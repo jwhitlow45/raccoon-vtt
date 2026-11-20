@@ -76,9 +76,11 @@ export class ActorGateway implements RoomGateway {
   }
 
   async deleteRoom(roomId: string): Promise<boolean> {
-    await this.#manager.unloadForDelete(roomId);
-    const result = await this.#pool.query("delete from rooms where id = $1", [roomId]);
-    return result.rowCount === 1;
+    return this.#manager.deleting(roomId, async () => {
+      await this.#manager.unloadForDelete(roomId);
+      const result = await this.#pool.query("delete from rooms where id = $1", [roomId]);
+      return result.rowCount === 1;
+    });
   }
 
   async playerRoster(roomId: string): Promise<RosterEntry[] | null> {

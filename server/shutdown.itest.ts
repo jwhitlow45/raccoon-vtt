@@ -343,6 +343,92 @@ test("a stop that begins while a periodic snapshot is being written leaves the r
   }
 });
 
+/** A deferred: a promise and what settles it. */
+function deferred<T = void>(): { promise: Promise<T>; resolve(value: T): void; reject(err: Error): void } {
+  let resolve!: (value: T) => void;
+  let reject!: (err: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** A room on `on` with its DM's socket open and a change since its snapshot. */
+async function roomWithChange(on: FastifyInstance, name: string): Promise<{ roomId: string; dm: TestClient; socket: Socket }> {
+  const dm = client(() => on);
+  const { roomId } = await dm.createRoom(name);
+  const socket = await connect(roomId, dm, on);
+  await socket.apply({ t: "log.chat", text: `${name} before the stop` });
+  return { roomId, dm, socket };
+}
+
+test("a delete that unloaded its room and then fails while the server stops leaves the room unsaved, and the stop names it (LP44-OPS-1)", async () => {
+  let doomed = "";
+  const held = deferred();
+  const deleteAnswer = deferred<never>();
+  const pool = poolWith((text, values) => {
+    if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
+    held.resolve();
+    return deleteAnswer.promise;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { roomId, dm, socket } = await roomWithChange(own, "Doomed");
+  try {
+    doomed = roomId;
+    // The DM's delete has unloaded the room, with no snapshot, and waits on the database when the stop comes.
+    const asked = dm.delete(`/api/rooms/${roomId}`, { name: "Doomed" }).catch(() => undefined);
+    await held.promise;
+    const roomsClosing = deferred();
+    const close = own.rooms.close.bind(own.rooms);
+    own.rooms.close = () => {
+      const closing = close();
+      roomsClosing.resolve();
+      return closing;
+    };
+    const stopping = closeServer(own, () => pool.end());
+    await roomsClosing.promise;
+    deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
+    await losesOnly(stopping, [{ roomId, why: "delete failed" }]);
+    await asked;
+    assert.equal((await check.query("select 1 from rooms where id = $1", [roomId])).rowCount, 1, "the room is still there");
+  } finally {
+    socket.ws.terminate();
+  }
+});
+
+test("a delete that lands while the server stops a room leaves it deleted, and the stop exits 0 (LP44-OPS-1)", async () => {
+  let watched = "";
+  const deleted = deferred();
+  // The stop's check of the room waits for the delete, so the room's row is gone when the stop reads it.
+  const pool = poolWith((text, values) => {
+    // The stop's read of the room's stored snapshot, not the quota check of its snapshot write, which the delete waits behind.
+    if (!watched || values?.[0] !== watched || !text.includes("select seq::text from room_snapshots where room_id = $1")) return null;
+    watched = "";
+    return deleted.promise.then(() => pool.query(text, values)) as Promise<never>;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { roomId, socket } = await roomWithChange(own, "Gone");
+  try {
+    const actor = await own.rooms.acquire(roomId);
+    watched = roomId;
+    const codes: number[] = [];
+    const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
+    for (let i = 0; i < 500 && !actor.closed; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(actor.closed, "the stop is unloading the room");
+    // A delete request already past the server's close reaches the gateway now.
+    assert.equal(await own.gateway.deleteRoom(roomId), true);
+    deleted.resolve();
+    await stopping;
+    assert.deepEqual(codes, [0], "the stop exits 0");
+    assert.equal((await check.query("select 1 from rooms where id = $1", [roomId])).rowCount, 0, "the room is deleted");
+  } finally {
+    socket.ws.terminate();
+  }
+});
+
 /** A port that was free a moment ago, for a server in a process of its own. */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
