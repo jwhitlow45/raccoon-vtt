@@ -17,8 +17,9 @@ import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
-import { NOT_REACHED } from "./linkWords.ts";
+import { dropChip, linkMarksLine } from "./linkWords.ts";
 import { clearOfMarkers, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { holeDrops } from "./openingView.ts";
 
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
 const NO_SCENES: Readonly<Record<string, Scene>> = {};
@@ -39,7 +40,14 @@ const LOCK_PATH = "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2
  * floor, else "Stairs up" or "Ladder down", and the DM's adds "Not reached
  * yet" where players have not reached it. The name gives way to the
  * turn's marker while the creature whose turn it is stands where its moves
- * on this floor began, as after it climbed (picture 07). No tap in play:
+ * on this floor began, as after it climbed (picture 07). The DM's pill adds
+ * "Hidden" on stairs players get nothing of (phase 4, 8.1).
+ *
+ * An opening (phase 4, 3 and 7.4) draws no treads: its upper end, the hole,
+ * a dashed accent rim round the floor below (OpeningWindow.tsx), its name
+ * under the rim and its height chip, "10 ft down", over it where the device
+ * holds the floor below and its end, and its lower end a dashed outline.
+ * No tap in play:
  * a tap on the board selects creatures. Isometric draws the end flat on
  * the ground, and its name stands up where every cell under it is
  * revealed, as a trap's name does, else lies flat under the fog
@@ -53,6 +61,8 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const dm = props.role === "dm";
   const notReached = useTreeShownView((s) => (dm && s.view ? notReachedLinks(s.view, props.scene.id).join(" ") : ""));
   const quiet = useTreeShownView((s) => quietLinks(s.floorView, props.scene.id, props.role).join(" "));
+  // Each hole's drop, read from the whole copy, which holds the floor below (openingView.ts).
+  const drops = useTreeShownView((s) => (s.view ? holeDrops(s.view, props.scene.id) : ""));
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   const list = useMemo(
     () =>
@@ -63,14 +73,53 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   );
   const far = useMemo(() => new Set(notReached.split(" ")), [notReached]);
   const hushed = useMemo(() => new Set(quiet.split(" ")), [quiet]);
+  const feet = useMemo(() => dropsById(drops), [drops]);
   return (
     <Group listening={false}>
       {list.map((l) => (
-        <LinkMark key={l.id} link={l} scenes={scenes} grid={grid} scale={props.scale} notReached={far.has(l.id)} quiet={hushed.has(l.id)} />
+        <LinkMark key={l.id} link={l} scenes={scenes} grid={grid} scale={props.scale} notReached={far.has(l.id)} quiet={hushed.has(l.id)} drop={feet.get(l.id) ?? null} />
       ))}
     </Group>
   );
 });
+
+/** The holes' drops by id, from openingView.ts holeDrops's "o1=10 o3=15". */
+function dropsById(drops: string): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const pair of drops.split(" ")) {
+    const [id, ft] = pair.split("=");
+    if (id && ft) out.set(id, Number(ft));
+  }
+  return out;
+}
+
+/** An opening's dashed outline: the hole's rim in the accent, wider, and the lower end's thin. */
+function OpeningRim(props: { o: Outline; hole: boolean; color: string }) {
+  const { o, hole, color } = props;
+  return (
+    <Shape
+      listening={false}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+        const px = 1 / (shape.getAbsoluteScale().x || 1);
+        if (o.loop) trace(ctx, o.loop);
+        else {
+          ctx.beginPath();
+          ctx.rect(o.x, o.y, o.w, o.h);
+        }
+        ctx.lineJoin = "round";
+        ctx.setLineDash(hole ? [8 * px, 5 * px] : [5 * px, 4 * px]);
+        ctx.lineWidth = (hole ? 5 : 3.5) * px;
+        ctx.strokeStyle = boardTheme.color.textHalo;
+        ctx.stroke();
+        ctx.lineWidth = (hole ? 3 : 1.5) * px;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }}
+    />
+  );
+}
 
 /** An end's squares as the board draws them: a box in cells, and on hexes the outline of its hexes. */
 type Outline = { x: number; y: number; w: number; h: number; loop: number[] | null };
@@ -118,40 +167,53 @@ function trace(ctx: Konva.Context, loop: readonly number[]): void {
   ctx.closePath();
 }
 
-const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readonly<Record<string, Scene>>; grid: Grid; scale: number; notReached: boolean; quiet: boolean }) {
+const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readonly<Record<string, Scene>>; grid: Grid; scale: number; notReached: boolean; quiet: boolean; drop: number | null }) {
   const { link, scale } = props;
   const o = useMemo(() => outlineOf(props.grid, link.rect), [props.grid, link.rect]);
   const dir = linkDir({ scenes: props.scenes }, link);
   const label = linkLabel({ scenes: props.scenes }, link);
-  const at = nameAnchor(o);
+  // A hole's name hangs under it, so its height chip can sit on the rim over it.
+  const hole = link.kind === "opening" && dir === "down";
+  const at = nameAnchor(o, hole ? "bottom" : "top");
   // The turn's marker is the one pill the name keeps off (clearOfMarkers), read from the markers' own key.
   const markers = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
-  const top: PillSpec | null =
-    label === null || props.quiet || !trapNameShown(scale)
-      ? null
-      : { name: label, ...(props.notReached ? { value: NOT_REACHED } : {}), x: at.x, y: at.y, above: true, size: "map", small: true, maxLines: 1, stack: true };
+  const marks = linkMarksLine({ hidden: link.hidden === true, notReached: props.notReached });
+  const shown = label !== null && !props.quiet && trapNameShown(scale);
+  const first: PillSpec | null = shown
+    ? { name: label, ...(marks !== null ? { value: marks } : {}), x: at.x, y: at.y, ...(hole ? { below: true } : { above: true }), size: "map", small: true, maxLines: 1, stack: true }
+    : null;
   const iso = useIsoGround();
-  // Every stage decides alike, from the top place's stand, so the ground and the overlay publish the same pill.
-  const pill = top ? clearOfMarkers(top, nameAnchor(o, "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...top, scale }) : true) : null;
+  // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
+  const pill = first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...first, scale }) : true) : null;
+  const top = nameAnchor(o, "top");
+  const chip: PillSpec | null = hole && props.drop !== null && shown ? { value: dropChip(props.drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";
-  const pillKey = pill ? JSON.stringify(pill) : "";
-  // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
-  usePublishPills(`floorLink:${link.id}`, useMemo(() => (pill ? [pill] : NO_PILLS), [pillKey]));
+  const pills = [pill, chip].filter((p): p is PillSpec => p !== null);
+  const pillKey = JSON.stringify(pills);
+  // Keyed on what the name and the chip say and where, so a pinch that keeps them shown publishes nothing new.
+  usePublishPills(`floorLink:${link.id}`, useMemo(() => (pills.length > 0 ? pills : NO_PILLS), [pillKey]));
   const color = boardTheme.color.accentSoft;
   const locked = link.locked === true;
   const words = pill ? (pill.value ? `${pill.name} · ${pill.value}` : pill.name!) : "";
+  const stands = (p: PillSpec) => drawsHere(iso, iso ? pillStands(iso.fog, { ...p, scale }) : true);
   return (
-    <Group {...{ [FLOOR_LINK_ATTR]: link.id, "data-floor-link-name": words }}>
+    <Group {...{ [FLOOR_LINK_ATTR]: link.id, "data-floor-link-name": words, ...(chip ? { "data-floor-link-chip": chip.value } : {}) }}>
       {flat ? <LinkShape o={o} kind={link.kind} dir={dir} locked={locked} color={color} scale={scale} /> : null}
-      {pill && drawsHere(iso, iso ? pillStands(iso.fog, { ...pill, scale }) : true) ? <MarkPill {...pill} scale={scale} color={color} /> : null}
+      {pill && stands(pill) ? <MarkPill {...pill} scale={scale} color={color} /> : null}
+      {chip && stands(chip) ? <MarkPill {...chip} scale={scale} color={color} /> : null}
     </Group>
   );
 });
 
-/** An end's marks on the ground: its treads or rungs, the chevron of its way, its outline, and its lock on the bottom right corner, clear of the name over the top edge. */
+/**
+ * An end's marks on the ground: its treads or rungs, the chevron of its way, its outline, and its lock on the bottom
+ * right corner, clear of the name over the top edge. An opening's are its outline alone, dashed: the hole's in the
+ * accent and wider, round the floor below that OpeningWindow.tsx draws inside it, and the lower end's thin.
+ */
 function LinkShape(props: { o: Outline; kind: FloorLink["kind"]; dir: "up" | "down" | null; locked: boolean; color: string; scale: number }) {
   const { o, kind, dir, locked, color } = props;
+  if (kind === "opening") return <OpeningRim o={o} hole={dir === "down"} color={color} />;
   const s = 1 / props.scale;
   const r = (LOCK_PX / 2) * s;
   const k = (LOCK_PX * 0.6 * s) / 24;
