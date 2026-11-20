@@ -10,7 +10,7 @@ import type { Op, OpType } from "#shared/protocol.ts";
 import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { actor, character, drawing, entry, env, P1, randomOp, randomState, rng, room, template, token } from "#shared/testutil.ts";
+import { actor, character, drawing, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, template, token } from "#shared/testutil.ts";
 import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
@@ -148,7 +148,8 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
       // A random room's asks may name creatures no one owns, which any op then settles away.
       state.casts = {};
       for (let k = 0; k < 8; k++) {
-        const op = randomOp(r, state, P1);
+        // Now and then a roll of several dice whose rolls reach different readers.
+        const op = k % 4 === 3 ? randomDiceRoll(r, state, P1) : randomOp(r, state, P1);
         if (FAR_TREATMENT[op.t] === "deletion" || FAR_TREATMENT[op.t] === "server" || !canApply(op, P1, state, DEPS).ok) continue;
         // Late line ids, so the op's lines are the newest, as a live op's are.
         const result = applyOp(state, op, P1, env(1_000_000 + seed * 10 + k));
@@ -252,6 +253,21 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
       assert.deepEqual(strays(state, result.state, [], true), []);
     });
   }
+
+  test("a dice line of P1's with a roll for a creature of theirs players do not see beside one they do: P1's stepped parts stay as they were, line after line", () => {
+    let state = table();
+    state.tokens.pet = { ...state.tokens.pet!, visibility: "dm" };
+    for (let i = 0; i < 3; i++) {
+      const op = rolled(state, { t: "dice.roll", tag: `t${i}`, to: "all", rolls: [{ formula: "1d20", label: "Bite", creature: { tokenId: "pet" } }, { formula: "1d20", label: "Strike", creature: { tokenId: "hero" } }] } as DiceOp);
+      assert.ok(canApply(op, P1, state, DEPS).ok);
+      const result = applyOp(state, op, P1, env(1_000_000 + i));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      const line = result.state.log.at(-1)!;
+      assert.ok(line.parts?.rolls?.some((readers) => readers !== null), "the line names who read a roll");
+      assert.deepEqual(strays(state, result.state, [], true), []);
+      state = result.state;
+    }
+  });
 
   test("a stored field past its width keeps the rest in the stepped part, so the exact part never counts less than it takes out", () => {
     const state = table();

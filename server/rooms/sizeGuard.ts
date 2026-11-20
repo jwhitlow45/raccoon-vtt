@@ -1805,12 +1805,12 @@ export type ExactBytes = { sub: number; shown: number; hidden?: number };
 export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel: ExactBytes; blocks: ExactBytes };
 
 /**
- * The room's facts a field's width may read: the creatures the player
- * owns, the roster's ids and a list of them at its widest, the Per player
+ * The room's facts a field's width may read: the player and the creatures
+ * they own, the roster's ids and a list of them at its widest, the Per player
  * scenes, which every player sees, and the characters the player plays only
  * through a creature of theirs.
  */
-type WidthRoom = { readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -1827,7 +1827,7 @@ type OwnField = {
   readonly parent: string;
   readonly key: string;
   readonly width: (parent: Readonly<Record<string, unknown>>, room: WidthRoom, thing: Readonly<Record<string, unknown>>, stored: unknown) => number;
-  readonly kept?: (stored: unknown) => number;
+  readonly kept?: (stored: unknown, parent: Readonly<Record<string, unknown>>, room: WidthRoom) => number;
 };
 
 /** A number's widest digits: a rev (WIDEST_REV), a clock tick, an HP value. */
@@ -1944,9 +1944,15 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   ],
   log: [
     // Who could read each part of a line their op writes, each list at every member of the roster: an HP, rest,
-    // concentration, death save or use line's numbers, an HP or rest line's label, and a turn's take-back. Who could read
-    // each roll of a dice line, which a dice line names by every roll stored, stays stepped with the rolls it hides.
-    field("", "parts", (line, room) => (PARTS_OF[(line.data as { type?: string } | undefined)?.type ?? ""] ?? 0) * (fieldBytes("label") + readersWidth(room) + 1) + fieldBytes("parts") + 2, (parts) => memberBytes("rolls", (parts as { rolls?: unknown } | undefined)?.rolls)),
+    // concentration, death save or use line's numbers, an HP or rest line's label, a turn's take-back, and each roll of
+    // a dice line of theirs, every roll of which their copy holds. Who could read each roll of another's dice line,
+    // which names every roll stored, stays stepped with the rolls it hides.
+    field(
+      "",
+      "parts",
+      (line, room) => (PARTS_OF[(line.data as { type?: string } | undefined)?.type ?? ""] ?? 0) * (fieldBytes("label") + readersWidth(room) + 1) + fieldBytes("parts") + 2 + ownRolls(line, room),
+      (parts, line, room) => (ownRolls(line, room) > 0 ? 0 : memberBytes("rolls", (parts as { rolls?: unknown } | undefined)?.rolls)),
+    ),
     // What an HP change replaced. The conditions it carried over count as they were on the creature: those shown to
     // players at their bytes, as the creature's copy held them, and those hidden in the stepped part, as they were.
     field("data", "revert", (data, _room, _line, stored) => (data.type === "hp" ? fieldBytes("revert") + REVERT_MOST + 1 + conditions(stored, false) : 0), (stored) => conditions(stored, true)),
@@ -1960,6 +1966,13 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   ],
   // A door's state and whether it was found, in the build's chunk, which a player sets on a door their creature reaches.
   chunk: [field("", "rev", (c) => (holdsDoor(c) ? fieldBytes("rev") + DIGITS.rev + 1 : 0)), doorField("edges.*", "state", serializedBytes("closed")), doorField("edges.*", "discovered", 5), doorField("walls[].f", "state", serializedBytes("closed")), doorField("walls[].f", "discovered", 5)],
+};
+
+/** The readers of each roll of a dice line the player rolled, each list at every member of the roster. */
+const ownRolls = (line: Readonly<Record<string, unknown>>, room: WidthRoom) => {
+  const data = line.data as { type?: string; by?: string; rolls?: unknown[] } | undefined;
+  if (data?.type !== "dice" || data.by !== room.memberId) return 0;
+  return fieldBytes("rolls") + 2 + (data.rolls?.length ?? 0) * (readersWidth(room) + 1) + 1;
 };
 
 /** How many lists of readers a shared event line's parts hold at most, by its type (shared/project.ts partsOf). */
@@ -2013,7 +2026,7 @@ function hiddenOf(stored: unknown, copy: unknown, path: string, index: FieldInde
     for (const key of new Set([...Object.keys(stored), ...Object.keys(copy)])) {
       const own = listed?.find((f) => f.key === key);
       if (own) {
-        const kept = own.kept?.(stored[key]) ?? 0;
+        const kept = own.kept?.(stored[key], copy, room) ?? 0;
         hidden += kept + Math.max(0, memberBytes(key, stored[key]) - kept - own.width(copy, room, thing, stored[key]));
       } else if (copy[key] === undefined) hidden += memberBytes(key, stored[key]);
       else if (stored[key] === undefined) hidden -= memberBytes(key, copy[key]);
@@ -2077,7 +2090,7 @@ function ownFields(copy: unknown, stored: unknown, path: string, index: FieldInd
     const width = f.width(copy, room, thing, from[f.key]);
     out.widths += width;
     out.stripped += memberBytes(f.key, copy[f.key]);
-    out.taken += Math.max(0, Math.min(width, memberBytes(f.key, from[f.key]) - (f.kept?.(from[f.key]) ?? 0)));
+    out.taken += Math.max(0, Math.min(width, memberBytes(f.key, from[f.key]) - (f.kept?.(from[f.key], copy, room) ?? 0)));
   }
   for (const [key, value] of Object.entries(copy)) {
     const at = childPath(index, path, key);
@@ -2328,6 +2341,7 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   for (const token of Object.values(state.tokens)) if (token.ownerIds.includes(memberId) && "ref" in token.actor) characters.add(token.actor.ref);
   const viewer: Viewer = { memberId, role: "player" };
   const room: WidthRoom = {
+    memberId,
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),

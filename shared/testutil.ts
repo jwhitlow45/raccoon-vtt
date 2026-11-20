@@ -47,6 +47,7 @@ import { numberable, numberScope, shownName } from "./numbering.ts";
 import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
 import type { Op } from "./protocol.ts";
+import { resolveDiceOp, type DiceOp } from "./dice/resolve.ts";
 import { ATTACH_KINDS, seatSpot } from "./rules/attach.ts";
 import { encodeTile, fullTileBits, rasterizeFogOps, TILE_BYTES } from "./rules/fog.ts";
 
@@ -1417,6 +1418,24 @@ function addTurnStart(r: () => number, state: RoomState): void {
 }
 
 /** A random, mostly valid op from the DM's or a player's point of view, for the fan-out invariant. */
+/**
+ * A player's free roll of two or three dice as the server stores it
+ * (`sys.dice`): each for a creature of theirs, which players may see or
+ * not, for another creature, or for none, so the line's rolls reach
+ * different readers.
+ */
+export function randomDiceRoll(r: () => number, state: RoomState, who: Viewer): Op {
+  const tokens = Object.values(state.tokens);
+  const mine = tokens.filter((t) => t.ownerIds.includes(who.memberId));
+  const rolls = Array.from({ length: int(r, 2, 3) }, (_, i) => {
+    const t = mine.length > 0 && chance(r, 0.7) ? pick(r, mine) : tokens.length > 0 && chance(r, 0.5) ? pick(r, tokens) : undefined;
+    return { formula: "1d20", label: `Roll ${i + 1}`, ...(t ? { creature: { tokenId: t.id } } : {}) };
+  });
+  const op = { t: "dice.roll", tag: `tag${Math.floor(r() * 1e9)}`, to: chance(r, 0.85) ? "all" : "dm", rolls } as DiceOp;
+  const resolved = resolveDiceOp(op, state, { draw: (sides) => int(r, 1, sides), batch: "AbCdEfGhIjKlMnOp" });
+  return resolved.ok ? resolved.op : { t: "log.chat", text: "z" };
+}
+
 export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   const tokens = Object.values(state.tokens);
   const tokenIds = tokens.map((t) => t.id);
