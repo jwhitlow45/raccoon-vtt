@@ -113,7 +113,8 @@ import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import { sheetOpen as sheetShows, type Ended, type Toast } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
-import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
+import { noSceneText, sceneToOpen } from "./noScene.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, foldsUnderSheet, useSideSheetRoom } from "./fold.ts";
@@ -376,6 +377,11 @@ function RoomPage() {
   const ended = useRoomView((s) => s.ended);
   const roomId = useRoomView((s) => s.roomId);
   const gate = useRoomView(useShallow((s) => sceneGate({ view: s.view, sceneId: s.sceneId, role })));
+  const actions = useRoomActions();
+  const toOpen = useRoomView((s) => sceneToOpen(s.view, role, s.projectedSceneId));
+  useEffect(() => {
+    if (toOpen !== null) actions.switchScene(toOpen);
+  }, [toOpen, actions]);
   const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden, sheetExpanded, below, splitFits } = useRoomView(useShallow((s) => s.local));
   // The state this render draws, so a focus request waits for the render that draws the latest (placeFocus).
   const localNow = useRoomView((s) => s.local);
@@ -1504,6 +1510,7 @@ function MapArea(props: {
   onHideBar(): void;
 }) {
   const { gate, role } = props;
+  const anyScene = useRoomView((s) => s.view !== null && Object.keys(s.view.scenes).length > 0);
   if (gate.kind === "ready") {
     return (
       <>
@@ -1524,14 +1531,7 @@ function MapArea(props: {
     );
   }
   // Fail closed: until the gate opens, nothing from any scene is drawn.
-  const message =
-    gate.kind === "blackout"
-      ? "The DM has paused the game."
-      : gate.kind === "noScene"
-        ? role === "dm"
-          ? "Create a scene to get started."
-          : "Waiting for the DM to pick a scene."
-        : "Loading the scene…";
+  const message = gate.kind === "blackout" ? "The DM has paused the game." : gate.kind === "noScene" ? noSceneText(role, anyScene) : "Loading the scene…";
   return <div style={SCENE_GATE_STYLE}>{gate.kind === "wait" ? <Loading text={message} /> : message}</div>;
 }
 
