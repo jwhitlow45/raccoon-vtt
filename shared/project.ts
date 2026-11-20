@@ -3160,13 +3160,7 @@ function projectStampCtx(ctx: Ctx, id: string): Stamp | null {
 function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): FloorLink | ProjectedFloorLink | null {
   if (!ctx.floors.has(link.sceneId)) return null;
   if (ctx.viewer.role === "dm") return link;
-  const scene = ownEntry(ctx.state.scenes, link.sceneId);
-  if (scene?.fogEnabled) {
-    const fogs = ctx.presence(link.sceneId);
-    const fogged = (r: CellRange) => isRangeFullyFogged(fogs, link.sceneId, r, (x, y) => ctx.fogged(link.sceneId, x, y));
-    if (zoneFogged(ctx.state, link.sceneId, { cells: [link.rect] }, fogged, (sx, sy) => ctx.fogged.sub(link.sceneId, sx, sy))) return null;
-  }
-  const dir = linkDir(ctx.state, link);
+  const dir = endShownAs(ctx, link);
   if (dir === null) return null;
   const out: ProjectedFloorLink = { id: link.id, rev: 0, sceneId: link.sceneId, rect: link.rect, kind: link.kind, dir };
   if (link.locked) out.locked = true;
@@ -3176,7 +3170,30 @@ function projectFloorLinkCtx(ctx: Ctx, link: FloorLink): FloorLink | ProjectedFl
     out.to = link.to;
     out.rise = linkHeight(ctx.state, link);
   }
+  // Where the far end lies on other squares (phase 4, 8.2), only once that end is itself projected (D-261119-008): before
+  // that a carried ruler prices the climb on these squares, and the offset never tells a fogged end's place.
+  const far = ownEntry(ctx.state.floorLinks, link.pair);
+  if (far !== undefined && (far.rect.x !== link.rect.x || far.rect.y !== link.rect.y) && ctx.floors.has(far.sceneId) && endShownAs(ctx, far) !== null) {
+    out.shift = { dx: far.rect.x - link.rect.x, dy: far.rect.y - link.rect.y };
+  }
   return out;
+}
+
+/**
+ * The way an end leads, for a player who gets it on a floor they hold, or
+ * null where they get nothing of it: an end the DM hid (phase 4, 8.1, no
+ * key, count or id), one under full fog by the labels' rule, and one
+ * whose way no level tells.
+ */
+function endShownAs(ctx: Ctx, link: FloorLink): "up" | "down" | null {
+  if (link.hidden === true) return null;
+  const scene = ownEntry(ctx.state.scenes, link.sceneId);
+  if (scene?.fogEnabled) {
+    const fogs = ctx.presence(link.sceneId);
+    const fogged = (r: CellRange) => isRangeFullyFogged(fogs, link.sceneId, r, (x, y) => ctx.fogged(link.sceneId, x, y));
+    if (zoneFogged(ctx.state, link.sceneId, { cells: [link.rect] }, fogged, (sx, sy) => ctx.fogged.sub(link.sceneId, sx, sy))) return null;
+  }
+  return linkDir(ctx.state, link);
 }
 
 /** An end's fields for players (docs/design/design-v1-floors.md phase 2, 4), held to every key of FloorLink as TRAP_FOR_PLAYERS is. */
@@ -5216,7 +5233,11 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
       }
     }
     else if (parsed.kind === "token") tokenIds.add(parsed.id);
-    else if (parsed.kind === "character") characterIds.add(parsed.id);
+    else if (parsed.kind === "floorLink") {
+      // An end's `shift` reads where its pair lies and whether that is projected (phase 4, 8.2).
+      const link = ownEntry(state.floorLinks, parsed.id);
+      if (link) add(keys.floorLink(link.pair));
+    } else if (parsed.kind === "character") characterIds.add(parsed.id);
     else if (parsed.kind === "handout") handoutIds.add(parsed.id);
     else if (parsed.kind === "template") templateIds.add(parsed.id);
     else if (parsed.kind === "journal") pageIds.add(parsed.id);
@@ -5423,8 +5444,13 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   }
   for (const pin of Object.values(state.pins)) if (on(pin.sceneId, pinCells(pin))) add(keys.pin(pin.id));
   for (const trap of Object.values(state.traps ?? {})) if (zoneRanges(state, trap.sceneId, trap.zone).some((r) => on(trap.sceneId, r))) add(keys.trap(trap.id));
-  // An end reaches players by the fog over its squares, read as a found trap's (projectFloorLinkCtx).
-  for (const link of Object.values(state.floorLinks ?? {})) if (zoneRanges(state, link.sceneId, { cells: [link.rect] }).some((r) => on(link.sceneId, r))) add(keys.floorLink(link.id));
+  // An end reaches players by the fog over its squares, read as a found trap's (projectFloorLinkCtx), and its pair's
+  // `shift` comes only while it is projected (phase 4, 8.2, D-261119-094), so the reveal re-projects the pair too.
+  for (const link of Object.values(state.floorLinks ?? {})) {
+    if (!zoneRanges(state, link.sceneId, { cells: [link.rect] }).some((r) => on(link.sceneId, r))) continue;
+    add(keys.floorLink(link.id));
+    if (ownEntry(state.floorLinks, link.pair)) add(keys.floorLink(link.pair));
+  }
 }
 
 /**
