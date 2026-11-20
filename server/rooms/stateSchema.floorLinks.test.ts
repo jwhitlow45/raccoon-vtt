@@ -126,7 +126,8 @@ describe("stairs through an import's remap", () => {
  */
 describe("openings, hidden ends, trapdoors and fall cards in the stored-state schema", () => {
   test("a room with each parses whole and keeps them", () => {
-    const state = JSON.parse(JSON.stringify(withFalls(withTrapdoor(withOpening(withHiddenStairs(tower()), { rect: { x: 8, y: 8, w: 8, h: 8 } })), fallCard(), fallCard({ made: 121 })))) as RoomState;
+    // The trapdoor keeps off the opening, as floorProblem holds every trapdoor off every end (phase 4, 4.6).
+    const state = JSON.parse(JSON.stringify(withFalls(withTrapdoor(withOpening(withHiddenStairs(tower()), { rect: { x: 8, y: 8, w: 8, h: 8 } }), trapdoor("td1", { zone: { cells: [{ x: 0, y: 0, w: 2, h: 2 }] } })), fallCard(), fallCard({ made: 121 })))) as RoomState;
     const parsed = parseRoomState(state);
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     assert.deepEqual(parsed.state.floorLinks, state.floorLinks);

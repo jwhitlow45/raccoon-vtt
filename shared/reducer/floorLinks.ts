@@ -1,21 +1,25 @@
 import { keys } from "../keys.ts";
-import type { FloorLink, RoomState, Token } from "../model.ts";
+import type { CellRect, FloorLink, RoomState, SceneId, Token } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { ownEntry } from "../records.ts";
 import { publicLabel } from "../numbering.ts";
-import { climbCost, climbKeepsSqueeze, LINK_WORDS, linkProblem, rectGround, standsOn } from "../rules/floorLinks.ts";
+import { climbCost, climbKeepsSqueeze, landingOf, LINK_WORDS, linkProblem, rectGround, standsOn, throughOpening } from "../rules/floorLinks.ts";
 import { onHolder } from "../rules/attach.ts";
 import { sameScene } from "../rules/floors.ts";
 import { sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { footprintGround } from "../rules/heights.ts";
+import { withDrop } from "../rules/moveLeg.ts";
 import { areasFollow, carriedAlong, judgedIn, placeCarried, withPath } from "./tokens.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
-import { notBuilt } from "./falls.ts";
+import { recordLandings } from "./falls.ts";
 
 /*
- * Stairs and ladders between floors (docs/design/design-v1-floors.md phase
- * 2, 3): placing, changing and removing a pair, a creature's climb, and the
- * pairs that go with their floors. Each op writes both ends, so the two
- * keep one rev, and floorProblem holds them whole after every op.
+ * Stairs, ladders and openings between floors (docs/design/design-v1-floors.md
+ * phase 2, 3, phase 4): placing, changing and removing a pair, a creature's
+ * climb or flight, the one landing of a climb, a flight and a fall, a
+ * trapdoor's drop, and the pairs that go with their floors. Each op writes
+ * both ends, so the two keep one rev, and floorProblem holds them whole
+ * after every op.
  */
 
 /** The ends sorted by id, so every pass writes in one order on every device and replay. */
@@ -31,7 +35,6 @@ function byId(links: Iterable<FloorLink>): FloorLink[] {
  */
 export function floorLinkPut(tx: Tx, op: OpOf<"floorLink.put">): void {
   const draft = op.link;
-  if (draft.kind === "opening") throw notBuilt("An opening");
   if (ownEntry(tx.state.floorLinks, draft.id) || ownEntry(tx.state.floorLinks, draft.pairId)) throw invalid("those stairs are already on the map");
   const here = tx.scene(draft.sceneId);
   tx.scene(draft.to);
@@ -64,17 +67,62 @@ function pairOf(tx: Tx, linkId: string): [FloorLink, FloorLink] {
   return [link, pair];
 }
 
-/** `floorLink.update`: both ends' kind or lock, each end's rev moving on together. */
+/**
+ * `floorLink.update`: both ends' kind, lock or hiding (phase 4, 8.1), or
+ * their squares (8.2), each end's rev moving on together. An opening keeps
+ * its kind, is never locked or hidden, and keeps one rect on both floors,
+ * so `rect` alone moves both its ends. Stairs and ladders on squares may
+ * lie on other squares of each floor at one size, and on hexes both ends
+ * keep the same hexes. New squares are judged as a new pair's are
+ * (linkProblem), each floor's own, and each end takes the ground there.
+ */
 export function floorLinkUpdate(tx: Tx, op: OpOf<"floorLink.update">): void {
-  const { kind, hidden, rect, pairRect } = op.patch;
-  if (kind === "opening" || hidden !== undefined || rect !== undefined || pairRect !== undefined) throw notBuilt("Hiding, moving or resizing stairs");
-  for (const link of byId(pairOf(tx, op.linkId))) {
+  const [named, pair] = pairOf(tx, op.linkId);
+  const { kind, locked, hidden, rect, pairRect } = op.patch;
+  if (kind !== undefined && kind !== named.kind && (kind === "opening" || named.kind === "opening")) throw invalid(LINK_WORDS.kindChange(named.kind, kind));
+  const nextKind = kind ?? named.kind;
+  if (nextKind === "opening" && locked === true) throw invalid(LINK_WORDS.openingLocked);
+  if (nextKind === "opening" && hidden === true) throw invalid(LINK_WORDS.openingHidden);
+  const rects = rect !== undefined || pairRect !== undefined ? movedRects(tx, named, pair, nextKind, rect, pairRect) : null;
+  for (const link of byId([named, pair])) {
     const next: FloorLink = { ...link };
-    if (op.patch.kind !== undefined) next.kind = op.patch.kind;
-    if (op.patch.locked === true) next.locked = true;
-    else if (op.patch.locked === false) delete next.locked;
+    if (kind !== undefined) next.kind = kind;
+    if (locked === true) next.locked = true;
+    else if (locked === false) delete next.locked;
+    if (hidden === true) next.hidden = true;
+    else if (hidden === false) delete next.hidden;
+    if (rects) {
+      next.rect = { ...rects.get(link.id)! };
+      // linkProblem found one height there.
+      next.ground = rectGround(tx.state.buildChunks, link.sceneId, next.rect)!;
+    }
     tx.write(keys.floorLink(link.id), next);
   }
+}
+
+/**
+ * Each end's squares after an update that sets them (phase 4, 8.2), by end
+ * id, or the refusal in the builder's words: an opening's two ends and
+ * both ends on hexes on one rect, stairs and ladders on squares at one
+ * size, then linkProblem on the room without this pair, so it meets
+ * neither itself nor its own count.
+ */
+function movedRects(tx: Tx, named: FloorLink, pair: FloorLink, kind: FloorLink["kind"], rect: CellRect | undefined, pairRect: CellRect | undefined): Map<string, CellRect> {
+  const here = rect ?? named.rect;
+  const there = pairRect ?? (kind === "opening" ? here : pair.rect);
+  const same = here.x === there.x && here.y === there.y && here.w === there.w && here.h === there.h;
+  if (kind === "opening" || named.grid !== undefined) {
+    if (!same) throw invalid(LINK_WORDS.sameSquares(kind));
+  } else if (here.w !== there.w || here.h !== there.h) {
+    throw invalid(LINK_WORDS.oneSize(kind));
+  }
+  const { [named.id]: _named, [pair.id]: _pair, ...others } = tx.state.floorLinks ?? {};
+  const why = linkProblem({ ...tx.state, floorLinks: others }, { id: named.id, pairId: pair.id, sceneId: named.sceneId, to: named.to, rect: here, kind, ...(same ? {} : { pairRect: there }) });
+  if (why) throw invalid(why);
+  return new Map([
+    [named.id, here],
+    [pair.id, there],
+  ]);
 }
 
 /** `floorLink.delete`: both ends. */
@@ -94,7 +142,9 @@ function nameOf(tx: Tx, token: Token): string {
  * squeeze only where its full space would leave the squares, and its
  * placement between squares goes. Its path folds the turn's legs and adds
  * the climb as a leg of its own (withPath). What it drags stays, and the
- * link pass lets it go, as at a teleport.
+ * link pass lets it go, as at a teleport. Fly up and Fly down take an
+ * opening the same way, for a creature in the air under or over it
+ * (phase 4, 5), and land 5 ft over the far end's ground (landThrough).
  *
  * Every refusal reads the end on its floor and the creature alone, never
  * the far floor, so it answers alike whatever the far floor holds (4). A
@@ -103,39 +153,70 @@ function nameOf(tx: Tx, token: Token): string {
  * climbCheck), so one the player does not receive counts as absent: the
  * creature climbs alone and the link pass lets that link go. A creature
  * dragged stands on its own feet, so it climbs, and its drag lets go.
+ * Hidden stairs are no stairs to a player (phase 4, 8.1).
  */
 export function tokenClimb(tx: Tx, op: OpOf<"token.climb">): void {
   const token = tx.token(op.tokenId);
   const link = ownEntry(tx.state.floorLinks, op.linkId);
   const far = link && ownEntry(tx.state.floorLinks, link.pair);
-  if (!link || !far || link.sceneId !== token.sceneId) throw invalid(LINK_WORDS.noStairs);
+  if (!link || !far || link.sceneId !== token.sceneId || (link.hidden === true && tx.actor.role !== "dm")) throw invalid(LINK_WORDS.noStairs);
   if (token.attached !== undefined && onHolder(token.attached.kind) && tx.actor.role === "dm") throw invalid(LINK_WORDS.carried(nameOf(tx, token), link.kind));
   if (link.locked === true) throw invalid(LINK_WORDS.locked);
-  const stand = standsOn(tx.state, tx.actor, token, link);
+  const opening = link.kind === "opening";
+  const stand = opening ? throughOpening(tx.state, tx.actor, token, link) : standsOn(tx.state, tx.actor, token, link);
   if (stand === "squeeze") throw invalid(LINK_WORDS.tooBigSqueeze(link.kind));
   if (stand === "tooBig") throw invalid(LINK_WORDS.tooBig(link.kind));
-  if (stand !== "on") throw invalid(LINK_WORDS.noStairs);
-  tx.scene(link.to);
-  // Planned before anything is written: what sits on it follows where it stood (docs/design/design-v1-attach.md 8.2).
-  const along = carriedAlong(tx, op);
-  const next: Token = { ...token, sceneId: link.to, elevation: far.ground };
-  if (!climbKeepsSqueeze(tx.state, token, link)) delete next.squeeze;
-  delete next.nudge;
-  const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
-  tx.write(keys.token(token.id), withPath(tx, token, next, judged, false, undefined, undefined, undefined, climbCost(tx.state, token, link)));
-  placeCarried(tx, along, judged);
-  areasFollow(tx, token.id, link.to);
+  if (stand !== "on") throw invalid(opening && standsOn(tx.state, tx.actor, token, link) !== null ? LINK_WORDS.onlyInAir : LINK_WORDS.noStairs);
+  landThrough(tx, token, link, opening ? "flight" : "climb");
 }
 
 /**
  * The one landing of a climb, a flight and a fall through an opening
  * (docs/design/design-v1-floors.md phase 4, 4.2): tokenClimb's body, on the
  * far end's ground, 5 ft above it for a flight, shifted by landingShift
- * where the far end lies on other squares. What sits on it rides along and
- * its areas follow. A fall's path folds the turn's legs and adds nothing.
+ * where the far end lies on other squares (rules/floorLinks.ts landingOf,
+ * which the move's plan reads too). What sits on it rides along, planned
+ * before anything is written (docs/design/design-v1-attach.md 8.2), and its
+ * areas follow. A climb's and a flight's path adds the leg as a leg of its
+ * own, and a fall's folds the turn's legs and adds nothing. Each creature
+ * that lands joins the op's landings (reducer/falls.ts), which the
+ * arrival step, the opened marks and the landing reminders read.
  */
-export function landThrough(_tx: Tx, _token: Token, _link: FloorLink, _how: "climb" | "flight" | "fall"): void {
-  throw new Error("not built: landThrough");
+export function landThrough(tx: Tx, token: Token, link: FloorLink, how: "climb" | "flight" | "fall"): void {
+  const far = ownEntry(tx.state.floorLinks, link.pair);
+  if (!far) throw invalid(LINK_WORDS.noStairs);
+  tx.scene(link.to);
+  const along = carriedAlong(tx, { t: "token.climb", tokenId: token.id, linkId: link.id });
+  const next: Token = { ...token, sceneId: link.to, ...landingOf(tx.state, token, link, far) };
+  if (!climbKeepsSqueeze(tx.state, token, link)) delete next.squeeze;
+  delete next.nudge;
+  const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
+  const fall = how === "fall";
+  tx.write(keys.token(token.id), withPath(tx, token, next, judged, false, undefined, undefined, undefined, fall ? undefined : climbCost(tx.state, token, link), fall ? true : undefined));
+  placeCarried(tx, along, judged);
+  areasFollow(tx, token.id, link.to);
+  recordLandings(tx, [token.id, ...along.map((c) => c.token.id)], link.to, how);
+}
+
+/**
+ * A trapdoor's drop of one creature (phase 4, 4.6): onto the same squares
+ * of the floor below, on the ground under its full space there, since a
+ * change of floor leaves a squeeze behind (as Move to floor lands it),
+ * with what sits on it riding down and their areas following. What it
+ * drags stays, for the link pass. Its path folds the turn's legs and adds
+ * nothing, as a fall's.
+ */
+export function dropThrough(tx: Tx, token: Token, below: SceneId): void {
+  tx.scene(below);
+  const { squeeze: _squeeze, nudge: _nudge, ...full } = token;
+  const elevation = footprintGround(tx.state.buildChunks, { ...full, sceneId: below });
+  const along = carriedAlong(tx, withDrop({ t: "token.climb", tokenId: token.id, linkId: token.id }, { sceneId: below, x: token.x, y: token.y, elevation }));
+  const next: Token = { ...full, sceneId: below, elevation };
+  const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
+  tx.write(keys.token(token.id), withPath(tx, token, next, judged, false, undefined, undefined, undefined, undefined, true));
+  placeCarried(tx, along, judged);
+  areasFollow(tx, token.id, below);
+  recordLandings(tx, [token.id, ...along.map((c) => c.token.id)], below, "drop");
 }
 
 /**

@@ -7,6 +7,7 @@ import { HEX_ORIGIN, OWN_SQUARE_GRID, hexOriginBefore } from "../rules/grid.ts";
 import { ownEntry } from "../records.ts";
 import { patchedVision } from "./sceneVision.ts";
 import { invalid, type Tx } from "./tx.ts";
+import type { Landing } from "./falls.ts";
 
 /*
  * The floor ops (docs/design/design-v1-floors.md 9): adding a floor beside
@@ -166,12 +167,13 @@ export function floorOpen(tx: Tx, op: OpOf<"floor.open">): void {
  * The opened marks (9, D-261102-482), after every op's dispatch beside
  * `markPlayed`, as bookkeeping outside undo: on the players' scene, when it
  * has floors, the start floor and each floor where an unhidden party
- * member stands, every floor of it marked played too, and then no opened
+ * member stands or, from op version 64, landed in the op (`landings`,
+ * phase 4 4.3 step 9), every floor of it marked played too, and then no opened
  * mark on a scene that is gone or has no `floor`, so an undo that takes a
  * scene's floors away leaves no stray mark. Nothing on a projected copy,
  * which lacks what it reads: only the server marks.
  */
-export function markOpened(tx: Tx, _before: RoomState): void {
+export function markOpened(tx: Tx, _before: RoomState, landings: readonly Landing[] = []): void {
   const s = tx.state;
   if (sightOf(s) !== undefined) return;
   const start = startFloor(s);
@@ -180,6 +182,12 @@ export function markOpened(tx: Tx, _before: RoomState): void {
     const here = new Set(floors.map((f) => f.id));
     const party = new Set<string>();
     for (const token of Object.values(s.tokens)) if (here.has(token.sceneId) && unhiddenPartyMember(s, token)) party.add(token.sceneId);
+    // Every floor an unhidden party member landed on in the op is reached, one it went on from too (phase 4, 4.3 step 9,
+    // D-261119-104), so the mark outlives the undo of the landing or the creature leaving.
+    for (const landing of landings) {
+      const token = ownEntry(s.tokens, landing.tokenId);
+      if (token && here.has(landing.sceneId) && unhiddenPartyMember(s, token)) party.add(landing.sceneId);
+    }
     for (const floor of floors) {
       if ((floor.id === start || party.has(floor.id)) && ownEntry(tx.state.openFloors, floor.id) === undefined) {
         tx.writeBookkeeping(keys.opened(floor.id), { sceneId: floor.id, rev: 0 });

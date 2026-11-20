@@ -1,4 +1,4 @@
-import type { EntityKey } from "./keys.ts";
+import { sightOf, type EntityKey } from "./keys.ts";
 import type { FallRecord, LogEntry, RoomState, Viewer } from "./model.ts";
 import type { Op, RefusalCode, RestoreEntry } from "./protocol.ts";
 import {
@@ -12,9 +12,9 @@ import {
   effectUpdate,
   endDueSpans,
 } from "./reducer/actors.ts";
-import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
+import { remindAfter, remindLandings, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, floorLinksOps, floorsOps, followsDaylight, playerLimitsOps, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { attaches, floorLinksOps, floorsOps, followsDaylight, opensOps, playerLimitsOps, timedEnds, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate, followDaylight } from "./reducer/clock.ts";
 import {
@@ -84,11 +84,11 @@ import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.t
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
-import { fallSettle } from "./reducer/falls.ts";
+import { beginOpenings, dropGoneCards, fallCandidates, fallPass, fallSettle, restoreFallCards, type Openings } from "./reducer/falls.ts";
 import { castAsk, castClose, dropCasterAsks } from "./reducer/casts.ts";
-import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
+import { capRestoredDues, dropBelow, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
 import { noticeStep } from "./reducer/trapNotice.ts";
-import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
+import { arrivalStep, planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { actorPrompt, actorUse } from "./reducer/uses.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
@@ -189,6 +189,9 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
   let traps: TrapWrites | null = null;
   let trapWrote: Set<EntityKey> | undefined;
   let plain: ApplyResult | undefined;
+  let falls: FallRecord[] = [];
+  // Openings land creatures from op version 64, on the server's state alone: a projected copy holds `sight` (docs/design/design-v1-floors.md phase 4, 4.1).
+  const openings = opensOps(env.opVersion) && sightOf(state) === undefined ? beginOpenings(tx, state) : null;
   try {
     // The trap step plans from the room before the op (docs/design/design-v1-traps.md 13.2). Ops stored before traps met none.
     const plan = trapsGoOff(env.opVersion) && env.withoutTraps !== true ? planBefore(op, state, actor, env) : null;
@@ -226,7 +229,11 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (timedEnds(env.opVersion)) endDueSpans(tx, state, op);
     endSaves(tx);
     const dispatched = plan ? new Set(tx.touched()) : null;
-    if (plan) traps = trapStep(tx, op, state, plan);
+    if (plan) {
+      // A trapdoor the trap step springs drops at step 4b, after the walk's reminders (phase 4, 4.3 step 2, D-261119-103).
+      if (openings) openings.deferred = [];
+      traps = trapStep(tx, op, state, plan);
+    }
     // A pit that opened moved what stood on its lid, so the links it left out of reach come loose (docs/design/design-v1-traps.md 13.2).
     if (traps?.pit && attaches(env.opVersion)) {
       linkPass(tx);
@@ -237,6 +244,14 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);
+    if (openings) {
+      const landed = landAfter(tx, state, op, openings);
+      falls = landed.falls;
+      if (landed.trapKeys.size > 0) {
+        traps = { ...traps, wrote: true };
+        trapWrote = new Set([...(trapWrote ?? []), ...landed.trapKeys]);
+      }
+    }
     // Last of the op's own writes, after the trap step, so every token the op left anywhere is judged where it ends, and a
     // correction line reads it so (docs/design/design-v1-snap-off.md 5.3).
     keepNudges(tx, state);
@@ -273,7 +288,60 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     ...(trapped ? { trapped: true as const } : {}),
     ...(trapWrote && trapWrote.size > 0 ? { trapWrote } : {}),
     ...(traps?.wrote || plain ? { withoutTraps: () => (plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true })) } : {}),
+    ...(falls.length > 0 ? { falls } : {}),
   };
+}
+
+/**
+ * What an op from version 64 does after the walk's reminders and before
+ * the nudge pass (docs/design/design-v1-floors.md phase 4, 4.3 steps 4b to
+ * 11): the trapdoor drops the trap step kept, the fall pass, one arrival
+ * step on each creature's last landing, a fall pass for what that step's
+ * trapdoors dropped, the link pass again, the opened marks with every
+ * landing, and the landing reminders. Its fall records, and the keys first
+ * written by steps 4b, 6 and 7, which join the trap step's (D-261119-106):
+ * a key dispatch or the fall pass wrote first stays the move's, so a rider
+ * that fell with its mount goes back up with it. An op without its trap
+ * step (Env.withoutTraps) runs only the fall pass, which is no trap's.
+ */
+function landAfter(tx: Tx, before: RoomState, op: Op, openings: Openings): { falls: FallRecord[]; trapKeys: Set<EntityKey> } {
+  const trapKeys = new Set<EntityKey>();
+  const written = () => new Set(tx.touched());
+  const since = (was: ReadonlySet<EntityKey>) => {
+    for (const key of tx.touched()) if (!was.has(key)) trapKeys.add(key);
+  };
+  // A DM's delete takes its creature's cards with it (4.4).
+  dropGoneCards(tx, before);
+  if (op.t === "sys.restore") restoreFallCards(tx, op);
+  // 4b.
+  const deferred = openings.deferred ?? [];
+  openings.deferred = null;
+  if (deferred.length > 0) {
+    const was = written();
+    for (const trap of deferred) dropBelow(tx, trap);
+    since(was);
+  }
+  // 5.
+  const candidates = fallCandidates(tx, before, op);
+  for (const id of openings.dropped) candidates.add(id);
+  openings.dropped.clear();
+  const falls = fallPass(tx, before, candidates, openings.landings);
+  if (tx.env.withoutTraps !== true) {
+    // 6 and 7: what the arrival step's trapdoors dropped onto an opening falls, and those landings set off nothing more.
+    const was = written();
+    const arrived = arrivalStep(tx, before, openings.landings);
+    if (arrived && openings.dropped.size > 0) falls.push(...fallPass(tx, before, new Set(openings.dropped), openings.landings));
+    since(was);
+  }
+  if (openings.landings.length === 0) return { falls, trapKeys };
+  // 8 to 11.
+  if (attaches(tx.env.opVersion)) {
+    linkPass(tx);
+    settleMounts(tx);
+  }
+  markOpened(tx, before, openings.landings);
+  remindLandings(tx, before, new Set(openings.landings.map((l) => l.tokenId)));
+  return { falls, trapKeys };
 }
 
 /**

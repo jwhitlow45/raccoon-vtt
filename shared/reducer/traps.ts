@@ -1,9 +1,9 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { type LogEntry, type LogEvent, type RoomState, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
+import { type LogEntry, type LogEvent, type RoomState, type Scene, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
-import { cellWord, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { cellWord, isHex, sceneGrid, shapeOfGrid, type Grid } from "../rules/grid.ts";
 import { hexInScene, sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
 import { splitCheck } from "../rules/walls.ts";
@@ -11,8 +11,15 @@ import { sightPiecesCheck } from "../visionLimits.ts";
 import { buildHeight, heightsPainted } from "./heights.ts";
 import { doorSet } from "./map.ts";
 import { gone, invalid, Refuse, type Tx } from "./tx.ts";
-import { notBuiltWords } from "./falls.ts";
+import { heldUp, leaveSeat, openingsOf, writeCard } from "./falls.ts";
+import { dropThrough } from "./floorLinks.ts";
 import { ownEntry } from "../records.ts";
+import { fallDrop, floorBelow, linkHeight } from "../rules/floorLinks.ts";
+import { isCreature } from "../rules/attach.ts";
+import { footprintGround } from "../rules/heights.ts";
+import { footprintRect, occupiedHexes } from "../rules/footprint.ts";
+import { hexKey } from "../rules/hex.ts";
+import { PIT_OR_BELOW } from "../protocol.ts";
 
 /**
  * Traps (docs/design/design-v1-traps.md 6), the DM's: making, changing and
@@ -22,6 +29,11 @@ import { ownEntry } from "../records.ts";
  */
 
 export const GIVE_IT_USES = "Give it at least one use, or no limit.";
+/** The lowest floor's refusal of a trapdoor (docs/design/design-v1-floors.md phase 4, 4.6), or a scene without floors. */
+export function noFloorBelow(state: Pick<RoomState, "scenes">, sceneId: string): string {
+  const name = ownEntry(state.scenes, sceneId)?.floor?.name;
+  return name === undefined ? "There is no floor below this scene." : `There is no floor below ${name}.`;
+}
 export const DONE_MEANWHILE = "It was done meanwhile.";
 export const SETTLED_MEANWHILE = "It was settled meanwhile.";
 
@@ -67,7 +79,7 @@ export function trapOwnBytes(trap: Trap): number {
  * edge only where the op sets it, and Mark found, a rename or a rig edit
  * still works on such a trap (SHRUNK-SCENE-TRAP).
  */
-function trapProblem(tx: Tx, trap: Trap, set: { zone: boolean; hits: boolean }): string | null {
+function trapProblem(tx: Tx, trap: Trap, set: { zone: boolean; hits: boolean; below: boolean }): string | null {
   const scene = tx.scene(trap.sceneId);
   const g = sceneGrid(scene);
   const { w, h } = isHex(g) ? hexKeySpan(g, scene.bounds) : scene.bounds;
@@ -90,8 +102,12 @@ function trapProblem(tx: Tx, trap: Trap, set: { zone: boolean; hits: boolean }):
     if (!isHex(g) && ![a[0], a[1], b[0], b[1]].every((v) => Number.isInteger(v * 2))) return "a wire's ends are on cell corners and edge midpoints";
   }
   if (!rig) return null;
-  if (rig.below) return notBuiltWords("A trapdoor");
   const squares = "cells" in zone;
+  // A trapdoor drops to the floor just below, onto the same squares (docs/design/design-v1-floors.md phase 4, 4.6).
+  if (rig.below && rig.pit) return PIT_OR_BELOW;
+  if (rig.below && !squares) return `only a trap on ${word} drops to the floor below`;
+  // Only where the op sets it, as the edge: a floor below removed since leaves the trapdoor's other edits working.
+  if (set.below && rig.below && floorBelow(tx.state, trap.sceneId) === undefined) return noFloorBelow(tx.state, trap.sceneId);
   if (squares && (rig.on.length < 1 || rig.on.length > 4)) return `a trap on ${word} goes off one to four ways`;
   if (!squares && rig.on.length > 0) return "a trip wire goes off when crossed and a door when opened";
   if (!squares && rig.pit) return `only a trap on ${word} opens a pit`;
@@ -143,7 +159,7 @@ export function trapCreate(tx: Tx, op: OpOf<"trap.create">): void {
   // A trap on a hex scene is stamped with its shape, which its keys are of (docs/design/design-v1-hex-grids.md HX-D14).
   const shape = shapeOfGrid(sceneGrid(tx.scene(input.sceneId)));
   const trap: Trap = { id: input.id, rev: 0, sceneId: input.sceneId, name: input.name, zone: input.zone, state: "armed", found: input.found ?? false, rig: { ...input.rig }, ...(shape ? { grid: shape } : {}) };
-  const why = trapProblem(tx, trap, { zone: true, hits: true }) ?? refProblem(tx, trap, true, true);
+  const why = trapProblem(tx, trap, { zone: true, hits: true, below: true }) ?? refProblem(tx, trap, true, true);
   if (why) throw invalid(why);
   tx.write(keys.trap(trap.id), trap);
 }
@@ -175,7 +191,7 @@ export function trapUpdate(tx: Tx, op: OpOf<"trap.update">): void {
     next.rig = rig as TrapRig;
   }
   if (p.state === "armed" && next.rig?.usesLeft === 0) throw invalid(GIVE_IT_USES);
-  const why = trapProblem(tx, next, { zone: p.zone !== undefined, hits: p.rig?.hits !== undefined }) ?? refProblem(tx, next, p.zone !== undefined, p.rig?.actions !== undefined, trap.rig?.actions);
+  const why = trapProblem(tx, next, { zone: p.zone !== undefined, hits: p.rig?.hits !== undefined, below: p.rig?.below !== undefined }) ?? refProblem(tx, next, p.zone !== undefined, p.rig?.actions !== undefined, trap.rig?.actions);
   if (why) throw invalid(why);
   tx.write(keys.trap(trap.id), next);
 }
@@ -260,7 +276,65 @@ export function runActions(tx: Tx, trap: Trap): Did[] {
   for (const [i, action] of (trap.rig?.actions ?? []).entries()) did.push({ action: i, ok: runAction(tx, trap.sceneId, action) });
   const pit = openPit(tx, trap);
   if (pit !== null) did.push({ action: PIT_ACTION, ok: pit });
+  // A trapdoor takes the pit's place among the outcomes (docs/design/design-v1-floors.md phase 4, 4.6).
+  if (trap.rig?.below === true) did.push({ action: PIT_ACTION, ok: openBelow(tx, trap) });
   return did;
+}
+
+/**
+ * A trapdoor's springing (4.6): its drop, at once, or kept for the
+ * reducer's step 4b while the walk's trap step runs (falls.ts Openings
+ * `deferred`), so the walk's own reminders read where the walk stopped
+ * (D-261119-103). False where its floor has no floor below now. Only the
+ * server's state drops: a projected copy holds no record of the op's
+ * landings, and its creatures stay where its server's answer puts them.
+ */
+function openBelow(tx: Tx, trap: Trap): boolean {
+  if (!belowOpens(tx.state, trap)) return false;
+  const openings = openingsOf(tx);
+  if (!openings) return true;
+  if (openings.deferred) openings.deferred.push(trap);
+  else dropBelow(tx, trap);
+  return true;
+}
+
+/**
+ * A trapdoor's drop (4.6, D-261119-112): each victim (`dropVictims`) whose
+ * space lies inside the floor below falls there onto the ground under its
+ * full space (reducer/floorLinks.ts dropThrough), what sits on it riding
+ * down, with a card, its drop measured from the ground it stood on. The
+ * squares do not change. Victims seated on a holder that does not count
+ * drop first, each leaving its seat as it lands, so a holder dropped
+ * after never carries one twice. Read on the room as it stands when the
+ * drop runs, the trap as it stands then too.
+ */
+export function dropBelow(tx: Tx, sprung: Trap): void {
+  const trap = ownEntry(tx.state.traps, sprung.id) ?? sprung;
+  const below = floorBelow(tx.state, trap.sceneId);
+  if (!below) return;
+  const rise = linkHeight(tx.state, { sceneId: trap.sceneId, to: below.id });
+  const victims = dropVictims(tx, trap);
+  const seated = (t: Token) => t.attached !== undefined && t.attached.kind !== "drag";
+  for (const victim of [...victims.filter(seated), ...victims.filter((t) => !seated(t))]) {
+    const now = ownEntry(tx.state.tokens, victim.id);
+    // One an earlier drop carried along has landed already.
+    if (!now || now.sceneId !== trap.sceneId) continue;
+    if (!spaceInScene(below, now)) continue;
+    dropThrough(tx, now, below.id);
+    leaveSeat(tx, now);
+    const landed = ownEntry(tx.state.tokens, now.id)!;
+    writeCard(tx, { tokenId: now.id, sceneId: below.id, from: trap.sceneId, ft: fallDrop(rise, now.elevation, landed.elevation) });
+  }
+}
+
+/** Whether a creature's full space lies inside a floor's edge, on its grid (4.6): only those a trapdoor drops onto it. */
+function spaceInScene(scene: Scene, token: Token): boolean {
+  const g = sceneGrid(scene);
+  const { squeeze: _squeeze, ...full } = token;
+  if (isHex(g)) return occupiedHexes(g, full).every((h) => hexInScene(g, scene.bounds, h));
+  const r = footprintRect(g, full);
+  const E = 1e-9;
+  return r.x >= -E && r.y >= -E && r.x + r.w <= scene.bounds.w + E && r.y + r.h <= scene.bounds.h + E;
 }
 
 /**
@@ -322,8 +396,8 @@ export function pitOpens(state: RoomState, trap: Trap): boolean {
  * just below. The stop planner's `opening` asks it for a `below` trap, as
  * it asks pitOpens for a pit, so a stopping walker stops over it.
  */
-export function belowOpens(_state: RoomState, _trap: Trap): boolean {
-  throw new Error("not built: belowOpens");
+export function belowOpens(state: RoomState, trap: Trap): boolean {
+  return trap.rig?.below === true && "cells" in trap.zone && floorBelow(state, trap.sceneId) !== undefined;
 }
 
 /**
@@ -332,8 +406,29 @@ export function belowOpens(_state: RoomState, _trap: Trap): boolean {
  * (4.1), applied before any holder filter, so a rider on a holder the op
  * does not count is listed. Pits keep `standingOn` and replay as before.
  */
-export function dropVictims(_tx: Tx, _trap: Trap): Token[] {
-  throw new Error("not built: dropVictims");
+export function dropVictims(tx: Tx, trap: Trap): Token[] {
+  if (!("cells" in trap.zone)) return [];
+  const squares = new Set<string>();
+  for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
+  const scene = ownEntry(tx.state.scenes, trap.sceneId);
+  if (!scene) return [];
+  const g = sceneGrid(scene);
+  const before = openingsOf(tx)?.before ?? tx.state;
+  const out: Token[] = [];
+  for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    if (token.sceneId !== trap.sceneId || !isCreature(token) || token.elevation !== footprintGround(tx.state.buildChunks, token)) continue;
+    if (!whollyOn(g, token, squares) || heldUp(tx, before, token)) continue;
+    out.push(token);
+  }
+  return out;
+}
+
+/** Whether every square or hex a creature's footprint covers, squeezed where it squeezes, is one of these keys (4.6). */
+function whollyOn(g: Grid, token: Token, squares: ReadonlySet<string>): boolean {
+  if (isHex(g)) return occupiedHexes(g, token).every((h) => squares.has(hexKey(h)));
+  const r = footprintRect(g, token);
+  for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
+  return true;
 }
 
 /**

@@ -1,24 +1,26 @@
-import type { FallId, FallRecord, RoomState, SceneId, TokenId } from "../model.ts";
-import type { OpOf } from "../protocol.ts";
-import { invalid, type Refuse, type Tx } from "./tx.ts";
+import { keys } from "../keys.ts";
+import { FALLS_PER_ROOM, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
+import type { Op, OpOf } from "../protocol.ts";
+import { inSightOfNonOwners } from "../project.ts";
+import { ownEntry } from "../records.ts";
+import { isCreature, onHolder } from "../rules/attach.ts";
+import { fallDrop, isHole, linkHeight, linksOn, spaceOn } from "../rules/floorLinks.ts";
+import { footprintGround } from "../rules/heights.ts";
+import { landThrough } from "./floorLinks.ts";
+import { invalid, type Tx } from "./tx.ts";
 
 /*
  * Falls through openings between floors (docs/design/design-v1-floors.md
  * phase 4, 4): the fall pass that runs from op version 64 (opensOps), the
- * cards it writes, and their settling by Dismiss or by a group save's
- * outcome. Until each piece is built, an op that reaches it is refused and
- * the passes throw, so a room behaves as before.
+ * cards it and trapdoors write, and their settling by Dismiss, by a group
+ * save's outcome, by the undo of the move that made them, or by the DM's
+ * delete of the creature. What an op lands is kept on its transaction
+ * (`Openings`), which the reducer's passes after dispatch read in the
+ * order of 4.3.
  */
 
-/** The words of an op that names an opening, a trapdoor, a hidden or moved end, or a fall card, before its rule is built. */
-export function notBuiltWords(what: string): string {
-  return `${what} is not built yet`;
-}
-
-/** The refusal in those words. */
-export function notBuilt(what: string): Refuse {
-  return invalid(notBuiltWords(what));
-}
+/** A card a second DM device, or a resend, settles after it went: as a trap's (reducer/traps.ts SETTLED_MEANWHILE). */
+export const FALL_SETTLED = "It was settled meanwhile.";
 
 /**
  * A creature's landing in the op (4.3 steps 5 to 11): a climb's or a
@@ -29,23 +31,224 @@ export function notBuilt(what: string): Refuse {
 export type Landing = { tokenId: TokenId; sceneId: SceneId; how: "climb" | "flight" | "drop" | "fall" };
 
 /**
+ * What an op from version 64 lands, kept on its transaction while the
+ * reducer runs it (shared/reducer.ts): the room before the op, which the
+ * support rule reads (4.1), the trapdoors the trap step sprang, whose drops
+ * wait for step 4b while it runs (`deferred`, null where a trapdoor drops
+ * at once), every landing so far, how many cards the op made, and the
+ * creatures a drop landed since the last fall pass. Only the server's
+ * state takes one: a projected copy lands nothing (4.1).
+ */
+export type Openings = { before: RoomState; deferred: Trap[] | null; landings: Landing[]; cards: number; dropped: Set<TokenId> };
+
+const OPENINGS = new WeakMap<Tx, Openings>();
+
+/** Starts the op's openings record (4.3). */
+export function beginOpenings(tx: Tx, before: RoomState): Openings {
+  const openings: Openings = { before, deferred: null, landings: [], cards: 0, dropped: new Set() };
+  OPENINGS.set(tx, openings);
+  return openings;
+}
+
+/** The op's openings record, or undefined for an op before version 64 or on a projected copy. */
+export function openingsOf(tx: Tx): Openings | undefined {
+  return OPENINGS.get(tx);
+}
+
+/** Adds landings to the op's record: the creature the landing names first, then what rode with it. A drop's first is its victim. */
+export function recordLandings(tx: Tx, tokenIds: readonly TokenId[], sceneId: SceneId, how: Landing["how"]): void {
+  const openings = OPENINGS.get(tx);
+  if (!openings) return;
+  for (const tokenId of tokenIds) openings.landings.push({ tokenId, sceneId, how });
+  if (how === "drop" && tokenIds[0] !== undefined) openings.dropped.add(tokenIds[0]);
+}
+
+/**
+ * Whether something holds the creature up where it stands (4.1): a seat on
+ * a holder on its floor that counts. Every holder counts for a DM's op,
+ * and for a player's only one every player saw before the op, since a fall
+ * is a shared write that a holder some player cannot see must not change
+ * (10.3). A trapdoor reads the same rule for its victims (4.6).
+ */
+export function heldUp(tx: Tx, before: RoomState, token: Token): boolean {
+  const link = token.attached;
+  if (!link || !onHolder(link.kind)) return false;
+  const holder = ownEntry(tx.state.tokens, link.to);
+  if (!holder || holder.id === token.id || holder.sceneId !== token.sceneId) return false;
+  if (tx.actor.role === "dm") return true;
+  const was = ownEntry(before.tokens, holder.id);
+  return was !== undefined && inSightOfNonOwners(before, was, tx.env);
+}
+
+/** The opening's upper end the creature stands over (4.1): on the ground, its space wholly inside the hole, or undefined. */
+function holeUnder(state: RoomState, token: Token): FloorLink | undefined {
+  if (!isCreature(token)) return undefined;
+  const hole = linksOn(state, token.sceneId).find((link) => isHole(state, link) && ownEntry(state.floorLinks, link.pair) !== undefined && spaceOn(state, token, link));
+  // The ground under its space last: the hole's squares are one height, but its space reads its own.
+  return hole && token.elevation === footprintGround(state.buildChunks, token) ? hole : undefined;
+}
+
+/** Whether an op's write placed a token anew: its floor, place, height, size or squeeze, or a seat it left (4.1). */
+function placed(was: Token, now: Token): boolean {
+  const seated = (t: Token) => t.attached !== undefined && onHolder(t.attached.kind);
+  return (
+    was.sceneId !== now.sceneId ||
+    was.x !== now.x ||
+    was.y !== now.y ||
+    was.elevation !== now.elevation ||
+    was.size !== now.size ||
+    was.w !== now.w ||
+    was.h !== now.h ||
+    (was.squeeze === true) !== (now.squeeze === true) ||
+    (seated(was) && !seated(now))
+  );
+}
+
+/**
+ * The fall pass's candidates (4.1): every token the op placed anew and
+ * that stood in the room before it, and every token standing on the upper
+ * end of an opening whose squares the op wrote. None for a create, an
+ * undo, a redo or a restore, which never fall (4.1, D-261119-007). The
+ * creatures trapdoors dropped join them from the op's record.
+ */
+export function fallCandidates(tx: Tx, before: RoomState, op: Op): Set<TokenId> {
+  const out = new Set<TokenId>();
+  // A room without an opening has nothing to fall through, so most ops read no further.
+  if (op.t === "sys.restore" || !Object.values(tx.state.floorLinks ?? {}).some((link) => link.kind === "opening")) return out;
+  for (const key of tx.touched()) {
+    if (key.startsWith("token:")) {
+      const id = key.slice("token:".length);
+      const was = ownEntry(before.tokens, id);
+      const now = ownEntry(tx.state.tokens, id);
+      if (was && now && placed(was, now)) out.add(id);
+    } else if (key.startsWith("floorLink:")) {
+      const id = key.slice("floorLink:".length);
+      const end = ownEntry(tx.state.floorLinks, id);
+      const was = ownEntry(before.floorLinks, id);
+      if (!end || !isHole(tx.state, end)) continue;
+      if (was && was.sceneId === end.sceneId && was.rect.x === end.rect.x && was.rect.y === end.rect.y && was.rect.w === end.rect.w && was.rect.h === end.rect.h) continue;
+      for (const token of Object.values(tx.state.tokens)) if (spaceOn(tx.state, token, end)) out.add(token.id);
+    }
+  }
+  return out;
+}
+
+/**
  * The fall pass (4.1, 4.3 step 5): each candidate on the ground whose
  * space lies wholly inside an opening's upper end, held up by nothing by
  * 4.1's rule, falls to the floor below (reducer/floorLinks.ts landThrough)
  * with a card. Each landing joins `landings`, and the pass returns one
- * record a root that fell. Never for a create, an undo, a redo, a
- * `sys.restore`, or on a projected copy.
+ * record a root that fell, with the upper end as it stood before the op.
+ * Candidates go in id order, each read where the pass so far left it, and
+ * one a fall already carried along is not asked again. A creature that
+ * falls alone off a holder that does not count leaves its seat as it
+ * lands, as the link pass would, so that holder's own fall later in the
+ * pass never carries it twice.
  */
-export function fallPass(_tx: Tx, _before: RoomState, _candidates: ReadonlySet<TokenId>, _landings: Landing[]): FallRecord[] {
-  throw new Error("not built: fallPass");
+export function fallPass(tx: Tx, before: RoomState, candidates: ReadonlySet<TokenId>, landings: Landing[]): FallRecord[] {
+  const records: FallRecord[] = [];
+  const landed = new Set<TokenId>();
+  for (const id of [...candidates].sort()) {
+    if (landed.has(id)) continue;
+    const token = ownEntry(tx.state.tokens, id);
+    if (!token) continue;
+    const hole = holeUnder(tx.state, token);
+    if (!hole || heldUp(tx, before, token)) continue;
+    const far = ownEntry(tx.state.floorLinks, hole.pair)!;
+    const from = token.sceneId;
+    const ft = fallDrop(linkHeight(tx.state, hole), hole.ground, far.ground);
+    const first = landings.length;
+    landThrough(tx, token, hole, "fall");
+    for (const landing of landings.slice(first)) landed.add(landing.tokenId);
+    leaveSeat(tx, token);
+    const card = writeCard(tx, { tokenId: id, sceneId: hole.to, from, ft });
+    const stood = ownEntry(before.floorLinks, hole.id) ?? hole;
+    records.push({ tokenId: id, linkId: hole.id, rev: stood.rev, made: stood.made, from, to: hole.to, fallId: card.id });
+  }
+  return records;
+}
+
+/** A creature that fell or dropped alone off a holder still seats it on the holder it left behind: that seat goes (4.1). */
+export function leaveSeat(tx: Tx, was: Token): void {
+  const now = ownEntry(tx.state.tokens, was.id);
+  if (!now?.attached || !onHolder(now.attached.kind)) return;
+  const { attached: _left, ...loose } = now;
+  tx.write(keys.token(now.id), loose);
+}
+
+/** The cards in eviction order: the oldest `made` first, then their place among their op's cards. */
+function byAge(a: Fall, b: Fall): number {
+  return a.made - b.made || placeOf(a.id) - placeOf(b.id);
+}
+
+function placeOf(id: FallId): number {
+  return Number(id.slice(id.indexOf(":") + 1));
+}
+
+/** Drops the oldest cards past FALLS_PER_ROOM (4.4). */
+function evict(tx: Tx): void {
+  const all = Object.values(tx.state.falls ?? {});
+  if (all.length <= FALLS_PER_ROOM) return;
+  all.sort(byAge);
+  for (const old of all.slice(0, all.length - FALLS_PER_ROOM)) tx.remove(keys.fall(old.id));
+}
+
+/**
+ * A new card (4.4): its id the op's seq and its place among the op's
+ * cards, `made` the op's seq, written in the op's undo step, the oldest
+ * dropped past FALLS_PER_ROOM. No name is stored.
+ */
+export function writeCard(tx: Tx, fields: Pick<Fall, "tokenId" | "sceneId" | "from" | "ft">): Fall {
+  const openings = OPENINGS.get(tx);
+  const place = openings ? openings.cards++ : 0;
+  const card: Fall = { id: `${tx.env.seq}:${place}`, rev: 0, tokenId: fields.tokenId, sceneId: fields.sceneId, from: fields.from, ft: fields.ft, made: tx.env.seq };
+  tx.write(keys.fall(card.id), card);
+  evict(tx);
+  return card;
+}
+
+/**
+ * The cards whose creature a DM's op deleted (4.4): each goes in the op's
+ * undo step, so the undo of the delete brings it back. A player's op
+ * leaves every card, so a dismissed companion's card stays for the DM
+ * (4.7).
+ */
+export function dropGoneCards(tx: Tx, before: RoomState): void {
+  if (tx.actor.role !== "dm") return;
+  const falls = tx.state.falls;
+  if (falls === undefined) return;
+  for (const card of Object.values(falls).sort(byAge)) {
+    if (ownEntry(before.tokens, card.tokenId) !== undefined && ownEntry(tx.state.tokens, card.tokenId) === undefined) tx.remove(keys.fall(card.id));
+  }
+}
+
+/**
+ * A player's undo or redo of a fall (4.5, `sys.restore` falls): the undo
+ * removes each record's card if it is still there, and never refuses for
+ * one, and the redo writes back only the card a record carries, the one
+ * its undo removed. So damage already applied is never asked for twice.
+ * Any restore then evicts as a new card does, since a DM's undo of a
+ * delete or a Dismiss puts back cards the room may since have filled the
+ * place of, and no room holds more than FALLS_PER_ROOM.
+ */
+export function restoreFallCards(tx: Tx, op: OpOf<"sys.restore">): void {
+  for (const record of op.falls ?? []) {
+    if (op.from === "undo") {
+      if (ownEntry(tx.state.falls, record.fallId) !== undefined) tx.remove(keys.fall(record.fallId));
+    } else if (record.card !== undefined) {
+      tx.write(keys.fall(record.card.id), record.card);
+    }
+  }
+  evict(tx);
 }
 
 /** `fall.settle` (4.4): the DM's Dismiss of a fall card. */
-export function fallSettle(_tx: Tx, _op: OpOf<"fall.settle">): void {
-  throw notBuilt("Dismissing a fall");
+export function fallSettle(tx: Tx, op: OpOf<"fall.settle">): void {
+  settleFallCard(tx, op.fallId);
 }
 
-/** The card a group save's outcome settles (`actor.outcome`'s `fall`, 4.4), removed in the same op. */
-export function settleFallCard(_tx: Tx, _fallId: FallId): void {
-  throw notBuilt("Applying a fall");
+/** The card a group save's outcome settles (`actor.outcome`'s `fall`, 4.4), removed in the same op, refused once it went. */
+export function settleFallCard(tx: Tx, fallId: FallId): void {
+  if (ownEntry(tx.state.falls, fallId) === undefined) throw invalid(FALL_SETTLED);
+  tx.remove(keys.fall(fallId));
 }

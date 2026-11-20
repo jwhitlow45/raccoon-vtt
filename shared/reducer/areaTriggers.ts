@@ -661,6 +661,35 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
   // A teleport enters an area only where it lands, as it sets off a trap only there (docs/design/design-v1-traps.md 6.6, 13.2). Ops stored
   // before op version 15 swept its straight leg, and replay so.
   const landsOnly = op.t === "token.move" && op.teleport !== undefined && trapsGoOff(tx.env.opVersion);
+  remindEntries(tx, before, moved, () => (landsOnly ? [after] : grouped ? alongGroups(after, grouped, routed) : walk ? alongWalkBeforeV14(after, walk) : alongLeg(before, after, moved)));
+}
+
+/**
+ * The landing reminders (docs/design/design-v1-floors.md phase 4, 4.3 step
+ * 11, D-261119-105), once an op from version 64, during a turn: every
+ * creature that landed in the op (a climb, a flight, a fall, a trapdoor's
+ * drop, and what rode with each) enters each area its last landing lies
+ * in, and an area that came with one covers who stands there, as a
+ * teleport lands (`landsOnly`), read against who each area held before
+ * the op (`remindEntries`). So a bearer never enters its own aura that
+ * came with it, whatever `includeOrigin` says, since it was inside before
+ * too, or never is (D-261119-122).
+ */
+export function remindLandings(tx: Tx, before: RoomState, landers: ReadonlySet<string>): void {
+  if (landers.size === 0 || !inTurn(tx.state)) return;
+  const after = tx.state;
+  remindEntries(tx, before, { tokens: new Set(landers), templateId: null }, () => [after]);
+}
+
+/**
+ * Each area that hits on entering reminds about every creature it now
+ * holds that it did not hold before the op, among the creatures the op
+ * moved and, where the area moved itself or with its token, every
+ * creature on its scene, judged at the points of `legOf`'s leg, read once
+ * and only where some creature might have entered.
+ */
+function remindEntries(tx: Tx, before: RoomState, moved: Moved, legOf: () => RoomState[]): void {
+  const after = tx.state;
   let swept: RoomState[] | null = null;
   for (const template of Object.values(after.templates).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (!(template.triggers?.includes("enter") ?? false)) continue;
@@ -678,7 +707,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= landsOnly ? [after] : grouped ? alongGroups(after, grouped, routed) : walk ? alongWalkBeforeV14(after, walk) : alongLeg(before, after, moved)) : [];
+    const leg = outside.length > 0 ? (swept ??= legOf()) : [];
     for (const at of leg) {
       const area = ownEntry(at.templates, template.id);
       if (!area) continue;

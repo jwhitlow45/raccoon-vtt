@@ -136,30 +136,24 @@ describe("`fall.settle`'s rows (4.4, 11)", () => {
 });
 
 /*
- * Until each rule is built, the reducer refuses every op shape that names
- * an opening, a hidden or moved end, a trapdoor or a fall card, so a room
- * behaves as before the contract. Each refusal goes as its rule is built.
+ * The contract's shapes once their rules are built (docs/design/design-v1-floors.md
+ * phase 4): an opening, a hidden, moved or resized end, a trapdoor, Dismiss
+ * and a fall's outcome apply, and stairs, ladders and pits apply as before.
  */
-describe("the shapes not built yet", () => {
-  const refused = (state: RoomState, op: Op) => {
-    const r = applyOp(state, opSchema.parse(op), DM, env(130));
-    assert.ok(!r.ok, `${op.t} applied`);
-    return r.message;
-  };
-
-  test("an opening, a hidden, moved or resized end, a trapdoor, Dismiss and a fall's outcome are refused", () => {
+describe("the shapes built", () => {
+  test("an opening, a hidden, moved or resized end, a trapdoor, Dismiss and a fall's outcome apply", () => {
+    const applies = (state: RoomState, op: Op) => {
+      const r = applyOp(state, opSchema.parse(op), DM, env(130));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+    };
     const stairs = withStairs();
-    assert.match(refused(tower(), putOpeningOp()), /not built yet$/);
-    for (const patch of [{ hidden: true }, { rect: { x: 4, y: 4, w: 2, h: 1 } }, { pairRect: { x: 4, y: 4, w: 2, h: 1 } }, { kind: "opening" as const }]) {
-      assert.match(refused(stairs, { t: "floorLink.update", linkId: "l1", patch }), /not built yet$/, JSON.stringify(patch));
-    }
+    applies(tower(), putOpeningOp());
+    for (const patch of [{ hidden: true }, { rect: { x: 4, y: 4, w: 2, h: 1 } }, { pairRect: { x: 4, y: 4, w: 2, h: 1 } }]) applies(stairs, { t: "floorLink.update", linkId: "l1", patch });
     const { id, sceneId, name, zone, rig } = trapdoor();
-    assert.match(refused(tower(), { t: "trap.create", trap: { id, sceneId, name, zone, rig: rig! } }), /not built yet$/);
-    const pit = { ...tower(), traps: { t1: trap("t1", { sceneId: UPPER }) } };
-    assert.match(refused(pit, { t: "trap.update", trapId: "t1", patch: { rig: { below: true } } }), /not built yet$/);
-    assert.match(refused(withFalls(tower(), fallCard()), { t: "fall.settle", fallId: "120:0" }), /not built yet$/);
-    const outcome: Op = { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0" }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] };
-    assert.match(refused(withFalls(tower(), fallCard()), outcome), /not built yet$/);
+    applies(tower(), { t: "trap.create", trap: { id, sceneId, name, zone, rig: rig! } });
+    applies({ ...tower(), traps: { t1: trap("t1", { sceneId: UPPER }) } }, { t: "trap.update", trapId: "t1", patch: { rig: { below: true } } });
+    applies(withFalls(tower(), fallCard()), { t: "fall.settle", fallId: "120:0" });
+    applies(withFalls(tower(), fallCard()), { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0" }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] });
   });
 
   test("stairs and ladders, their lock and kind, and a pit still apply as before", () => {

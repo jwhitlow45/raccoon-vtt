@@ -1,10 +1,12 @@
 import { chunkKey, doorChunk, keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import type { RoomState, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts";
+import type { RoomState, Token, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts";
 import type { Op, OpOf } from "../protocol.ts";
-import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
+import { armedTraps, planDoor, planHand, planTrapMove, planTurn, setsOff, standsOn as standsOnTrap, trapHits, trapsLiveOn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
+import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
+import { playersToken } from "../players.ts";
 import { pressChangesNothing } from "./encounter.ts";
-import { addDue, dmLine, orderedBy, PIT_ACTION, pitOpens, plainList, playersLine, runActions } from "./traps.ts";
+import { addDue, belowOpens, dmLine, orderedBy, PIT_ACTION, pitOpens, plainList, playersLine, runActions } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 import type { Landing } from "./falls.ts";
 import { ownEntry } from "../records.ts";
@@ -34,7 +36,7 @@ export type TrapWrites = { wrote: boolean; pit?: true };
 export function planBefore(op: Op, before: RoomState, actor: Viewer, env: Env): TrapPlan {
   if (walkOp(op)) {
     try {
-      const plan = planTrapMove(op, before as TrapRoom, actor, env, (trap) => pitOpens(before, trap));
+      const plan = planTrapMove(op, before as TrapRoom, actor, env, (trap) => (trap.rig?.below === true ? belowOpens(before, trap) : pitOpens(before, trap)));
       return { op: plan.op, before: plan.springings };
     } catch (err) {
       // An op the move rules refuse is dispatch's to refuse, in its own words.
@@ -177,7 +179,8 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
     return;
   }
   const did = runActions(tx, trap);
-  if (did.some((d) => d.action === PIT_ACTION && d.ok)) out.pit = true;
+  // A trapdoor's drop runs its own link pass (shared/reducer.ts 4.3 step 8), so only a pit asks for this one.
+  if (rig.below !== true && did.some((d) => d.action === PIT_ACTION && d.ok)) out.pit = true;
   const perceived = s.pass === "public" && s.perceived;
   const next = sprungOf(ownEntry(tx.state.traps, trap.id) ?? trap);
   const found = perceived && rig.foundOnSpring === true && !trap.found;
@@ -193,9 +196,60 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
  * 6), once an op from version 64: each creature's last landing sets off
  * every armed trap on the landing floor whose squares its space overlaps
  * and whose rig goes off on `enter`, by `who`, `minSize` and `floor`, as a
- * walk's would, public or private alike. A trapdoor it springs drops at
- * once.
+ * walk's would, so a flier landing in the air sets off no floor trap. On
+ * live floors only, as every trap (rules/traps.ts trapsLiveOn). Who sets a
+ * trap off together goes off in one springing, public where every player
+ * saw them before the op, as a walk's public pass reads them, else in the
+ * private pass, and written by `write` as a walk's springings are. Two
+ * traps go off by floor, then trap id. A trapdoor it springs drops at once.
+ * Null where nothing goes off.
  */
-export function arrivalStep(_tx: Tx, _before: RoomState, _landings: readonly Landing[]): TrapWrites | null {
-  throw new Error("not built: arrivalStep");
+export function arrivalStep(tx: Tx, before: RoomState, landings: readonly Landing[]): TrapWrites | null {
+  const last = new Map<string, Landing>();
+  for (const landing of landings) {
+    last.delete(landing.tokenId);
+    last.set(landing.tokenId, landing);
+  }
+  if (last.size === 0) return null;
+  const room = tx.state as TrapRoom;
+  const seenBefore = (id: string) => {
+    const token = ownEntry(before.tokens, id);
+    return token !== undefined && inSightOfNonOwners(before, token, tx.env);
+  };
+  const springings: Springing[] = [];
+  for (const sceneId of [...new Set([...last.values()].map((l) => l.sceneId))].sort()) {
+    if (!trapsLiveOn(room, sceneId)) continue;
+    const landers = [...last.values()]
+      .filter((l) => l.sceneId === sceneId)
+      .map((l) => ownEntry(room.tokens, l.tokenId))
+      .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const trap of armedTraps(room.traps ?? {}, sceneId)) {
+      const rig = trap.rig!;
+      if (!rig.on.includes("enter") || !("cells" in trap.zone)) continue;
+      const on = landers.filter((t) => setsOff(rig, room, t) && standsOnTrap(room, trap, t, seenBefore));
+      const shown = on.filter((t) => seenBefore(t.id));
+      const pass = shown.length > 0 ? "public" : "private";
+      const by = (pass === "public" ? shown : on).map((t) => t.id);
+      if (by.length > 0) springings.push(arrival(trap, pass, by, room, tx.env));
+    }
+  }
+  if (springings.length === 0) return null;
+  const out: TrapWrites = { wrote: false };
+  for (const s of springings) write(tx, s, out);
+  if (!tx.state.encounter) for (const s of springings) rearmNow(tx, s.trap.id);
+  return out;
+}
+
+/** An arrival's springing at the room it landed in, as rules/traps.ts springingAt makes a turn's. */
+function arrival(trap: Trap, pass: "public" | "private", by: string[], room: RoomState, env: Env): Springing {
+  const seen = new Set<string>();
+  const party = new Set<string>();
+  for (const id of by) {
+    const token = ownEntry(room.tokens, id);
+    if (!token) continue;
+    if (seenByNonOwners(room, token, env)) seen.add(id);
+    if (playersToken(room, token)) party.add(id);
+  }
+  return { trap, how: "enter", pass, by, hits: trapHits(trap, room, by, env.opVersion), perceived: pass === "public" && seen.size > 0, seen, party };
 }

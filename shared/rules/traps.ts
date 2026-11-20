@@ -1668,13 +1668,16 @@ function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen
 /**
  * The squares a stopping trap's pit opens on (5.7), when it opens: a pit on
  * squares not yet at its floor, which `opens`, the action's own test, says
- * the caps let open. A spot lies over it when every square its footprint
- * covers, squeezed where it squeezes, is one of them, and on a hex scene
- * every hex (H3).
+ * the caps let open, or a trapdoor whose floor has a floor below, which
+ * `opens` asks as reducer/traps.ts belowOpens (docs/design/design-v1-floors.md
+ * phase 4, 4.6), so a stopping walker stops over it. A spot lies over it
+ * when every square its footprint covers, squeezed where it squeezes, is
+ * one of them, and on a hex scene every hex (H3).
  */
 function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean): ((spot: RouteSpot, walk: Walk) => boolean) | null {
   const pit = trap.rig?.pit;
-  if (!pit || !("cells" in trap.zone) || pitOpen(before.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
+  const below = trap.rig?.below === true;
+  if ((!pit && !below) || !("cells" in trap.zone) || (pit && pitOpen(before.buildChunks, trap.sceneId, trap.zone.cells, pit))) return null;
   // The action's own test of whether the pit opens (reducer/traps.ts pitOpens): one the caps keep shut moves no walker over it.
   if (opens && !opens(trap)) return null;
   const squares = new Set<string>();
