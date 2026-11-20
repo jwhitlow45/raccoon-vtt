@@ -119,6 +119,14 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       // A new kind names the step, and a kind sent as it is leaves the lock to name it, as the pane sends the two apart.
       if (op.patch?.kind !== undefined && op.patch.kind !== kind) return LINK_LABELS.kind(kind);
       if (op.patch?.locked !== undefined) return LINK_LABELS.lock(kind, op.patch.locked);
+      if (op.patch?.hidden !== undefined) return LINK_LABELS.hide(kind, op.patch.hidden);
+      // A rect is a move, or a resize where the end's size changes (phase 4, 8.2).
+      if (op.patch?.rect !== undefined) {
+        const end = ownEntry(before.floorLinks, op.linkId);
+        const far = (end && ownEntry(before.scenes, end.to)?.floor?.name) ?? "a floor";
+        const sized = end !== undefined && (end.rect.w !== op.patch.rect.w || end.rect.h !== op.patch.rect.h);
+        return sized ? LINK_LABELS.resized(kind, far) : LINK_LABELS.moved(kind, far);
+      }
       return LINK_LABELS.same(kind);
     }
     case "floorLink.delete": {
