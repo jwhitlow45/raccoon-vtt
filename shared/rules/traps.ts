@@ -1862,6 +1862,9 @@ function roomAt(m: Moment): RoomState {
  * route cut there, squeezed where that spot is (5.5): the named token's own
  * walk at its group's step, where every walker's stand was judged. A Get off
  * and a landing from the height controls take one step, so neither is cut.
+ * A cut walk drops the op's `seat`, which seats a rider where the walk ends
+ * as the op says (moveLeg.ts DroppedSeat), so each rider lands on the seat
+ * its place carries it to, where the trap step read it at the stop.
  */
 function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: RoomState, seen: (id: string) => boolean): Op {
   const landing = (named: string): (RouteSpot & { elevation: number }) | null => {
@@ -1872,7 +1875,7 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     case "token.move": {
       const at = landing(op.tokenId);
       if (!at) return op;
-      const { route, squeeze: _squeeze, ...rest } = op;
+      const { route, squeeze: _squeeze, seat: _seat, ...rest } = op;
       const next = { ...rest, x: at.x, y: at.y, elevation: at.elevation, ...(at.squeezed ? { squeeze: true as const } : {}) };
       const pieces = route ? cutRoute(route, at.progress, at) : [];
       const cut = pieces.length > 0 ? { ...next, route: pieces as [number, number, number, 0 | 1][] } : next;

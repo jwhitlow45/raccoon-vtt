@@ -2447,10 +2447,22 @@ const stateClientOps = [
    * the move is a "Teleport here" past a wall or a ledge: it skips the wall
    * test, its leg on the turn's path does not count, and the DM's log says so.
    * `unknown` is past something on ground the player does not hold, which
-   * names no kind (docs/design/design-v1-map-discovery.md 6).
+   * names no kind (docs/design/design-v1-map-discovery.md 6). `seat` is the
+   * stored place a token sitting on the moved one was dropped at, from op
+   * version 63 (LP40-HEX-SEAT, migrate.ts seatsWhereDropped): where the walk
+   * ends full size it sits there, if that is a seat of the moved token's
+   * stand, instead of the seat its own place carries it to (rules/moveLeg.ts
+   * follow). Anything else ignores it, so it never refuses a move.
    */
-  op("token.move", { ...moveFields, squeeze: z.literal(true).optional(), teleport: z.enum(["wall", "ledge", "unknown"]).optional(), route: routeSchema.optional() })
+  op("token.move", {
+    ...moveFields,
+    squeeze: z.literal(true).optional(),
+    teleport: z.enum(["wall", "ledge", "unknown"]).optional(),
+    route: routeSchema.optional(),
+    seat: z.strictObject({ tokenId: id, x: coord, y: coord }).optional(),
+  })
     .refine((o) => o.route === undefined || o.teleport === undefined, { message: "a teleport walks no route" })
+    .refine((o) => o.seat === undefined || (o.teleport === undefined && o.seat.tokenId !== o.tokenId), { message: "a seat is a rider's, on a walk" })
     .refine((o) => o.route === undefined || (o.route.at(-1)?.[0] === o.x && o.route.at(-1)?.[1] === o.y), { message: "a route ends where the move lands" }),
   op("token.moveMany", { moves: z.array(z.strictObject(moveFields)).min(1).max(MAX_MOVES) }),
   /**

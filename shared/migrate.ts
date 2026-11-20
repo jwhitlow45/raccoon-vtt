@@ -1485,12 +1485,13 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // Hex walks in single file that settle (DROP_SEAT_OP_VERSION): no stored op changes shape, so the step is the identity.
-    // From this version a walk in single file on hexes that reaches its last hex before its holder ends holds that hex to the
-    // holder's end (`fileEndsWithHolder`), and one whose way by the one ahead ends out of a hex step of its holder goes straight
-    // onto the holder's start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that keeps the file on its
-    // spots for reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops stored before replay as
-    // they ran.
+    // A rider's seat where she is dropped, and hex walks in single file that settle (DROP_SEAT_OP_VERSION): `token.move` may
+    // carry `seat`, which an older strict schema refuses, so no stored op changes shape and the step is the identity. From this
+    // version the rider it names sits where she was dropped where the walk ends full size (`seatsWhereDropped`). A walk in
+    // single file on hexes that reaches its last hex before its holder ends holds that hex to the holder's end
+    // (`fileEndsWithHolder`), and one a hex step from its holder's start whose way by the one ahead ends out of a hex step of
+    // its holder steps straight onto that start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that keeps the file on its spots for
+    // reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops stored before replay as they ran.
     // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
     // version 63 ops after its last snapshot, which an older build refuses.
     from: 62,
@@ -2163,6 +2164,19 @@ export function fileGoesDirectWhereFar(opVersion: number | undefined): boolean {
  * today's rule.
  */
 export function stopsStepApartInReach(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
+
+/**
+ * Whether a `token.move`'s `seat` seats the token sitting on the moved one
+ * that it names where it was dropped (LP40-HEX-SEAT, rules/moveLeg.ts
+ * follow): where the walk ends full size and the dropped place is a seat of
+ * the moved token's stand there. A rider dragged onto the hex of a corridor's
+ * mouth that her warhorse's only full stand there covers then sits on it, not
+ * on the seat beside it that her place carried her to. No op before version
+ * 63 carries a seat, and each that did would replay without it.
+ */
+export function seatsWhereDropped(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
 }
 

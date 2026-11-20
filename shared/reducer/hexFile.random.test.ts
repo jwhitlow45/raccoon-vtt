@@ -10,11 +10,11 @@ import { movementRules } from "../ruleHooks.ts";
 import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
-import { routeWorld } from "../rules/hexWalk.ts";
+import { findRouteOn, routeWorld } from "../rules/hexWalk.ts";
 import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
-import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
+import { groundUnder, hexStandHexes, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { footing, footprintGround } from "../rules/heights.ts";
 import { planTrapMove, trapHits, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
@@ -769,5 +769,111 @@ for (const [name, g] of [
       assert.ok(moments >= 180000 && placed >= 120000 && moving >= 85000 && spots >= 38000, `moments ${moments}, places ${placed}, still moving ${moving}, spots ${spots}`);
       for (const [name, least] of KINDS) assert.ok((kinds.get(name) ?? 0) >= least, `walks ${name}: ${kinds.get(name) ?? 0}, ${JSON.stringify(counts)}`);
     });
+
+    test("a rider dropped on a seat of her mount's stand (LP40-HEX-SEAT): at every corner of the mount's walk and at its end the trap step has every walk where the move has it, every token lands where the trap step had it, the rider sits there, and a hidden rider beside her changes no player's copy", () => {
+      let moves = 0;
+      let seated = 0;
+      let corners = 0;
+      let twins = 0;
+      for (let seed = 1; seed <= 3000; seed++) {
+        const room = caseOf(seed, g);
+        if (!room) continue;
+        const made = seatedMove(g, room, seed);
+        if (!made) continue;
+        const { state: s, op, rider } = made;
+        for (const [who, actor] of [
+          ["Pat", P1],
+          ["the DM", DM],
+        ] as const) {
+          if (!canApply(op, actor, s, { canUseAsset: () => true }).ok) continue;
+          const at = `${name} seed ${seed}, ${who}`;
+          moves++;
+          const walks = planWalks(op, s, actor, {});
+          const lead = walks.find((m) => m.tokenId === "horse")!;
+          const ridden = walks.find((m) => m.tokenId === rider)!;
+          // The rule seats a rider every player sees for Pat, and any for the DM.
+          if ((actor === DM || s.tokens[rider]!.visibility !== "dm") && planTrapMove(op, s, actor, {}).op === op) {
+            assert.deepEqual([ridden.to.x, ridden.to.y], [op.seat!.x, op.seat!.y], `${at}: ${rider} sits where she was dropped`);
+            seated++;
+          }
+          const moment = trapMoments(op, s, actor, {});
+          for (let i = 0; i < lead.route.length; i++) {
+            const p: readonly [number, number, number] = i === lead.route.length - 1 ? [i - 1, 1, 1] : [i, 0, 1];
+            const tokens = moment(p);
+            for (const m of walks) {
+              if (m.along) continue;
+              const want = m.route[Math.min(i, m.route.length - 1)]!;
+              const t = tokens[m.tokenId]!;
+              assert.deepEqual([t.x, t.y, Math.round(t.elevation * 1e9) / 1e9], [want.x, want.y, Math.round(want.elevation * 1e9) / 1e9], `${at}: ${m.tokenId} at the walk's point ${i}`);
+            }
+            corners++;
+          }
+          const r = applyOp(s, op, actor, env(5));
+          assert.ok(r.ok, at);
+          const cut = planTrapMove(op, s, actor, {}).op !== op;
+          for (const [id, pose] of trapLandings(op, s, actor, {})) {
+            // A passenger on a holder a cut lands short of its walk sits on the seat the cut gives it, where the trap step read it at
+            // its walk's spot, the gap `checkedMove` leaves too: the cut drops the seat, so that one lands on the seat its place
+            // carries it to.
+            const link = s.tokens[id]!.attached;
+            if (cut && link && onHolder(link.kind)) continue;
+            const t: Token = r.state.tokens[id]!;
+            assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
+          }
+          // The shown rider with and without a hidden rider beside her: the same copy for every player.
+          if (actor !== P1 || s.tokens[rider]!.visibility === "dm") continue;
+          const twin = riderTwins(g, fogged(s));
+          if (!twin) continue;
+          const a = applyOp(structuredClone(twin.alone), op, P1, env(5));
+          const b = applyOp(structuredClone(twin.beside), op, P1, env(5));
+          assert.equal(a.ok, b.ok, `${at}: the answer with the hidden rider`);
+          if (!a.ok || !b.ok) continue;
+          assert.deepEqual(copies(b.state, twin.alone), copies(a.state, twin.alone), `${at}: every player's copy with the hidden rider`);
+          twins++;
+        }
+      }
+      // About 640 to 700 moves on each layout, 575 to 640 seated, 230 to 265 twins.
+      assert.ok(moves >= 500 && seated >= 450 && corners >= 1100 && twins >= 180, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}`);
+    });
   });
+}
+
+/**
+ * `made` with the holder's own walk to a full stand on open ground a few hexes from where it stands, as the device's search finds
+ * it, and the `seat` of a rider sitting on it, dropped on a placement of that stand her place does not carry her to. Null where
+ * the room has no rider, no such stand or no such placement.
+ */
+function seatedMove(g: HexGrid, made: Case, seed: number): (Case & { rider: string }) | null {
+  const r = rng(seed * 7121 + (g.orient === "rows" ? 15 : 16));
+  const s = made.state;
+  const horse = s.tokens.horse!;
+  const riders = Object.values(s.tokens).filter((t): t is Token => t?.attached?.to === "horse" && onHolder(t.attached.kind));
+  if (riders.length === 0) return null;
+  const rider = pick(r, riders);
+  const from = occupiedHexes(g, horse)[0]!;
+  const stands: { x: number; y: number }[] = [];
+  for (let dc = -3; dc <= 3; dc++) {
+    for (let dr = -3; dr <= 3; dr++) {
+      const ref = { col: from.col + dc, row: from.row + dr };
+      const stand = { size: sizeOf(horse), ref, squeezed: false };
+      if ((dc !== 0 || dr !== 0) && hexStandHexes(g, stand).every(made.open)) stands.push(hexStandPlace(g, horse, stand));
+    }
+  }
+  if (stands.length === 0) return null;
+  const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, pick(r, stands));
+  if (!found || found === "none") return null;
+  // Where the search's way ends, which the op lands on.
+  const [x, y] = found.pieces[found.pieces.length - 1]!;
+  const to = { x, y };
+  const own = seatedAt(g, rider, horse, to, false);
+  const spots = hexPlacements(g, rider, occupiedHexes(g, { ...horse, ...to })).map((p) => p.spot).filter((p) => Math.abs(p.x - own.x) > 1e-9 || Math.abs(p.y - own.y) > 1e-9);
+  if (spots.length === 0) return null;
+  const seat = pick(r, spots);
+  const route = found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+  return { ...made, rider: rider.id, op: { t: "token.move", tokenId: "horse", ...to, route, seat: { tokenId: rider.id, x: seat.x, y: seat.y } } };
+}
+
+/** The holder's size category, as its full stands take it. */
+function sizeOf(t: Token): "large" | "huge" {
+  return t.size === "huge" ? "huge" : "large";
 }
