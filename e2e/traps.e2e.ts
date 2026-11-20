@@ -1405,4 +1405,42 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pane(dm).waitFor({ state: "detached" });
     await pickTool(dm, "Select");
   });
+
+  test("tf-1. a trap goes off on a floor the DM is not showing: its card's Save and damage takes the trap's floor, so Apply hurts the creature there and settles it", async () => {
+    const cellar = uuidv7();
+    const goblin = uuidv7();
+    const trapId = uuidv7();
+    await ops.send({ t: "scene.create", scene: { id: cellar, name: "Tower", bounds: BOUNDS }, floor: { beside: run.sceneId, side: "below", besideName: "Upper hall" } });
+    await ops.send({ t: "scene.update", sceneId: cellar, patch: { floor: { name: "Cellar" }, fogEnabled: false } });
+    await ops.send({ t: "token.create", token: { id: goblin, sceneId: cellar, kind: "monster", name: "Cellar Goblin", size: "medium", visibility: "all", x: 3, y: 3, disposition: "hostile", actor: { inline: actor() } } });
+    const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", damage: [{ formula: "1d6", type: "fire" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: cellar, name: "Cellar Flame", zone: { cells: [{ x: 3, y: 3, w: 1, h: 1 }] }, rig } });
+    await waitFor("the cellar's trap and goblin on the DM's copy", () => (state(dmSocket)?.traps?.[trapId] && token(dmSocket, goblin) ? true : null));
+    assert.equal(state(dmSocket)?.scenes[cellar]?.floor?.name, "Cellar");
+    await ops.send({ t: "trap.spring", trapId, tokenIds: [goblin] });
+    await waitFor("the springing waits", () => ((state(dmSocket)?.traps?.[trapId]?.rig?.due?.length ?? 0) > 0 ? true : null));
+    const shown = state(dmSocket)!.meta.playerSceneId;
+    assert.equal(shown, run.sceneId, "the DM still shows the floor above");
+    const card = dm.getByRole("group", { name: "Cellar Flame went off" });
+    await card.waitFor();
+    await card.getByRole("button", { name: "Save and damage", exact: true }).click();
+    const damage = dm.getByLabel("Damage", { exact: true });
+    await damage.waitFor();
+    const lines = state(dmSocket)?.log.length ?? 0;
+    await damage.press("Enter");
+    const rolled = await waitFor("the damage roll", () => state(dmSocket)?.log.slice(lines).find((e) => e.data?.type === "dice" && e.data.rolls.some((r) => r.formula === "1d6")) ?? null);
+    const amount = rolled.data?.type === "dice" ? rolled.data.rolls.find((r) => r.formula === "1d6")!.total : 0;
+    const apply = dm.getByRole("button", { name: /^Apply: 1 takes damage$/ });
+    await apply.waitFor();
+    assert.equal(await apply.isEnabled(), true, "Apply waits though the creature is on the trap's floor");
+    await shots.take(dm, "traps-tf-1-other-floor-page");
+    const goblinHp = () => {
+      const t = token(dmSocket, goblin);
+      return t && "inline" in t.actor ? t.actor.inline.hp.cur : null;
+    };
+    await apply.click();
+    await waitFor(`the goblin at ${HP - amount}`, () => (goblinHp() === HP - amount ? true : null));
+    await waitFor("the springing settled", () => (state(dmSocket)?.traps?.[trapId]?.rig?.due === undefined ? true : null));
+    await card.waitFor({ state: "detached" });
+  });
 });
