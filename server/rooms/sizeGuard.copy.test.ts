@@ -6,7 +6,7 @@ import { heldClock, projectState, publicEffects, seatView, stableStringify } fro
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
-import { exactCopies, ownHeldBytes } from "./sizeGuard.ts";
+import { exactCopies, linesHeld, ownHeldBytes } from "./sizeGuard.ts";
 
 /*
  * D-261116-015 and D-261119-021: a player's exact part counts only what
@@ -392,13 +392,16 @@ function storedThings(state: RoomState, memberId: string): Array<{ path: Step[];
   const out: Array<{ path: Step[]; stored: unknown; copy: unknown }> = [];
   const records = [["tokens", "token"], ["templates", "template"], ["drawings", "drawing"], ["casts", "cast"], ["rolls", "roll"], ["characters", "character"], ["companionBlocks", "companionBlock"], ["members", "member"], ["buildChunks", "chunk"]] as const;
   for (const [name, kind] of records) for (const [id, stored] of Object.entries(state[name] as Record<string, unknown>)) out.push({ path: [name, id], stored, copy: view.copy(kind, id) });
-  state.log.forEach((line, i) => out.push({ path: ["log", i], stored: line, copy: view.copy("log", line.id) }));
+  // A shared line as their exact part holds it: as they read it when it was written, or not at all (linesHeld).
+  const lines = linesHeld(state, memberId, view);
+  state.log.forEach((line, i) => out.push({ path: ["log", i], stored: line, copy: lines.get(line) ?? null }));
   state.encounter?.entries.forEach((row, i) => out.push({ path: ["encounter", "entries", i], stored: row, copy: view.copy("row", row.id) }));
   return out;
 }
 
 function applied(state: RoomState, change: Change): RoomState {
-  const twin = structuredClone(state);
+  // Through JSON, so no two places share an object: a change to one is a change to it alone.
+  const twin = JSON.parse(JSON.stringify(state)) as RoomState;
   let at: Record<string | number, unknown> = twin as never;
   for (const step of change.path.slice(0, -1)) at = at[step] as never;
   const last = change.path.at(-1)!;
@@ -437,6 +440,13 @@ const heldAsStored = (state: RoomState, memberId: string) => {
  * show again residual 7's (D-261120-012).
  */
 const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId|visibility)$/.test(where);
+
+/**
+ * What `memberId` holds of a room: their copy, and the shared lines as they
+ * read them when written (linesHeld), which their exact part counts so.
+ * Twins alike in both must give equal exact parts.
+ */
+const knownBy = (state: RoomState, memberId: string) => `${copyOf(state, memberId)}\n${stableStringify([...linesHeld(state, memberId)].map(([line, held]) => [line.id, held]))}`;
 
 /** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
 function namedBase(seed: number): RoomState {
@@ -497,13 +507,13 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
         // Every change at a named place, and a sample of the rest.
         const forced = changes.filter((c) => Object.values(NAMED).some((re) => re.test(c.path.join("."))));
         const rest = changes.filter((c) => !forced.includes(c)).sort(() => r() - 0.5).slice(0, 30);
-        const [copy, shown, conditions, asStored] = [copyOf(base, memberId), shownBy(base, memberId), shownChanges(base, memberId), heldAsStored(base, memberId)];
+        const [copy, shown, conditions, asStored] = [knownBy(base, memberId), shownBy(base, memberId), shownChanges(base, memberId), heldAsStored(base, memberId)];
         for (const change of [...forced, ...rest]) {
           const twin = applied(base, change);
           // A change no stored room could hold, such as a word outside its list, makes no twin.
           let twinCopy: string;
           try {
-            twinCopy = copyOf(twin, memberId);
+            twinCopy = knownBy(twin, memberId);
           } catch {
             continue;
           }

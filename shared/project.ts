@@ -674,6 +674,13 @@ type Ctx = {
   held: boolean;
   /** The viewer's ground per scene (rules/held.ts), worked out when first asked (groundCtx). */
   grounds: Map<string, Ground | null>;
+  /**
+   * A shared line read as the viewer, on the roster when it was written,
+   * read it then (SeatView `written`): every player read it then, and the
+   * parts they did not are cut already (LineParts), so no rule that reads
+   * the room now applies.
+   */
+  written?: true;
 };
 
 function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts, held = true): Ctx {
@@ -1229,6 +1236,10 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
       if (kind !== "row") return projectEntityCtx(ctx, keys[kind](id));
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
       return encounter?.entries.find((e) => e.id === id) ?? null;
+    },
+    written: (lineId) => {
+      const line = readEntity(state, keys.log(lineId)) as LogEntry | undefined;
+      return line && lineAudience(line) === "shared" ? projectLogEntryCtx({ ...ctx, paused: false, written: true }, line) : null;
     },
     turn: () => {
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
@@ -4031,16 +4042,26 @@ function withoutClaim(data: ClockLogEvent): ClockLogEvent {
   return rest;
 }
 
+/** The creature an event is about as a read finds it: in sight now, or for a line read as written, whatever it is now. */
+function holderFor(ctx: Ctx, data: { tokenId?: string; characterId?: string }): { token?: Token; character?: Character } | null {
+  return ctx.written ? {} : holderInSight(ctx, data);
+}
+
+/** The HP numbers a read gives: those the viewer may read now, or, for a line read as written, all its parts left them. */
+function accessFor(ctx: Ctx, holder: { token?: Token; character?: Character }): HpAccess {
+  return ctx.written ? "exact" : hpAccess(ctx.state, ctx.viewer, holder);
+}
+
 function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | null {
   // A copy of a secret roll of someone else's, read as the bare line then, names no roll or creature to check again.
   if (copy && data.type === "dice" && data.to === "dm" && data.rolls.length === 0) return ctx.member && data.by !== ctx.viewer.memberId ? data : null;
-  if (!reaches(eventReach(ctx.state, data), ctx.viewer.memberId)) return null;
+  if (!ctx.written && !reaches(eventReach(ctx.state, data), ctx.viewer.memberId)) return null;
   data = withoutLists(data, ctx.viewer.memberId);
   switch (data.type) {
     case "hp": {
-      const holder = holderInSight(ctx, data);
+      const holder = holderFor(ctx, data);
       if (!holder) return null;
-      const access = hpAccess(ctx.state, ctx.viewer, holder);
+      const access = accessFor(ctx, holder);
       // An allowlist: what the change replaced and which line a take-back names are the DM's alone, the owner included.
       const out: LogEvent = { type: "hp", change: data.change };
       if (data.tokenId !== undefined) out.tokenId = data.tokenId;
@@ -4056,9 +4077,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       return out;
     }
     case "concentration": {
-      const holder = holderInSight(ctx, data);
+      const holder = holderFor(ctx, data);
       if (!holder) return null;
-      if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
+      if (accessFor(ctx, holder) === "exact") return data;
       // lineReader uses this same gate to record the audience, so a hidden check also leaves no gap in player log ids.
       if (data.exact) return null;
       const { dc: _dc, ...rest } = data;
@@ -4066,12 +4087,12 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     }
     case "effect":
       // Hidden from players, owners included, like the effect itself on the actor (neverRead).
-      return holderInSight(ctx, data) ? data : null;
+      return holderFor(ctx, data) ? data : null;
     case "rest": {
       // Everyone who sees the creature sees it rest. The HP it got back is as private as its HP.
-      const holder = holderInSight(ctx, data);
+      const holder = holderFor(ctx, data);
       if (!holder) return null;
-      const access = hpAccess(ctx.state, ctx.viewer, holder);
+      const access = accessFor(ctx, holder);
       const out: LogEvent = { type: "rest", kind: data.kind };
       if (data.tokenId !== undefined) out.tokenId = data.tokenId;
       if (data.characterId !== undefined) out.characterId = data.characterId;
@@ -4085,16 +4106,20 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     }
     case "deathSave": {
       // Life is public, but how close a creature is to death is as private as its HP.
-      const holder = holderInSight(ctx, data);
+      const holder = holderFor(ctx, data);
       if (!holder) return null;
-      if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
+      if (accessFor(ctx, holder) === "exact") return data;
       if (data.exact) return null;
       const { ok: _ok, fail: _fail, ...rest } = data;
       return rest;
     }
     case "life":
-      return holderInSight(ctx, data) ? data : null;
+      return holderFor(ctx, data) ? data : null;
     case "turn": {
+      if (ctx.written) {
+        const { toSeen: _toSeen, ...rest } = data;
+        return rest;
+      }
       const rows = projectEncounterCtx(ctx)?.entries;
       const row = rows?.find((e) => e.id === data.entryId);
       if (!row) return null;
@@ -4106,9 +4131,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     }
     case "area": {
       // The area must have been in players' sight when it happened and be in this player's now, as must the creature.
-      if (!holderInSight(ctx, data)) return null;
+      if (!holderFor(ctx, data)) return null;
       const template = ownEntry(ctx.state.templates, data.templateId);
-      return template && projectTemplateCtx(ctx, template) ? data : null;
+      return ctx.written || (template && projectTemplateCtx(ctx, template)) ? data : null;
     }
     case "encounter":
       // A fight started behind the pause screen is news when the game resumes.
@@ -4123,7 +4148,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       return withoutClaim(data);
     case "handout": {
       const handout = ownEntry(ctx.state.handouts, data.handoutId);
-      return handout && projectHandoutCtx(ctx, handout) ? data : null;
+      return ctx.written || (handout && projectHandoutCtx(ctx, handout)) ? data : null;
     }
     case "member":
       // Every player sees the whole roster, so its history is public too.
@@ -4157,9 +4182,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       return projectDiceCtx(ctx, data);
     case "use": {
       // The DM's and its owners' read the counts (docs/design/design-v1-combat-controls.md 8). Others read only a public use, by name.
-      const holder = holderInSight(ctx, data);
+      const holder = holderFor(ctx, data);
       if (!holder) return null;
-      const owns = (holder.token !== undefined && ownsToken(ctx.state, ctx.viewer, holder.token)) || (holder.character !== undefined && ownsCharacter(ctx.viewer, holder.character));
+      const owns = ctx.written || (holder.token !== undefined && ownsToken(ctx.state, ctx.viewer, holder.token)) || (holder.character !== undefined && ownsCharacter(ctx.viewer, holder.character));
       const { cost, left, max, hidden, ...rest } = data;
       if (owns) return { ...rest, ...(cost !== undefined ? { cost } : {}), ...(left !== undefined ? { left } : {}), ...(max !== undefined ? { max } : {}) };
       // A give back, and a use after a secret roll, say nothing to anyone else.
@@ -4255,7 +4280,7 @@ function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): Lo
 function keptRolls(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): number[] {
   const out: number[] = [];
   data.rolls.forEach((roll, i) => {
-    if (reaches(diceRollReach(ctx.state, roll), ctx.viewer.memberId) && (roll.tokenId === undefined || holderInSight(ctx, roll) !== null)) out.push(i);
+    if (ctx.written || (reaches(diceRollReach(ctx.state, roll), ctx.viewer.memberId) && (roll.tokenId === undefined || holderInSight(ctx, roll) !== null))) out.push(i);
   });
   return out;
 }

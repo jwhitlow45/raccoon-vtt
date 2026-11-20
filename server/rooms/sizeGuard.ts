@@ -2500,6 +2500,33 @@ export type ExactCopy = { on: string; shownOn?: "room" } & ExactBytes;
  * Each thing a player's exact part holds (ownCopyBytes), by its key: where
  * the reading counts it and its part (exactBytes).
  */
+/**
+ * The log's shared lines a player's exact part holds, each as they read it
+ * when it was written (SeatView `written`): every player on the roster then
+ * read it (shared/project.ts lineReach), so it counts so whatever its
+ * creature, area or row is now. One written while they were not on the
+ * roster, which they may never have read, stays in the stepped part, so
+ * none of their ops moves it there either (D-261120-010). They are on the
+ * roster from the start of the log unless its first line about them is
+ * their join, and leave it at a kick or a removal.
+ */
+export function linesHeld(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<LogEntry, unknown> {
+  const lines = measuredLog(state.log);
+  const about = (line: LogEntry) => (line.data?.type === "member" && line.data.memberId === memberId ? line.data.action : undefined);
+  const first = lines.find((line) => about(line) !== undefined);
+  let onRoster = first === undefined || about(first) !== "join";
+  const out = new Map<LogEntry, unknown>();
+  for (const line of lines) {
+    const action = about(line);
+    if (action === "join") onRoster = true;
+    else if (action === "kick" || action === "remove") onRoster = false;
+    if (!onRoster) continue;
+    const copy = view.written(line.id);
+    if (copy !== null) out.set(line, copy);
+  }
+  return out;
+}
+
 export function exactCopies(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<EntityKey, ExactCopy> {
   const out = new Map<EntityKey, ExactCopy>();
   // A character counts as played through a creature of theirs that their copy holds, so a creature's delete or hand-off
@@ -2548,10 +2575,7 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   copied("member", memberId, state.members[memberId]);
   for (const id of characters) if (state.characters[id]) copied("character", id, state.characters[id]);
   for (const [id, roll] of Object.entries(state.rolls)) copied("roll", id, roll);
-  for (const line of measuredLog(state.log)) {
-    const copy = view.copy("log", line.id);
-    if (copy !== null) out.set(keys.log(line.id), { on: "room", ...exactBytes("log", line, valueBytes(line) + 1, copy, valueBytes(copy) + 1, room) });
-  }
+  for (const [line, copy] of linesHeld(state, memberId, view)) out.set(keys.log(line.id), { on: "room", ...exactBytes("log", line, valueBytes(line) + 1, copy, valueBytes(copy) + 1, room) });
   // The doors their copy holds, which they open, close and find: only those fields of the build's chunks.
   for (const [key, chunk] of Object.entries(state.buildChunks)) {
     if (!view.holds(chunk.sceneId)) continue;

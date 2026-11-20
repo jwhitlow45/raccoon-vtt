@@ -1531,6 +1531,13 @@ export type SeatView = {
   showsRow(entryId: string): boolean;
   holds(sceneId: string): boolean;
   copy(kind: CopiedKind, id: string): unknown;
+  /**
+   * A shared line as they read it when it was written, whatever the room
+   * shows them now, or null for a line of another audience. Only for one
+   * written while they were on the roster, whom every shared line reached
+   * then (shared/project.ts lineReach).
+   */
+  written(lineId: string): unknown;
   /** The creatures whose turn the copy shows under way: the active row's, and the mounts sharing its turn the copy holds. */
   turn(): ReadonlySet<string>;
 };
