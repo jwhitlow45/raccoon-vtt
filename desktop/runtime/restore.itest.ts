@@ -10,7 +10,7 @@ import { deleteJournal, readJournal, writeJournal } from "./journal.ts";
 import { Cluster } from "./postgres.ts";
 import { BEFORE, LIVE, RESTORING, checkRestorable, noHooks, parseRecord, runRestore, type CrashPoint, type DbName, type ImageFs, type RestoreContext, type RestoreDb } from "./restore.ts";
 import { clusterRestoreDb, nodeImageFs } from "./restoreDb.ts";
-import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
+import { postgresDir, removeSupervisorData, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { addImage, createRoom, missingImages, query, restoreDatabases, roomNames, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 import { TEST_PORTS } from "./testing/testPorts.ts";
@@ -105,8 +105,9 @@ before(async () => {
 });
 
 after(async () => {
+  // A test may have killed it already, and the listing removeSupervisorData takes is what proves PostgreSQL ended.
   await stopCurrent().catch(() => undefined);
-  await rm(data, { recursive: true, force: true });
+  await removeSupervisorData(data);
 });
 
 // Each: the crash point, the journal states whose writes are dropped, what fails first, and the end.

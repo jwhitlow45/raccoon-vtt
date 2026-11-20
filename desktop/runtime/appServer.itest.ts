@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, mkdtemp } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { isAlive } from "./processInfo.ts";
+import { removeSupervisorData } from "./testing/cluster.ts";
 import { createRoom, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor } from "./testing/supervisorProcess.ts";
 import { TEST_PORTS } from "./testing/testPorts.ts";
@@ -22,7 +23,7 @@ import { TEST_PORTS } from "./testing/testPorts.ts";
 const PORT = TEST_PORTS.appServer;
 const dirs: string[] = [];
 after(async () => {
-  for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+  for (const dir of dirs) await removeSupervisorData(dir);
 });
 
 test("the real app server runs under the supervisor, and stops cleanly over its channel", { timeout: 180_000 }, async () => {

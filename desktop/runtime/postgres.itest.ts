@@ -14,7 +14,7 @@ import { parentProblem, pgPaths, PROGRAMDATA_FOLDER, windowsDeps } from "./pgPat
 import { loopbackPort } from "./ports.ts";
 import { BOOT_RECORD, Cluster, DB_STATEMENT_MS, DatabaseFailed, RESTORE_STATEMENT_MS, dbConfig, uncertainWords } from "./postgres.ts";
 import { bootId, isAlive, processFacts, processStamp } from "./processInfo.ts";
-import { postgresDir, startTestCluster, type TestCluster } from "./testing/cluster.ts";
+import { postgresDir, removeSupervisorData, startTestCluster, type TestCluster } from "./testing/cluster.ts";
 import { killSupervisor, startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 import { TEST_PORTS } from "./testing/testPorts.ts";
 
@@ -29,13 +29,18 @@ import { TEST_PORTS } from "./testing/testPorts.ts";
 const platform = Platform.parse(process.platform);
 const temps: string[] = [];
 const clusters: TestCluster[] = [];
-const supervisors: SupervisorRun[] = [];
+const supervisors: { run: SupervisorRun; data: string }[] = [];
 
 after(async () => {
-  for (const s of supervisors) await s.stop().catch(() => undefined);
-  for (const c of clusters) await c.stop();
+  // Every folder is cleaned up before the first failure is thrown, so one leftover never hides another.
+  const failures: unknown[] = [];
+  // A test may have stopped or killed it already, and the listing below is what proves PostgreSQL ended.
+  for (const s of supervisors) await s.run.stop().catch(() => undefined);
+  for (const data of new Set(supervisors.map((s) => s.data))) await removeSupervisorData(data).catch((err: unknown) => failures.push(err));
+  for (const c of clusters) await c.stop().catch((err: unknown) => failures.push(err));
   // Retried as removeStopped does, since a postgres.exe just ended and its cmd.exe still hold logs/postgres.log for a moment on Windows.
-  for (const dir of temps) await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  for (const dir of temps) await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch((err: unknown) => failures.push(err));
+  if (failures.length > 0) throw new AggregateError(failures, `the cleanup failed ${failures.length} times: ${failures.map((f) => (f as Error).message).join(" | ")}`);
 });
 
 async function dataDir(): Promise<string> {
@@ -52,7 +57,7 @@ async function cluster(): Promise<TestCluster> {
 
 function supervisor(data: string, port: number): SupervisorRun {
   const run = startSupervisor({ data, port });
-  supervisors.push(run);
+  supervisors.push({ run, data });
   return run;
 }
 

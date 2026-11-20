@@ -9,7 +9,7 @@ import pg from "pg";
 import { Platform } from "../contract.ts";
 import { dataIdentity } from "./dataDir.ts";
 import { guardPath, lockLocation } from "./lock.ts";
-import { ROOT } from "./testing/cluster.ts";
+import { ROOT, removeSupervisorData } from "./testing/cluster.ts";
 import { startSupervisor } from "./testing/supervisorProcess.ts";
 import { TEST_PORTS } from "./testing/testPorts.ts";
 
@@ -149,9 +149,15 @@ function owners(outcomes: readonly Outcome[]): Outcome[] {
   return outcomes.filter((o) => o.ok);
 }
 
+/** Each folder a supervisor ran on, with every path it was given for it, which the cleanup lists processes by. */
+const supervised: { data: string; given: string[] }[] = [];
+
 after(async () => {
   for (const proc of running) proc.kill("SIGKILL");
+  const failures: unknown[] = [];
+  for (const { data, given } of supervised) await removeSupervisorData(data, given).catch((err: unknown) => failures.push(err));
   for (const dir of temps) await rm(dir, { recursive: true, force: true });
+  if (failures.length > 0) throw new AggregateError(failures, failures.map((f) => (f as Error).message).join(" | "));
 });
 
 describe("the lock, with real processes", { skip: !unix && "Windows uses a named pipe, which has no stale socket to recover" }, () => {
@@ -337,6 +343,7 @@ describe("two supervisors on one folder", { skip: !unix && "symlinked data folde
     const alias = join(dirname(data), `${basename(data)}-alias`);
     await symlink(data, alias);
     temps.push(alias);
+    supervised.push({ data, given: [data, alias] });
     const first = startSupervisor({ data, port: TEST_PORTS.lockFirst });
     let second: ReturnType<typeof startSupervisor> | null = null;
     let client: pg.Client | null = null;
