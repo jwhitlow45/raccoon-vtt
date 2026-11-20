@@ -2429,8 +2429,8 @@ export function farWidths(state: RoomState, floors?: ReadonlySet<string>): numbe
  * things on floors, rows, asks and companion blocks (shared/limits.ts
  * ownHeld), every creature their copy holds while the room lets them move
  * any, their member, the characters they own or a creature of theirs plays,
- * the roll requests their copy holds, and the log's shared lines they may
- * read, each by its own rules and not by where their live log starts,
+ * the roll requests their copy holds, and the log's shared lines written
+ * while they were on the roster, each as they read it then (linesHeld),
  * which their chat and rolls add to and whose oldest drops as they do. Each
  * takes out of the stepped part all of its stored bytes but what the copy
  * hides and their ops never write, and counts the copy, with each
