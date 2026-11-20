@@ -69,3 +69,48 @@ describe("the walking ruler over stairs (phase 3, 4.1 and 4.2)", () => {
     assert.equal(words.CARRIED_TOO_LONG, "A ruler over stairs can't take more stops. Clear it to measure again.");
   });
 });
+
+describe("openings' words and hidden stairs (phase 4, 3, 5, 7.4 and 8.1)", () => {
+  test("Fly up and Fly down: the button's words, its name with and without the far floor, its tooltip with the floor and the key", () => {
+    assert.equal(words.climbWords("up", "opening"), "Fly up");
+    assert.equal(words.climbWords("down", "opening"), "Fly down");
+    assert.equal(words.climbWords("down", "ladder"), "Go down");
+    assert.equal(words.climbName("down", "opening", "Ground floor"), "Fly down to Ground floor");
+    assert.equal(words.climbName("up", "opening", null), "Fly up through the opening");
+    assert.equal(words.climbTip("down", "opening", "{", "Ground floor"), "Fly down to Ground floor ({)");
+    assert.equal(words.climbTip("up", "opening", null, "Upper floor"), "Fly up to Upper floor");
+    assert.equal(words.climbTip("up", "stairs", "}", "Upper floor"), "Go up the stairs (})", "stairs' tooltip names no floor, as before");
+    assert.equal(words.FLY_ONLY, "Only a creature in the air goes through an opening.");
+    // The off reasons are the server's own, by kind (shared/rules/floorLinks.ts LINK_WORDS).
+    assert.equal(words.climbOffReason("squeeze", "opening"), LINK_WORDS.tooBigSqueeze("opening"));
+    assert.equal(words.climbOffReason("tooBig", "opening"), LINK_WORDS.tooBig("opening"));
+  });
+
+  test("the board's names, marks and chip", () => {
+    assert.equal(words.linkName("down", "opening", "Ground floor"), "Down to Ground floor");
+    assert.equal(words.linkName("down", "opening", null), "Opening down");
+    assert.equal(words.linkName("up", "opening", null), "Opening up");
+    assert.equal(words.linkMarksLine({ hidden: true, notReached: false }), "Hidden");
+    assert.equal(words.linkMarksLine({ hidden: true, notReached: true }), "Hidden · Not reached yet");
+    assert.equal(words.linkMarksLine({ hidden: false, notReached: true }), "Not reached yet");
+    assert.equal(words.linkMarksLine({ hidden: false, notReached: false }), null);
+    assert.equal(words.dropChip(10), "10 ft down");
+    assert.equal(words.windowLoading("Ground floor"), "Loading Ground floor…");
+  });
+
+  test("the builder's kind, hint and pane for an opening, and the Hidden switch", () => {
+    assert.equal(words.KIND_NAMES.opening, "Opening");
+    assert.equal(words.linkHint("opening", false), "Drag over squares to place an opening.");
+    assert.equal(words.linkHint("opening", true), "Drag over hexes to place an opening.");
+    for (const hexes of [true, false]) assert.ok(words.linkHint("opening", hexes).length < 45);
+    assert.equal(words.paneTitle("down", "opening", "Ground floor"), "Opening down to Ground floor");
+    assert.deepEqual(["stairs", "ladder", "opening"].map((k) => words.paneName(k as "stairs")), ["Edit stairs", "Edit ladder", "Edit opening"]);
+    assert.deepEqual(words.PANE_KINDS, ["stairs", "ladder"]);
+    assert.equal(words.removeWords("opening"), "Remove opening");
+    assert.equal(words.removeWords("ladder"), "Remove ladder");
+    assert.equal(words.HIDDEN_SWITCH, "Hidden from players");
+    assert.equal(words.hiddenHelp("stairs"), "Players see nothing of these stairs until you turn this off.");
+    assert.equal(words.hiddenHelp("ladder"), "Players see nothing of this ladder until you turn this off.");
+    assert.equal(words.notReachedLine("Cellar", "down", "opening"), 'Players haven\'t reached Cellar, so they see "Opening down" here.');
+  });
+});
