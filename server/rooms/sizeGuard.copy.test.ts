@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
 import type { Effect, RoomState, Viewer } from "#shared/model.ts";
-import { heldClock, projectState, publicEffects, seatView, stableStringify } from "#shared/project.ts";
+import { lineAudience } from "#shared/logRings.ts";
+import { heldClock, projectLogEntry, projectState, publicEffects, seatView, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
@@ -545,6 +546,72 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
   });
 });
 
+// ---------------------------------------------------------------------------
+// A shared line as a player's exact part holds it is what they read when it was written (LP44-FABLE-9 and 10)
+
+/** A clock op of the DM's, now and then a blackout, else a random op of the DM's or P1's. */
+function lineOp(r: () => number, state: RoomState, k: number): { op: Op; who: Viewer } {
+  const roll = r();
+  if (roll < 0.15) return { op: { t: "clock.advance", by: 1 + Math.floor(r() * 600_000) } as Op, who: DM };
+  if (roll < 0.2) return { op: { t: "clock.set", at: Math.floor(r() * 9_000_000) } as Op, who: DM };
+  if (roll < 0.25) return { op: { t: "clock.update", shown: r() < 0.7 } as Op, who: DM };
+  if (roll < 0.35) return { op: { t: "view.blackout", blackout: r() < 0.5 } as Op, who: DM };
+  const who = k % 2 === 0 ? DM : ({ memberId: "p1", role: "player" } as Viewer);
+  return { op: randomOp(r, state, who), who };
+}
+
+describe("LP44-FABLE-10: a shared line counts in a player's exact part as they read it when the op wrote it", () => {
+  test("random rooms through the DM's and P1's ops, the DM's clock ops and blackouts among them: each player's written line is their read of it then", () => {
+    const found: string[] = [];
+    let lines = 0;
+    let dark = 0;
+    for (let seed = 1; seed <= 600 && found.length < 10; seed++) {
+      const r = rng(seed * 53 + 5);
+      let state = randomState(r);
+      state.clock = { id: "clk1", rev: 0, t: 86_400, shown: true, calendar: { kind: "days" } };
+      for (let k = 0; k < 12; k++) {
+        const { op, who } = lineOp(r, state, k);
+        const result = applyOp(state, op, who, env(7_000_000 + seed * 20 + k));
+        if (!result.ok) continue;
+        const next = result.state;
+        const was = new Set(state.log.map((line) => line.id));
+        for (const line of next.log) {
+          if (was.has(line.id) || lineAudience(line) !== "shared") continue;
+          lines++;
+          if (next.meta.view?.blackout) dark++;
+          for (const id of players(next)) {
+            const viewer: Viewer = { memberId: id, role: "player" };
+            const [held, read] = [seatView(next, id).written(line.id), projectLogEntry(next, line, viewer, { sceneId: null })];
+            if (stableStringify(held) !== stableStringify(read)) found.push(`seed ${seed}, ${op.t}, ${id}'s ${line.data?.type ?? line.kind} line: ${stableStringify(held)} against ${stableStringify(read)}`);
+          }
+        }
+        state = next;
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(lines > 2_000 && dark > 300, `${lines} new shared lines, ${dark} behind a blackout`);
+  });
+
+  test("a clock line the DM writes behind a blackout is in no player's exact part until it lifts, as in their copy (D-261120-062)", () => {
+    const dark = () => {
+      const state = room();
+      state.clock = { id: "clk1", rev: 0, t: 86_400, shown: true, calendar: { kind: "days" } };
+      const result = applyOp(state, { t: "view.blackout", blackout: true } as Op, DM, env(7_900_000));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      return result.state;
+    };
+    for (const by of [60, 600_000]) {
+      const [quiet, advanced] = [dark(), applyOp(dark(), { t: "clock.advance", by } as Op, DM, env(7_900_001))];
+      assert.ok(advanced.ok, advanced.ok ? "" : advanced.message);
+      assert.equal(copyOf(advanced.state, "p1"), copyOf(quiet, "p1"), "P1's copies are equal");
+      assert.deepEqual(shownBy(advanced.state, "p1"), shownBy(quiet, "p1"), `by ${by}`);
+      const lifted = applyOp(advanced.state, { t: "view.blackout", blackout: false } as Op, DM, env(7_900_002));
+      assert.ok(lifted.ok, lifted.ok ? "" : lifted.message);
+      const line = lifted.state.log.find((entry) => entry.data?.type === "clock")!;
+      assert.ok(exactCopies(lifted.state, "p1").has(keys.log(line.id)), "and in P1's once the blackout lifts");
+    }
+  });
+});
 
 describe("D-261120-060: a player's creature's walk past its turn counts as their copy held it on that turn", () => {
   test("random rooms through the DM's and P1's ops: wherever P1's copy holds a walk of a creature of theirs, it is the walk their exact part keeps", () => {

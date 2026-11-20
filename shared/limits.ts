@@ -1535,7 +1535,8 @@ export type SeatView = {
    * A shared line as they read it when it was written, whatever the room
    * shows them now, or null for a line of another audience. Only for one
    * written while they were on the roster, whom every shared line reached
-   * then (shared/project.ts lineReach).
+   * then (shared/project.ts lineReach). A clock line, shared whether or not
+   * a blackout held players back, is null behind one, as in their copy.
    */
   written(lineId: string): unknown;
   /** The creatures whose turn the copy shows under way: the active row's, and the mounts sharing its turn the copy holds. */

@@ -1239,7 +1239,10 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
     },
     written: (lineId) => {
       const line = readEntity(state, keys.log(lineId)) as LogEntry | undefined;
-      return line && lineAudience(line) === "shared" ? projectLogEntryCtx({ ...ctx, paused: false, written: true }, line) : null;
+      // A clock line is shared whether or not a blackout held players back when it was written, so it waits with the
+      // clock behind one now, as their copy does (D-261120-062). Every other shared line was read when it was written.
+      const paused = line?.data?.type === "clock" && ctx.paused;
+      return line && lineAudience(line) === "shared" ? projectLogEntryCtx({ ...ctx, paused, written: true }, line) : null;
     },
     turn: () => {
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
