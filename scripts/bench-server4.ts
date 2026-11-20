@@ -30,6 +30,7 @@
  *   node scripts/bench-server4.ts --numbers   (creature numbers' row BN1 alone)
  *   node scripts/bench-server4.ts --stamps   (the walk bringing stamps into view alone)
  *   node scripts/bench-server4.ts --far   (the far count of tokens' walk and first snapshots alone)
+ *   node scripts/bench-server4.ts --openings   (row OPEN-1 alone, sight through openings against the same room without them)
  *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
  * Then the bright and dark scenes again per player
@@ -54,11 +55,12 @@
  */
 import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
-import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
+import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FloorLink, type FreeWall, type Light, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
 import { FAR } from "../shared/limits.ts";
 import { MAX_ASK_OPS, type Op, type ServerMessage } from "../shared/protocol.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
+import { openingJoins } from "../shared/rules/openingSight.ts";
 import { projectState } from "../shared/project.ts";
 import { visionRules, type PartySight } from "../shared/ruleHooks.ts";
 import { clearVisionCache } from "../shared/rules/vision.ts";
@@ -181,44 +183,72 @@ function checkMode(state: RoomState, perPlayer: boolean): void {
 }
 
 /**
- * The commit and fan-out of the op being timed: when its batch's COMMIT ran, and how long holders' tiles took to read
- * since. `hold`, for tests, keeps the next commit from landing until it settles, as a loaded machine would.
+ * The commit and fan-out of the op being timed: when its batch's COMMIT ran, how long holders' tiles took to read
+ * since, and how long every timed sight's tiles took to read in the whole op (`read`), before its commit too. `hold`,
+ * for tests, keeps the next commit from landing until it settles, as a loaded machine would.
  */
-type Span = { commitAt: number; drawn: number; hold?: Promise<void> | null };
+type Span = { commitAt: number; drawn: number; read: number; hold?: Promise<void> | null };
 
-/** The span of the table sitting at the bench, which the wrapped holder sight below adds to. */
+/** The span of the table sitting at the bench, which the wrapped sights below add to. */
 let live: Span | null = null;
 
 /*
  * Holders' rasters drawn, timed apart from the rest of the fan-out (PV3's
  * gate needs the two apart): per player, the fan-out is the first to read
- * each holder's tiles, so reading them there draws the rasters. Each read
- * after the commit adds its time to the span. One wrapper per sight keeps
- * a sight's identity across reads. Only a run wraps the hook, and it puts
- * the hook back after, so a file that imports this one is left as it was
- * (review PV2-BENCH-PROXY). Returns what puts it back.
+ * each holder's tiles, so reading them there draws the rasters. A floor
+ * joined through its openings raises its tiles when they are first read
+ * too, so `sightFor`'s answer is timed as well (docs/design/design-v1-floors.md
+ * phase 4, 13, D-261119-102), but only a joined one: the floor's own
+ * answer is a holder's, timed already, or the party's, which these rows
+ * never timed. A read inside another timed read counts in that one alone,
+ * as a joined answer reads its own answer's tiles. Each read adds its time
+ * to the op's span, and once the op committed to its fan-out's part too:
+ * a joined floor's tiles are mostly read first by the explore step, before
+ * the commit. One wrapper per sight keeps a sight's identity across reads. Only a run wraps the hooks, and it puts them back
+ * after, so a file that imports this one is left as it was (review
+ * PV2-BENCH-PROXY). Returns what puts them back. A test passes its own
+ * span and clock.
  */
-function timeHolderSight(): () => void {
+export function timeSight(span: () => Span | null = () => live, now: () => number = () => performance.now()): () => void {
   const wrapped = new WeakMap<PartySight, PartySight>();
-  const holderSight = visionRules.holderSight;
-  visionRules.holderSight = (state, sceneId, memberId) => {
-    const sight = holderSight(state, sceneId, memberId);
+  const timed = new WeakSet<PartySight>();
+  let depth = 0;
+  const timing = (sight: PartySight): PartySight => {
     let timedSight = wrapped.get(sight);
     if (!timedSight) {
       timedSight = new Proxy(sight, {
         get(target, prop) {
-          const start = performance.now();
-          const value: unknown = Reflect.get(target, prop, target);
-          if (prop === "tiles" && live && live.commitAt > 0) live.drawn += performance.now() - start;
+          const start = now();
+          depth++;
+          let value: unknown;
+          try {
+            value = Reflect.get(target, prop, target);
+          } finally {
+            depth--;
+          }
+          const at = span();
+          if (prop === "tiles" && depth === 0 && at) {
+            const took = now() - start;
+            at.read += took;
+            if (at.commitAt > 0) at.drawn += took;
+          }
           return typeof value === "function" ? value.bind(target) : value;
         },
       });
       wrapped.set(sight, timedSight);
+      timed.add(timedSight);
     }
     return timedSight;
   };
+  const { holderSight, sightFor } = visionRules;
+  visionRules.holderSight = (state, sceneId, memberId) => timing(holderSight(state, sceneId, memberId));
+  visionRules.sightFor = (state, sceneId, cls, pending) => {
+    const sight = sightFor(state, sceneId, cls, pending);
+    return timed.has(sight) || sight === visionRules.partySight(state, sceneId) ? sight : timing(sight);
+  };
   return () => {
     visionRules.holderSight = holderSight;
+    visionRules.sightFor = sightFor;
   };
 }
 
@@ -272,7 +302,7 @@ type SitDownTimes = { load: number[]; first: number[]; later: number[] };
 /** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. */
 export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
   const t0 = performance.now();
-  const db: Span = { commitAt: 0, drawn: 0 };
+  const db: Span = { commitAt: 0, drawn: 0, read: 0 };
   live = db;
   const deps: ActorDeps = {
     pool: memoryPool(state, db),
@@ -361,7 +391,7 @@ function whenSent<T>(sent: Table["sent"], check: () => T | null, missing: string
   });
 }
 
-type Timing = { total: number; fanout: number; drawn: number };
+type Timing = { total: number; fanout: number; drawn: number; read: number };
 
 /** Sends one op from `conn` and times it to the last frame any socket was sent, from the commit to that frame, and the holders' rasters drawn in between. */
 export async function send(table: Table, conn: Connection, op: Op, refusalOk = false): Promise<Timing> {
@@ -372,6 +402,7 @@ export async function send(table: Table, conn: Connection, op: Op, refusalOk = f
   const t0 = performance.now();
   table.db.commitAt = 0;
   table.db.drawn = 0;
+  table.db.read = 0;
   await table.actor.op(conn, n, op);
   // An op that applied commits at once (one op per batch). A refusal changes nothing and waits for the batch timer,
   // so its time is the actor's work on it, which is over when `op` returns.
@@ -380,8 +411,8 @@ export async function send(table: Table, conn: Connection, op: Op, refusalOk = f
   const refused = answer.rejects?.find((r) => r.n === n);
   if (refused && !refusalOk) throw new Error(`${op.t} was refused: ${refused.message}`);
   if (!refused && refusalOk) throw new Error(`${op.t} was meant to be refused`);
-  if (refused) return { total: worked, fanout: 0, drawn: 0 };
-  return { total: table.sent.last - t0, fanout: table.db.commitAt > 0 ? table.sent.last - table.db.commitAt : 0, drawn: table.db.drawn };
+  if (refused) return { total: worked, fanout: 0, drawn: 0, read: table.db.read };
+  return { total: table.sent.last - t0, fanout: table.db.commitAt > 0 ? table.sent.last - table.db.commitAt : 0, drawn: table.db.drawn, read: table.db.read };
 }
 
 type Ms = { median: number; max: number };
@@ -704,6 +735,126 @@ async function runFar(rows: Row[]): Promise<void> {
 }
 
 /*
+ * Row OPEN-1 (docs/design/design-v1-floors.md phase 4, 13): sight through
+ * openings. Two dark floors of 100 by 100, Ground floor (the bench scene)
+ * under Upper floor, with 16 openings of 8 by 8 between them, the most a
+ * scene holds, a lamp lighting the floor under each, a goblin carrying a
+ * light below, and four characters with darkvision upstairs. Each step the
+ * DM moves the party two squares on across the holes, then the goblin two
+ * squares on below, each move one batch, timed to its last frame. The same
+ * room without the openings is the measure: each batch within 1.3 times
+ * its time there, and the first snapshots, sight joined from nothing,
+ * under the 250 ms gate. Every table sits down fresh, the first round
+ * untimed.
+ */
+const ABOVE = "benchup";
+const OPEN_PARTY = ["pc0", "pc1", "pc2", "pc3"] as const;
+const OPEN_STEPS = 40;
+const OPEN_ROUNDS = 4;
+const OPEN_WARM = 1;
+
+/** Row OPEN-1's room, with its 16 openings or, for the measure, without them and otherwise the same. */
+export function openingsBenchRoom(openings: boolean): RoomState {
+  const floor = (id: string, level: number, name: string) =>
+    testScene(id, { name: "Tower", order: 0, bounds: { w: 100, h: 100 }, fogEnabled: true, vision: { on: true, light: "dark" }, floor: { of: SCENE, level, name, height: 10 } });
+  const floorLinks: Record<string, FloorLink> = {};
+  const lights: Record<string, Light> = {};
+  for (let k = 0; k < 16; k++) {
+    const rect = { x: 6 + (k % 4) * 24, y: 6 + Math.floor(k / 4) * 24, w: 8, h: 8 };
+    if (openings) {
+      floorLinks[`hole${k}`] = { id: `hole${k}`, rev: 0, sceneId: ABOVE, to: SCENE, pair: `foot${k}`, rect, kind: "opening", ground: 0, made: 1 };
+      floorLinks[`foot${k}`] = { id: `foot${k}`, rev: 0, sceneId: SCENE, to: ABOVE, pair: `hole${k}`, rect: { ...rect }, kind: "opening", ground: 0, made: 1 };
+    }
+    lights[`lamp${k}`] = { id: `lamp${k}`, rev: 0, sceneId: SCENE, x: rect.x + 4, y: rect.y + 4, bright: 20, dim: 20, on: true, walls: true };
+  }
+  const tokens: Record<string, Token> = {};
+  OPEN_PARTY.forEach((id, n) => {
+    tokens[id] = testToken(id, { sceneId: ABOVE, kind: "pc", name: `Hero ${n}`, disposition: "ally", ownerIds: [`p${n + 1}`], x: 4 + n, y: 4, actor: { inline: testActor({ senses: "Darkvision 60 ft" }) } });
+  });
+  tokens.carrier = testToken("carrier", { sceneId: SCENE, name: "Goblin", x: 2, y: 50, light: { bright: 20, dim: 20 } });
+  return testRoom({
+    meta: { name: "Bench", settings: { ...DEFAULT_SETTINGS }, playerSceneId: SCENE, view: { follow: false, blackout: false } },
+    members: members(),
+    scenes: { [SCENE]: floor(SCENE, 0, "Ground floor"), [ABOVE]: floor(ABOVE, 1, "Upper floor") },
+    tokens,
+    lights,
+    floorLinks,
+  });
+}
+
+type OpeningsRun = { party: Timing[]; carrier: Timing[]; first: number[]; later: number[] };
+
+export type OpeningsBench = Record<"without" | "with", OpeningsRun>;
+
+/** One table of row OPEN-1: it sits down, its first snapshots timed, then walks the party and the goblin OPEN_STEPS steps, each move timed. */
+async function openingsTable(openings: boolean, into: OpeningsRun | null): Promise<void> {
+  clearVisionCache();
+  const times: SitDownTimes = { load: [], first: [], later: [] };
+  const table = await sitDown(openingsBenchRoom(openings), times);
+  const state = () => table.actor.committed.state;
+  const joins = openingJoins(state(), ABOVE).length;
+  if (joins !== (openings ? 16 : 0)) throw new Error(`Upper floor joins ${joins} openings`);
+  for (let k = 0; k < OPEN_STEPS; k++) {
+    const moves = OPEN_PARTY.map((id) => {
+      const t = state().tokens[id]!;
+      return { tokenId: id, x: t.x + 2, y: t.y + 2 };
+    });
+    const party = await send(table, table.dm, { t: "token.moveMany", moves });
+    const goblin = state().tokens.carrier!;
+    const carrier = await send(table, table.dm, { t: "token.move", tokenId: goblin.id, x: goblin.x + 2, y: goblin.y });
+    into?.party.push(party);
+    into?.carrier.push(carrier);
+  }
+  into?.first.push(...times.first);
+  into?.later.push(...times.later);
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/** Row OPEN-1's timings, the rooms with and without openings taking turns, with joined rasters timed in each fan-out. */
+export async function runOpeningsBench(): Promise<OpeningsBench> {
+  const run = (): OpeningsRun => ({ party: [], carrier: [], first: [], later: [] });
+  const out: OpeningsBench = { without: run(), with: run() };
+  const untime = timeSight();
+  try {
+    for (let round = 0; round < OPEN_ROUNDS; round++) {
+      for (const openings of [false, true]) await openingsTable(openings, round < OPEN_WARM ? null : out[openings ? "with" : "without"]);
+    }
+  } finally {
+    untime();
+  }
+  return out;
+}
+
+export function formatOpeningsBench(bench: OpeningsBench, onServer: boolean, revision?: string): string {
+  const factor = onServer ? 1 : 1.5;
+  const f = (ms: number) => ms.toFixed(1);
+  const p50 = (t: readonly number[]) => percentile(t, 50);
+  const both = (t: readonly number[]) => `${f(p50(t))} / ${f(Math.max(...t))}`;
+  const of = (run: OpeningsRun, move: "party" | "carrier", part: keyof Timing) => run[move].map((t) => t[part]);
+  const ratio = (move: "party" | "carrier") => p50(of(bench.with, move, "total")) / p50(of(bench.without, move, "total"));
+  const batches = ratio("party") <= 1.3 && ratio("carrier") <= 1.3;
+  const limit = 250 / factor;
+  const snapshots = p50(bench.with.first) <= limit && p50(bench.with.later) <= limit;
+  const lines = [
+    `Revision: ${revision ?? "unrecorded"}`,
+    `Machine: ${onServer ? "server-box measurement, unscaled server budgets" : "laptop measurement, server budgets divided by 1.5"}.`,
+    "",
+    "room | party's move p50 / max | its fan-out p50 | joined sight read in it p50 | goblin's move p50 / max | joined sight read in it p50 | DM's first snapshot p50 / max | a player's first snapshot p50 / max",
+    "--- | --- | --- | --- | --- | --- | --- | ---",
+    ...(["without", "with"] as const).map((k) => {
+      const r = bench[k];
+      return `${k === "with" ? "16 openings of 8 by 8" : "no openings"} | ${both(of(r, "party", "total"))} | ${f(p50(of(r, "party", "fanout")))} | ${f(p50(of(r, "party", "read")))} | ${both(of(r, "carrier", "total"))} | ${f(p50(of(r, "carrier", "read")))} | ${both(r.first)} | ${both(r.later)}`;
+    }),
+    "",
+    `Each batch with the openings over the same room without them, at the median: the party's move ${ratio("party").toFixed(2)}, the goblin's ${ratio("carrier").toFixed(2)}, limit 1.30: ${batches ? "yes" : "NO"}.`,
+    `First snapshots with the openings, sight joined from nothing, at the median: the DM's ${f(p50(bench.with.first))} ms, a player's ${f(p50(bench.with.later))} ms, limit ${f(limit)} ms: ${snapshots ? "yes" : "NO"}.`,
+    "",
+    `Moves: ${bench.with.party.length} of each a room kind, ${OPEN_STEPS} a table. Every table loaded fresh, the first ${OPEN_WARM} of ${OPEN_ROUNDS} rounds untimed.`,
+  ];
+  return lines.join("\n");
+}
+
+/*
  * A routed walk across three areas that remind on entering, during the
  * walker's turn (docs/design/design-v1-per-player-vision.md 8.1): the reminders
  * judge who saw each crossing at its moment along the walk, which on a
@@ -984,7 +1135,7 @@ export async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn
 
 export async function runServerBench(): Promise<Row[]> {
   const rows: Row[] = [];
-  const untime = timeHolderSight();
+  const untime = timeSight();
   try {
     await runLevel("bright", 5, rows);
     await runLevel("dark", 5, rows);
@@ -1183,7 +1334,8 @@ export function formatServerBench(rows: Row[], onServer: boolean, revision?: str
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   const revision = benchRevision(argv);
-  if (argv.includes("--numbers")) console.log(formatNumbersBench(await runNumbersBench(), argv.includes("--server"), revision));
+  if (argv.includes("--openings")) console.log(formatOpeningsBench(await runOpeningsBench(), argv.includes("--server"), revision));
+  else if (argv.includes("--numbers")) console.log(formatNumbersBench(await runNumbersBench(), argv.includes("--server"), revision));
   else {
     const rows: Row[] = [];
     if (argv.includes("--ask")) {

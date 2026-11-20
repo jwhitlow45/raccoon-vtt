@@ -8,10 +8,82 @@ import { visionRules } from "../shared/ruleHooks.ts";
  * that imports the bench keeps the hook every other module reads.
  */
 
-test("importing the server bench leaves the holder sight hook as it was", async () => {
-  const before = visionRules.holderSight;
+test("importing the server bench leaves the holder sight and class sight hooks as they were", async () => {
+  const before = { holderSight: visionRules.holderSight, sightFor: visionRules.sightFor };
   await import("./bench-server4.ts");
-  assert.equal(visionRules.holderSight, before);
+  assert.equal(visionRules.holderSight, before.holderSight);
+  assert.equal(visionRules.sightFor, before.sightFor);
+});
+
+/*
+ * Row OPEN-1 (docs/design/design-v1-floors.md phase 4, 13) times sight
+ * through openings against the same room without them, and the timing hook
+ * times a floor's joined answer, which raises its tiles when first read.
+ */
+
+test("the openings row's two rooms differ in their 16 openings of 8 by 8 alone, which join both dark floors", async () => {
+  const { openingsBenchRoom } = await import("./bench-server4.ts");
+  const { openingJoins } = await import("../shared/rules/openingSight.ts");
+  const open = openingsBenchRoom(true);
+  const shut = openingsBenchRoom(false);
+  assert.deepEqual({ ...open, floorLinks: {} }, shut);
+  const ends = Object.values(open.floorLinks ?? {});
+  assert.equal(ends.length, 32);
+  assert.ok(ends.every((l) => l?.kind === "opening" && l.rect.w === 8 && l.rect.h === 8));
+  for (const sceneId of ["bench", "benchup"]) {
+    const scene = open.scenes[sceneId]!;
+    assert.deepEqual([scene.bounds, scene.vision?.light], [{ w: 100, h: 100 }, "dark"]);
+    assert.equal(openingJoins(open, sceneId).length, 16, `${sceneId} joins through every opening`);
+    assert.equal(openingJoins(shut, sceneId).length, 0);
+  }
+});
+
+test("the timing hook times a joined answer's tiles once, and leaves each floor's own answer as it was", async () => {
+  const { timeSight } = await import("./bench-server4.ts");
+  const { clearVisionCache } = await import("../shared/rules/vision.ts");
+  const { ATTIC, GROUND, UPPER } = await import("../shared/floorLinksTestutil.ts");
+  const { openTower, pc, withAll } = await import("../shared/openingsTestutil.ts");
+  const before = { holderSight: visionRules.holderSight, sightFor: visionRules.sightFor };
+  let clock = 0;
+  const span = { commitAt: 1, drawn: 0, read: 0 };
+  clearVisionCache();
+  const untime = timeSight(() => span, () => ++clock);
+  try {
+    // Thorn upstairs over the opening to Ground floor, every floor per player, and Attic with no opening.
+    const s = withAll(openTower({}, { perPlayer: [GROUND, UPPER, ATTIC] }), [pc("thorn", "p1", UPPER, 6, 6, {}, "Darkvision 60 ft")]);
+    const own = visionRules.holderSight(s, ATTIC, "p1");
+    assert.equal(visionRules.sightFor(s, ATTIC, { holder: "p1" }), own, "a holder's own answer, timed once by the holder hook");
+    const union = visionRules.partySight(s, ATTIC);
+    assert.equal(visionRules.sightFor(s, ATTIC, "union"), union, "the party's own answer, which no row timed");
+    const joined = visionRules.sightFor(s, UPPER, { holder: "p1" });
+    assert.notEqual(joined, visionRules.holderSight(s, UPPER, "p1"), "Upper floor's answer is joined through the opening");
+    const start = clock;
+    const tiles = joined.tiles;
+    // Only the outer read's own two clock reads count: the holder answers it reads inside add nothing of their own.
+    assert.equal(span.drawn, clock - (start + 1));
+    assert.ok(span.drawn > 1, "the joined read reads its own answer's tiles inside it");
+    assert.equal(span.read, span.drawn);
+    assert.deepEqual([...tiles.keys()], [...before.sightFor(s, UPPER, { holder: "p1" }).tiles.keys()], "the wrapper answers as the joined answer does");
+  } finally {
+    untime();
+  }
+  assert.equal(visionRules.holderSight, before.holderSight);
+  assert.equal(visionRules.sightFor, before.sightFor);
+});
+
+test("the openings row's report holds each batch to 1.3 times its time without openings and the first snapshots to the gate", async () => {
+  const { formatOpeningsBench } = await import("./bench-server4.ts");
+  const moves = (ms: number) => Array.from({ length: 3 }, () => ({ total: ms, fanout: ms / 2, drawn: 0, read: ms / 4 }));
+  const run = (party: number, carrier: number, first: number) => ({ party: moves(party), carrier: moves(carrier), first: [first], later: [first / 2] });
+  const fits = formatOpeningsBench({ without: run(10, 2, 50), with: run(13, 2.6, 160) }, false, REVISION);
+  assert.ok(fits.includes(`Revision: ${REVISION}`));
+  assert.ok(fits.includes("the party's move 1.30, the goblin's 1.30, limit 1.30: yes"));
+  assert.ok(fits.includes("the DM's 160.0 ms, a player's 80.0 ms, limit 166.7 ms: yes"));
+  assert.ok(fits.includes("16 openings of 8 by 8 | 13.0 / 13.0 | 6.5 | 3.3 | 2.6 / 2.6 | 0.7 | 160.0 / 160.0 | 80.0 / 80.0"));
+  const over = formatOpeningsBench({ without: run(10, 2, 50), with: run(10, 2.7, 170) }, false);
+  assert.ok(over.includes("the goblin's 1.35, limit 1.30: NO"), "either move past the ratio fails the row");
+  assert.ok(over.includes("limit 166.7 ms: NO"));
+  assert.ok(formatOpeningsBench({ without: run(10, 2, 50), with: run(10, 2, 170) }, true).includes("limit 250.0 ms: yes"), "the server box's gate is the budget itself");
 });
 
 const REVISION = "3113e75800000000000000000000000000000000";
