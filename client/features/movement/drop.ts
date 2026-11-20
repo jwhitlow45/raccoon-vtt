@@ -8,7 +8,8 @@ import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize,
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { deviceGround } from "#shared/rules/held.ts";
-import { footing } from "#shared/rules/heights.ts";
+import { footing, footprintGround } from "#shared/rules/heights.ts";
+import { linkDir, linksOn, spaceOn } from "#shared/rules/floorLinks.ts";
 import { coreBlocked, coreWalled, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegSpots, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legSpots, legStop, offGridWallThrough, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type HexWalls, type Walker } from "#shared/rules/movement.ts";
 import { fileHeightsAlong, fileOutOfReach, fileRoutes, fileShift, followedHeight, followerTrace, hexFileClasses, hexFileRoutes, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FileEnd, type FilePoint, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes } from "#shared/migrate.ts";
@@ -16,6 +17,7 @@ import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
+import { ownEntry } from "#shared/records.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
 import { dragWalkers } from "../attach/groups.ts";
 import { riderSeat } from "./riderSeat.ts";
@@ -1296,6 +1298,47 @@ export function namedFollower(state: DropView, labels: Labels, plan: DropPlan, f
 export function holdLabel(blocker: StopBlocker, noWay = false): string {
   if (noWay) return "No way through";
   return blocker === "wall" ? "Wall in the way" : blocker === "ledge" ? "Ledge in the way" : "Something in the way";
+}
+
+/**
+ * Where a drop at `at`, landing at `elevation`, falls through an opening
+ * (docs/design/design-v1-floors.md phase 4, 4.1 and 12, D-261119-009), as
+ * this copy judges it: on the ground, its space wholly inside an opening's
+ * upper end, held up by nothing. The far floor's name, `floor` null where
+ * the copy does not hold that floor, or null where it does not fall. The
+ * server decides the fall itself, on the state it holds.
+ */
+export function fallsAt(state: DropView, token: DropToken, at: Point & { squeeze?: boolean }, elevation: number): { floor: string | null } | null {
+  const { squeeze: _squeeze, ...full } = token;
+  const placed = { ...full, x: at.x, y: at.y, elevation, ...(at.squeeze === true ? { squeeze: true as const } : {}) };
+  if (elevation !== footprintGround(state.buildChunks, placed)) return null;
+  if (heldUp(state, token, at)) return null;
+  for (const link of linksOn(state, token.sceneId)) {
+    if (link.kind !== "opening" || linkDir(state, link) !== "down" || !spaceOn(state, placed as Token, link)) continue;
+    const far = link.to === undefined ? undefined : ownEntry(state.scenes, link.to)?.floor?.name;
+    return { floor: far ?? null };
+  }
+  return null;
+}
+
+/**
+ * Whether the token's holder holds it up where it is dropped (4.1): its
+ * seat still holds there. A player's op counts only a holder every player
+ * sees (`seenSeat`), as the server counts one, and the DM's any holder
+ * the copy holds.
+ */
+function heldUp(state: DropView, token: DropToken, at: Point): boolean {
+  if (state.role === "player") return seenSeat(state, token)?.keptAt(at) === true;
+  const seated = state.tokens[token.id];
+  const link = seated?.attached;
+  const holder = seated && link && onHolder(link.kind) ? (holderOf(state.tokens, seated) as Token | undefined) : undefined;
+  if (!seated || !link || !holder) return false;
+  return linkHolds(dropGrid(state, seated), state.meta.settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder);
+}
+
+/** What a drag's label says where it would fall (`fallsAt`): "Falls to Ground floor", or "Falls through the opening" where the copy lacks that floor. */
+export function fallLabel(fall: { floor: string | null }): string {
+  return fall.floor === null ? "Falls through the opening" : `Falls to ${fall.floor}`;
 }
 
 /**

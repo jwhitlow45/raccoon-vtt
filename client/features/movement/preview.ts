@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, pathNow, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropGrid, dropLanding, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropGrid, dropLanding, fallLabel, fallsAt, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 import type { Labels } from "../../lib/labels.ts";
@@ -46,12 +46,13 @@ export function groupLanding(state: DropState, token: Token, to: Point): { eleva
  * label and the cost its frames send (review AT-ASTRA-15): landed as the
  * group's drop lands it (`groupLanding`), walked as its walk is
  * (drop.ts walkerOf), and off a ride on its own turn at the half Speed the
- * reducer stores (`dismountOf`), as a lone drag reads it.
+ * reducer stores (`dismountOf`), as a lone drag reads it. Where it would
+ * fall through an opening there, the label says so (`withFall`).
  */
 export function groupReading(view: DropView, token: Token, to: Point, role: Role): DragRead {
   const landing = groupLanding(view, token, to);
   const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
-  return dragReading({
+  return withFall(view, token, to, landing.elevation, dragReading({
     token: walkStart(view, walkerOf(view, token, to)),
     grid: dropGrid(view, token),
     standing: token,
@@ -63,7 +64,18 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
     rules: { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal },
     role,
     ...(dismount ? { dismount, build: view } : {}),
-  });
+  }));
+}
+
+/**
+ * A drag's reading with "Falls to Ground floor" where the drop would land
+ * wholly over an opening with nothing holding it up (drop.ts fallsAt,
+ * docs/design/design-v1-floors.md phase 4, 12, D-261119-009), so the drop
+ * never surprises the player. Read from this copy alone.
+ */
+function withFall(view: DropView, token: Token, to: Point & { squeeze?: boolean }, elevation: number, read: DragRead): DragRead {
+  const fall = fallsAt(view, token, to, elevation);
+  return fall ? { ...read, falls: fallLabel(fall) } : read;
 }
 
 /**
@@ -202,7 +214,7 @@ export function walkPreview(input: { labels: Labels; view: DropView; token: Toke
     ...(to.squeeze === true ? { squeeze: true as const } : {}),
     cut: walk?.cut === true,
     corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
-    read,
+    read: withFall(view, token, to, end.elevation, read),
     endsIn: world ? endsIn(view, world, token, points[points.length - 1]!, input.labels) : null,
   };
 }

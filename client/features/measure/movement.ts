@@ -315,6 +315,8 @@ export type DragRead = {
   halfSpeed?: string;
   /** The leg's diagonals by the 5-10-5 count, from which a walking ruler's next leg runs on. */
   diag: [number, number];
+  /** Where the drop would fall through an opening, the drag's own words for it (movement/drop.ts fallLabel, docs/design/design-v1-floors.md phase 4, 12). */
+  falls?: string;
 };
 
 const BAND_ORDER: readonly SpeedLeft["band"][] = ["walk", "dash", "over"];
@@ -593,10 +595,10 @@ function straightSteps(start: Walker, points: readonly RoutePoint[]): Point[][] 
   return out;
 }
 
-/** The label's lines (docs/design/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, and the Half Speed area it would end in. */
+/** The label's lines (docs/design/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, the Half Speed area it would end in, and a fall through an opening there. */
 export function dragLabel(read: DragRead): string {
   const first = read.left ? `${formatFeet(read.dragFt)} · ${leftText(read.left)}` : formatFeet(read.dragFt);
-  return [first, read.extra?.words, read.halfSpeed ? `Half Speed in ${read.halfSpeed}` : null].filter((l): l is string => !!l).join("\n");
+  return [first, read.extra?.words, read.halfSpeed ? `Half Speed in ${read.halfSpeed}` : null, read.falls].filter((l): l is string => !!l).join("\n");
 }
 
 /** "a", "a and b", "a, b and c". */
