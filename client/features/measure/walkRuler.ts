@@ -3,7 +3,7 @@ import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts
 import type { Op, RulerPrior } from "#shared/protocol.ts";
 import { gridOfToken } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { planMove } from "#shared/rules/moveLeg.ts";
+import { planMove, wayOf } from "#shared/rules/moveLeg.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
 import { footprintSize, placedOnHex } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -587,11 +587,21 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Aim, targe
   };
 }
 
-/** The walks of the tokens a leg's plan takes along, as the room's own move plans them on the room before it (moveLeg.ts planMove). */
+/**
+ * The walks of the tokens a leg's plan takes along, as the room's own move
+ * plans them on the room before it (moveLeg.ts planMove): each its way as
+ * every reader of it reads it (moveLeg.ts wayOf), its corners as its place
+ * carries it and its end where it arrives, so a rider a dropped seat moves
+ * is drawn on her own seat through every corner and ends on that seat.
+ */
 function carriedWalks(sim: RoomState, role: WalkViewer["role"], plan: DropPlan): ReadonlyMap<string, readonly RoutePoint[]> {
   const out = new Map<string, readonly RoutePoint[]>();
   for (const op of moveOpsOf(plan.moves)) {
-    for (const moved of planMove(op as Op, sim, RULER_ACTOR(role), {})) if (moved.carriedBy !== undefined) out.set(moved.tokenId, moved.route);
+    for (const moved of planMove(op as Op, sim, RULER_ACTOR(role), {})) {
+      if (moved.carriedBy === undefined) continue;
+      const way = wayOf(moved).route;
+      out.set(moved.tokenId, [...way.slice(0, -1), { x: moved.to.x, y: moved.to.y, elevation: way[way.length - 1]!.elevation }]);
+    }
   }
   return out;
 }

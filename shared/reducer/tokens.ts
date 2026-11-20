@@ -9,7 +9,7 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { foldPrior, keepPrior, pathCounters, pathThisTurn, priorDiag, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { sameScene } from "../rules/floors.ts";
 import { hexRouteFeet, onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
-import { planMove, type MovedToken } from "../rules/moveLeg.ts";
+import { planMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
 import { walkFrom } from "../rules/movement.ts";
@@ -556,7 +556,7 @@ export function withPath(
   judged: Judged,
   uncounted = false,
   route?: readonly RoutePiece[],
-  carried?: Pick<MovedToken, "route" | "trace">,
+  carried?: Pick<MovedToken, "route" | "trace" | "carried">,
   cost?: number,
   climb?: { moved: number; cost: number },
 ): Token {
@@ -692,7 +692,10 @@ export function sharesTurn(state: RoomState, mountId: string, turn: TurnStart): 
  * its spots stand on the hex line between them
  * (docs/design/design-v1-hex-grids.md 4.2 and 4.4).
  */
-function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, carried?: Pick<MovedToken, "route" | "trace">): PathStop {
+function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, plan?: Pick<MovedToken, "route" | "trace" | "carried">): PathStop {
+  // Its way as every reader of it reads it (rules/moveLeg.ts wayOf): a rider a dropped seat moves at the walk's end was carried on
+  // her own seat until she arrived, which `after` holds (review HEXOP-ASTRA-2).
+  const carried = plan ? wayOf(plan) : undefined;
   const rules = tx.state.meta.settings;
   const grid = gridOfToken(tx.state, after);
   const from = path.stops[path.stops.length - 1]!;
@@ -725,9 +728,10 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
   // Each spot with the footprint the walk's trace has there, squeezed where it ends as it will be (route.ts onTrace). Ops
   // before version 14 read the full footprint between its ends, squeezed only where it starts.
-  const spots = attaches(tx.env.opVersion)
+  const walkSpots = attaches(tx.env.opVersion)
     ? routeWalk(grid, trace, judged.before, undefined, { endSqueezed: isSqueezed(after) }).map((p) => ({ ...p, squeezed: p.squeezed ?? isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
     : routeWalkBeforeV14(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: i === all.length - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before) }));
+  const spots = plan?.carried && walkSpots.length > 0 ? [...walkSpots.slice(0, -1), { ...walkSpots[walkSpots.length - 1]!, x: after.x, y: after.y }] : walkSpots;
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
 }

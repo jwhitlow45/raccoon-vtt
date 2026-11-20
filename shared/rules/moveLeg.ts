@@ -3,11 +3,11 @@ import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules, type BuildState } from "../ruleHooks.ts";
-import { carriedGroup, moveGroups, onHolder, publicMembers, seatedAt, seatSpot, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
-import { footprintRect, placedOnHex, tokenRefHex } from "./footprint.ts";
+import { carriedGroup, linkHolds, moveGroups, onHolder, overlaps, publicMembers, seatedAt, seatSpot, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
+import { footprintRect, placedOnHex, snapStep, tokenRefHex } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
-import { hexDistance, hexLine } from "./hex.ts";
+import { hexDistance, hexKey, hexLine, hexNeighbors } from "./hex.ts";
 import { sameScene } from "./floors.ts";
 import { climbKeepsSqueeze } from "./floorLinks.ts";
 import { footing, footprintGround } from "./heights.ts";
@@ -63,14 +63,29 @@ export type MovedToken = {
   along?: readonly FileAlong[];
   /**
    * Its walk as its place carries it, where a rider's dropped seat
-   * (`DroppedSeat`), on it or up its chain of holders, moves only the
-   * walk's end. It sits where its place carries it until the walk ends, so
-   * a trap's step reads it there at every moment before the end, where a
-   * stop leaves it, as the cut op, which drops the seat, lands it (traps.ts
-   * walksOf, review HEXOP-ASTRA-1).
+   * (`DroppedSeat`), on it or up its chain of seats, moves only the walk's
+   * end: it rides on its own seat until the walk ends and takes the dropped
+   * one on arriving. Every reader of a moved token's way reads it through
+   * `wayOf`.
    */
-  carried?: RoutePoint[];
+  carried?: { route: RoutePoint[]; trace: WalkTrace };
 };
+
+/**
+ * A moved token's way as every reader of it reads it (reviews HEXOP-ASTRA-1
+ * to 3): `route` and `trace` as it goes, to where it arrives, `to`. They
+ * differ from the move's own only where a dropped seat moved a rider, or
+ * what rides on her, at the walk's end (MovedToken `carried`): she rides on
+ * her own seat until the walk ends, so the trap step, an area's sweep, the
+ * path a turn records and the walking ruler read her there at every moment
+ * before she arrives, as the cut op that a stop short makes, which drops the
+ * seat, lands her. What hangs from her by a drag walks as her place carries
+ * her (`withCarried`), so the wall test of a dragged creature reads its own
+ * route, and one players cannot see stops where it must unseen.
+ */
+export function wayOf<T extends Pick<MovedToken, "route" | "trace" | "carried">>(m: T): T {
+  return m.carried ? { ...m, route: m.carried.route, trace: m.carried.trace } : m;
+}
 
 /**
  * What a trap's cut op carries (traps.ts cutOp): the groups the trap step
@@ -281,7 +296,8 @@ export function planWalks(op: Op, before: RoomState, actor: Viewer, env: Version
  * `cut` is the group's part of a trap's cut that stopped it (`GroupCut`),
  * and `dropped` the op's `seat` (`DroppedSeat`): a player's names only a
  * member every player sees on a link they see, so a seat naming a hidden
- * one is ignored as an unknown id is.
+ * one is ignored as an unknown id is, and a rider dragging a creature the
+ * actor sees keeps her own seat (review HEXOP-OPUS2-2).
  */
 function followGroup(before: RoomState, lead: MovedToken, members: readonly string[], isPublic: (id: string, holderId: string) => boolean, byPlayer: boolean, env: Versioned, stands = false, cut?: GroupCut, dropped?: DroppedSeat): MovedToken[] {
   const pub = (id: string) => {
@@ -312,9 +328,13 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
     // A trap's cut keeps each walk in the file where the trap step had it, behind its holder already, so no holder's walk in the
     // move, which the private pass may stop short, moves it on (review FU45B-ASTRA-12).
     const walk = own && up && upOwn && !cut ? behindStop(g, member, own, upOwn, up.route) : own;
-    const seat = dropped?.tokenId === id && holderMove === lead && (!byPlayer || pub(id)) ? dropped : undefined;
+    // A rider with a creature hanging from her by a drag the actor sees keeps the seat her place carries her to, as the device that
+    // sends a seat keeps it (client movement/riderSeat.ts): what she drags walks by her place, and a seat across the mount would
+    // take it onto the mount or across a wall the drop never read. One players cannot see never decides it (review HEXOP-OPUS2-2).
+    const dragsSeen = () => carriedGroup(before.tokens, id).some((d) => d !== id && ownEntry(before.tokens, d)?.attached?.kind === "drag" && (!byPlayer || pub(d)));
+    const seat = dropped?.tokenId === id && holderMove === lead && (!byPlayer || pub(id)) && !dragsSeen() ? dropped : undefined;
     const how: Following = { file: walk, kept: cut?.own?.get(id), seats: seatsOn, stands: stands && cut?.judged(member) !== true };
-    const moved = withCarried(follow(before, member, holderMove, pub(id), byPlayer, env, { ...how, ...(seat ? { seat } : {}) }), before, member, holderMove, pub(id), byPlayer, env, how);
+    const moved = withCarried(follow(before, member, holderMove, pub(id), byPlayer, env, { ...how, ...(seat ? { seat } : {}) }), before, member, holderMove, lead, pub(id), byPlayer, env, how);
     if (!moved) continue;
     walked.set(id, moved);
     out.push(moved);
@@ -486,7 +506,7 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
       return kept ? { x: kept.x, y: kept.y, elevation: kept.elevation ?? p.elevation + oz } : { ...(seats?.[i] ?? { x: p.x + ox, y: p.y + oy }), elevation: p.elevation + oz };
     });
     const seat = how.seat ? droppedSeat(before, member, holder, how.seat) : null;
-    const carried = seat ? route.slice() : null;
+    const carried = seat ? { route: route.slice(), trace: followerTrace(member, route.slice()) } : null;
     if (seat) route[route.length - 1] = { ...seat, elevation: route[route.length - 1]!.elevation };
     if (!onHolder(kind) && floorChange(before, member, holder, env)) route[route.length - 1] = draggedOntoFloor(before.buildChunks, member, route[route.length - 1]!, holder.to.sceneId);
     const last = route[route.length - 1]!;
@@ -532,17 +552,82 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
 }
 
 /**
- * `moved`, a member of a group, with its walk as its place carries it
- * (MovedToken `carried`) where its holder's dropped seat moved only the
- * end of the holder's walk: the same follow of the holder's carried walk.
+ * `moved`, a member of a group, where its holder's dropped seat moved only
+ * the end of the holder's walk (MovedToken `carried`): what rides on the
+ * holder takes the seat with it on arriving, its walk as the holder's place
+ * carries it kept as its own `carried`. What the holder drags walks as its
+ * place carries it, the same follow of the holder's carried walk, so one
+ * players cannot see stops where that walk meets a wall, unseen (review
+ * HEXOP-ASTRA-3), and arrives beside her seat (`besideSeat`). A drag is no
+ * seat, so the seat never moves it onto the mount. Only one players cannot
+ * see is dragged so: one the actor sees keeps her own seat (`followGroup`).
  */
-function withCarried(moved: MovedToken | null, before: RoomState, member: Token, holder: MovedToken, isPublic: boolean, byPlayer: boolean, env: Versioned, how: Following): MovedToken | null {
-  if (!moved || !holder.carried) return moved;
-  const end = holder.carried[holder.carried.length - 1]!;
-  const was = follow(before, member, { ...holder, route: holder.carried, to: { ...holder.to, x: end.x, y: end.y, elevation: end.elevation } }, isPublic, byPlayer, env, how);
-  if (!was) return moved;
+function withCarried(moved: MovedToken | null, before: RoomState, member: Token, holder: MovedToken, lead: MovedToken, isPublic: boolean, byPlayer: boolean, env: Versioned, how: Following): MovedToken | null {
+  if (!holder.carried) return moved;
+  const end = holder.carried.route[holder.carried.route.length - 1]!;
+  const was = follow(before, member, { ...holder, route: holder.carried.route, trace: holder.carried.trace, to: { ...holder.to, x: end.x, y: end.y, elevation: end.elevation } }, isPublic, byPlayer, env, how);
+  const kind = member.attached?.kind;
+  if (kind === undefined || !onHolder(kind)) return was ? besideSeat(before, member, was, holder, lead) : was;
+  if (!moved || !was) return moved;
   const same = was.route.length === moved.route.length && was.route.every((p, i) => p.x === moved.route[i]!.x && p.y === moved.route[i]!.y && p.elevation === moved.route[i]!.elevation);
-  return same ? moved : { ...moved, carried: was.route };
+  return same ? moved : { ...moved, carried: { route: was.route, trace: was.trace } };
+}
+
+/**
+ * Where a creature players cannot see that a seated rider drags arrives
+ * (review HEXOP-OPUS2-2): off the mount and in her reach where she sits.
+ * Its walk as her place carries her (`was`) ends beside her own seat, which
+ * the dropped seat may leave two squares or hexes off, so where that walk
+ * went all the way it takes the spot nearest its end that keeps it off the
+ * mount's stand, in her reach there, no farther from that end than her own
+ * step to the seat and one more, a step from that end through no wall,
+ * standing clear, and its walk holds to there at its end. Stopped short, or
+ * with no such spot, it ends where its walk does, as one its holder leaves
+ * behind, and lets go there out of reach (reducer/attach.ts linkPass). Only
+ * one players cannot see gets here, so no player reads it.
+ */
+function besideSeat(before: RoomState, member: Token, was: MovedToken, holder: MovedToken, lead: MovedToken): MovedToken {
+  const scene = ownEntry(before.scenes, was.to.sceneId);
+  const rider = ownEntry(before.tokens, holder.tokenId);
+  const walker = ownEntry(before.tokens, lead.tokenId);
+  if (!scene || !rider || !walker || !holder.carried || was.route.length !== holder.route.length) return was;
+  const g = sceneGrid(scene);
+  const settings = before.meta.settings;
+  const end = was.route[was.route.length - 1]!;
+  const seat = holder.route[holder.route.length - 1]!;
+  const own = holder.carried.route[holder.carried.route.length - 1]!;
+  // Its walk went all the way where it ends at its place beside her own seat: a wall the private pass stopped it at holds it there.
+  if (Math.abs(end.x - (own.x + member.x - holder.from.x)) > 1e-9 || Math.abs(end.y - (own.y + member.y - holder.from.y)) > 1e-9) return was;
+  const far = Math.max(Math.abs(seat.x - own.x), Math.abs(seat.y - own.y)) + 1;
+  const { squeeze: _seated, ...sat } = rider;
+  const there = { ...sat, x: seat.x, y: seat.y, elevation: seat.elevation };
+  const { squeeze: _squeeze, ...full } = walker;
+  const mount = { ...full, x: lead.to.x, y: lead.to.y };
+  const { squeeze: _goblin, ...self } = member;
+  const at = (p: Point) => ({ ...self, x: p.x, y: p.y, elevation: end.elevation });
+  const clear = (p: Point) => linkHolds(g, settings, "drag", at(p), there) && !overlaps(g, at(p), mount);
+  if (clear(end)) return was;
+  const from = was.trace[was.trace.length - 1]!;
+  const spots: Point[] = [];
+  if (isHex(g)) {
+    // The hexes up to three steps from her seat's.
+    let ring = [tokenRefHex(g, there)];
+    const seen = new Set(ring.map(hexKey));
+    for (let d = 0; d < 3; d++) {
+      const next = ring.flatMap((h) => hexNeighbors(g, h)).filter((n) => !seen.has(hexKey(n)) && seen.add(hexKey(n)) !== undefined);
+      for (const h of next) spots.push(placedOnHex(g, self, h));
+      ring = next;
+    }
+  } else {
+    const step = snapStep(self);
+    for (let dy = -3; dy <= 3; dy += step) for (let dx = -3; dx <= 3; dx += step) spots.push({ x: seat.x + dx, y: seat.y + dy });
+  }
+  const best = spots
+    .filter((p) => Math.max(Math.abs(p.x - end.x), Math.abs(p.y - end.y)) <= far && clear(p) && movementRules.legBlocker(before, from, { x: p.x, y: p.y, elevation: end.elevation, squeeze: false }) === null && !offGridWallThrough(before, walkEnd(before, from, p)))
+    .sort((a, b) => (a.x - end.x) ** 2 + (a.y - end.y) ** 2 - ((b.x - end.x) ** 2 + (b.y - end.y) ** 2) || a.y - b.y || a.x - b.x)[0];
+  if (!best) return was;
+  const route = [...was.route.slice(0, -1), { x: best.x, y: best.y, elevation: end.elevation }];
+  return { ...was, to: { ...was.to, x: best.x, y: best.y }, route, trace: followerTrace(member, route), carried: { route: was.route, trace: was.trace } };
 }
 
 /**

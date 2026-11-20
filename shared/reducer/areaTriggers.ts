@@ -1,10 +1,10 @@
 import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
-import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
+import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token, Viewer } from "../model.ts";
 import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
-import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
+import { describeMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, legAt, pieceReach, placedOnTrace, routePoints, walkAt, type FileAlong, type HexPiece, type RoutePoint } from "../rules/route.ts";
 import { footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
@@ -307,9 +307,9 @@ function movedBy(tx: Tx, op: Op, before: RoomState, after: RoomState): Moved {
   const templateId = op.t === "template.update" ? op.templateId : null;
   // From op version 14 a holder's group moves with it, and the move's one description names every token (docs/design/design-v1-attach.md 9).
   if (attaches(tx.env.opVersion)) {
-    const described = describeMove(op, before, after, tx.actor, tx.env).filter((m) => placeChanged(ownEntry(before.tokens, m.tokenId), ownEntry(after.tokens, m.tokenId)));
+    const described = describedMoves(op, before, after, tx.actor, tx.env);
     for (const m of described) tokens.add(m.tokenId);
-    return { tokens, templateId, walks: { named: described.filter((m) => m.carriedBy === undefined), all: described } };
+    return { tokens, templateId, walks: groupWalks(described) };
   }
   const ids =
     op.t === "token.move" ? [op.tokenId] : op.t === "token.moveMany" ? op.moves.map((m) => m.tokenId) : op.t === "token.update" ? [op.tokenId] : [];
@@ -319,6 +319,21 @@ function movedBy(tx: Tx, op: Op, before: RoomState, after: RoomState): Moved {
 
 /** The walks of an op's moved tokens, the named ones apart: only they decide how finely the move is swept. */
 type GroupWalks = { named: MovedToken[]; all: MovedToken[] };
+
+/**
+ * The walks a move's sweep reads: each moved token's way as every reader of
+ * it reads it (moveLeg.ts wayOf), so a rider a dropped seat moves at the
+ * walk's end rides on her own seat until then, and enters an area only as
+ * her place carries her, or where she arrives (review HEXOP-ASTRA-2).
+ */
+function groupWalks(described: readonly MovedToken[]): GroupWalks {
+  return { named: described.filter((m) => m.carriedBy === undefined), all: described.map(wayOf) };
+}
+
+/** The move's description (moveLeg.ts describeMove) of each token whose place it changed. */
+function describedMoves(op: Op, before: RoomState, after: RoomState, actor: Viewer, env: { opVersion?: number }): MovedToken[] {
+  return describeMove(op, before, after, actor, env).filter((m) => placeChanged(ownEntry(before.tokens, m.tokenId), ownEntry(after.tokens, m.tokenId)));
+}
 
 /*
  * A move, or an area's move, is one straight leg from where it was to where
@@ -441,8 +456,16 @@ function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
  * hexes as the walk's spots.
  */
 function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
+  return [...sweptPoints(after, moved.walks, routed).map((at) => at.room), after];
+}
+
+/**
+ * Each point a group move's sweep reads before `after` (`alongGroups`): the
+ * room there, at fraction `f` of the lead's piece `piece`, 1 the first.
+ */
+function sweptPoints(after: RoomState, walks: GroupWalks, routed: boolean): { piece: number; f: number; room: RoomState }[] {
   const fpc = after.meta.settings.feetPerCell;
-  const { named, all } = moved.walks;
+  const { named, all } = walks;
   const gridOf = (walk: MovedToken) => gridOfScene(after, walk.to.sceneId);
   // A straight leg's hex line, built once a walk, squeezed along it where the walk squeezes (HX-D17) and ending as the token is stored.
   const pieces = new Map<MovedToken, HexPiece>();
@@ -511,7 +534,7 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     }
     return { ...after, tokens: placed };
   };
-  const out: RoomState[] = [];
+  const out: { piece: number; f: number; room: RoomState }[] = [];
   if (routed) {
     const lead = named[0]!.route;
     const plan = routeSweepPlan(lead, fpc);
@@ -519,7 +542,7 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
       const n = plan[i - 1]!;
       for (let k = 1; k <= n; k++) {
         if (i === lead.length - 1 && k === n) break;
-        out.push(place(i, k / n));
+        out.push({ piece: i, f: k / n, room: place(i, k / n) });
       }
     }
   } else {
@@ -532,10 +555,19 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
       } else reach = Math.max(reach, pieceReach(walk.from, walk.to, fpc));
     }
     const points = Math.min(MAX_SWEEP_POINTS, Math.max(1, Math.ceil(reach / SWEEP_STEP)));
-    for (let k = 1; k < points; k++) out.push(place(1, k / points));
+    for (let k = 1; k < points; k++) out.push({ piece: 1, f: k / points, room: place(1, k / points) });
   }
-  out.push(after);
   return out;
+}
+
+/**
+ * The points a move of a group sweeps before it lands, for the tests: the
+ * room at each, at fraction `f` of the lead's piece `piece` (`alongGroups`).
+ */
+export function sweptAlong(op: Op, before: RoomState, after: RoomState, actor: Viewer, env: { opVersion?: number }): { piece: number; f: number; room: RoomState }[] {
+  const walks = groupWalks(describedMoves(op, before, after, actor, env));
+  if (walks.named.length === 0) return [];
+  return sweptPoints(after, walks, op.t === "token.move" && op.route !== undefined && walksRoutes(env.opVersion));
 }
 
 /** A token at a spot of its leg as ops before version 14 replay it, which describe no walk: with the footprint the move left. */

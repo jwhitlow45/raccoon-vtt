@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token, Trap, Viewer } from "../model.ts";
+import { wall } from "../discoveryTestutil.ts";
 import { canApply } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
@@ -78,16 +79,23 @@ describe("squares: a stop short of a seated rider's walk's end (HEXOP-ASTRA-1)",
     }
   });
 
-  test("Bree dragging a goblin, by the DM's drop: a stop short lands the goblin beside her where the trap step had it too", () => {
-    for (const actor of [P1, DM]) {
-      const s = ride("none", trap("t", { zone: { cells: [{ x: 10, y: 2, w: 1, h: 1 }] }, rig: rig("trigger") }));
-      s.tokens.gob = token("gob", { x: 4, y: 3, name: "Goblin", kind: "monster", attached: { to: "bree", kind: "drag" } });
-      assert.notEqual(planTrapMove(op, s, actor, {}).op, op, `${actor.role}: the trap cuts the walk`);
-      const after = landedAsJudged(s, op, actor, actor.role);
-      const { seat: _seat, ...bare } = op;
-      const plain = applyOp(s, bare, actor, env(1));
-      assert.ok(plain.ok);
-      assert.deepEqual(after.tokens, plain.state.tokens, `${actor.role}: as with no seat`);
+  test("a goblin dragged by Bree, or one every player sees dragged by her hidden owl, which walks as itself: a stop short lands it where the trap step judged its stand on its own walk, as with no seat, a wall beside that walk's last piece or none", () => {
+    for (const by of ["bree", "owl"] as const) {
+      for (const walled of [false, true]) {
+        for (const actor of [P1, DM]) {
+          const at = `by ${by}${walled ? ", walled" : ""}, ${actor.role}`;
+          const s = ride(by === "owl" ? "hidden" : "none", trap("t", { zone: { cells: [{ x: 10, y: 2, w: 1, h: 1 }] }, rig: rig("trigger") }));
+          s.tokens.gob = token("gob", { x: 4, y: 3, name: "Goblin", kind: "monster", attached: { to: by, kind: "drag" } });
+          // A wall across row 3 at x 11, where the goblin's own walk would stand at the stop.
+          if (walled) wall(s, "seatwall0003", [11, 3], [11, 4]);
+          assert.notEqual(planTrapMove(op, s, actor, {}).op, op, `${at}: the trap cuts the walk`);
+          const after = landedAsJudged(s, op, actor, at);
+          const { seat: _seat, ...bare } = op;
+          const plain = applyOp(s, bare, actor, env(1));
+          assert.ok(plain.ok, at);
+          assert.deepEqual(after.tokens, plain.state.tokens, `${at}: as with no seat`);
+        }
+      }
     }
   });
 

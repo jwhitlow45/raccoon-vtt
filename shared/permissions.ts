@@ -10,7 +10,7 @@ import { handoutPages } from "./handouts.ts";
 import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "./rules/distance.ts";
-import { checkSetReach, planMove, planWalks, walkedIn } from "./rules/moveLeg.ts";
+import { checkSetReach, planMove, planWalks, walkedIn, wayOf } from "./rules/moveLeg.ts";
 import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hexAt, hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
@@ -2012,9 +2012,11 @@ function draggedWalls(c: Check, op: Op): Decision {
   // Every walk, those that end where they start too: one in single file walks its holder's line on the way all the same.
   const walks = planWalks(op, c.state, c.actor, {});
   const walked = walkedIn(walks);
-  for (const moved of walks) {
-    const member = ownEntry(c.state.tokens, moved.tokenId);
-    if (moved.carriedBy === undefined || !walked(moved) || moved.pass !== "public" || !member || member.attached?.kind !== "drag") continue;
+  for (const walk of walks) {
+    const member = ownEntry(c.state.tokens, walk.tokenId);
+    if (walk.carriedBy === undefined || !walked(walk) || walk.pass !== "public" || !member || member.attached?.kind !== "drag") continue;
+    // Its way as every reader of it reads it (rules/moveLeg.ts wayOf, review HEXOP-ASTRA-3).
+    const moved = wayOf(walk);
     for (let i = 1; i < moved.route.length; i++) {
       // A creature a holder drags beside it walks as itself, since a drag is no seat: as the move's trace has it (route.ts followerTrace),
       // full size at each point, as it is stored wherever it stops (moveLeg.ts stoppedAtWalls).

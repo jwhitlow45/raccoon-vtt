@@ -7,13 +7,14 @@ import { projectState, stableStringify } from "../project.ts";
 import type { Op, OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
-import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
+import { carriedGroup, hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { routeWorld } from "../rules/hexWalk.ts";
 import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
-import { planWalks, walkedIn } from "../rules/moveLeg.ts";
+import { planWalks, walkedIn, wayOf, type MovedToken } from "../rules/moveLeg.ts";
+import { sweptAlong } from "./areaTriggers.ts";
 import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { footing, footprintGround } from "../rules/heights.ts";
 import { planTrapMove, trapHits, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "../rules/traps.ts";
@@ -770,15 +771,20 @@ for (const [name, g] of [
       for (const [name, least] of KINDS) assert.ok((kinds.get(name) ?? 0) >= least, `walks ${name}: ${kinds.get(name) ?? 0}, ${JSON.stringify(counts)}`);
     });
 
-    test("a rider dropped on a seat of her mount's stand (LP40-HEX-SEAT): at every corner of the mount's walk and at its end the trap step has every walk where the move has it, every token lands where the trap step had it, the rider sits there, and a hidden rider beside her changes no player's copy", () => {
+    test("a rider dropped on a seat of her mount's stand (LP40-HEX-SEAT): at every corner of the mount's walk and at its end the trap step and the area sweep have every walk where its way has it (moveLeg.ts wayOf), every token lands where the trap step had it, a stop late in the walk among them, the rider sits there, and a hidden rider beside her changes no player's copy", () => {
       let moves = 0;
       let seated = 0;
       let corners = 0;
       let twins = 0;
+      let cuts = 0;
+      let swept = 0;
       for (let seed = 1; seed <= 3000; seed++) {
         const room = caseOf(seed, g);
         if (!room) continue;
-        const made = seatedMove(g, room, seed);
+        const seatedOne = seatedMove(g, room, seed);
+        if (!seatedOne) continue;
+        // The move as made, and with a stop trap on a hex the mount enters a step before its stand, which cuts it on its last piece.
+        for (const [kind, made] of [["", seatedOne], ["late stop, ", lateStop(g, seatedOne)]] as const) {
         if (!made) continue;
         const { state: s, op, rider } = made;
         for (const [who, actor] of [
@@ -786,23 +792,32 @@ for (const [name, g] of [
           ["the DM", DM],
         ] as const) {
           if (!canApply(op, actor, s, { canUseAsset: () => true }).ok) continue;
-          const at = `${name} seed ${seed}, ${who}`;
+          const at = `${name} seed ${seed}, ${kind}${who}`;
           moves++;
+          if (planTrapMove(op, s, actor, {}).op !== op) cuts++;
           const walks = planWalks(op, s, actor, {});
           const lead = walks.find((m) => m.tokenId === "horse")!;
           const ridden = walks.find((m) => m.tokenId === rider)!;
-          // The rule seats a rider every player sees for Pat, and any for the DM.
-          if ((actor === DM || s.tokens[rider]!.visibility !== "dm") && planTrapMove(op, s, actor, {}).op === op) {
+          // The rule seats a rider every player sees for Pat, and any for the DM, but one dragging a creature the actor sees.
+          const shown = (id: string) => actor === DM || s.tokens[id]!.visibility !== "dm";
+          const drags = carriedGroup(s.tokens, rider).some((d) => d !== rider && s.tokens[d]!.attached?.kind === "drag" && shown(d) && shown(s.tokens[d]!.attached!.to));
+          if (shown(rider) && !drags && planTrapMove(op, s, actor, {}).op === op) {
             assert.deepEqual([ridden.to.x, ridden.to.y], [op.seat!.x, op.seat!.y], `${at}: ${rider} sits where she was dropped`);
             seated++;
           }
+          // Each walk's way (moveLeg.ts wayOf) at each corner of the mount's walk, and where it arrives at the end: the trap step's and
+          // the area sweep's poses there are the way's.
+          const wayAt = (m: MovedToken, i: number) => {
+            const way = wayOf(m).route;
+            return i === lead.route.length - 1 ? m.route[m.route.length - 1]! : way[Math.min(i, way.length - 1)]!;
+          };
           const moment = trapMoments(op, s, actor, {});
           for (let i = 0; i < lead.route.length; i++) {
             const p: readonly [number, number, number] = i === lead.route.length - 1 ? [i - 1, 1, 1] : [i, 0, 1];
             const tokens = moment(p);
             for (const m of walks) {
               if (m.along) continue;
-              const want = m.route[Math.min(i, m.route.length - 1)]!;
+              const want = wayAt(m, i);
               const t = tokens[m.tokenId]!;
               assert.deepEqual([t.x, t.y, Math.round(t.elevation * 1e9) / 1e9], [want.x, want.y, Math.round(want.elevation * 1e9) / 1e9], `${at}: ${m.tokenId} at the walk's point ${i}`);
             }
@@ -810,6 +825,18 @@ for (const [name, g] of [
           }
           const r = applyOp(s, op, actor, env(5));
           assert.ok(r.ok, at);
+          if (planTrapMove(op, s, actor, {}).op === op) {
+            for (const point of sweptAlong(op, s, r.state, actor, {})) {
+              if (point.f !== 1) continue;
+              for (const m of walks) {
+                const t: Token | undefined = point.room.tokens[m.tokenId];
+                if (m.along || !t || (m.from.x === m.to.x && m.from.y === m.to.y)) continue;
+                const want = wayAt(m, point.piece);
+                assert.deepEqual([t.x, t.y], [want.x, want.y], `${at}: the area sweep has ${m.tokenId} at the walk's point ${point.piece}`);
+              }
+              swept++;
+            }
+          }
           const cut = planTrapMove(op, s, actor, {}).op !== op;
           for (const [id, pose] of trapLandings(op, s, actor, {})) {
             // A passenger on a holder a cut lands squeezed short of its walk sits on the squeezed stand, where the trap step read it
@@ -818,7 +845,9 @@ for (const [name, g] of [
             const link = s.tokens[id]!.attached;
             if (cut && link && onHolder(link.kind) && r.state.tokens[link.to]?.squeeze === true) continue;
             const t: Token = r.state.tokens[id]!;
-            assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
+            // To the last bit but rounding: a cut's passenger is placed by the cut walk's own sums, the trap step by its spots'.
+            const near = Math.abs(t.x - pose.x) < 1e-9 && Math.abs(t.y - pose.y) < 1e-9 && Math.abs(t.elevation - pose.elevation) < 1e-9;
+            assert.ok(near, `${at}: ${id} on ${t.x}, ${t.y}, ${t.elevation} where the trap step left it on ${pose.x}, ${pose.y}, ${pose.elevation}`);
           }
           // The shown rider with and without a hidden rider beside her: the same copy for every player.
           if (actor !== P1 || s.tokens[rider]!.visibility === "dm") continue;
@@ -831,9 +860,28 @@ for (const [name, g] of [
           assert.deepEqual(copies(b.state, twin.alone), copies(a.state, twin.alone), `${at}: every player's copy with the hidden rider`);
           twins++;
         }
+        }
       }
-      // About 640 to 700 moves on each layout, 575 to 640 seated, 230 to 265 twins.
-      assert.ok(moves >= 500 && seated >= 450 && corners >= 1100 && twins >= 180, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}`);
+      // About 1200 to 1300 moves on each layout, 490 to 540 seated, 540 to 590 cut, 440 to 490 twins, 77 to 120 swept corners.
+      assert.ok(moves >= 1000 && seated >= 400 && corners >= 2200 && twins >= 380 && cuts >= 450 && swept >= 60, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}, cuts ${cuts}, swept ${swept}`);
     });
   });
+}
+
+/**
+ * `made` with a stop trap on a hex the mount enters a step before its stand, which it does not stand on where it starts or ends,
+ * so the trap cuts its walk on the last piece, where a dropped seat's rider was read toward the seat. Null where there is none.
+ */
+function lateStop(g: HexGrid, made: Case & { rider: string }): (Case & { rider: string }) | null {
+  const op = made.op;
+  if (op.t !== "token.move") return null;
+  const horse = made.state.tokens.horse!;
+  const spots = trapWalks(op, made.state, DM, {}).find((w) => w.tokenId === "horse")?.spots ?? [];
+  if (spots.length < 3) return null;
+  const kept = new Set([...occupiedHexes(g, horse), ...occupiedHexes(g, { ...horse, x: op.x, y: op.y })].map(hexKey));
+  const hex = occupiedHexes(g, { ...horse, ...spots[spots.length - 2]! }).find((h) => !kept.has(hexKey(h)));
+  if (!hex) return null;
+  const state = structuredClone(made.state);
+  state.traps.late = trap("late", { grid: g.orient === "rows" ? "hexRows" : "hexColumns", zone: { cells: [{ x: hex.col, y: hex.row, w: 1, h: 1 }] } });
+  return { ...made, state };
 }

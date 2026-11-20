@@ -1490,8 +1490,9 @@ export const opMigrations: MigrationStep[] = [
     // version the rider it names sits where she was dropped where the walk ends full size (`seatsWhereDropped`). A walk in
     // single file on hexes that reaches its last hex before its holder ends holds that hex to the holder's end
     // (`fileEndsWithHolder`), and one a hex step from its holder's start whose way by the one ahead ends out of a hex step of
-    // its holder steps straight onto that start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that keeps the file on its spots for
-    // reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops stored before replay as they ran.
+    // its holder steps straight onto that start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that
+    // keeps the file on its spots for reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops
+    // stored before replay as they ran.
     // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
     // version 63 ops after its last snapshot, which an older build refuses.
     from: 62,

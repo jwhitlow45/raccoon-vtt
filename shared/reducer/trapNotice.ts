@@ -5,7 +5,7 @@ import { groundAnyPlayerSees, playersToken, unionSightOf } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
 import { groundAt } from "../rules/heights.ts";
-import { planMove } from "../rules/moveLeg.ts";
+import { planMove, wayOf } from "../rules/moveLeg.ts";
 import { isPlainId, trapCreature, walkOp, zoneHexes, zoneRanges } from "../rules/traps.ts";
 import type { Tx } from "./tx.ts";
 import { isHex, sceneGrid, SQUARES } from "../rules/grid.ts";
@@ -68,7 +68,9 @@ export function noticeStep(tx: Tx, op: Op, before: RoomState): boolean {
 function movedPartyCreatures(op: Op, before: RoomState, tx: Tx): Token[] {
   const out: Token[] = [];
   for (const m of planMove(op, before, tx.actor, tx.env)) {
-    if (m.how !== "walk" || !m.route.some((p) => p.x !== m.from.x || p.y !== m.from.y || p.elevation !== m.from.elevation)) continue;
+    // Its way as every reader of it reads it (rules/moveLeg.ts wayOf), and where a dropped seat moved it on arriving.
+    const away = (p: { x: number; y: number; elevation: number }) => p.x !== m.from.x || p.y !== m.from.y || p.elevation !== m.from.elevation;
+    if (m.how !== "walk" || !(wayOf(m).route.some(away) || (m.carried !== undefined && away(m.to)))) continue;
     const t = ownEntry(tx.state.tokens, m.tokenId);
     if (!t || t.sceneId !== m.from.sceneId || !isPlainId(t.id) || !trapCreature(tx.state, t) || !playersToken(tx.state, t)) continue;
     out.push(t);

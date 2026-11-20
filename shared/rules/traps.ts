@@ -10,9 +10,9 @@ import type { Rect } from "./geom.ts";
 import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { pendingGround } from "./held.ts";
-import { planWalks, walkedIn, withTrapCut, type MovedToken } from "./moveLeg.ts";
+import { planWalks, walkedIn, wayOf, withTrapCut, type MovedToken } from "./moveLeg.ts";
 import { groundUnder, hexStandHexes, storedBuild, type HexWalls } from "./movement.ts";
-import { compareAlong, fileOrder, followerTrace, onTrace, routeLattice, routeStands, routeWalk, walkAt, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
+import { compareAlong, fileOrder, onTrace, routeLattice, routeStands, routeWalk, walkAt, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
@@ -755,7 +755,10 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
     const group: Group = { named, head, base, step };
     groups.set(named, group);
     const seats = seatsOfSeen(before, members, seen, opVersion);
-    for (const e of members) {
+    for (const moved of members) {
+      // Its way as every reader reads it (moveLeg.ts wayOf): where a dropped seat moved only its walk's end, as its place carries it
+      // up to there, so a stop before the end reads it where the cut op, which drops the seat, lands it (review HEXOP-ASTRA-1).
+      const e = wayOf(moved);
       const token = ownEntry(before.tokens, e.tokenId)!;
       const holder = e.carriedBy !== undefined ? byId.get(e.carriedBy) : undefined;
       const kind = holder ? token.attached?.kind : undefined;
@@ -768,11 +771,8 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       const oy = token.y - headToken.y;
       // A walk hex by hex reaches its points at moments of its own (moveLeg.ts MovedToken `along`), so it never shares the lead's
       // spots, even where its points are the lead's offset by its place (review HEXFILE-ASTRA-1).
-      // A dropped seat moves only the walk's end (moveLeg.ts MovedToken `carried`): its walk is read as its place carries it, to
-      // its end where the seat moved it, so a stop before the end reads it where the cut op, which drops the seat, lands it.
-      const walked = e.carried ?? e.route;
-      const shared = e === head || (!e.along && sameRoute(walked, head.route, ox, oy));
-      const ownSpots = shared ? null : e.how === "teleport" ? twoSpots(walked) : routeWalk(grid, e.carried ? followerTrace(token, e.carried) : e.trace, build, mine);
+      const shared = e === head || (!e.along && sameRoute(e.route, head.route, ox, oy));
+      const ownSpots = shared ? null : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine);
       // A walk hex by hex is read at its group's moments by how far along the lead's walk each of its points is reached.
       const byHex = ownSpots && e.along && e.how !== "teleport" ? e.along : null;
       const walk: Walk = {
@@ -808,12 +808,11 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
   return { all, byId, groups, stands: new Map(), opVersion, grounds: new Map() };
 }
 
-/** `spots` with the last where the walk ends, for a walk read as its place carries it before a dropped seat moved its end (`walksOf`). */
+/** `spots` of a way (moveLeg.ts wayOf) with the last where it arrives, which a dropped seat moved off its way's end. */
 function seatedEnd(e: MovedToken, spots: readonly WalkSpot[], ox: number, oy: number): readonly WalkSpot[] {
   if (!e.carried || spots.length === 0) return spots;
-  const end = e.route[e.route.length - 1]!;
   const last = spots[spots.length - 1]!;
-  return [...spots.slice(0, -1), { ...last, x: end.x - ox, y: end.y - oy }];
+  return [...spots.slice(0, -1), { ...last, x: e.to.x - ox, y: e.to.y - oy }];
 }
 
 /**
@@ -1758,13 +1757,12 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
     const full = standRule(walks, before, walk.token.sceneId);
     // A creature in single file walks its holder's middle, off its own grid behind a larger holder, so it is judged on its grid beside it.
     const own = walk.holder ? (snapsInFile(walks, walk) ? { ...full, snaps: true } : full) : { ...full, squeeze: walk.squeezeAtEnd };
-    // A walk a dropped seat moved the end of is judged as its place carries it, to its end where the seat moved it (`walksOf`).
-    const carried = walk.entry.carried;
-    stands = routeStands(storedBuild(before, walks.opVersion), carried ?? walk.entry.route, token, walk.group.step, own, head ? walk.group.base(walk.group.step) : undefined);
-    if (carried) {
+    // Its way (moveLeg.ts wayOf), to where it arrives where a dropped seat moved that off its way's end (`seatedEnd`).
+    stands = routeStands(storedBuild(before, walks.opVersion), walk.entry.route, token, walk.group.step, own, head ? walk.group.base(walk.group.step) : undefined);
+    if (walk.entry.carried) {
       const inner = stands;
       const last = inner.walk.length - 1;
-      const end = walk.entry.route[walk.entry.route.length - 1]!;
+      const end = walk.entry.to;
       stands = { walk: inner.walk, spot: (i) => (i === last ? { ...inner.spot(i), x: end.x, y: end.y } : inner.spot(i)) };
     }
     // A walk hex by hex reads its stands at its group's progress, as its spots do (`alongProgress`).
