@@ -3,12 +3,13 @@ import { describe, test } from "node:test";
 import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
-import { FAR, serializedBytes } from "#shared/limits.ts";
-import type { Effect, RoomState, Token } from "#shared/model.ts";
+import { FAR, LIMITS, serializedBytes } from "#shared/limits.ts";
+import type { Effect, EncounterSnapshot, RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
 import { projectState, seatView, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { keptHistory } from "#shared/reducer/encounter.ts";
 import { memberRing } from "#shared/logRings.ts";
 import { floorsOf, ownedBy } from "#shared/rules/floors.ts";
 import { actor, character, DM, effect, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
@@ -585,6 +586,54 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     const [light, heavy] = [hit(1, ["fire"]), hit(150, ["bludgeoning", "piercing", "lightning"])];
     assert.deepEqual(heavy.life, ["dying", "dying"], "the heavy hits drop both to 0");
     assert.deepEqual(heavy.moves, light.moves);
+  });
+
+  test("where players may apply damage and monsters die at 0, P1's hit that kills a goblin or leaves it, and one hit or two on P2's hero, read alike once the DM hides both (D-261120-061)", () => {
+    const hits = (ops: Array<[string, number]>) => {
+      const state = table();
+      state.meta.settings = { ...state.meta.settings, playersApplyDamage: true, monstersDieAtZero: true };
+      state.tokens.gob = token("gob", { x: 9, y: 9, actor: { inline: actor({ hp: { cur: 20, max: 20, temp: 0 }, dmNotes: "" }) } });
+      state.characters.c2 = character("c2", { ownerIds: ["p2"], rev: 8, actor: actor({ hp: { cur: 100, max: 100, temp: 0 }, notes: "", dmNotes: "" }) });
+      state.tokens.bree = token("bree", { kind: "pc", actor: { ref: "c2" }, ownerIds: ["p2"], x: 8, y: 8 });
+      let after = state;
+      for (const [i, [tokenId, amount]] of ops.entries()) {
+        const op = { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount } } as Op;
+        assert.ok(canApply(op, P1, after, DEPS).ok, `P1 may hit ${tokenId}`);
+        const result = applyOp(after, op, P1, env(2_600_000 + i));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        after = result.state;
+      }
+      for (const [i, tokenId] of ["gob", "bree"].entries()) {
+        const result = applyOp(after, { t: "token.update", tokenId, patch: { visibility: "dm" } } as Op, DM, env(2_700_000 + i));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        after = result.state;
+      }
+      const gob = after.tokens.gob!.actor;
+      return { moved: movedBy(state, after), life: "inline" in gob ? gob.inline.life : undefined, rev: after.characters.c2!.rev };
+    };
+    const [left, killed] = [hits([["gob", 5], ["bree", 10]]), hits([["gob", 30], ["bree", 5], ["bree", 5]])];
+    assert.deepEqual([left.life, killed.life, left.rev, killed.rev], ["alive", "dead", 9, 10], "the goblin's life and the hero's rev come apart");
+    assert.deepEqual(killed.moved, left.moved);
+  });
+
+  test("a fight's history kept to its bound and a turn start at its widest read as none of either, in the room's reading and each scene's (D-261120-060)", () => {
+    const fight = (full: boolean): RoomState => {
+      const state = table();
+      const encounter = { rev: 0, round: 1, activeEntryId: "rhero", entries: [entry("rhero", { tokenId: "hero", value: 20 })] };
+      state.encounter = encounter;
+      if (!full) return state;
+      let history: EncounterSnapshot[] = [];
+      for (let i = 0; i < 20; i++) history = keptHistory(history, { encounter: { ...encounter, entries: [entry(`r${i}`, { label: "x".repeat(52_000) })] }, effects: {}, revealed: [], at: "2026-10-12T20:00:00.000Z" });
+      state.encounterHistory = history;
+      const widest = "\u0001".repeat(64);
+      const n = -1.2345678901234567e-300;
+      state.encounter = { ...encounter, turnStart: { entryId: widest, tokenId: widest, sceneId: "s1", x: n, y: n, elevation: n, seen: true, seenBy: ["p1"], seq: Number.MAX_SAFE_INTEGER, mounts: Array.from({ length: LIMITS.turnMounts }, () => widest) } };
+      return state;
+    };
+    const full = fight(true);
+    assert.equal(full.encounterHistory.length, 20, "the history keeps 20 steps");
+    assert.ok(serializedBytes(full.encounterHistory) > 1_040_000, "near its bound");
+    assert.deepEqual(Object.fromEntries(steppedParts(full)), Object.fromEntries(steppedParts(fight(false))));
   });
 
   /**
