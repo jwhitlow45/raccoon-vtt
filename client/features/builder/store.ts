@@ -71,6 +71,9 @@ export type BuilderState = {
   wingRoom: number | null;
 };
 
+/** An end a Between floors press took hold of: moved by its body, resized by its corner handle. `far` is a resize's far square's center when the press began. */
+export type LinkGrab = { kind: "move" | "resize"; linkId: string; far?: Point };
+
 export type WingPicks = { sceneId: string; area: CellRect | null; tap: WingTap | null; join: WingJoin | null };
 
 export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
@@ -141,8 +144,8 @@ export type BuilderGesture = {
   asking: boolean;
   /** A stroke or a drag of the builder's hex gestures (hexPointer.ts): Erase, Difficult ground and Wall lines. */
   hex: HexGesture | null;
-  /** Where a Between floors press began, on screen and on the map (linkTap.ts). */
-  link: { screen: Point; world: Point } | null;
+  /** Where a Between floors press began, on screen and on the map, and the end it took hold of to move or resize, if any (linkTap.ts). */
+  link: { screen: Point; world: Point; grab?: LinkGrab } | null;
   /** Where an Add a wing press began, on screen and on the map (wingPick.ts withWingMode). */
   wing: { screen: Point; world: Point } | null;
 };

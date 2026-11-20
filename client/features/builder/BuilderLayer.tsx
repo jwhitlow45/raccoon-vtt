@@ -14,7 +14,7 @@ import type { HexGrid } from "#shared/rules/hex.ts";
 import { hexesInRect, hexOutline } from "./hexBuild.ts";
 import { hexKey } from "#shared/rules/hex.ts";
 import type { CellRect } from "#shared/model.ts";
-import { paneEnd } from "./linkTap.ts";
+import { handleOf, paneEnd } from "./linkTap.ts";
 import { heightSlot } from "./heights/store.ts";
 import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, openDoorPaths, pillarPaths, stairSymbols } from "./draw.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
@@ -412,6 +412,7 @@ function LinkMarks(props: { scene: Scene; scale: number }) {
     <>
       {draft ? <LinkRect rect={draft.rect} grid={grid} scale={scale} color={draft.problem === null ? accent : boardTheme.color.danger} fill={0.25} /> : null}
       {outlined ? <LinkRect rect={outlined} grid={grid} scale={scale} color={accent} fill={0} /> : null}
+      {outlined ? <LinkHandle rect={outlined} grid={grid} scale={scale} color={accent} /> : null}
     </>
   );
 }
@@ -453,6 +454,46 @@ function LinkRect(props: { rect: CellRect; grid: Grid; scale: number; color: str
             }
           }
         }
+        c.restore();
+      }}
+    />
+  );
+}
+
+/** The resize handle's drawn size, inside the 44 px square a press on it hits (linkTap.ts handleOf). */
+const HANDLE_DRAWN_PX = 24;
+
+/**
+ * The corner handle of the end whose pane is open (phase 4, 8.2): a round
+ * grip just outside its bottom right corner, which a drag resizes both ends
+ * by. The press itself is read by linkTap.ts, so the grip listens to nothing.
+ */
+function LinkHandle(props: { rect: CellRect; grid: Grid; scale: number; color: string }) {
+  const { rect, grid, scale, color } = props;
+  const handle = handleOf(grid, rect, scale);
+  if (handle === null) return null;
+  return (
+    <Shape
+      listening={false}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx) => {
+        const c = ctx._context;
+        const r = HANDLE_DRAWN_PX / 2 / scale;
+        c.save();
+        c.setLineDash([]);
+        c.beginPath();
+        c.arc(handle.x, handle.y, r, 0, Math.PI * 2);
+        c.fillStyle = color;
+        c.fill();
+        c.lineWidth = 2 / scale;
+        c.strokeStyle = boardTheme.color.text;
+        c.stroke();
+        // A diagonal pair of arrowheads says it stretches.
+        const k = r * 0.5;
+        c.beginPath();
+        c.moveTo(handle.x - k, handle.y - k);
+        c.lineTo(handle.x + k, handle.y + k);
+        c.stroke();
         c.restore();
       }}
     />

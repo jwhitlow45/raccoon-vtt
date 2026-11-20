@@ -2,12 +2,13 @@ import { OPENING_SIDE, type CellRect, type FloorLink, type RoomState, type Scene
 import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { linkProblem, linksOn, type LinkDraft } from "#shared/rules/floorLinks.ts";
-import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { LINK_WORDS, linkProblem, linksOn, type LinkDraft } from "#shared/rules/floorLinks.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { hexCenter } from "#shared/rules/hex.ts";
 import { TAP_SLOP_PX, distance } from "../../lib/gestures.ts";
-import { rectBetween } from "../traps/rules.ts";
+import { rectBetween, zoneBox } from "../traps/rules.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts";
-import { builderSlot, linkPaneSlot } from "./store.ts";
+import { builderSlot, linkPaneSlot, type LinkGrab } from "./store.ts";
 import type { Bounds, Point } from "./cells.ts";
 
 /*
@@ -15,7 +16,10 @@ import type { Bounds, Point } from "./cells.ts";
  * 7): a drag over up to 4 by 4 squares draws the draft, which shows red with
  * its reason while the rules refuse it and is sent only when they pass, a
  * tap on squares with nothing there places 1 by 1, and a tap on an end opens
- * its pane. The functions are plain so node --test reads them.
+ * its pane. A press on an end and a drag moves that floor's end (an opening
+ * moves both), and a drag from the corner handle of the end whose pane is
+ * open resizes both (phase 4, 8.2). The functions are plain so node --test
+ * reads them.
  */
 
 type Kind = FloorLink["kind"];
@@ -93,6 +97,144 @@ export function judgeDraft(view: RoomState, sceneId: SceneId, to: SceneId, rect:
   return { rect, problem: linkProblem(view, draftOf(sceneId, to, rect, kind)) };
 }
 
+/** What the move or resize of an end writes: its own squares and, for stairs and ladders on squares, the far end's. */
+export type EndChange = { rect: CellRect; pairRect?: CellRect };
+
+export const sameRect = (a: CellRect, b: CellRect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+
+/**
+ * An end's pair on the room's ends, or null. The builder's copy holds both
+ * floors' ends, so the pair is always there unless it was removed meanwhile.
+ */
+function pairOfEnd(view: Pick<RoomState, "floorLinks">, link: FloorLink): FloorLink | null {
+  return ownEntry(view.floorLinks, link.pair) ?? null;
+}
+
+/**
+ * A drag of an end's body: the end's squares moved by the whole squares the
+ * pointer moved since the press. An opening's far end follows on the same
+ * squares, which the server does on `rect` alone. Stairs and ladders move
+ * only this floor's end, so the pair may come to lie on other squares.
+ */
+export function moveChange(g: Grid, link: FloorLink, bounds: Bounds, from: Point, to: Point): EndChange {
+  const a = rectBetween(g, from, from, bounds);
+  const b = rectBetween(g, to, to, bounds);
+  return { rect: { ...link.rect, x: link.rect.x + b.x - a.x, y: link.rect.y + b.y - a.y } };
+}
+
+/** The longest side an end of this kind may take. */
+function sideOf(kind: Kind): number {
+  return kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
+}
+
+/** The center of an end's far square (bottom right), which a resize drags from. */
+export function farCenter(g: Grid, rect: CellRect): Point {
+  const col = rect.x + rect.w - 1;
+  const row = rect.y + rect.h - 1;
+  return isHex(g) ? hexCenter(g, { col, row }) : { x: col + 0.5, y: row + 0.5 };
+}
+
+/**
+ * A drag of the corner handle: the end's size so its far square is the one
+ * under the pointer, held between 1 and the kind's side. Both ends take the
+ * size and keep their own corner (stairs and ladders), or the one rect
+ * (an opening, and every end on hexes, which the server keeps on one rect).
+ * `far` is where the far square's center lay when the press began, moved by
+ * the pointer's own move so the handle never jumps under the finger.
+ */
+export function resizeChange(g: Grid, link: FloorLink, pair: FloorLink, bounds: Bounds, far: Point, from: Point, to: Point): EndChange {
+  const at = { x: far.x + to.x - from.x, y: far.y + to.y - from.y };
+  const cell = rectBetween(g, at, at, bounds);
+  const side = sideOf(link.kind);
+  const clamp = (v: number) => Math.max(1, Math.min(side, v));
+  const w = clamp(cell.x - link.rect.x + 1);
+  const h = clamp(cell.y - link.rect.y + 1);
+  const rect = { ...link.rect, w, h };
+  return link.kind === "opening" ? { rect } : { rect, pairRect: { ...pair.rect, w, h } };
+}
+
+/**
+ * The first rule a move or resize breaks, in the words the server refuses
+ * it in (reducer/floorLinks.ts movedRects), or null: an opening's two ends
+ * and both ends on hexes on one rect, stairs and ladders on squares at one
+ * size, then linkProblem on the room without this pair, so the pair meets
+ * neither itself nor its own count.
+ */
+export function judgeChange(view: RoomState, link: FloorLink, change: EndChange): string | null {
+  const pair = pairOfEnd(view, link);
+  if (pair === null) return null;
+  const here = change.rect;
+  const there = change.pairRect ?? (link.kind === "opening" ? here : pair.rect);
+  const same = sameRect(here, there);
+  if (link.kind === "opening" || link.grid !== undefined) {
+    if (!same) return LINK_WORDS.sameSquares(link.kind);
+  } else if (here.w !== there.w || here.h !== there.h) {
+    return LINK_WORDS.oneSize(link.kind);
+  }
+  const { [link.id]: _end, [pair.id]: _pair, ...others } = view.floorLinks ?? {};
+  return linkProblem({ ...view, floorLinks: others }, { id: link.id, pairId: pair.id, sceneId: link.sceneId, to: link.to, rect: here, kind: link.kind, ...(same ? {} : { pairRect: there }) });
+}
+
+/** Whether a change leaves both ends where they are. */
+export function isNoChange(view: Pick<RoomState, "floorLinks">, link: FloorLink, change: EndChange): boolean {
+  const pair = pairOfEnd(view, link);
+  return sameRect(change.rect, link.rect) && (change.pairRect === undefined || (pair !== null && sameRect(change.pairRect, pair.rect)));
+}
+
+/** The patch a change sends: `rect` always, and `pairRect` where the far end moves on its own. */
+export function changePatch(change: EndChange): { rect: CellRect; pairRect?: CellRect } {
+  return change.pairRect ? { rect: change.rect, pairRect: change.pairRect } : { rect: change.rect };
+}
+
+/** The pane's line where the far end lies on other squares (phase 4, 8.2): "On Upper floor at other squares." */
+export function otherSquaresLine(floor: string): string {
+  return `On ${floor} at other squares.`;
+}
+
+/** The pane's button that moves this end onto the far end's squares: "Line up with Upper floor". */
+export function lineUpWords(floor: string): string {
+  return `Line up with ${floor}`;
+}
+
+/** How far the handle's hit square reaches from the end's corner, in CSS pixels: 44 across, so a finger lands on it. */
+export const HANDLE_PX = 44;
+
+/**
+ * The corner handle of an end, in cells: its hit square's center and half
+ * side. It lies just outside the end's bottom right corner, never over its
+ * squares, so a press on the end itself always moves it.
+ */
+export function handleOf(g: Grid, rect: CellRect, scale: number): { x: number; y: number; r: number } | null {
+  const box = zoneBox(g, { zone: { cells: [rect] }, sceneId: "" }, {});
+  if (box === null) return null;
+  const r = HANDLE_PX / 2 / scale;
+  return { x: box.x1 + r, y: box.y1 + r, r };
+}
+
+/** Whether a point on the map is on the handle's hit square. */
+export function onHandle(h: { x: number; y: number; r: number } | null, p: Point): boolean {
+  return h !== null && Math.abs(p.x - h.x) <= h.r && Math.abs(p.y - h.y) <= h.r;
+}
+
+/** What a press takes hold of: the corner handle of the end whose pane is open on this floor, else the end under it, else nothing. */
+function grabAt(ctx: ToolContext, view: RoomState, g: Grid, world: Point): LinkGrab | null {
+  const open = paneEnd(view, ctx.scope.get(linkPaneSlot).getState().linkId);
+  if (open && open.sceneId === ctx.scene.id && onHandle(handleOf(g, open.rect, ctx.camera().scale), world)) return { kind: "resize", linkId: open.id, far: farCenter(g, open.rect) };
+  const hit = endAt(view, ctx.scene.id, g, ctx.scene.bounds, world);
+  return hit ? { kind: "move", linkId: hit.id } : null;
+}
+
+/** The change a grabbed end's drag makes at a point, or null where the end is gone. */
+function grabChange(ctx: ToolContext, view: RoomState, start: { world: Point; grab: LinkGrab }, at: Point): { link: FloorLink; change: EndChange } | null {
+  const link = ownEntry(view.floorLinks, start.grab.linkId);
+  const pair = link && pairOfEnd(view, link);
+  if (!link || !pair) return null;
+  const g = sceneGrid(ctx.scene);
+  const bounds = ctx.scene.bounds;
+  const change = start.grab.kind === "resize" && start.grab.far ? resizeChange(g, link, pair, bounds, start.grab.far, start.world, at) : moveChange(g, link, bounds, start.world, at);
+  return { link, change };
+}
+
 /** Whether the builder's mode is Between floors. */
 export function isLinkMode(mode: string): boolean {
   return mode === "link";
@@ -108,7 +250,9 @@ function plan(ctx: ToolContext): { to: SceneId; kind: Kind } | null {
 
 function down(p: ToolPointer, ctx: ToolContext): void {
   const { store, gesture } = ctx.scope.get(builderSlot);
-  gesture.link = { screen: p.screen, world: p.world };
+  const view = ctx.getState().view;
+  const grab = view ? grabAt(ctx, view, sceneGrid(ctx.scene), p.world) : null;
+  gesture.link = { screen: p.screen, world: p.world, ...(grab ? { grab } : {}) };
   store.setState({ linkDraft: null, note: null, inSight: false });
 }
 
@@ -116,6 +260,14 @@ function move(p: ToolPointer, ctx: ToolContext): void {
   const { store, gesture } = ctx.scope.get(builderSlot);
   const start = gesture.link;
   const view = ctx.getState().view;
+  if (start?.grab && view) {
+    if (store.getState().linkDraft === null && distance(start.screen, p.screen) <= TAP_SLOP_PX) return;
+    const made = grabChange(ctx, view, { world: start.world, grab: start.grab }, p.world);
+    if (!made) return;
+    const problem = judgeChange(view, made.link, made.change);
+    store.setState({ linkDraft: { rect: made.change.rect, problem }, note: problem });
+    return;
+  }
   const target = plan(ctx);
   if (!start || !view || !target) return;
   if (store.getState().linkDraft === null && distance(start.screen, p.screen) <= TAP_SLOP_PX) return;
@@ -132,6 +284,18 @@ function up(p: ToolPointer, ctx: ToolContext): void {
   const view = ctx.getState().view;
   if (!start || !view) return;
   const g = sceneGrid(ctx.scene);
+  if (start.grab) {
+    // A press on an end that did not drag is a tap on it, which opens its pane. On the handle it does nothing.
+    if (!drafted) {
+      if (start.grab.kind === "move") {
+        ctx.ui.select(null);
+        ctx.scope.get(linkPaneSlot).setState({ linkId: start.grab.linkId });
+      }
+      return;
+    }
+    sendGrab(ctx, view, { world: start.world, grab: start.grab }, p.world);
+    return;
+  }
   if (!drafted) {
     const hit = endAt(view, ctx.scene.id, g, ctx.scene.bounds, p.world);
     // One thing floats over the map at a time: the pane, or a token's bar.
@@ -157,6 +321,33 @@ function up(p: ToolPointer, ctx: ToolContext): void {
     ctx.ui.select(null);
     ctx.scope.get(linkPaneSlot).setState({ linkId: ids.id });
   }
+}
+
+/**
+ * Sends a grabbed end's move or resize when the rules pass it, as one
+ * `floorLink.update` and so one step to undo, and shows the draft until the
+ * server answers (phase 4, 12). A refusal leaves its words in the note.
+ */
+function sendGrab(ctx: ToolContext, view: RoomState, start: { world: Point; grab: LinkGrab }, at: Point): void {
+  const { store } = ctx.scope.get(builderSlot);
+  const made = grabChange(ctx, view, start, at);
+  if (!made || isNoChange(view, made.link, made.change)) return;
+  const problem = judgeChange(view, made.link, made.change);
+  if (problem !== null) {
+    store.setState({ note: problem });
+    return;
+  }
+  store.setState({ note: null });
+  // Set before the send so an answer that comes at once finds it to clear.
+  const draft = { rect: made.change.rect, problem: null };
+  store.setState({ linkDraft: draft });
+  const sent = ctx.actions.dispatch({ t: "floorLink.update", linkId: made.link.id, patch: changePatch(made.change) }, { onAnswer: () => store.setState((s) => (s.linkDraft === draft ? { linkDraft: null } : {})) });
+  if (sent === null) {
+    store.setState({ linkDraft: null });
+    return;
+  }
+  ctx.ui.select(null);
+  ctx.scope.get(linkPaneSlot).setState({ linkId: made.link.id });
 }
 
 function cancel(ctx: ToolContext): void {
