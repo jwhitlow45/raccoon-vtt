@@ -30,11 +30,11 @@ import { ConsoleWatch, openSceneGroup, openSideTab, Shots, sideTabName, SocketWa
  * dispatch of many ops in one commit (D-261107-263), which the store's
  * `dispatchMany` is.
  *
- * It runs with `pnpm test:e2e` on E2E_PORT plus forty-one. The other
+ * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
  */
 
-const PORT = Number(process.env.E2E_PORT ?? 3100) + 41;
+const PORT = Number(process.env.E2E_PORT ?? 3100) + 77;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 
