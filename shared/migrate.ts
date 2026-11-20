@@ -2188,7 +2188,10 @@ export function seatsWhereDropped(opVersion: number | undefined): boolean {
  * her own start, still passed the squares between. From op version 63 the
  * trap step, an area's sweep and the turn's path read her walk, so a stop
  * on the way lands her where the trap step had her and an area she crossed
- * reminds. Ops stored before replay as they ran, skipping her.
+ * reminds. A token's own route back to its start, or back to the first
+ * square or hex clear of its mount (rules/dismount.ts restLeaves), records
+ * its leg and its feet too (review HEXOP-ASTRA-7). Ops stored before replay
+ * as they ran, skipping her.
  */
 export function walksThatReturn(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);

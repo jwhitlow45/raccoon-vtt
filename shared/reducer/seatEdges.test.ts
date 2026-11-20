@@ -13,7 +13,9 @@ import { isHex, SQUARES, type Grid } from "../rules/grid.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { hexKey, hexNeighbors } from "../rules/hex.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
-import { hexStandHexes, hexStandPlace } from "../rules/movement.ts";
+import { dismountCost } from "../rules/dismount.ts";
+import { hexStandHexes, hexStandPlace, ownWalk } from "../rules/movement.ts";
+import { routePoints } from "../rules/route.ts";
 import { trapLandings } from "../rules/traps.ts";
 import { DM, entry, env, member, P1, room, scene, template, token, trap } from "../testutil.ts";
 
@@ -25,8 +27,9 @@ import { DM, entry, env, member, P1, room, scene, template, token, trap } from "
  * HEXOP-OPUS4-1, HEXOP-OPUS4C-2). One every player sees under a hidden
  * holder ends where her place carries it (HEXOP-OPUS4-2). A walk that comes
  * back to where it started counts as a walk from op 63, seat or no seat
- * (HEXOP-ASTRA-5, HEXOP-OPUS4C-1). Review round 5 searches every spot in
- * her reach, whatever the sizes (HEXOP-ASTRA-6).
+ * (HEXOP-ASTRA-5, HEXOP-OPUS4C-1), and so does a token's own route
+ * (HEXOP-ASTRA-7). Review round 5 searches every spot in her reach,
+ * whatever the sizes (HEXOP-ASTRA-6).
  */
 
 const deps = { canUseAsset: () => true };
@@ -387,4 +390,45 @@ describe("a walk that comes back to where it started counts as a walk from op 63
     }
   });
 
+  test("the warhorse's own route out by 8, 2 and back records its leg and its feet on its path, as one ending on 3, 2 does (HEXOP-ASTRA-7)", () => {
+    const s = loop(false);
+    const back = applyOp(s, { t: "token.move", tokenId: "horse", x: 2, y: 2, route: [[8, 2, 0, 0], [2, 2, 0, 0]] }, P1, env(2));
+    const on = applyOp(s, { t: "token.move", tokenId: "horse", x: 3, y: 2, route: [[8, 2, 0, 0], [3, 2, 0, 0]] }, P1, env(2));
+    assert.ok(back.ok && on.ok);
+    const leg = (t: Token) => t.path?.stops.at(-1);
+    assert.deepEqual([at(back.state, "horse"), leg(back.state.tokens.horse!)?.moved, leg(back.state.tokens.horse!)?.cost], [[2, 2], 60, 60], "back on its start");
+    assert.deepEqual([leg(on.state.tokens.horse!)?.moved, leg(on.state.tokens.horse!)?.cost], [55, 55], "on 3, 2");
+    // Op 62 replays the loop as it ran: no path for the warhorse.
+    const old = applyOp(s, { t: "token.move", tokenId: "horse", x: 2, y: 2, route: [[8, 2, 0, 0], [2, 2, 0, 0]] }, P1, { ...env(2), opVersion: 62 });
+    assert.ok(old.ok);
+    assert.equal(old.state.tokens.horse!.path, undefined);
+  });
+
+  test("Bree's own walk off the warhorse out by 8, 3 and back to 4, 3, the first square clear of it, records the rest of the walk, as the ruler reads it (HEXOP-ASTRA-7)", () => {
+    const s = loop(false);
+    const route: [number, number, number, 0 | 1][] = [
+      [8, 3, 0, 0],
+      [4, 3, 0, 0],
+    ];
+    const op: OpOf<"token.move"> = { t: "token.move", tokenId: "bree", x: 4, y: 3, route };
+    const r = applyOp(s, op, P1, env(2));
+    assert.ok(r.ok);
+    const stops = (t: Token) => t.path!.stops.map((p) => [p.x, p.y, p.moved ?? 0, p.cost ?? 0]);
+    // Getting off costs half her Speed, 15 ft, for the square off it, then 40 ft out and back.
+    assert.deepEqual(stops(r.state.tokens.bree!), [
+      [3, 3, 0, 0],
+      [4, 3, 5, 15],
+      [4, 3, 40, 40],
+    ]);
+    const walker = ownWalk(s.tokens.bree!);
+    const ruler = dismountCost(SQUARES, s, walker, s.tokens.horse!, routePoints(s.buildChunks, walker, route, 0), route, s.meta.settings, { h: 0, v: 0 }, 15, false);
+    assert.deepEqual([ruler.moved, ruler.cost], [45, 55], "the ruler's feet");
+    // Op 62 replays it as it ran: the walk off and nothing more.
+    const old = applyOp(s, op, P1, { ...env(2), opVersion: 62 });
+    assert.ok(old.ok);
+    assert.deepEqual(stops(old.state.tokens.bree!), [
+      [3, 3, 0, 0],
+      [4, 3, 5, 15],
+    ]);
+  });
 });

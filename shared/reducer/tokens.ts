@@ -11,7 +11,7 @@ import { sameScene } from "../rules/floors.ts";
 import { hexRouteFeet, onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
 import { leftStart, planMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
-import { dismountSplit } from "../rules/dismount.ts";
+import { dismountSplit, restLeaves } from "../rules/dismount.ts";
 import { walkFrom } from "../rules/movement.ts";
 import { nudgeAt, nudgesToJudge, nudgeValid, withNudge } from "../rules/nudge.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
@@ -519,7 +519,9 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
   const split = dismountSplit(gridOfToken(tx.state, rider), tx.state, walking, mount, points, route);
   const off: Token = { ...next, ...split.off };
   const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, split.prefix, undefined, cost);
-  return split.whole || sameSpot(off, next) ? first : withPath(tx, first, next, judged, false, split.rest);
+  // From op version 63 a rest that leaves the first clear spot and comes back to it is a leg all the same (review HEXOP-ASTRA-7).
+  const back = walksThatReturn(tx.env.opVersion) && restLeaves(split);
+  return (split.whole || sameSpot(off, next)) && !back ? first : withPath(tx, first, next, judged, false, split.rest);
 }
 
 /**
@@ -568,8 +570,9 @@ export function withPath(
   const resized = (from.w !== to.w || from.h !== to.h) && sinceV6;
   const reshaped = resized || (sinceV6 && isSqueezed(before) !== isSqueezed(after));
   const inPlace = sameSpot(before, after);
-  // From op version 63 a carried walk that left its start and came back is a leg of the turn all the same (review HEXOP-ASTRA-5).
-  const returned = carried !== undefined && walksThatReturn(tx.env.opVersion) && leftStart(carried);
+  // From op version 63 a walk that left its start and came back is a leg of the turn all the same, a carried one or the token's
+  // own route (reviews HEXOP-ASTRA-5, HEXOP-ASTRA-7).
+  const returned = walksThatReturn(tx.env.opVersion) && (carried !== undefined ? leftStart(carried) : route?.some(([x, y]) => x !== before.x || y !== before.y) === true);
   if (!floors && !reshaped && inPlace && !returned) return after;
   const encounter = tx.state.encounter;
   let turn = turnUnderWay(encounter);

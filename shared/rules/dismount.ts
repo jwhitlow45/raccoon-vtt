@@ -49,6 +49,16 @@ export function dismountSplit(g: Grid, build: Pick<BuildState, "buildChunks">, r
 }
 
 /**
+ * Whether the rest of a walk off a mount leaves its first clear spot,
+ * wherever it ends. From op version 63 one that comes back there is a leg
+ * all the same (review HEXOP-ASTRA-7, migrate.ts walksThatReturn), so
+ * `whole` alone no longer means there is no rest.
+ */
+export function restLeaves(split: DismountSplit): boolean {
+  return split.rest?.some(([x, y]) => x !== split.off.x || y !== split.off.y) === true;
+}
+
+/**
  * What a rider's walk off its mount takes, the two parts summed: `halfFt`
  * for the first, and the rest's own cost. `counter` holds the diagonals
  * the turn's counted legs took before it, `swimSpeed` whether the rider
@@ -80,7 +90,7 @@ export function dismountCost(
   };
   let running = counter;
   const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(g, rider, seat, split.off, rules, counter);
-  if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
+  if (split.whole && !restLeaves(split)) return { moved: first.moved, cost: halfFt, diag: first.diag };
   running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
   // The rest of the walk goes on from where the walk off the mount left the rider (movement.ts walkOn).
   const start = walkFrom(build.buildChunks, rider);
