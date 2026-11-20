@@ -6,6 +6,7 @@ import { ownsToken } from "../tokens/access.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
+import { byFallAge } from "#shared/rules/fallCards.ts";
 import { fallers, fallNames } from "./desk.ts";
 
 /*
@@ -80,10 +81,9 @@ export function newestMade(falls: Readonly<Record<string, Fall | undefined>> | u
 
 /** The fall cards made after `after`, oldest first, so their toasts come in the order they fell. */
 export function fallsAfter(falls: Readonly<Record<string, Fall | undefined>> | undefined, after: number): Fall[] {
-  const place = (card: Fall) => Number(card.id.slice(card.id.indexOf(":") + 1));
   return Object.values(falls ?? {})
     .filter((card): card is Fall => card !== undefined && card.made > after)
-    .sort((a, b) => a.made - b.made || place(a) - place(b));
+    .sort(byFallAge);
 }
 
 /** A fall's toast for the DM: its words, and Show where the floor it names is not the one shown. */

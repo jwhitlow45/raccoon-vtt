@@ -5,6 +5,7 @@ import { inSightOfNonOwners } from "../project.ts";
 import { ownEntry } from "../records.ts";
 import { isCreature, onHolder } from "../rules/attach.ts";
 import { fallDrop, isHole, linkHeight, linksOn, spaceOn } from "../rules/floorLinks.ts";
+import { byFallAge } from "../rules/fallCards.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { landThrough } from "./floorLinks.ts";
 import { invalid, type Tx } from "./tx.ts";
@@ -200,20 +201,11 @@ export function leaveSeat(tx: Tx, was: Token): void {
   tx.write(keys.token(now.id), loose);
 }
 
-/** The cards in eviction order: the oldest `made` first, then their place among their op's cards. */
-function byAge(a: Fall, b: Fall): number {
-  return a.made - b.made || placeOf(a.id) - placeOf(b.id);
-}
-
-function placeOf(id: FallId): number {
-  return Number(id.slice(id.indexOf(":") + 1));
-}
-
 /** Drops the oldest cards past FALLS_PER_ROOM (4.4). */
 function evict(tx: Tx): void {
   const all = Object.values(tx.state.falls ?? {});
   if (all.length <= FALLS_PER_ROOM) return;
-  all.sort(byAge);
+  all.sort(byFallAge);
   for (const old of all.slice(0, all.length - FALLS_PER_ROOM)) tx.remove(keys.fall(old.id));
 }
 
@@ -244,7 +236,7 @@ export function dropGoneCards(tx: Tx, before: RoomState): void {
   if (tx.actor.role !== "dm") return;
   const falls = tx.state.falls;
   if (falls === undefined) return;
-  for (const card of Object.values(falls).sort(byAge)) {
+  for (const card of Object.values(falls).sort(byFallAge)) {
     const named = [card.tokenId, ...(card.riders ?? [])];
     if (named.some((id) => ownEntry(before.tokens, id) !== undefined) && named.every((id) => ownEntry(tx.state.tokens, id) === undefined)) tx.remove(keys.fall(card.id));
   }

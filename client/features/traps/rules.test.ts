@@ -6,6 +6,7 @@ import { CHUNK_CELLS, type BuildChunk, type Trap, type TrapRig } from "#shared/m
 import { clientOpSchema } from "#shared/protocol.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { pitOpen } from "#shared/rules/traps.ts";
+import { floorBelow } from "#shared/rules/floorLinks.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LEVEL_BANDS, TRAP_PRESET_IDS } from "#shared/srd/traps.ts";
 import { actor, DM, env, room, token } from "#shared/testutil.ts";
@@ -14,7 +15,6 @@ import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   afterSummary,
   A_PIT,
-  floorBelow,
   floorWord,
   INTO_GROUP,
   intoHelp,
@@ -354,8 +354,11 @@ describe("a trapdoor's Into (docs/design/design-v1-floors.md phase 4, 4.6)", () 
   test("the floor just below, none on the lowest floor or a scene of one floor", () => {
     assert.equal(floorBelow(view, "upper")?.id, "ground");
     assert.equal(floorBelow(view, "ground")?.id, "cellar");
-    assert.equal(floorBelow(view, "cellar"), null);
-    assert.equal(floorBelow(view, "cave"), null);
+    assert.equal(floorBelow(view, "cellar"), undefined);
+    assert.equal(floorBelow(view, "cave"), undefined);
+    // The pane reads the reducer's own rule (FLR4-OPUS-4): by level, so a floor with no level just under it has none below, as the server refuses.
+    const gap = { scenes: { ground: floor("ground", 0, "Ground floor"), attic: floor("attic", 2, "Attic") } } as never;
+    assert.equal(floorBelow(gap, "attic"), undefined);
     assert.equal(floorWord(view, "cellar"), "Cellar");
     assert.equal(floorWord(view, "cave"), "Cave");
   });

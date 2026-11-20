@@ -1,5 +1,5 @@
 import { LIMITS } from "#shared/limits.ts";
-import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Scene, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
+import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect, hexAnchor, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
 import { onSqueezedLattice, ownWalk } from "#shared/rules/movement.ts";
@@ -15,7 +15,6 @@ import type { AskFill } from "../rolls/logic.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { findDoor, segmentDistance, type Point } from "../doors/doors.ts";
 import { cellWord, isHex, type Grid } from "#shared/rules/grid.ts";
-import { floorsOf } from "#shared/rules/floors.ts";
 import { ownEntry } from "#shared/records.ts";
 
 /*
@@ -653,13 +652,6 @@ export function intoHelp(below: string): string {
 /** The server's refusal of a trapdoor on a floor with none below it, which the pane shows where a stored one has none. */
 export function noFloorUnder(floor: string): string {
   return `There is no floor below ${floor}.`;
-}
-
-/** The floor just below a trap's floor, among its scene's floors, or null on the lowest floor and on a scene of one floor. */
-export function floorBelow(view: Pick<RoomState, "scenes">, sceneId: string): Scene | null {
-  const floors = floorsOf(view, sceneId);
-  const at = floors.findIndex((f) => f.id === sceneId);
-  return at > 0 ? (floors[at - 1] ?? null) : null;
 }
 
 /** A floor's own name, else its scene's, for the words: "Cellar". */

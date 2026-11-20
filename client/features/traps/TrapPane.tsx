@@ -6,6 +6,7 @@ import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
 import { pitOpen, trapCreature, zoneHexes } from "#shared/rules/traps.ts";
+import { floorBelow } from "#shared/rules/floorLinks.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -48,7 +49,6 @@ import {
   cleanNote,
   disarmFill,
   findSummary,
-  floorBelow,
   floorWord,
   hitsSummary,
   INTO_GROUP,

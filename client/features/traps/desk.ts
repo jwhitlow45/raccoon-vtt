@@ -1,12 +1,13 @@
 import type { BuildChunk, Fall, LogEntry, LogEvent, RoomState, Token, Trap, TrapAction, TrapDue } from "#shared/model.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { ownEntry } from "#shared/records.ts";
-import { fallDice } from "#shared/rules/floorLinks.ts";
+import { byFallAge } from "#shared/rules/fallCards.ts";
+import { fallDice, floorBelow } from "#shared/rules/floorLinks.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { displayName } from "../../lib/scene.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { Labels } from "../../lib/labels.ts";
-import { floorBelow, floorWord } from "./rules.ts";
+import { floorWord } from "./rules.ts";
 
 /*
  * What a trap going off shows the DM (docs/design/design-v1-traps.md 4.3), as
@@ -87,7 +88,7 @@ export function didLines(trap: Trap, did: readonly { action: number; ok: boolean
 function trapdoorLine(trap: Trap, ok: boolean, view: Pick<RoomState, "scenes">): string {
   const below = floorBelow(view, trap.sceneId);
   if (ok) return `Opened the trapdoor onto ${below?.floor?.name ?? "the floor below"}.`;
-  return below === null ? `Could not open the trapdoor: there is no floor below ${floorWord(view, trap.sceneId)}.` : "Could not open the trapdoor.";
+  return below === undefined ? `Could not open the trapdoor: there is no floor below ${floorWord(view, trap.sceneId)}.` : "Could not open the trapdoor.";
 }
 
 /** Whether a squares trap reaches past its scene's edge, as a scene made smaller leaves it: the one other reason a pit cannot open. */
@@ -134,10 +135,9 @@ export function foldedWithTraps(base: { text: string; label: string } | null, tr
 
 /** The fall cards waiting for the DM, newest first: by the op each was made in, then its place among that op's cards. */
 export function deskFalls(falls: Readonly<Record<string, Fall | undefined>> | undefined): Fall[] {
-  const place = (card: Fall) => Number(card.id.slice(card.id.indexOf(":") + 1));
   return Object.values(falls ?? {})
     .filter((card): card is Fall => card !== undefined)
-    .sort((a, b) => b.made - a.made || place(b) - place(a));
+    .sort((a, b) => byFallAge(b, a));
 }
 
 /**
