@@ -98,6 +98,20 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
     }
   });
 
+  test("P1's area on a creature in their sight that the DM hid counts as one the DM deleted, as their copies are alike", () => {
+    const seen = () => {
+      const state = onHidden();
+      state.tokens.y = { ...state.tokens.y!, visibility: "all" };
+      return state;
+    };
+    const hidden = seen();
+    hidden.templates.a1 = { ...hidden.templates.a1!, visibility: "dm" };
+    const deleted = seen();
+    delete deleted.templates.a1;
+    assert.equal(copyOf(hidden, "p1"), copyOf(deleted, "p1"), "P1's copies are alike");
+    assert.deepEqual([...exactCopies(hidden, "p1").keys()], [...exactCopies(deleted, "p1").keys()]);
+  });
+
   test("random rooms through the DM's ops, P1's areas and rulers on hidden creatures among them", () => {
     const found: string[] = [];
     let checked = 0;
