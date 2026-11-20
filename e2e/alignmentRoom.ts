@@ -409,9 +409,28 @@ export class Sweep {
   }
 }
 
-/** Whether a locator shows within `ms`, without failing. */
+/** Whether a locator shows within `ms`, without failing. A probe for what may not show, which a short `ms` keeps quick. */
 function showsWithin(l: Locator, ms: number): Promise<boolean> {
   return l.waitFor({ timeout: ms }).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * How long the sweep waits for a screen or state it must reach before it calls it missing, as harness waitFor's
+ * default does. A slow runner's late screen is not a missing one, and one that shows ends the wait at once.
+ */
+const SHOWS_MS = 15_000;
+
+/** Whether a screen the sweep must reach shows, within SHOWS_MS. */
+function shows(l: Locator): Promise<boolean> {
+  return showsWithin(l, SHOWS_MS);
+}
+
+/** Whether a control the sweep must press takes a press within SHOWS_MS: shown, enabled and not busy. */
+function takesPress(l: Locator, what: string): Promise<boolean> {
+  return untilReady(l, what, SHOWS_MS).then(
     () => true,
     () => false,
   );
@@ -577,19 +596,30 @@ async function toastScreen(sweep: Sweep, page: Page, screen: string, words: RegE
   await dismissToasts(page);
   await cause();
   const toast = toasts(page, words);
-  if (await showsWithin(toast.first(), 3_000)) await sweep.measure(page, screen, toast);
+  if (await shows(toast.first())) await sweep.measure(page, screen, toast);
   else await sweep.missing(page, screen, `no toast read ${words}`);
   await dismissToasts(page);
 }
 
-/** An undo another's change overtook, and so refused, as `page` presses Ctrl+Z: `mine` moves Thorn, and `theirs` moves him after. */
+/**
+ * An undo another's change overtook, and so refused, as `page` presses Ctrl+Z: `mine` moves Thorn, and `theirs` moves
+ * him after. The page undoes the head its own history names, so a page still a batch behind the op sockets names one
+ * the room has moved past, and the room refuses it as a changed history instead. That refusal comes behind the
+ * batches the page lacked, on its own socket, so the page has caught up by then and its second Ctrl+Z is the one meant.
+ */
 async function refusedUndo(page: Page, mine: OpSocket, theirs: OpSocket): Promise<void> {
   // From his place on the ground, so neither move meets the pit or a ledge.
   await resetThorn();
   await mine.send({ t: "token.move", tokenId: run.ids.thorn, x: 5, y: 6 });
   await theirs.send({ t: "token.move", tokenId: run.ids.thorn, x: 5, y: 5 });
-  await escapeAll(page);
-  await page.keyboard.press("Control+z");
+  const behind = toasts(page, /^Play history changed\./);
+  for (let i = 0; i < 2; i++) {
+    await escapeAll(page);
+    await page.keyboard.press("Control+z");
+    // toastScreen says it if neither shows.
+    if (!(await shows(toasts(page, /^Could not undo/).or(behind).first())) || !(await visible(behind))) return;
+    await dismissToasts(page);
+  }
 }
 
 /** A roll of Perception with its d20, by `who`'s token, which every viewer sees. */
@@ -607,7 +637,7 @@ async function notesScreen(sweep: Sweep, page: Page, pane: Locator): Promise<voi
   await name.press("Enter");
   await dice.fill("2d");
   await dice.press("Enter");
-  const notes = (await showsWithin(pane.getByText("A trap needs a name."), 2_000)) && (await showsWithin(pane.getByText(/^Not a dice formula/), 2_000));
+  const notes = (await shows(pane.getByText("A trap needs a name."))) && (await shows(pane.getByText(/^Not a dice formula/)));
   if (notes) await sweep.measure(page, "trap-pane-notes", pane);
   else await sweep.missing(page, "trap-pane-notes", "Enter on a cleared name and on 2d gave no notes");
   await name.fill(was.name);
@@ -634,7 +664,7 @@ async function unfoldAll(root: Locator): Promise<void> {
     await next.click();
     // The fold itself, not the nth folded one, which is another once it opens.
     const fold = next;
-    await waitFor("the group to unfold", async () => ((await fold.getAttribute("aria-expanded")) !== "false" ? true : null), 3_000);
+    await waitFor("the group to unfold", async () => ((await fold.getAttribute("aria-expanded")) !== "false" ? true : null), SHOWS_MS);
     await fold.dispose();
   }
 }
@@ -718,7 +748,7 @@ async function canvasAt(page: Page, cell: { x: number; y: number }): Promise<boo
 async function selectToken(page: Page, name: string, cell: { x: number; y: number }): Promise<Locator | null> {
   await tapCell(page, BOUNDS, cell);
   const bar = page.getByRole("dialog", { name: `${name} actions` });
-  return (await showsWithin(bar, 3_000)) ? bar : null;
+  return (await shows(bar)) ? bar : null;
 }
 
 /**
@@ -752,7 +782,7 @@ async function barHeader(bar: Locator): Promise<Locator> {
 async function measureWindow(sweep: Sweep, page: Page, screen: string, bar: Locator, headers: HeaderPlace[], groupLine: boolean): Promise<void> {
   if ((await bar.getAttribute("data-bar-state")) === "expanded") {
     await bar.getByRole("button", { name: "Collapse", exact: true }).click();
-    await waitFor("the strip", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null), 3_000);
+    await waitFor("the strip", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null), SHOWS_MS);
   }
   await sweep.measure(page, `${screen}-header`, await barHeader(bar));
   await expandBar(bar);
@@ -773,7 +803,7 @@ async function toolMenuScreen(sweep: Sweep, page: Page): Promise<void> {
   const setup = nav.getByRole("button", { name: /^Setup tools/ });
   const buttons = nav.locator("button[data-active]");
   // The toolbar draws its buttons once it has measured its room.
-  await waitFor("the toolbar's buttons", async () => ((await visible(setup)) || (await buttons.count()) > 1 ? true : null), 3_000);
+  await waitFor("the toolbar's buttons", async () => ((await visible(setup)) || (await buttons.count()) > 1 ? true : null), SHOWS_MS);
   let name = "Setup tools";
   if (await visible(setup)) await setup.first().click();
   else if ((await buttons.count()) <= 3) {
@@ -783,7 +813,7 @@ async function toolMenuScreen(sweep: Sweep, page: Page): Promise<void> {
     await second.click();
   } else return;
   const menu = page.getByRole("menu", { name });
-  if (!(await showsWithin(menu, 3_000))) {
+  if (!(await shows(menu))) {
     await sweep.missing(page, name === "Tools" ? "tools-menu" : "setup-menu", `${name} opened no menu`);
     await escapeAll(page);
     return;
@@ -803,7 +833,7 @@ async function shortcutSheetScreen(sweep: Sweep, page: Page): Promise<void> {
   await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
   await page.keyboard.press("?");
   const sheet = page.getByRole("dialog", { name: "Shortcuts" });
-  if (!(await showsWithin(sheet, 3_000))) {
+  if (!(await shows(sheet))) {
     await sweep.missing(page, "shortcut-sheet-toolbar", "? opened no sheet");
     return;
   }
@@ -955,7 +985,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   ] as const) {
     const p = await pagePoint(page, BOUNDS, at);
     await page.mouse.click(p.x, p.y);
-    if (!(await showsWithin(pane, 3_000))) {
+    if (!(await shows(pane))) {
       await sweep.missing(page, `trap-pane-${which}`, "a tap on the trap opened no pane");
       await escapeAll(page);
       continue;
@@ -988,7 +1018,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await spring(run.traps.needle);
   await patCrosses();
   const wentOff = toasts(page, /went off/);
-  if (await showsWithin(wentOff.first(), 3_000)) await sweep.measure(page, "toast-under-pane", wentOff);
+  if (await shows(wentOff.first())) await sweep.measure(page, "toast-under-pane", wentOff);
   else await sweep.missing(page, "toast-under-pane", "no toast for the trip wire");
   const dock = page.locator("[data-rvtt-pane-dock]");
   if (await visible(dock)) await sweep.measure(page, "pane-dock", dock);
@@ -1016,7 +1046,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await waitFor("the settled trap cards to leave", async () => (await page.getByRole("group", { name: /went off$/ }).count()) === 0 ? true : null);
   await patCrosses();
   const underCard = toasts(page, /went off/);
-  if (await showsWithin(underCard.first(), 3_000)) {
+  if (await shows(underCard.first())) {
     await sweep.add(page, "toast-lane", await toastLaneLines(page, `${sweep.at} toast-under-card`));
     if ((await toastsUnderCards(page)) > 0) sweep.seen.add("toast-under-card");
     else if (size.width < size.height && size.width <= 430) await sweep.missing(page, "toast-under-card", "the toast stood under no alert card");
@@ -1030,7 +1060,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await spring(run.traps.needle);
   await patCrosses();
   const wentOff2 = toasts(page, /went off/);
-  if (await showsWithin(wentOff2.first(), 3_000)) {
+  if (await shows(wentOff2.first())) {
     await sweep.measure(page, "toast-column", wentOff2);
     await sweep.add(page, "toast-lane", await toastLaneLines(page, `${sweep.at} toast-lane`));
   } else await sweep.missing(page, "toast-column", "no toast for the trip wire");
@@ -1044,7 +1074,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       // cards go over the screen.
       const tapped = (await fold.elementHandle())!;
       await tapped.click();
-      await waitFor("the tapped card to draw open", async () => ((await tapped.evaluate((el) => !el.isConnected || el.getAttribute("aria-expanded") === "true")) ? true : null), 3_000);
+      await waitFor("the tapped card to draw open", async () => ((await tapped.evaluate((el) => !el.isConnected || el.getAttribute("aria-expanded") === "true")) ? true : null), SHOWS_MS);
       await tapped.dispose();
       // The open card's height is read on the frame after the tap. Where it leaves the first card no room above the tool's options, the cards are asked for as the summary row's tap asks for them. A measure taken sooner read a column still moving, which on a slow CI page folded into its row mid-measure.
       await columnSettled(page);
@@ -1067,11 +1097,11 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await ops.send({ t: "trap.update", trapId: run.traps.wire, patch: { rig: { note: tallNote } } });
   const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
   try {
-    if (await showsWithin(summary.first(), 2_500)) {
+    if (await shows(summary.first())) {
       await sweep.measure(page, "alerts-summary", summary.first());
       await summary.first().click();
       const overlay = page.getByRole("dialog", { name: "Alerts" });
-      if (await showsWithin(overlay, 2_500)) await sweep.measure(page, "alerts-overlay", overlay);
+      if (await shows(overlay)) await sweep.measure(page, "alerts-overlay", overlay);
       else await sweep.missing(page, "alerts-overlay", "a tap on the summary row showed no alerts");
     } else await sweep.missing(page, "alerts-summary", "the opened first card's long note did not force a summary");
     if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
@@ -1154,7 +1184,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     // The prisoner too where the window leaves its cell clear, as on a short screen it may not.
     if (await canvasAt(page, { x: 10, y: 3 })) await tapCell(page, BOUNDS, { x: 10, y: 3 });
     const group = page.locator('[role="dialog"][data-bar-mode]');
-    if (await showsWithin(group.first(), 3_000)) {
+    if (await shows(group.first())) {
       // FL-3: both group entry points show mixed typed damage at every measured size.
       await group.first().getByLabel("HP change", { exact: true }).fill("11 cold + 3 fire");
       await group.first().getByLabel("HP change", { exact: true }).blur();
@@ -1192,7 +1222,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
         await sweep.measure(page, "snapoff-snap-row", placed.locator('[data-bar-row="play"]'));
         await sweep.add(page, "snapoff-snap-row", await placementPairLines(placed.locator('[data-bar-row="play"]'), `${sweep.at} snapoff-snap-row`, size.name === "1440x900"));
         await place.click();
-        await waitFor("Place freely pressed", async () => ((await place.getAttribute("aria-pressed")) === "true" ? true : null), 3_000);
+        await waitFor("Place freely pressed", async () => ((await place.getAttribute("aria-pressed")) === "true" ? true : null), SHOWS_MS);
         await sweep.measure(page, "snapoff-pressed-row", placed.locator('[data-bar-row="play"]'));
         await place.click();
       }
@@ -1287,7 +1317,7 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
       // Setup, so folded on a phone (docs/design/design-v1-scenes-reorg.md 3).
       await openSceneGroup(panel, "Fog and vision");
       const lends = panel.getByText("Lends its sight to Pat");
-      if (await showsWithin(lends.first(), 5_000)) {
+      if (await shows(lends.first())) {
         const section = panel.locator("[data-vision-sight]").locator("xpath=ancestor::*[@data-panel-group][1]");
         await section.scrollIntoViewIfNeeded();
         await sweep.measure(page, "vision-section", section);
@@ -1298,7 +1328,7 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
     const panel = await openPanelOf(page, "Scenes");
     await openSceneGroup(panel, "Fog and vision");
     const row = panel.locator("[data-vision-sight]");
-    if (!(await showsWithin(row, 5_000))) {
+    if (!(await shows(row))) {
       await sweep.missing(page, "vision-sight", "the Scenes panel showed no Sight row");
       return;
     }
@@ -1310,14 +1340,14 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
     await ops.send({ t: "vision.holders", sceneId, on: [run.patId] });
     await ops.send({ t: "vision.holders", sceneId, on: [] });
     const off = list.getByText("Pat sees only what creatures that share sight see here.");
-    if (await showsWithin(off, 5_000)) await sweep.measure(page, "vision-holders-off", list);
+    if (await shows(off)) await sweep.measure(page, "vision-holders-off", list);
     else await sweep.missing(page, "vision-holders-off", "Pat's entry turned off showed no line");
     await ops.send({ t: "vision.holders", sceneId, on: [run.patId] });
     const box = list.getByRole("checkbox", { name: "Pat" });
-    await waitFor("Pat ticked", async () => ((await box.isChecked()) ? true : null), 5_000);
+    await waitFor("Pat ticked", async () => ((await box.isChecked()) ? true : null), SHOWS_MS);
     await box.click();
     const question = list.getByRole("group", { name: "Untick Pat?" });
-    if (await showsWithin(question, 3_000)) {
+    if (await shows(question)) {
       await question.scrollIntoViewIfNeeded();
       await sweep.measure(page, "vision-untick", list);
       await question.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1343,7 +1373,7 @@ async function settled(el: Locator): Promise<void> {
     last = box;
     if (!still) await twoFrames(el);
     return still ? true : null;
-  }, 5_000);
+  }, SHOWS_MS);
 }
 
 /** Two animation frames of `el`'s page. */
@@ -1914,7 +1944,7 @@ async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Prom
     const loading = preview.locator('[data-preview-wait="loading"]');
     // The status stays mounted, empty until the shared delay, so the wait is for its words.
     const loadingWords = loading.getByRole("status").filter({ hasText: "Loading what Pat sees" });
-    if (await showsWithin(loadingWords, 3_000)) {
+    if (await shows(loadingWords)) {
       await sweep.measure(page, "preview-loading", loading);
       await sweep.add(page, "preview-loading-words", await previewWaitTextLines(loadingWords, scale, `${sweep.at} preview-loading-words`));
     } else await sweep.missing(page, "preview-loading", "the preview showed no loading line");
@@ -1923,7 +1953,7 @@ async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Prom
     await held.close();
     const failed = preview.locator('[data-preview-wait="failed"]');
     const failedWords = failed.getByRole("alert").filter({ hasText: "Could not load what Pat sees." });
-    if (await showsWithin(failedWords, 3_000)) {
+    if (await shows(failedWords)) {
       await sweep.measure(page, "preview-failed", failed);
       await sweep.add(page, "preview-failed-words", await previewWaitTextLines(failedWords, scale, `${sweep.at} preview-failed-words`));
     } else await sweep.missing(page, "preview-failed", "a closed preview socket said nothing");
@@ -2002,7 +2032,9 @@ async function closeDiceSheet(page: Page): Promise<void> {
  * from their summary row, for one.
  */
 async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: Locator, name: RegExp, host: Locator, reshow?: () => Promise<unknown>): Promise<void> {
-  if (!(await showsWithin(button, 4_000))) return sweep.missing(page, screen, "its roll button never showed");
+  if (!(await shows(button))) return sweep.missing(page, screen, "its roll button never showed");
+  // A roll button is drawn busy while what it rolls waits on the room, as Again is while its roll waits for its answer, and opens no menu then.
+  if (!(await takesPress(button, screen))) return sweep.missing(page, screen, "its roll button stayed busy or disabled");
   /** The scrolled boxes around the button, innermost first. */
   const scrolls = () => button.evaluate((el) => {
     type El = { scrollTop: number; parentElement: El | null; tagName: string };
@@ -2029,7 +2061,7 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     const scrollBefore = await scrolls();
     await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
     await page.keyboard.press(key);
-    if (!(await showsWithin(menu, 3_000))) return false;
+    if (!(await shows(menu))) return false;
     await frames();
     const after = JSON.stringify(await button.boundingBox());
     if (after !== before) {
@@ -2050,7 +2082,7 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     await page.keyboard.press("Escape");
     await menu.waitFor({ state: "detached" }).catch(() => undefined);
     if (!shown) return;
-    const back = await waitFor(`${screen}'s button to take focus back`, () => button.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement || null, undefined, { timeout: 500 }).catch(() => null), 1_500).catch(() => false);
+    const back = await waitFor(`${screen}'s button to take focus back`, () => button.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement || null, undefined, { timeout: 500 }).catch(() => null), SHOWS_MS).catch(() => false);
     if (back) return;
     const gone = (await visible(button)) ? "" : ", and the button went from view";
     await sweep.add(page, screen, [`${sweep.at} ${screen}: the Escape that closed ${key}'s menu closed more than the menu: focus went to ${await focused()}${gone}`]);
@@ -2065,7 +2097,7 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     await close("ContextMenu", shown);
   }
   if (reshow && !(await visible(button))) await reshow();
-  if (!(await showsWithin(button, 2_000))) return sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button never came back for Shift+F10`]);
+  if (!(await shows(button))) return sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button never came back for Shift+F10`]);
   shown = false;
   try {
     shown = await open("Shift+F10");
@@ -2088,7 +2120,7 @@ async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
   try {
     const host = await openDice(page);
     const tabs = host.getByRole("tablist", { name: "Roll for" });
-    if (!(await showsWithin(tabs, 4_000))) return sweep.missing(page, "dp-card-tabs", "Pat's creatures showed no tabs");
+    if (!(await shows(tabs))) return sweep.missing(page, "dp-card-tabs", "Pat's creatures showed no tabs");
     await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
     await host.getByRole("region", { name: "Rolls for Thorn" }).waitFor();
     await sweep.measure(page, "dp-card-tabs", host.locator("[data-dice-card]"));
@@ -2178,7 +2210,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     // Three selected: the dragon, still selected with its window open, the goblin and the kobold. A second tap on the dragon would let it go.
     await closeDiceSheet(page);
     const again = page.getByRole("dialog", { name: `${dmName(run.ids.dragon)} actions` });
-    if (!(await showsWithin(again, 3_000))) return sweep.missing(page, "dp-several", "the dragon's window closed with the Dice sheet");
+    if (!(await shows(again))) return sweep.missing(page, "dp-several", "the dragon's window closed with the Dice sheet");
     await (await barControl(again, "Multi-select")).click();
     // Two more creatures where the map shows them: the dragon's window covers some cells at some sizes.
     let added = 0;
@@ -2189,11 +2221,11 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
       added++;
     }
     const group = page.locator('[role="dialog"][data-bar-mode]').filter({ hasText: /\d+ selected/ }).first();
-    if (!(await showsWithin(group, 3_000))) return sweep.missing(page, "dp-several", `Multi-select and ${added} taps opened no group window`);
+    if (!(await shows(group))) return sweep.missing(page, "dp-several", `Multi-select and ${added} taps opened no group window`);
     await (await barControl(group, "Roll")).click();
     const several = await openDice(page);
     const rolls = several.locator('section[aria-label="Group rolls"]');
-    if (!(await showsWithin(rolls.getByRole("heading", { name: /^\d+ selected$/ }), 5_000))) return sweep.missing(page, "dp-several", "the group window's Roll showed no several-selected card");
+    if (!(await shows(rolls.getByRole("heading", { name: /^\d+ selected$/ })))) return sweep.missing(page, "dp-several", "the group window's Roll showed no several-selected card");
     await unfoldAll(rolls);
     await sweep.measure(page, "dp-several", rolls);
     await skillLabelScreen(sweep, page, rolls, "several");
@@ -2307,7 +2339,7 @@ async function closeSheets(page: Page): Promise<void> {
     const n = await open.count();
     if (n === 0) return;
     await open.first().getByRole("button", { name: /^Close / }).first().click();
-    await waitFor("a sheet put away", async () => ((await open.count()) < n ? true : null), 5_000);
+    await waitFor("a sheet put away", async () => ((await open.count()) < n ? true : null), SHOWS_MS);
   }
 }
 
@@ -2315,14 +2347,16 @@ async function closeSheets(page: Page): Promise<void> {
  * An alert card by its name: in the alerts column, or, where the column
  * stands as its summary row, in the alerts that row opens over the screen.
  */
-async function alertCard(page: Page, name: string | RegExp): Promise<Locator | null> {
+async function alertCard(page: Page, name: string | RegExp, opts: { optional?: boolean } = {}): Promise<Locator | null> {
   const inColumn = page.getByRole("group", { name, exact: true }).filter({ visible: true }).first();
-  if (await showsWithin(inColumn, 3_000)) return inColumn;
-  const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
-  if (!(await visible(summary))) return null;
-  await summary.first().click();
+  const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).filter({ visible: true }).first();
+  // A card that may have gone is probed briefly. One the sweep must reach is waited for, in whichever place the page draws it first.
+  const appears = (l: Locator) => (opts.optional ? showsWithin(l, 3_000) : shows(l));
+  if (!(await appears(inColumn.or(summary).first()))) return null;
+  if (await visible(inColumn)) return inColumn;
+  await summary.click();
   // A summary can restore the column or open Alerts. The named group is reachable in either place.
-  return (await showsWithin(inColumn, 4_500)) ? inColumn : null;
+  return (await appears(inColumn)) ? inColumn : null;
 }
 
 /** The tracker: the side panel's tab from 900 layout px up, else the sheet the turn strip's button opens. */
@@ -2510,7 +2544,7 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     // Dismissed here alone, so Thorn's token is free for the bar's tap.
     await turn.getByRole("button", { name: "Dismiss Thorn's turn" }).click();
   } else await sweep.missing(page, "cu-turn-amount", "Thorn's turn showed Pat no turn card");
-  const saveAgain = await alertCard(page, "Death save for Thorn");
+  const saveAgain = await alertCard(page, "Death save for Thorn", { optional: true });
   if (saveAgain) await saveAgain.getByRole("button", { name: "Dismiss", exact: true }).click();
   await escapeAll(page);
 
@@ -2532,7 +2566,7 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
  */
 async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   // Thorn's death save shows the DM too, and could cover a token.
-  const save = await alertCard(page, "Death save for Thorn");
+  const save = await alertCard(page, "Death save for Thorn", { optional: true });
   if (save) await save.getByRole("button", { name: "Dismiss", exact: true }).click();
   await escapeAll(page);
 
@@ -2566,7 +2600,7 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   // Auto Initiative, its re-roll on so it has dice to roll, then off as it was.
   // Auto Initiative is the tracker's own section, outside the round's.
   const reroll = page.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).filter({ visible: true }).first();
-  if (await showsWithin(reroll, 3_000)) {
+  if (await shows(reroll)) {
     await reroll.check();
     const auto = page.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).filter({ visible: true }).first();
     await rollMenuScreen(sweep, page, "dpf1-menu-auto", auto, /^Roll options for Initiative$/, auto.locator("xpath=ancestor::section[1]"));
@@ -2579,7 +2613,7 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   consoles.dm.expectSocketFailures = true;
   await dmContext.setOffline(true);
   await lair.click();
-  await waitFor("In lair busy", async () => ((await lair.getAttribute("aria-busy")) === "true" ? true : null), 5_000);
+  await waitFor("In lair busy", async () => ((await lair.getAttribute("aria-busy")) === "true" ? true : null), SHOWS_MS);
   await sweep.measure(page, "cu-in-lair-busy", lair);
   await dmContext.setOffline(false);
   await waitFor("the dragon in its lair", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === run.fight.dragon)?.inLair ? true : null), 20_000);
@@ -2642,7 +2676,7 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   await escapeAll(page);
   // Under the recharge card, then alone once Done puts that card away.
   await turnBesideBar(sweep, page);
-  const done = await alertCard(page, `Fire Breath can recharge (5–6). ${redDragon()}`);
+  const done = await alertCard(page, `Fire Breath can recharge (5–6). ${redDragon()}`, { optional: true });
   if (done) {
     await done.getByRole("button", { name: "Done", exact: true }).click();
     await done.waitFor({ state: "detached" });
@@ -2792,7 +2826,7 @@ async function requestScreen(sweep: Sweep, page: Page, pane: Locator): Promise<v
   await ask.scrollIntoViewIfNeeded();
   await ask.click();
   const sheet = page.getByRole("dialog", { name: "Request a roll" });
-  if (!(await showsWithin(sheet, 3_000))) return sweep.missing(page, "request-roll", "Ask to disarm opened no request");
+  if (!(await shows(sheet))) return sweep.missing(page, "request-roll", "Ask to disarm opened no request");
   await sweep.measure(page, "request-roll", sheet);
   await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
   await sheet.waitFor({ state: "detached" });
@@ -2810,14 +2844,14 @@ async function openTrapSave(page: Page, trap: string): Promise<Locator | string>
   // The card in the column, or over the screen where the column's summary row stands in for its cards.
   const findCard = async (): Promise<Locator | null> => {
     const inColumn = page.getByRole("group", { name }).filter({ visible: true }).first();
-    if (await showsWithin(inColumn, 2_000)) return inColumn;
-    const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
-    if (!(await visible(summary))) return null;
-    await summary.first().click();
+    const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).filter({ visible: true }).first();
+    if (!(await shows(inColumn.or(summary).first()))) return null;
+    if (await visible(inColumn)) return inColumn;
+    await summary.click();
     const overlay = page.getByRole("dialog", { name: "Alerts" });
-    if (!(await showsWithin(overlay, 2_500))) return null;
+    if (!(await shows(overlay))) return null;
     const over = overlay.getByRole("group", { name }).first();
-    return (await visible(over)) ? over : null;
+    return (await shows(over)) ? over : null;
   };
   let card = await findCard();
   const fold = card?.locator("button[aria-expanded=false]");
@@ -2832,14 +2866,14 @@ async function openTrapSave(page: Page, trap: string): Promise<Locator | string>
       still = box === last ? still + 1 : 0;
       last = box;
       return still >= 2 ? true : null;
-    }, 3_000);
+    }, SHOWS_MS);
     await opened?.dispose();
     card = await findCard();
   }
   if (!card) return `no card showed for ${trap}'s springing`;
   await card.getByRole("button", { name: "Save and damage", exact: true }).click();
   const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
-  if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return "Save and damage opened no group save page";
+  if (!(await shows(host.getByText(new RegExp(`^From ${trap}`)).first()))) return "Save and damage opened no group save page";
   return host;
 }
 
@@ -2883,9 +2917,9 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
 async function playerRequestCard(page: Page): Promise<Locator | null> {
   const card = page.getByRole("dialog", { name: "The DM asks for a roll" }).filter({ visible: true }).first();
   const summary = page.getByRole("button", { name: /^Roll asked:/ }).filter({ visible: true }).first();
-  if (!(await showsWithin(card.or(summary).first(), 4_000))) return null;
+  if (!(await shows(card.or(summary).first()))) return null;
   if (!(await visible(card))) await summary.click();
-  return (await showsWithin(card, 3_000)) ? card : null;
+  return (await shows(card)) ? card : null;
 }
 
 /** Pat's ask card, as the DM asks for Thorn's save: Thorn has no stat block, so the card's roll row holds the bonus field and the extra dice. */
@@ -2911,7 +2945,7 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await resetThorn();
   await patCrosses();
   const own = toasts(page, /^Thorn: /);
-  if (await showsWithin(own.first(), 3_000)) await sweep.measure(page, "toast-player", own);
+  if (await shows(own.first())) await sweep.measure(page, "toast-player", own);
   else await sweep.missing(page, "toast-player", "no toast for Thorn's walk over the trip wire");
   await dismissToasts(page);
   await resetThorn();
@@ -2974,7 +3008,7 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await sweep.pills(page, "drag-pills", { needPills: true });
   await page.mouse.up();
   const note = page.locator("[data-stop-note]");
-  if (await showsWithin(note.first(), 3_000)) {
+  if (await shows(note.first())) {
     await sweep.measure(page, "stop-note", note.first());
     // The full note opens with a pane's header (StopNote.tsx PaneHeader), held to a map pane's place. A compact one lays its sentence in a scrolling body beside Close instead.
     if ((await note.first().locator("[data-stop-note-body]").count()) === 0) await sweep.add(page, "stop-note-header", headerLines(await headerPlaces(note.first()), `${sweep.at} stop-note`));
@@ -2993,7 +3027,7 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   for (let i = 1; i <= 12; i++) await page.mouse.move(from.x + ((onto.x - from.x) * i) / 12, from.y + ((onto.y - from.y) * i) / 12);
   await page.mouse.up();
   const ledgeNote = page.locator("[data-stop-note]").filter({ hasText: /^Ledge in the way\./ });
-  if (await showsWithin(ledgeNote.first(), 3_000)) {
+  if (await shows(ledgeNote.first())) {
     await sweep.measure(page, "stop-note-ledge", ledgeNote.first());
     if ((await ledgeNote.first().locator("[data-stop-note-body]").count()) === 0) await sweep.add(page, "stop-note-ledge-header", headerLines(await headerPlaces(ledgeNote.first()), `${sweep.at} stop-note-ledge`));
   } else await sweep.missing(page, "stop-note-ledge", "the drop onto the rise showed no ledge note");
@@ -3010,7 +3044,7 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await page.mouse.down();
     for (let i = 1; i <= 8; i++) await page.mouse.move(start.x + ((end.x - start.x) * i) / 8, start.y + ((end.y - start.y) * i) / 8);
     await page.mouse.up();
-    await waitFor("Thorn a cell south", () => (dmSocket.state?.tokens[run.ids.thorn]?.y === 6 ? true : null), 5_000);
+    await waitFor("Thorn a cell south", () => (dmSocket.state?.tokens[run.ids.thorn]?.y === 6 ? true : null), SHOWS_MS);
     const moved = page.getByRole("dialog", { name: "Thorn actions" });
     const strip = (await showsWithin(moved, 1_500)) ? moved : await selectToken(page, "Thorn", { x: 5, y: 6 });
     if (strip) {
@@ -3030,7 +3064,7 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   // Pat's pause screen while the DM blacks out the players' view (live play 18).
   await ops.send({ t: "view.blackout", blackout: true });
   const paused = page.getByText("The DM has paused the game.");
-  if (await showsWithin(paused, 3_000)) await sweep.measure(page, "pat-blackout", page.locator("body"));
+  if (await shows(paused)) await sweep.measure(page, "pat-blackout", page.locator("body"));
   else await sweep.missing(page, "pat-blackout", "the blackout showed no pause screen");
   await ops.send({ t: "view.blackout", blackout: false });
   await paused.waitFor({ state: "detached" });
@@ -3532,7 +3566,7 @@ async function ic2PlainGroups(sweep: Sweep, page: Page): Promise<void> {
   await pickTool(page, "Trap");
   const p = await pagePoint(page, BOUNDS, { x: 10.5, y: 6.5 });
   await page.mouse.click(p.x, p.y);
-  if (await showsWithin(pane, 3_000)) {
+  if (await shows(pane)) {
     await foldGroups(pane);
     const read = await groupOverflowLines(pane, at, "ic2-plain-trap");
     if (read.folded < 5) await sweep.missing(page, "ic2-plain-trap", `read ${read.folded} folded groups, not the pane's own`);
@@ -5177,7 +5211,7 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
         still = box === last ? still + 1 : 0;
         last = box;
         return still >= 2 ? true : null;
-      }, 3_000);
+      }, SHOWS_MS);
       await opened?.dispose();
       dmCard = await alertCard(page, title);
       assert.ok(dmCard, "fl7: the expanded DM request stays reachable");
@@ -6367,7 +6401,7 @@ export function fu30Tests(): void {
       await waitFor("the DM's snapshot", () => dmSocket.state);
       await openTracker(page);
       const header = page.locator("[data-round-header]").first();
-      if (!(await showsWithin(header.getByRole("timer", { name: /^Turn time is up, \+\d:\d\d over$/ }), 10_000))) await sweep.missing(page, "fu30-round-overtime", "the turn's clock never ran over");
+      if (!(await shows(header.getByRole("timer", { name: /^Turn time is up, \+\d:\d\d over$/ })))) await sweep.missing(page, "fu30-round-overtime", "the turn's clock never ran over");
       await sweep.add(page, "fu30-round-overtime", await roundLines(header, sweep.at));
       await sweep.measure(page, "fu30-round-overtime", header.locator(":scope > div").first());
       await shots.take(page, `alignment-fu30-round-${sweep.at}`);
@@ -6431,7 +6465,7 @@ export function fu30Tests(): void {
         await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
         await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
         await page.locator('section[aria-label="Outliner"]').waitFor();
-        if (!(await showsWithin(bar.locator("[data-vitals]").getByText("↑10 ft", { exact: true }), 5_000))) await sweep.missing(page, screen, "the elevation badge never left the window's header for the vitals line");
+        if (!(await shows(bar.locator("[data-vitals]").getByText("↑10 ft", { exact: true })))) await sweep.missing(page, screen, "the elevation badge never left the window's header for the vitals line");
         await sweep.measure(page, screen, bar.locator("[data-vitals]"));
         await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
         await closeSheets(page);
@@ -6616,7 +6650,7 @@ async function summaryScreen(sweep: Sweep, page: Page, c: { name: string; tap: {
   // A short bar keeps speed, Passive Perception and the saves in More stats (docs/design/design-v1-token-panel.md 3.3).
   const more = bar.getByRole("button", { name: "More stats", exact: true });
   if ((await visible(more)) && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
-  if (c.saves && !(await showsWithin(bar.locator("[data-saves]").first(), 10_000))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
+  if (c.saves && !(await shows(bar.locator("[data-saves]").first()))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
   await sweep.measure(page, screen, bar.locator("[data-vitals], [data-saves]"));
   await sweep.add(page, screen, await speedEndLines(bar, `${sweep.at} ${screen}`));
   if (shot) await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
@@ -6717,11 +6751,11 @@ async function openThornResync(page: Page): Promise<Locator | null> {
   else await (await barControl(bar, "Stat block")).click();
   const panel = wide ? page.getByRole("tabpanel", { name: sideTabName("Token") }) : page.getByRole("region", { name: "Token", exact: true });
   const resync = panel.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true });
-  if (!(await showsWithin(resync, 3_000))) {
-    // The Stat block group as this device last left it, folded.
-    await panel.getByRole("button", { name: /^Stat block/ }).first().click();
-    if (!(await showsWithin(resync, 5_000))) return null;
-  }
+  const fold = panel.getByRole("button", { name: /^Stat block/ }).first();
+  if (!(await shows(resync.or(fold).first()))) return null;
+  // The Stat block group as this device last left it, folded. Its fold is pressed only then, as a press on an open one would shut it.
+  if (!(await visible(resync)) && (await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  if (!(await shows(resync))) return null;
   await resync.scrollIntoViewIfNeeded();
   await resync.click();
   const review = page.getByRole("dialog", { name: "Re-sync review" });
@@ -6767,7 +6801,7 @@ async function openedGroup(panel: Locator, name: string): Promise<Locator> {
   const fold = panel.getByRole("button", { name, exact: true });
   await fold.first().waitFor();
   if ((await fold.first().getAttribute("aria-expanded")) === "false") await fold.first().click();
-  await waitFor(`${name} open`, async () => ((await fold.first().getAttribute("aria-expanded")) === "true" ? true : null), 3_000);
+  await waitFor(`${name} open`, async () => ((await fold.first().getAttribute("aria-expanded")) === "true" ? true : null), SHOWS_MS);
   // A filter's inner locator is read inside each group, so it starts from the page, not the panel.
   return panel.locator("[data-panel-group]").filter({ has: panel.page().getByRole("button", { name, exact: true }) });
 }
@@ -6790,7 +6824,7 @@ async function stepperRowScreens(sweep: Sweep, page: Page, fireball: string): Pr
   await escapeAll(page);
   const areas = await openPanel(page, "Areas");
   await areas.locator(`[data-opener="area-${fireball}"]`).click();
-  if (!(await showsWithin(areas.getByRole("button", { name: "Slot level plus 1", exact: true }), 4_000))) await sweep.missing(page, "fu32-slot-level", "Save and damage opened no page with a Slot level");
+  if (!(await shows(areas.getByRole("button", { name: "Slot level plus 1", exact: true })))) await sweep.missing(page, "fu32-slot-level", "Save and damage opened no page with a Slot level");
   else await fixedRowScreen(sweep, page, "fu32-slot-level", areas, "Slot level");
   const discard = areas.getByRole("button", { name: "Discard", exact: true });
   if (await visible(discard)) await discard.first().click();
@@ -6883,8 +6917,11 @@ async function modeTileLines(tiles: Locator, at: string): Promise<string[]> {
 async function brushStepper(page: Page): Promise<Locator> {
   const bar = page.getByRole("toolbar", { name: "Map builder options" });
   const inRow = bar.getByRole("group", { name: "Brush size", exact: true });
-  if (await showsWithin(inRow, 1_500)) return inRow;
-  await bar.getByRole("button", { name: "More options" }).click();
+  const more = bar.getByRole("button", { name: "More options" });
+  // The row draws the stepper and ⋯ together, so once either shows, a stepper not in the row is in ⋯.
+  await shows(inRow.or(more).first());
+  if (await visible(inRow)) return inRow;
+  await more.click();
   return page.getByRole("dialog", { name: "More Map builder options" }).getByRole("group", { name: "Brush size", exact: true });
 }
 
@@ -6965,7 +7002,7 @@ async function wingScreens(sweep: Sweep, page: Page): Promise<void> {
     const wall = await pagePoint(page, WING_KEEP, { x: 13, y: 8.5 });
     await page.mouse.click(wall.x, wall.y);
     // The line says the area and join took. Generate a wing stands in the row, or in ⋯ where a narrow row has no room for it.
-    if (!(await showsWithin(page.locator('[data-options-line="shown"]').filter({ hasText: "joined at the ringed wall" }).first(), 5_000))) {
+    if (!(await shows(page.locator('[data-options-line="shown"]').filter({ hasText: "joined at the ringed wall" }).first()))) {
       const said = await page.locator('[data-options-line="shown"]').first().innerText().catch(() => "");
       await sweep.missing(page, "builder-wing-row", `the area and join never took: ${said}`);
       return;
@@ -7107,7 +7144,7 @@ export function clockTests(): void {
       }, { roomId: run.roomId, panel: which, scale: String(at.scale) });
       await reopenRoom(pat);
       await pat.getByRole("status", { name: "Connected" }).first().waitFor();
-      if (await showsWithin(pat.getByText(one.line, { exact: true }), 10_000)) await sweep.measure(pat, one.root, await openPanel(pat, one.title));
+      if (await shows(pat.getByText(one.line, { exact: true }))) await sweep.measure(pat, one.root, await openPanel(pat, one.title));
       else await sweep.missing(pat, one.root, `a reload asking for ${one.title} with nothing shared showed no line`);
     }
     try {
@@ -7187,7 +7224,7 @@ export function clockTests(): void {
           await popover.waitFor();
           await popover.getByRole("button", { name: "Move the clock on 10 minutes", exact: true }).click();
           const notice = page.getByText("Blessed ended on Thorn.", { exact: true }).first();
-          if (await showsWithin(notice, 5_000)) {
+          if (await shows(notice)) {
             const [a, b] = [await popover.boundingBox(), await notice.boundingBox()];
             if (a && b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height) {
               sweep.lines.push(`${sweep.at} tm-popover-notice: the clock popover ${JSON.stringify(a)} and the expiry notice ${JSON.stringify(b)} overlap`);
@@ -7657,7 +7694,7 @@ export function panelGroupTests(): void {
           if ((await fog.getAttribute("aria-expanded")) === "true") await fog.click();
           const vision = sceneGroup(panel, "Fog and vision");
           const tag = vision.getByText("No walls", { exact: true });
-          if (!(await showsWithin(tag, 5_000))) await sweep.missing(page, "pg-scenes-no-walls", "Fog and vision folded on a map with no walls wore no tag");
+          if (!(await shows(tag))) await sweep.missing(page, "pg-scenes-no-walls", "Fog and vision folded on a map with no walls wore no tag");
           else {
             await vision.scrollIntoViewIfNeeded();
             await groups(sweep, page, "pg-scenes-no-walls", panel, vision);
@@ -8243,7 +8280,7 @@ function floorsRootTests(): void {
             const menu = await openMenu(page);
             // The Menu panel loads its body on first open, so its Floor row comes a moment after the panel does.
             const row = menu.locator(floorRoot("menu-row"));
-            await showsWithin(row.first(), 5_000);
+            await shows(row.first());
             await sweep.measure(page, "floors-menu-row", row);
             await closeSheets(page);
           }
@@ -8367,7 +8404,7 @@ function floorLinkBuildTests(): void {
           // An end's pane, and with Remove armed, whose words wrap rather than run past the pane.
           await tapCell(page, BOUNDS, { x: 6, y: 6 });
           const pane = page.locator(`[${LINK_PANE_ATTR}]`);
-          if (!(await showsWithin(pane, 5_000))) await sweep.missing(page, "flrk-pane", "a tap on an end opened no pane");
+          if (!(await shows(pane))) await sweep.missing(page, "flrk-pane", "a tap on an end opened no pane");
           else {
             await sweep.measure(page, "flrk-pane", pane);
             await shots.take(page, `alignment-${sweep.at}-flrk-pane`);
@@ -8542,7 +8579,7 @@ function floorMarkerIsoTests(): void {
       await closeSheets(page);
       await escapeAll(page);
       await view("Isometric");
-      await waitFor("the stairs pill in Isometric", async () => ((await boardPillWords(page)).some((w) => w.includes("Up to")) ? true : null), 8_000);
+      await waitFor("the stairs pill in Isometric", async () => ((await boardPillWords(page)).some((w) => w.includes("Up to")) ? true : null), SHOWS_MS);
       const pills = await boardPillBoxes(page);
       const marker = pills.find((p) => /ft/.test(p.text));
       if (!marker) lines.push("no turn marker drew");
@@ -8597,7 +8634,7 @@ function floorPillTests(): void {
         await closeSheets(page);
         await escapeAll(page);
         const where = `${at.size.name} at ${at.scale * 100}%`;
-        const pill = await waitFor(`the stairs pill at ${where}`, async () => (await boardPillWords(page)).find((w) => w.includes("Up to")) ?? null, 8_000).catch(() => null);
+        const pill = await waitFor(`the stairs pill at ${where}`, async () => (await boardPillWords(page)).find((w) => w.includes("Up to")) ?? null, at.size.touch ? 8_000 : SHOWS_MS).catch(() => null);
         // A phone zoomed out draws no name at all (trapNameShown), so a missing pill is no cut one there. A desktop's zoom shows it, so there it must draw.
         if (pill === null && !at.size.touch) lines.push(`${where}: no stairs pill drew`);
         if (pill !== null && !/^Up to Upper floor( · |\n)Not reached yet$/.test(pill)) lines.push(`${where}: the stairs pill reads ${JSON.stringify(pill)}`);
@@ -8611,7 +8648,7 @@ function floorPillTests(): void {
           const up = bar.locator('[data-climb="up"]:visible').first();
           // Where the strip has no room, Go up is behind Expand, as flrl-9 finds it.
           if (!(await showsWithin(up, 3_000)) && (await bar.getAttribute("data-bar-state")) === "rest") await expandBar(bar);
-          if (await showsWithin(up, 3_000)) await sweep.measure(page, "fu53-go-up", bar);
+          if (await shows(up)) await sweep.measure(page, "fu53-go-up", bar);
           else await sweep.missing(page, "fu53-go-up", "the bar offers no Go up");
         }
         lines.push(...sweep.lines);
@@ -8845,7 +8882,7 @@ export function md4Tests(): void {
         // A stroke across open ground the scout sees, so the row says the party sees it. Each size paints a row of its own: a stroke over floor already painted builds nothing.
         await dragCells(page, { w: 12, h: 8 }, { x: 5, y: i + 1 }, { x: 7, y: i + 1 });
         const bar = page.getByRole("toolbar", { name: "Map builder options" });
-        if (await showsWithin(bar.getByText(BUILD_IN_SIGHT).first(), 5_000)) {
+        if (await shows(bar.getByText(BUILD_IN_SIGHT).first())) {
           await sweep.measure(page, "md4-builder-note", bar);
           await shots.take(page, `alignment-md4-builder-note-${atName(at)}`);
           // Where the row cuts the note short, a tap opens it whole.
@@ -8917,7 +8954,7 @@ export function md4Tests(): void {
         await more.getByRole("button", { name: "Tap again to clear" }).click();
         if (await more.isVisible()) await page.keyboard.press("Escape");
         const ask = page.getByRole("dialog", { name: "Remembered map" });
-        if (await showsWithin(ask, 10_000)) {
+        if (await shows(ask)) {
           await sweep.measure(page, "md4-forget-question", ask);
           await shots.take(page, `alignment-md4-forget-question-${atName(at)}`);
           await page.keyboard.press("Escape");
@@ -9455,7 +9492,7 @@ export function toastsOverSheetTests(): void {
         await spring(run.traps.needle);
         await patCrosses();
         const underCard = toasts(page, /went off/);
-        if (!(await showsWithin(underCard.first(), 3_000))) lines.push(`${sweep.at}: no toast for the trip wire`);
+        if (!(await shows(underCard.first()))) lines.push(`${sweep.at}: no toast for the trip wire`);
         else if ((await toastsUnderCards(page)) === 0) lines.push(`${sweep.at}: the toast stood under no alert card, so it does not test the sheet opening over it`);
         else {
           const over = await openDice(page);
@@ -9531,7 +9568,7 @@ export function toastsOverSheetTests(): void {
         if ((await shown.count()) !== 1) lines.push(`${sweep.at}: ${await shown.count()} toasts drawn while one is held whole, not just it`);
         await closeSheets(page);
         const waited = toasts(page, /Over the map two\./);
-        if (!(await showsWithin(waited.first(), 3_000))) lines.push(`${sweep.at}: the toasts that waited behind the whole one were dropped unseen as the sheet closed`);
+        if (!(await shows(waited.first()))) lines.push(`${sweep.at}: the toasts that waited behind the whole one were dropped unseen as the sheet closed`);
         await shots.take(page, `lk1-toasts-${sweep.at}-closed`);
       }
       await dismissToasts(page);
@@ -9940,7 +9977,7 @@ export function panelSizeAlignmentTests(): void {
         const row = aside.locator('div:has(> [role="tablist"][aria-label="Panels"])').first();
         for (const width of [360, at.cap]) {
           await storeLive(page, "rvtt.sidePanelWidth", width === 360 ? "" : String(width));
-          await waitFor(`the panel at ${width}`, async () => ((await edge.getAttribute("aria-valuenow")) === String(width) ? true : null), 5_000);
+          await waitFor(`the panel at ${width}`, async () => ((await edge.getAttribute("aria-valuenow")) === String(width) ? true : null), SHOWS_MS);
           for (const choice of ["dark", "light"] as const) {
             await scheme(page, choice);
             const sweep = new Sweep(`ps-${atName(at)}-${width}-${choice}`);
@@ -9989,7 +10026,7 @@ export function panelSizeAlignmentTests(): void {
           for (const stand of ["normal", "full"] as const) {
             if (stand === "full") {
               await up.click();
-              await waitFor("the sheet full and at rest", async () => ((await sheet.getAttribute("aria-modal")) === "true" && (await sheet.evaluate((el) => (el as unknown as { style: { transform: string } }).style.transform)) === "" ? true : null), 5_000);
+              await waitFor("the sheet full and at rest", async () => ((await sheet.getAttribute("aria-modal")) === "true" && (await sheet.evaluate((el) => (el as unknown as { style: { transform: string } }).style.transform)) === "" ? true : null), SHOWS_MS);
             }
             const sweep = new Sweep(`ps-${SHEET_MOUSE.name}${scale === 1 ? "" : "-130"}-${stand}-${choice}`);
             const before = sweep.lines.length;
@@ -10353,7 +10390,7 @@ export function musicPlayerAlignmentTests(): void {
    */
   async function nowPlayer(page: Page): Promise<{ root: Locator; screen: string } | null> {
     const dialog = page.getByRole("dialog", { name: "Now playing", exact: true });
-    if (!(await showsWithin(dialog.locator("[data-now-player]"), 5_000))) return null;
+    if (!(await shows(dialog.locator("[data-now-player]")))) return null;
     if ((await dialog.getAttribute("data-rvtt-popover")) !== null) return { root: dialog, screen: "qe-now-popover" };
     const box = dialogBox(dialog);
     const width = (await box.boundingBox())?.width ?? 0;
@@ -10389,14 +10426,14 @@ export function musicPlayerAlignmentTests(): void {
         await ops.send({ t: "sound.stopAll" });
         const page = await sizePage(at);
         const chip = page.locator('header[data-rvtt-topbar] [data-chip="nowPlaying"]');
-        const state = (want: string) => waitFor(`the chip ${want}`, async () => ((await chip.getAttribute("data-chip-state")) === want ? true : null), 5_000);
+        const state = (want: string) => waitFor(`the chip ${want}`, async () => ((await chip.getAttribute("data-chip-state")) === want ? true : null), SHOWS_MS);
         try {
           const runId = uuidv7();
           await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
           for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: uuidv7(), soundId, volume: 70 });
           await waitFor("music and two loops playing", () => (dmSocket.state?.playing?.music?.run === runId && Object.keys(dmSocket.state.playing.loops ?? {}).length === lib.loops.length ? true : null));
           // At 100% the chip has room from 700 px. On an upright phone the speaker beside it takes its room, since a phone's chip leaves before the gaps tighten (docs/design/design-v1-volume.md 3), and at 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
-          const shown = await showsWithin(chip, 5_000);
+          const shown = at.scale === 1 && at.size.width >= 700 ? await shows(chip) : await showsWithin(chip, 5_000);
           if (!shown && at.scale === 1 && at.size.width >= 700) sweep.lines.push(`${sweep.at} qe-now-chip: no Now playing chip while music plays`);
           // With the speaker on the bar, an upright phone at 100% gives the chip to the DM menu, which holds Now playing (D-261108-409).
           if (at.size.width === 390 && at.scale === 1 && (await visible(page.locator("header[data-rvtt-topbar] [data-volume-button]")))) {
@@ -10466,7 +10503,7 @@ export function musicPlayerAlignmentTests(): void {
   /** The speaker's Volume as it opened: the popover under it from 900 px up, else a card or a bottom sheet, whose own box is measured. Null where none opened. */
   async function volumeOpened(page: Page): Promise<{ root: Locator; form: "popover" | "card" | "sheet" } | null> {
     const dialog = page.getByRole("dialog", { name: "Volume", exact: true });
-    if (!(await showsWithin(dialog.locator("[data-device-sound]"), 5_000))) return null;
+    if (!(await shows(dialog.locator("[data-device-sound]")))) return null;
     if ((await dialog.getAttribute("data-rvtt-popover")) !== null) return { root: dialog, form: "popover" };
     const box = dialogBox(dialog);
     const width = (await box.boundingBox())?.width ?? 0;
@@ -10507,7 +10544,7 @@ export function musicPlayerAlignmentTests(): void {
     const flip = async () => {
       const was = await pressed();
       await toggle.click();
-      await waitFor("the mute toggle turned", async () => ((await pressed()) !== was ? true : null), 3_000);
+      await waitFor("the mute toggle turned", async () => ((await pressed()) !== was ? true : null), SHOWS_MS);
     };
     // A player's device not asked yet starts muted: each state is measured under its own name either way, and the stored choice is put back, so a later step's ask still comes.
     const choice = await page.evaluate(() => localStorage.getItem("rvtt.roomSound"));
@@ -10602,7 +10639,7 @@ async function openChipMenu(page: Page, kind: string, mark: "dm" | "blackout" | 
   const chip = barChip(page, kind).first();
   if (!(await visible(chip))) return null;
   await chip.click();
-  return (await showsWithin(menu, 3_000)) ? menu : null;
+  return (await shows(menu)) ? menu : null;
 }
 
 async function shutChipMenu(page: Page, menu: Locator): Promise<void> {
@@ -10648,7 +10685,7 @@ async function openSearch(page: Page, text?: string): Promise<Locator | null> {
   await escapeAll(page);
   await page.keyboard.press("Control+k");
   const sheet = page.locator("[data-search-sheet]");
-  if (!(await showsWithin(sheet, 5_000))) return null;
+  if (!(await shows(sheet))) return null;
   if (text !== undefined) await sheet.locator("[data-search-field]").fill(text);
   return sheet;
 }
@@ -10695,7 +10732,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   await sweep.measure(page, "qe-dm-menu", menu);
   await chipItem(menu, "showHandout").click();
   const handout = page.getByRole("dialog", { name: "Show a handout", exact: true });
-  if (await showsWithin(handout, 5_000)) {
+  if (await shows(handout)) {
     await handout.getByText("Loading the library…").waitFor({ state: "detached" });
     await sweep.measure(page, "qe-handout-dialog", dialogBox(handout));
     await page.keyboard.press("Escape");
@@ -10708,7 +10745,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     await sweep.measure(page, "qe-chip-clock", clock);
     await clock.click();
     const popover = page.getByRole("dialog", { name: "Time", exact: true }).filter({ has: page.locator("[data-chip-time]") });
-    if (await showsWithin(popover, 3_000)) await sweep.measure(page, "qe-clock-popover", popover);
+    if (await shows(popover)) await sweep.measure(page, "qe-clock-popover", popover);
     else await sweep.missing(page, "qe-clock-popover", "the clock chip opened no steps");
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "detached" });
@@ -10719,7 +10756,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     if (menu && time && (await visible(time))) {
       await time.click();
       const steps = page.getByRole("dialog", { name: "Time", exact: true });
-      if (await showsWithin(steps.locator("[data-chip-time]"), 3_000)) await sweep.measure(page, "qe-time-sheet", dialogBox(steps));
+      if (await shows(steps.locator("[data-chip-time]"))) await sweep.measure(page, "qe-time-sheet", dialogBox(steps));
       else await sweep.missing(page, "qe-time-sheet", "the DM menu's Time opened no steps");
       await page.keyboard.press("Escape");
       await steps.waitFor({ state: "detached" });
@@ -10734,7 +10771,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   if (sheet) {
     await sweep.measure(page, "qe-search-empty", dialogBox(sheet));
     await sheet.locator("[data-search-field]").fill("show");
-    await waitFor("the search's rows for show", async () => ((await sheet.locator("[data-search-row]").count()) >= 4 ? true : null), 5_000);
+    await waitFor("the search's rows for show", async () => ((await sheet.locator("[data-search-row]").count()) >= 4 ? true : null), SHOWS_MS);
     await sweep.measure(page, "qe-search-full", dialogBox(sheet));
     await shutSearch(page);
   } else await sweep.missing(page, "qe-search-empty", "Ctrl+K opened no search");
@@ -10745,7 +10782,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     const region = page.getByRole("region", { name: "Panels" });
     const field = region.locator('[data-search-open="panels"]');
     // The field, then the room over each of the list's headings: the first under the field, the others under a row (QE2-OLD).
-    if (await showsWithin(field, 3_000)) {
+    if (await shows(field)) {
       await sweep.measure(page, "qe-panels-search", field);
       await sweep.add(page, "qe-panels-headings", await headingRoomLines(field, region.getByRole("list", { name: "Panels" }), `${sweep.at} qe-panels-headings`, at.scale));
     } else await sweep.missing(page, "qe-panels-search", "the Panels list has no search field");
@@ -10759,7 +10796,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   const change = members.getByRole("button", { name: "Change your color", exact: true });
   await change.click();
   const swatches = members.getByRole("radiogroup", { name: "Your color" });
-  if (await showsWithin(swatches, 3_000)) {
+  if (await shows(swatches)) {
     await swatches.scrollIntoViewIfNeeded();
     await sweep.measure(page, "qe-your-color", swatches.locator("xpath=ancestor::div[span[normalize-space()='Your color']][1]"));
     const picker = members.locator(`[id="${await change.getAttribute("aria-controls")}"]`);
@@ -10861,7 +10898,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
     try {
       const move = chipItem(menu, "movePlayers");
       await move.click();
-      if (await showsWithin(menu.getByText(/^Players not moved\./).first(), 5_000)) await sweep.measure(page, "qe-dm-menu-refused", menu);
+      if (await shows(menu.getByText(/^Players not moved\./).first())) await sweep.measure(page, "qe-dm-menu-refused", menu);
       else await sweep.missing(page, "qe-dm-menu-refused", "a refused move said nothing in its item");
     } finally {
       frames.spoil = null;
@@ -10873,7 +10910,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
   menu = await openChipMenu(page, "dm", "dm");
   if (menu) {
     await chipItem(menu, "movePlayers").click();
-    if (await showsWithin(chipItem(menu, "movePlayers:anyway"), 3_000)) await sweep.measure(page, "qe-dm-menu-armed", menu);
+    if (await shows(chipItem(menu, "movePlayers:anyway"))) await sweep.measure(page, "qe-dm-menu-armed", menu);
     else await sweep.missing(page, "qe-dm-menu-armed", "a move to a scene with fog off did not ask");
     await shutChipMenu(page, menu);
   }
@@ -10881,9 +10918,9 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
   const sheet = await openSearch(page, "move players here");
   if (sheet) {
     const row = sheet.locator('[data-search-row="item:movePlayers"]');
-    if (await showsWithin(row, 5_000)) {
+    if (await shows(row)) {
       await row.click();
-      if (await showsWithin(sheet.getByText("Fog is off here, so players will see the whole scene.").first(), 3_000)) await sweep.measure(page, "qe-search-warning", dialogBox(sheet));
+      if (await shows(sheet.getByText("Fog is off here, so players will see the whole scene.").first())) await sweep.measure(page, "qe-search-warning", dialogBox(sheet));
       else await sweep.missing(page, "qe-search-warning", "the row's move did not ask");
     } else await sweep.missing(page, "qe-search-warning", "no Move players here row");
     await shutSearch(page);
@@ -10894,7 +10931,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
   try {
     const black = barChip(page, "blackout");
     const eye = page.locator('header[data-rvtt-topbar] [data-chip="dm"][data-chip-form="eye"]');
-    await waitFor("Players see black or the crossed eye", async () => ((await visible(black)) || (await visible(eye)) ? true : null), 5_000).catch(() => null);
+    await waitFor("Players see black or the crossed eye", async () => ((await visible(black)) || (await visible(eye)) ? true : null), SHOWS_MS).catch(() => null);
     if (await visible(black)) {
       await sweep.measure(page, "qe-chip-blackout", black);
       const own = await openChipMenu(page, "blackout", "blackout");
@@ -10919,7 +10956,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
 /** The bar in a fight on Thorn's turn (qe-c): the row with the turn chip's next faces and the DM's Next where the strip is in the row, else the band with Next at its end. */
 async function qolFightScreens(sweep: Sweep, page: Page, at: { size: Size; scale: number }): Promise<void> {
   const next = page.locator("header[data-rvtt-topbar]").getByRole("button", { name: "Next turn", exact: true });
-  if (!(await showsWithin(next, 5_000))) return sweep.missing(page, "qe-next", "a fight showed the DM no Next");
+  if (!(await shows(next))) return sweep.missing(page, "qe-next", "a fight showed the DM no Next");
   await sweep.measure(page, "qe-next", next);
   const band = turnBand(page);
   if (await visible(band)) await sweep.measure(page, "qe-band", band);
@@ -10962,7 +10999,7 @@ async function cutWords(scope: Locator): Promise<string[]> {
 
 /** Waits out a turn notice's flare, a pill that stands in the row for TURN_NOTICE_MS and is not this sweep's (see the qe-d step). */
 async function afterFlare(page: Page): Promise<void> {
-  await waitFor("the turn notice's flare to settle", async () => ((await page.locator("header[data-rvtt-topbar] .rvtt-turn-notice").count()) === 0 ? true : null), 8_000);
+  await waitFor("the turn notice's flare to settle", async () => ((await page.locator("header[data-rvtt-topbar] .rvtt-turn-notice").count()) === 0 ? true : null), SHOWS_MS);
 }
 
 /**
@@ -10987,7 +11024,7 @@ async function qolPatScreens(sweep: Sweep, page: Page, at: { size: Size; scale: 
     await sweep.measure(page, "qe-you-menu", menu);
     await chipItem(menu, "xcard").click();
     const card = page.getByRole("dialog", { name: "X-card", exact: true });
-    if (await showsWithin(card, 3_000)) await sweep.measure(page, "qe-xcard", dialogBox(card));
+    if (await shows(card)) await sweep.measure(page, "qe-xcard", dialogBox(card));
     else await sweep.missing(page, "qe-xcard", "the You menu's X-card opened nothing");
     await page.keyboard.press("Escape");
     await card.waitFor({ state: "detached" });
@@ -11001,7 +11038,7 @@ async function qolPatScreens(sweep: Sweep, page: Page, at: { size: Size; scale: 
 
   await page.getByRole("button", { name: "Find my token", exact: true }).first().click();
   const bar = page.getByRole("dialog", { name: "Thorn actions" });
-  if (!(await showsWithin(bar, 5_000))) return sweep.missing(page, "qe-pat-find", "Find my token opened no bar for Thorn");
+  if (!(await shows(bar))) return sweep.missing(page, "qe-pat-find", "Find my token opened no bar for Thorn");
   await sweep.measure(page, "qe-pat-find", bar);
   if (at.size.width < 900) {
     const own = bar.getByRole("button", { name: /End turn$/ });
@@ -11278,7 +11315,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   }
   if (card) {
     const attacks = card.locator("[data-card-attacks]");
-    if (await showsWithin(attacks, 5_000)) {
+    if (await shows(attacks)) {
       if ((await card.locator("[data-apply-to]").count()) === 0) {
         await attacks.getByRole("button", { name: "Scimitar", exact: true }).click();
         await attacks.getByRole("button", { name: /^Scimitar damage/ }).click();
@@ -11302,7 +11339,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       await field.press("Enter");
       const last = dice.locator("[data-dice-last]");
       // The whole box with the chips at its foot, which keeps its line and chips in its middle (Roller.tsx LastResult).
-      if (await showsWithin(last.locator("[data-apply-to]"), 5_000)) await sweep.measure(page, "qe-dice-last", last);
+      if (await shows(last.locator("[data-apply-to]"))) await sweep.measure(page, "qe-dice-last", last);
       else await sweep.missing(page, "qe-dice-last", "a roll with the warrior selected offered no chips");
       await closeSheets(page);
       await escapeAll(page);
@@ -11314,7 +11351,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   await dismissToasts(page);
   await patOps.send({ t: "dice.roll", tag: uuidv7(), to: "all", rolls: [{ formula: "1d8+3", label: "Longsword damage", creature: { tokenId: run.ids.thorn } }] });
   const toast = page.locator("[data-toast]").filter({ hasText: /^Pat rolled \d+/ }).filter({ visible: true });
-  if (await showsWithin(toast.first(), 5_000)) {
+  if (await shows(toast.first())) {
     const sends = toast.first().locator("[data-toast-sends]");
     if (await visible(sends)) await sweep.measure(page, "qe-toast-apply", toast.first());
     else {
@@ -11322,7 +11359,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       await sweep.measure(page, "qe-toast-apply-row", toast.first());
       await toast.first().getByRole("button", { name: /^Pat rolled/ }).click();
       const whole = page.locator('[data-toast-form="whole"]');
-      if (await showsWithin(whole.locator("[data-toast-sends]"), 3_000)) await sweep.measure(page, "qe-toast-apply", whole);
+      if (await shows(whole.locator("[data-toast-sends]"))) await sweep.measure(page, "qe-toast-apply", whole);
       else await sweep.missing(page, "qe-toast-apply", "a tap on the toast's row showed no chips");
     }
   } else await sweep.missing(page, "qe-toast-apply", "Pat's damage roll toasted nothing on the DM's page");
@@ -11342,7 +11379,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       await conditions.click();
       const recent = bar.getByRole("group", { name: "Recent", exact: true });
       // The Recent row alone: the Statuses grid under it is older than it and not its.
-      if (await showsWithin(recent, 3_000)) await sweep.measure(page, "qe-bar-conditions", recent);
+      if (await shows(recent)) await sweep.measure(page, "qe-bar-conditions", recent);
       else await sweep.missing(page, "qe-bar-conditions", "the bar's Conditions have no Recent row");
       // The Statuses grid on its own, where a two-word name wraps to a second line (QE2-OLD).
       const statuses = bar.getByRole("group", { name: "Other statuses", exact: true });
@@ -11357,7 +11394,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
         await token.first().waitFor();
         await token.first().getByRole("button", { name: "Add", exact: true }).first().click();
         const picked = token.first().getByRole("group", { name: "Recent", exact: true });
-        if (await showsWithin(picked, 3_000)) {
+        if (await shows(picked)) {
           await picked.scrollIntoViewIfNeeded();
           await sweep.measure(page, "qe-panel-conditions", picked);
         } else await sweep.missing(page, "qe-panel-conditions", "the Token panel's picker has no Recent row");
@@ -11398,7 +11435,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
     const ask = page.getByRole("dialog", { name: "Request a roll" });
     await ask.waitFor();
     await ask.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Wisdom" }).click();
-    if (await showsWithin(ask.getByRole("group", { name: "Recent DCs", exact: true }), 3_000)) await sweep.measure(page, "qe-request-dcs", ask);
+    if (await shows(ask.getByRole("group", { name: "Recent DCs", exact: true }))) await sweep.measure(page, "qe-request-dcs", ask);
     else await sweep.missing(page, "qe-request-dcs", "a save's DC has no Recent DCs");
     await page.keyboard.press("Escape");
     await ask.waitFor({ state: "detached" });
@@ -11411,7 +11448,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   const fold = dmPanel.getByRole("button", { name: "Handouts", exact: true });
   if ((await fold.count()) > 0 && (await fold.getAttribute("aria-expanded")) === "false") await fold.click();
   const recentList = dmPanel.getByRole("list", { name: "Recent handouts" });
-  if (await showsWithin(recentList, 5_000)) {
+  if (await shows(recentList)) {
     await recentList.scrollIntoViewIfNeeded();
     await sweep.measure(page, "qe-recent-handouts", recentList.locator("xpath=ancestor::*[@data-panel-group][1]"));
   } else await sweep.missing(page, "qe-recent-handouts", "Handouts lists no Recent");
@@ -11420,7 +11457,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   if (!(await visible(showForm))) await dmPanel.getByRole("button", { name: "Show a handout" }).click();
   await showForm.getByRole("button", { name: "From the library" }).click();
   const tile = showForm.getByRole("button", { name: "Use this image" }).first();
-  if (await showsWithin(tile, 5_000)) {
+  if (await shows(tile)) {
     await tile.click();
     await showForm.getByRole("button", { name: "Change", exact: true }).scrollIntoViewIfNeeded();
     await sweep.measure(page, "qe-handout-picked", showForm);
@@ -11435,7 +11472,7 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
     const menu = await menuHome(page);
     await menu.getByRole("button", { name: /^This device/ }).click();
     const tabRow = menu.getByRole("button", { name: "Tab row", exact: true });
-    if (await showsWithin(tabRow, 3_000)) {
+    if (await shows(tabRow)) {
       await openGroup(menu, "Tab row");
       await tabRow.scrollIntoViewIfNeeded();
       await sweep.measure(page, "qe-tab-row", tabRow.locator("xpath=ancestor::*[@data-panel-group][1]"));
@@ -11451,8 +11488,8 @@ async function qolGroupSave(sweep: Sweep, page: Page, group: Locator): Promise<v
   await group.getByRole("button", { name: "Save", exact: true }).click();
   // A phone's Dice sheet, or the side panel's Dice pane, which a computer's group save takes under its own title.
   const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.locator('[data-pane-panel="dice"]')).filter({ visible: true }).first();
-  if (!(await showsWithin(host.getByText("Dexterity save for 2").first(), 5_000))) return sweep.missing(page, "qe-group-save-dcs", "Save opened no group save for the two");
-  if (await showsWithin(host.getByRole("group", { name: "Recent DCs", exact: true }), 3_000)) {
+  if (!(await shows(host.getByText("Dexterity save for 2").first()))) return sweep.missing(page, "qe-group-save-dcs", "Save opened no group save for the two");
+  if (await shows(host.getByRole("group", { name: "Recent DCs", exact: true }))) {
     const before = sweep.lines.length;
     await sweep.measure(page, "qe-group-save-dcs", host);
     leaveKnown(sweep, before);
@@ -11468,7 +11505,7 @@ async function qolGroupSave(sweep: Sweep, page: Page, group: Locator): Promise<v
   if (!(await visible(group))) return sweep.missing(page, "qe-group-replace", "the group bar left with the Dice sheet");
   await group.getByRole("button", { name: "Save", exact: true }).click();
   const replace = group.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 2?" });
-  if (await showsWithin(replace, 3_000)) {
+  if (await shows(replace)) {
     const before = sweep.lines.length;
     await sweep.measure(page, "qe-group-replace", group);
     leaveKnown(sweep, before);
@@ -11638,7 +11675,7 @@ function creatureNumberTests(): void {
           await page.getByRole("button", { name: "Fit the map to the screen", exact: true }).click();
           await tapCell(page, BOUNDS, c.at);
           const bar = page.getByRole("dialog", { name: new RegExp(`^${c.name}\\b.* actions$`) });
-          if (!(await showsWithin(bar, 3_000))) {
+          if (!(await shows(bar))) {
             await sweep.missing(page, `numc1-header-${i}`, `a tap on ${c.reads} opened no bar`);
             continue;
           }
@@ -11723,7 +11760,7 @@ export function qolPanelTests(): void {
         await escapeAll(page);
         const tracker = await openPanel(page, "Initiative");
         const start = tracker.getByRole("switch", { name: /^Roll monsters' Initiative/ });
-        if (await showsWithin(start, 5_000)) await sweep.measure(page, "qe-start-switch", soundSection(tracker, "New fight"));
+        if (await shows(start)) await sweep.measure(page, "qe-start-switch", soundSection(tracker, "New fight"));
         else await sweep.missing(page, "qe-start-switch", "Start a fight has no Roll monsters' Initiative");
         await closeSheets(page);
         await escapeAll(page);
