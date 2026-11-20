@@ -99,6 +99,27 @@ describe("what a trap going off tells each device", () => {
     assert.deepEqual(dmAlerts([gone], away, "s2"), [{ text: "Old Pit went off on another scene.", trapId: "old", due: "18:0" }], "a scene since deleted offers nothing to show");
   });
 
+  test("a trap on a scene with floors names its floor: alone from another floor of that scene, after the scene's name from another scene (FLR4-SEEN-2)", () => {
+    const here = world();
+    here.scenes.s1 = { ...here.scenes.s1!, name: "Crypt", floor: { of: "s1", level: 0, name: "Ground floor" } };
+    here.scenes.s1u = { ...here.scenes.s1!, id: "s1u", floor: { of: "s1", level: 1, name: "Upper floor" } };
+    const upstairs = line("19:0", { type: "trap", trapId: "pit", sceneId: "s1u", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [], sound: "crash" });
+    const notice = line("19:1", { type: "trapNotice", trapId: "pit", sceneId: "s1u", tokenId: "thorn", passive: 16, dc: 15 });
+    const away = { ...here, tokens: {}, traps: {} };
+    assert.deepEqual(
+      dmAlerts([upstairs, notice], away, "s1").map((a) => a.text),
+      ["Hidden Pit went off on Upper floor.", "A creature's Passive Perception (16) would notice a trap on Upper floor (DC 15)."],
+      "from Ground floor of Crypt",
+    );
+    assert.deepEqual(
+      dmAlerts([upstairs, notice], away, "s2").map((a) => a.text),
+      ["Hidden Pit went off on Crypt · Upper floor.", "A creature's Passive Perception (16) would notice a trap on Crypt · Upper floor (DC 15)."],
+      "from another scene",
+    );
+    assert.deepEqual(dmAlerts([upstairs], away, "s1")[0]?.show, { sceneId: "s1u", line: "19:0" }, "Show goes to that floor");
+    assert.equal(dmAlerts(dmLog.slice(0, 1), away, "s1u")[0]?.text, "Hidden Pit went off on Ground floor.", "and the other way");
+  });
+
   test("a player hears a line that names a creature they play, and reads the rest in the log", () => {
     assert.deepEqual(playerAlerts(seen, world(), P1), [{ text: "Thorn: The floor gives way!", sound: "crash" }]);
     assert.deepEqual(playerAlerts(seen, world(), { memberId: "p2", role: "player" }), [{ text: "Bree: Click." }]);

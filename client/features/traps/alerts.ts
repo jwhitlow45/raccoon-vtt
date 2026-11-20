@@ -8,6 +8,7 @@ import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
 import { fallers, fallNames } from "./desk.ts";
+import { placeName } from "../floors/words.ts";
 
 /*
  * What a trap going off tells each device (docs/design/design-v1-traps.md 4.3),
@@ -41,7 +42,8 @@ export type TrapAlert = { text: string; sound?: TrapSound; trapId?: string; due?
  * so. The DM's own Set it off needs none: its card, if any, is already on
  * the desk. The Passive Perception hint (4.6) is a toast too. A trap on
  * another scene than `viewing` reads "Hidden Pit went off on Crypt." with
- * its sound, since the line keeps them, and Show.
+ * its sound, since the line keeps them, and Show. On a scene with floors it
+ * names the floor (sceneWords).
  */
 export function dmAlerts(lines: readonly LogEntry[], state: RoomState, viewing: string | null): TrapAlert[] {
   const out: TrapAlert[] = [];
@@ -49,7 +51,7 @@ export function dmAlerts(lines: readonly LogEntry[], state: RoomState, viewing: 
     const data = e.data;
     if (data?.type === "trapNotice") {
       if (data.sceneId !== viewing) {
-        out.push({ text: `A creature's Passive Perception (${data.passive}) would notice a trap ${sceneWords(state, data.sceneId)} (DC ${data.dc}).`, trapId: data.trapId, notice: true, ...showOf(state, data.sceneId, e.id) });
+        out.push({ text: `A creature's Passive Perception (${data.passive}) would notice a trap ${sceneWords(state, data.sceneId, viewing)} (DC ${data.dc}).`, trapId: data.trapId, notice: true, ...showOf(state, data.sceneId, e.id) });
         continue;
       }
       out.push({ text: describeEvent(data, namesOf(state), true), trapId: data.trapId, notice: true });
@@ -59,7 +61,7 @@ export function dmAlerts(lines: readonly LogEntry[], state: RoomState, viewing: 
     const sound = data.sound ? { sound: data.sound } : {};
     const unseen = data.hidden ? " The players saw nothing." : "";
     if (data.sceneId !== viewing) {
-      out.push({ text: `${data.name} went off ${sceneWords(state, data.sceneId)}.${unseen}`, ...sound, trapId: data.trapId, due: e.id, ...showOf(state, data.sceneId, e.id) });
+      out.push({ text: `${data.name} went off ${sceneWords(state, data.sceneId, viewing)}.${unseen}`, ...sound, trapId: data.trapId, due: e.id, ...showOf(state, data.sceneId, e.id) });
       continue;
     }
     out.push({ text: `${describeEvent(data, namesOf(state), true)}${unseen}`, ...sound, trapId: data.trapId, due: e.id });
@@ -118,9 +120,18 @@ export function shownAlert(line: LogEntry, state: RoomState, viewing: string | n
   return rest;
 }
 
-function sceneWords(state: RoomState, sceneId: string): string {
-  const name = state.scenes[sceneId]?.name.trim();
-  return name ? `on ${name}` : "on another scene";
+/**
+ * Where a trap went off, as the floors UI names a place (docs/design/design-v1-floors.md
+ * 18.6): "on Upper floor" from another floor of the same scene, "on Crypt · Upper floor"
+ * for a floor of another scene, "on Crypt" for a scene with no floors, and "on another
+ * scene" for one since deleted or with no name.
+ */
+function sceneWords(state: RoomState, sceneId: string, viewing: string | null): string {
+  const scene = ownEntry(state.scenes, sceneId);
+  const name = scene?.name.trim();
+  if (!scene || !name) return "on another scene";
+  if (!scene.floor) return `on ${name}`;
+  return viewing !== null && sameScene(state, sceneId, viewing) ? `on ${scene.floor.name}` : `on ${placeName(state, sceneId)}`;
 }
 
 function showOf(state: RoomState, sceneId: string, line: string): Pick<TrapAlert, "show"> {
