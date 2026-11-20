@@ -28,6 +28,8 @@ import {
   type Platform,
   type SupervisorStatus,
 } from "../contract.ts";
+import { firstFreePort } from "../runtime/ports.ts";
+import { TEST_PORTS } from "../runtime/testing/testPorts.ts";
 import { defaultOut } from "./stage.ts";
 
 /**
@@ -112,16 +114,21 @@ function keepLogs(data: string, label: string): void {
 // ---------------------------------------------------------------------------
 // The network
 
-/** A port nothing listens on now, on any address. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "0.0.0.0", () => {
-      const { port } = server.address() as net.AddressInfo;
-      server.close(() => resolve(port));
-    });
-  });
+/** Where Linux's ephemeral range starts by default (testPorts.ts). */
+const EPHEMERAL_FLOOR = 32768;
+
+/**
+ * The app server's port for every supervisor the headless test starts: the
+ * first one from TEST_PORTS.smoke up that is free as the supervisor judges
+ * its own (ports.ts), below Linux's ephemeral range. A port the system
+ * picks would sit in that range, where any client connection may take it
+ * as its own end between the probe and a supervisor's bind, and hold it in
+ * TIME_WAIT after (LA-36).
+ */
+async function smokePort(): Promise<number> {
+  const port = await firstFreePort(TEST_PORTS.smoke);
+  check(port !== null && port < EPHEMERAL_FLOOR, `no port from ${TEST_PORTS.smoke} to ${EPHEMERAL_FLOOR - 1} is free`);
+  return port;
 }
 
 /** Something listening on 5432, as a PostgreSQL the DM runs already would. Null when something already does. */
@@ -542,7 +549,7 @@ async function headless(argv: readonly string[]): Promise<void> {
   mkdirSync(path.dirname(data), { recursive: true });
   const blocker = await hold5432();
   step(blocker ? "holding 5432, as a PostgreSQL of the DM's own would" : "5432 is taken already, as a PostgreSQL of the DM's own would take it");
-  const port = await freePort();
+  const port = await smokePort();
   const local = `http://localhost:${port}`;
   const start = (label: string, folder = data, env?: Record<string, string>) => new Supervisor(label, folder, { node, stage, postgres, port, env });
   const running = new Set<Supervisor>();
