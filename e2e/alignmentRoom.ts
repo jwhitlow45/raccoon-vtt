@@ -1379,8 +1379,8 @@ async function settled(el: Locator): Promise<void> {
 
 /**
  * Waits until the side panel's tab row holds still, over two reads two frames apart, where the page draws one. The
- * row fits its tabs again as a badge lands or the room loads, and More's menu closes at every new fit
- * (pages/SideTabs.tsx), so a More opened before then can close under the click on its item.
+ * row fits its tabs again as a badge lands or the room loads, so a row read before then is not the one the
+ * measures run on. (More's menu stays open across a new fit now, pages/SideTabs.tsx.)
  */
 async function tabRowSettled(page: Page): Promise<void> {
   const list = page.getByRole("tablist", { name: "Panels" });

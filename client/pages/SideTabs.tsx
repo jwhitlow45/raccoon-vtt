@@ -236,12 +236,12 @@ export function SideTabs(props: {
   const stops = [...row.map((p) => p.id), ...(held.length > 0 ? [MORE] : [])];
   const stop = chosenHeld ? MORE : row.some((p) => p.id === tab) ? tab : stops[0];
 
-  // The menu closes as the fit changes: a resize or a rotation that moves a tab, or that changes More's room.
+  // The menu closes when the row has no fit, as the side panel hides. A new fit leaves it open: a badge landing or a late font refits the row under a viewer who has just opened More, and closing then took the item they were about to press. The popover follows More as it moves, and a fit that leaves More out takes it with its anchor.
   const lastFit = useRef<TabFit | null>(null);
   useLayoutEffect(() => {
     const was = lastFit.current;
     lastFit.current = fit;
-    if (was && (!fit || was.count !== fit.count || Math.abs(was.moreRoom - fit.moreRoom) >= 0.5)) menu.close("state");
+    if (was && !fit) menu.close("state");
     if (focusMore.current) {
       focusMore.current = false;
       moreRef.current?.focus({ preventScroll: true });

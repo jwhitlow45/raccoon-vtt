@@ -981,6 +981,44 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await openSideTab(pat, "Initiative");
   });
 
+  test("fu7-1. More's menu stays open across a refit of the row, a wider side panel and a badge landing, and the item pressed after it still picks its panel", async () => {
+    await view(dm, dmCdp, { width: 1280, height: 800 });
+    await reloadAt(dm, 1);
+    await openSideTab(dm, "Initiative");
+    await more(dm).click();
+    await menu(dm).waitFor();
+    const room = async () => (await box(tablist(dm))).width;
+    const before = await room();
+    // Another window of the app widens the side panel, which this page takes from the `storage` event with its menu open: the row fits again under a viewer who has not touched the page.
+    const sibling = await dm.context().newPage();
+    try {
+      await sibling.goto(`${server.origin}/`);
+      await sibling.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sidePanelWidth", "460"));
+      await waitFor("the row to take the wider room", async () => (Math.abs((await room()) - before) >= 0.5 ? true : null));
+    } finally {
+      await sibling.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sidePanelWidth")).catch(() => undefined);
+      await sibling.close();
+    }
+    assert.equal(await menu(dm).count(), 1, "the menu is still open after the row fit again");
+    // The Log's badge lands while the menu is open, as Pat's chat line reaches the DM.
+    const patCookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: patCookie });
+    try {
+      await patOps.send({ t: "log.chat", text: "Is the door barred?" });
+    } finally {
+      patOps.close();
+    }
+    await tablist(dm).getByRole("tab", { name: "Log 1 unread", exact: true }).waitFor();
+    assert.equal(await menu(dm).count(), 1, "the menu is still open after a badge landed");
+    const item = menu(dm).getByRole("menuitemradio").first();
+    const title = (await item.innerText()).split("\n")[0]!.trim();
+    await item.click();
+    await menu(dm).waitFor({ state: "detached" });
+    await dm.getByRole("tabpanel", { name: sideTabName(title) }).waitFor();
+    await openSideTab(dm, "Log");
+    await view(dm, dmCdp, { width: 1280, height: 800 });
+  });
+
   test("10. no page logged an error or a warning", () => {
     for (const c of [dmConsole, patConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);

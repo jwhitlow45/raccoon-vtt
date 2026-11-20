@@ -203,7 +203,7 @@ What the menu adds:
 - **Opens** on a click or tap on More, or Enter, Space, Down or Up on More. Opened by a key, focus moves to the open panel's item when More holds it, else to the first item (with Up, the last). Opened by a pointer, the open puts focus on More itself (`preventScroll`), on every browser, Safari included, and focus enters the menu only when a key opened it (7.1). Down or Up on More then moves it into the open menu.
 - **A pick** (a click, a tap, Enter or Space) opens the panel, then moves focus to More, which by then names it, then closes the menu (7.1's focus on closing). In that order, a screen reader hears "Monsters, tab, selected" from More, and focus is never lost to the page between the item going and More taking it. While the pick runs, focus is on the item, which `useSubpageFocus` treats as it treats a tab (5.3).
 - **A second press on More** closes the menu.
-- **Closes with More**: when the side panel hides (Hide panels, S, crossing below 900 px), when the fit changes, or when More leaves the row. Focus that was in the menu goes to Panels where the side panel hid, by the layout design's rule (4.1). Otherwise it goes to More, or where More is gone, to the chosen tab.
+- **Closes with More**: when the side panel hides (Hide panels, S, crossing below 900 px), or when More leaves the row. A new fit leaves it open, and it follows More. Focus that was in the menu goes to Panels where the side panel hid, by the layout design's rule (4.1). Otherwise it goes to More, or where More is gone, to the chosen tab.
 
 ### 4.4 The menu
 
@@ -444,7 +444,7 @@ A computer whose font is as wide as DejaVu Sans, 1280 x 800. The row still holds
   - a handout, the X-card or any dialog opening: focus moves into it, and the menu closes
   - Hide panels: the menu closes, the side panel hides, and focus goes to Panels
   - a letter: typeahead, never a shortcut
-  - a resize or rotation that changes the fit: the menu closes
+  - a resize or rotation that changes the fit: the menu stays open and follows More, and a press on an item still picks it
   - crossing below 900 px: the menu goes with the side panel
 - **A focused tab that a new fit moves into More**: focus goes to More.
 - **A name More cuts**: the side panel's header names the panel in full (3.8). On one of its subpages the subpage's header shows as today, its Back naming the panel in full. The header comes and goes with the fit, never with a measurement of the span.
