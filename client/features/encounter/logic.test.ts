@@ -5,6 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { actor, apply, character, DM, effect, entry, P1, reveal, room, token } from "#shared/testutil.ts";
+import { ATTIC, CAVE, tower, TOWER, UPPER } from "../floors/testing.ts";
 import { fightCandidates, fightOps } from "../tokens/groupEdit.ts";
 import {
   addCandidates,
@@ -366,6 +367,28 @@ describe("adding tokens", () => {
     s.tokens.pc = token("pc", { kind: "pc", name: "Thorn", ownerIds: ["p1"], x: 3, y: 1, light: { bright: 20, dim: 20 } });
     const dmView = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
     assert.deepEqual(addCandidates(dmView, "s1", "visible", null, new Map()).map((t) => t.id), ["exempt", "a", "pc"]);
+  });
+
+  test("on every floor, the creatures of each floor of the scene, each judged visible by its own floor's fog (docs/design/design-v1-floors.md phase 4, 9.4)", () => {
+    const s = tower();
+    const fogged = (id: string) => (s.scenes[id] = { ...s.scenes[id]!, fogEnabled: true });
+    // Upper floor's fog is lifted over its top-left tile, where the goblin stands. The Attic's covers the orc.
+    fogged(UPPER);
+    fogged(ATTIC);
+    s.fogTiles[`${UPPER}:0,0`] = { sceneId: UPPER, tx: 0, ty: 0, rev: 0, bits: encodeTile(fullTileBits()) };
+    s.tokens.gob = token("gob", { name: "Goblin", sceneId: UPPER, x: 1, y: 1 });
+    s.tokens.orc = token("orc", { name: "Orc", sceneId: ATTIC, x: 1, y: 1 });
+    s.tokens.spy = token("spy", { name: "Spy", sceneId: ATTIC, visibility: "dm" });
+    s.tokens.rat = token("rat", { name: "Rat", sceneId: CAVE });
+    const every = new Set([TOWER, UPPER, ATTIC]);
+    const ids = (floors: string | ReadonlySet<string>, mode: "scene" | "visible") => addCandidates(s, floors, mode, null, new Map()).map((t) => t.id);
+    assert.deepEqual(ids(every, "scene"), ["bree", "gob", "orc", "spy", "thorn"]);
+    assert.deepEqual(ids(every, "visible"), ["bree", "gob", "thorn"]);
+    assert.deepEqual(ids(TOWER, "scene"), ["bree", "thorn"]);
+    assert.deepEqual(ids(new Set([UPPER]), "visible"), ["gob"]);
+    // The selection is offered from any floor in the set, and only there.
+    assert.deepEqual(addCandidates(s, every, "selected", "orc", new Map()).map((t) => t.id), ["orc"]);
+    assert.deepEqual(addCandidates(s, TOWER, "selected", "orc", new Map()), []);
   });
 
   test("the selected token, even an object or a dead one", () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { flushSync } from "react-dom";
 import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type EntryInput } from "#shared/protocol.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
 import { Button } from "../components/Button.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { Spinner } from "../components/Loading.tsx";
@@ -621,24 +622,38 @@ const NO_OPS: readonly number[] = [];
 /**
  * The whole view, since "Visible to players" asks projection's own rule,
  * which reads both fog layers and the party's sight besides the tokens.
+ * `floors` widens the floor on screen to a set of floors, for a fight on
+ * every floor.
  */
-function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]> {
+function useCandidates(selectedTokenId: string | null, floors: ReadonlySet<string> | null = null): Record<AddMode, Token[]> {
   const labels = useLabels();
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
   // A start still waiting for its answer counts, so its creatures are not offered again.
   const fight = useFightAhead();
-  return useMemo(
-    () =>
-      view
-        ? {
-            selected: addCandidates(view, sceneId, "selected", selectedTokenId, labels, fight),
-            scene: addCandidates(view, sceneId, "scene", selectedTokenId, labels, fight),
-            visible: addCandidates(view, sceneId, "visible", selectedTokenId, labels, fight),
-          }
-        : NO_CANDIDATES,
-    [view, sceneId, selectedTokenId, fight],
-  );
+  return useMemo(() => {
+    if (!view) return NO_CANDIDATES;
+    const on = floors ?? sceneId;
+    return {
+      selected: addCandidates(view, on, "selected", selectedTokenId, labels, fight),
+      scene: addCandidates(view, on, "scene", selectedTokenId, labels, fight),
+      visible: addCandidates(view, on, "visible", selectedTokenId, labels, fight),
+    };
+  }, [view, sceneId, floors, selectedTokenId, fight]);
+}
+
+/** Where a new fight's creatures come from on a scene with floors (docs/design/design-v1-floors.md phase 4, 9.4). */
+type FightFloors = "this" | "every";
+
+/** The floors of the scene on screen while it has two or more, kept while the scenes are, else null. */
+function useSceneFloors(): ReadonlySet<string> | null {
+  const scenes = useRoomView((s) => s.view?.scenes);
+  const sceneId = useRoomView((s) => s.sceneId);
+  return useMemo(() => {
+    if (!scenes || sceneId === null) return null;
+    const floors = floorsOf({ scenes }, sceneId);
+    return floors.length > 1 ? new Set(floors.map((f) => f.id)) : null;
+  }, [scenes, sceneId]);
 }
 
 /**
@@ -663,9 +678,17 @@ function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens:
  * button is busy until the server takes the start, since the fight shows
  * only then. Another button pressed meanwhile adds its creatures behind it,
  * and the button whose start waits stays busy.
+ *
+ * On a scene with floors, This floor or Every floor stands above the
+ * buttons (docs/design/design-v1-floors.md phase 4, 9.4, D-261119-056):
+ * Every floor offers the creatures of every floor of the scene, as the
+ * tracker already holds rows on any of them.
  */
 function StartFight(props: { selectedTokenId: string | null }) {
-  const candidates = useCandidates(props.selectedTokenId);
+  const floors = useSceneFloors();
+  const [where, setWhere] = useState<FightFloors>("this");
+  const every = floors !== null && where === "every";
+  const candidates = useCandidates(props.selectedTokenId, every ? floors : null);
   const join = useJoinBatches(candidates);
   const startFight = useStartFight();
   const roll = useStartRoll();
@@ -676,8 +699,19 @@ function StartFight(props: { selectedTokenId: string | null }) {
   const press = (from: StartFrom | "nobody", ops: readonly number[] | null) => setSent(pressAfter(sent, waits, from, ops));
   return (
     <Section label="New fight" search="tracker.new-fight" style={COLUMN}>
+      {floors ? (
+        <Segmented<FightFloors>
+          label="Floors"
+          value={where}
+          options={[
+            { value: "this", label: "This floor" },
+            { value: "every", label: "Every floor" },
+          ]}
+          onChange={setWhere}
+        />
+      ) : null}
       <Wrap>
-        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => press(from, startFight(join.batches(tokens), from))} rolling={rolling} pressed={pressed} />
+        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => press(from, startFight(join.batches(tokens), from))} rolling={rolling} pressed={pressed} every={every} />
         <Button size="sm" busy={pressed === "nobody"} onClick={() => press("nobody", startFight([], null))} style={GROW}>
           Nobody yet
         </Button>
@@ -694,7 +728,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
  * not load (JoinFailed says so), so none adds a row marked off for a lair
  * it could not read.
  */
-function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null; pressed?: StartFrom | "nobody" | null }) {
+function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null; pressed?: StartFrom | "nobody" | null; every?: boolean }) {
   const labels = useLabels();
   const { candidates } = props;
   const selected = candidates.selected[0];
@@ -712,7 +746,7 @@ function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(token
   return (
     <>
       {button(candidates.selected, "selected", selected ? displayName(selected, labels) : "Selected token")}
-      {button(candidates.scene, "scene", `Everyone here (${candidates.scene.length})`)}
+      {button(candidates.scene, "scene", props.every ? `Everyone on every floor (${candidates.scene.length})` : `Everyone here (${candidates.scene.length})`)}
       {button(candidates.visible, "visible", `Visible to players (${candidates.visible.length})`)}
     </>
   );

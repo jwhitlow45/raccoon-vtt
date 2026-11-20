@@ -521,13 +521,18 @@ function tokenOrder(labels: Labels): (a: Token, b: Token) => number {
  * (docs/design/design-v1-per-player-vision.md decision 14, vision/union.ts).
  * Tokens with a row in `fight` are left out: the view's fight, or one whose
  * start still waits for its answer (state/store.ts fightAhead).
+ *
+ * `floors` is the floor on screen, or for a fight on every floor the set of
+ * the scene's floors (docs/design/design-v1-floors.md phase 4, 9.4), each
+ * creature then judged visible by its own floor's fog, sight and vision.
  */
-export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null, labels: Labels, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
-  if (sceneId === null) return [];
+export function addCandidates(view: RoomState, floors: string | ReadonlySet<string> | null, mode: AddMode, selectedId: string | null, labels: Labels, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
+  if (floors === null) return [];
+  const on = typeof floors === "string" ? (sceneId: string) => sceneId === floors : (sceneId: string) => floors.has(sceneId);
   const taken = new Set((fight?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   const out: Token[] = [];
   for (const token of Object.values(view.tokens)) {
-    if (!token || token.sceneId !== sceneId || taken.has(token.id)) continue;
+    if (!token || !on(token.sceneId) || taken.has(token.id)) continue;
     // A companion that acts on its character's turn takes no row of its own, which the server refuses anyway (docs/design/design-v1-combat-flow.md 3.6.7).
     if (actsOnCharacterTurn(token)) continue;
     if (mode === "selected") {
