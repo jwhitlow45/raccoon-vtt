@@ -1,4 +1,4 @@
-import { attaches, draggedWalkFull, floorsOps, followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
+import { attaches, draggedWalkFull, fileEndsWithHolder, floorsOps, followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, walksRoutes } from "../migrate.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
@@ -314,8 +314,9 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
  * (route.ts hexFileRoutes, D-261107-172), where those of one hex go as each
  * class of them decides (route.ts hexFileClasses, D-261107-252), and from
  * op version 62 hex by hex from the hex the lead starts on (migrate.ts
- * followsHexByHex). The public ones go first. Null where they follow by
- * their places.
+ * followsHexByHex), each holding its last hex to the lead's end from op
+ * version 63 (migrate.ts fileEndsWithHolder). The public ones go first.
+ * Null where they follow by their places.
  */
 function singleFile(before: RoomState, lead: MovedToken, members: readonly string[], pub: (id: string) => boolean, env: Versioned): Map<string, FilePoint[]> | null {
   if (lead.squeezed !== true || lead.how !== "walk" || lead.carriedBy !== undefined) return null;
@@ -330,7 +331,7 @@ function singleFile(before: RoomState, lead: MovedToken, members: readonly strin
   const rest = dragged.filter((t) => !pub(t.id));
   if (!isHex(g)) return fileRoutes(standing, lead.route, [shown, rest]);
   const classes = hexFileClasses(shown, rest);
-  return classes[0].length > 0 || classes[1].length > 0 ? hexFileRoutes(g, standing, lead.route, classes, followsHexByHex(env.opVersion)) : null;
+  return classes[0].length > 0 || classes[1].length > 0 ? hexFileRoutes(g, standing, lead.route, classes, followsHexByHex(env.opVersion), fileEndsWithHolder(env.opVersion)) : null;
 }
 
 /** Where each passenger of a holder sits apart from the others at point `i` of the holder's walk, by id, or null at a point where each takes its nearest alone. */

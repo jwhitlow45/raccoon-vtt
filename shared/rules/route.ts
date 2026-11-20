@@ -504,8 +504,17 @@ export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidde
  * refused however the first was walked. One point a hex leaves every leg
  * one hex step, which every leg test and every reader of a walk's spots
  * reads as it is walked.
+ *
+ * With `endsWithHolder`, from op version 63 (HEXFILE-054, migrate.ts
+ * fileEndsWithHolder), a walk whose last hex is reached before the
+ * holder's walk ends holds that hex with one more point, reached at the
+ * holder's end. Each reader takes the holder's end height at a walk's last
+ * point and the holder's height at its moment at every other (moveLeg.ts
+ * follow, `fileHeightsAlong`), so without it a goblin a warhorse brings
+ * down from 40 ft reached the ground on its last hex while the warhorse
+ * was still 20 ft up.
  */
-export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[], byHex = false): Map<string, FilePoint[]> {
+export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[], byHex = false, endsWithHolder = byHex): Map<string, FilePoint[]> {
   const out = new Map<string, FilePoint[]>();
   const n = points.length - 1;
   if (n < 1) return out;
@@ -541,6 +550,7 @@ export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Po
         const walk: FilePoint[] = walked.slice(0, last + 1).map((w, k) => ({ ...(k === 0 ? { x: member.x, y: member.y } : placedOnHex(g, member, w.hex)), along: w.along }));
         const there = walk[walk.length - 1]!;
         while (walk.length < n + 1) walk.push({ x: there.x, y: there.y, along: end });
+        if (endsWithHolder && compareAlong(walk[walk.length - 1]!.along!, end) < 0) walk.push({ x: there.x, y: there.y, along: end });
         out.set(member.id, walk);
         taken.add(hexKey(walked[last]!.hex));
       }

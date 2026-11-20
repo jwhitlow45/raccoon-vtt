@@ -187,9 +187,12 @@ describe("the board holds a walk in single file hex by hex to as many points as 
       const op = { t: "token.move" as const, tokenId: "horse", ...inside, squeeze: true as const, elevation: 0, route };
       const allowed = canApply(op, P1, s, { canUseAsset: () => true });
       assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
-      // The rat's walk has fewer points than the goblin's, which the move holds it to at its end, coming down there.
+      // The rat's walk has fewer points than the goblin's, which the move holds it to at its end, coming down there. From op 63
+      // the goblin holds its last hex to the warhorse's end (HEXFILE-054), and the rat with it.
       const rat = planWalks(op, s, P1, {}).find((m) => m.tokenId === "rat")!;
-      assert.deepEqual(rat.route.map((p) => Math.round(p.elevation * 1e9) / 1e9), [40, 30, 20, 0]);
+      assert.deepEqual(rat.route.map((p) => Math.round(p.elevation * 1e9) / 1e9), [40, 30, 20, 0, 0]);
+      const old = planWalks(op, s, P1, { opVersion: 62 }).find((m) => m.tokenId === "rat")!;
+      assert.deepEqual(old.route.map((p) => Math.round(p.elevation * 1e9) / 1e9), [40, 30, 20, 0], "op 62 replays as it ran");
       const copy = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
       const plan: DropPlan = { moves: [{ tokenId: "horse", x: inside.x, y: inside.y, elevation: 0, squeeze: true, route }], stop: null, held: [] };
       const cut = cutForWalkers(dropView(copy, "player"), copy.tokens.horse!, plan, walkersFor(copy, "horse", "player"), "walk");

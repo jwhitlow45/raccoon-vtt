@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 47;
-export const OP_VERSION = 62;
+export const OP_VERSION = 63;
 
 export type MigrationStep = {
   from: number;
@@ -1484,6 +1484,16 @@ export const opMigrations: MigrationStep[] = [
     to: 62,
     apply: (op) => op,
   },
+  {
+    // Hex walks in single file that settle (DROP_SEAT_OP_VERSION): no stored op changes shape, so the step is the identity.
+    // From this version a walk in single file on hexes that reaches its last hex before its holder ends holds that hex to the
+    // holder's end (`fileEndsWithHolder`). Ops stored before replay as they ran.
+    // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
+    // version 63 ops after its last snapshot, which an older build refuses.
+    from: 62,
+    to: 63,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2105,6 +2115,25 @@ export function followsHexByHex(opVersion: number | undefined): boolean {
 export function stopsLandNamed(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < HEX_FILE_OP_VERSION);
 }
+
+/** The first op version whose `token.move` may seat a rider where she is dropped, and whose walks in single file on hexes settle by its rules. */
+export const DROP_SEAT_OP_VERSION = 63;
+
+/**
+ * Whether, on hexes, a walk in single file whose last hex is reached before
+ * its holder's walk ends holds that hex to the holder's end (HEXFILE-054,
+ * route.ts hexFileRoutes): one more point on that hex, reached at the
+ * holder's end, so the last real point stands at the holder's height at its
+ * own moment and only the held point takes the holder's end height. A
+ * goblin a warhorse brings down from 40 ft then comes down with it, not
+ * ahead of it. Ops stored before version 63 took the end height at that
+ * point's own moment, and replay so. Live ops carry no stored version and
+ * take today's rule.
+ */
+export function fileEndsWithHolder(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
+
 
 /**
  * Whether, on hexes, what sits on a holder takes hexes of its own at every
