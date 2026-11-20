@@ -10,16 +10,16 @@ import { movementRules } from "../ruleHooks.ts";
 import { hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
-import { findRouteOn, routeWorld } from "../rules/hexWalk.ts";
+import { routeWorld } from "../rules/hexWalk.ts";
 import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn } from "../rules/moveLeg.ts";
-import { groundUnder, hexStandHexes, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
+import { groundUnder, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { footing, footprintGround } from "../rules/heights.ts";
 import { planTrapMove, trapHits, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "../rules/traps.ts";
 import { groupWalkWorld } from "../rules/walkWorld.ts";
 import { chance, DM, env, int, P1, P2, pick, rng, template, trap } from "../testutil.ts";
-import { caseOf, insideCaseOf, keepOf, raised, wayInto, withImpAhead, withMouse, withOgre, withRises, withStop, type Case } from "./hexFile.testkit.ts";
+import { caseOf, insideCaseOf, keepOf, raised, seatedMove, wayInto, withImpAhead, withMouse, withOgre, withRises, withStop, type Case } from "./hexFile.testkit.ts";
 
 /**
  * Random walks in single file on hexes (RIDE-SINGLE-FILE-HEX and
@@ -836,44 +836,4 @@ for (const [name, g] of [
       assert.ok(moves >= 500 && seated >= 450 && corners >= 1100 && twins >= 180, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}`);
     });
   });
-}
-
-/**
- * `made` with the holder's own walk to a full stand on open ground a few hexes from where it stands, as the device's search finds
- * it, and the `seat` of a rider sitting on it, dropped on a placement of that stand her place does not carry her to. Null where
- * the room has no rider, no such stand or no such placement.
- */
-function seatedMove(g: HexGrid, made: Case, seed: number): (Case & { rider: string }) | null {
-  const r = rng(seed * 7121 + (g.orient === "rows" ? 15 : 16));
-  const s = made.state;
-  const horse = s.tokens.horse!;
-  const riders = Object.values(s.tokens).filter((t): t is Token => t?.attached?.to === "horse" && onHolder(t.attached.kind));
-  if (riders.length === 0) return null;
-  const rider = pick(r, riders);
-  const from = occupiedHexes(g, horse)[0]!;
-  const stands: { x: number; y: number }[] = [];
-  for (let dc = -3; dc <= 3; dc++) {
-    for (let dr = -3; dr <= 3; dr++) {
-      const ref = { col: from.col + dc, row: from.row + dr };
-      const stand = { size: sizeOf(horse), ref, squeezed: false };
-      if ((dc !== 0 || dr !== 0) && hexStandHexes(g, stand).every(made.open)) stands.push(hexStandPlace(g, horse, stand));
-    }
-  }
-  if (stands.length === 0) return null;
-  const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, pick(r, stands));
-  if (!found || found === "none") return null;
-  // Where the search's way ends, which the op lands on.
-  const [x, y] = found.pieces[found.pieces.length - 1]!;
-  const to = { x, y };
-  const own = seatedAt(g, rider, horse, to, false);
-  const spots = hexPlacements(g, rider, occupiedHexes(g, { ...horse, ...to })).map((p) => p.spot).filter((p) => Math.abs(p.x - own.x) > 1e-9 || Math.abs(p.y - own.y) > 1e-9);
-  if (spots.length === 0) return null;
-  const seat = pick(r, spots);
-  const route = found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
-  return { ...made, rider: rider.id, op: { t: "token.move", tokenId: "horse", ...to, route, seat: { tokenId: rider.id, x: seat.x, y: seat.y } } };
-}
-
-/** The holder's size category, as its full stands take it. */
-function sizeOf(t: Token): "large" | "huge" {
-  return t.size === "huge" ? "huge" : "large";
 }
