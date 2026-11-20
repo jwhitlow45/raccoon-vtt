@@ -1,4 +1,6 @@
-import { CHUNK_CELLS } from "#shared/model.ts";
+import { CHUNK_CELLS, MIN_HEIGHT_FT, type CellRect, type RoomState, type SceneId } from "#shared/model.ts";
+import { ownEntry } from "#shared/records.ts";
+import { fallDrop, isHole, linkHeight, linksOn, rectGround, type LinkEnd } from "#shared/rules/floorLinks.ts";
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { chunkHeights } from "#shared/rules/heights.ts";
 import { seenGround, type Cell, type GroundSource } from "../features/builder/heights/ground.ts";
@@ -374,6 +376,118 @@ export function drawnHeights(src: DrawnSource, feetPerCell: number, stairs: Stai
 function* stairCellsOf(src: DrawnSource): Generator<Point> {
   const prefix = `${src.sceneId}:`;
   for (const [key, chunk] of Object.entries(src.chunks)) if (key.startsWith(prefix)) yield* stairCandidates(chunk);
+}
+
+// ---------------------------------------------------------------- holes
+
+/**
+ * How far below its rim a hole's bottom draws where the device cannot tell
+ * the drop: a player without the floor below, or without its end there
+ * (docs/design/design-v1-floors.md phase 4, 9.1).
+ */
+export const BLIND_DROP_FT = 10;
+
+/**
+ * An opening's upper end on the floor shown, as Isometric draws it: a drop
+ * (docs/design/design-v1-floors.md phase 4, 9.1). `drop` is how far its
+ * bottom lies below its rim, in feet, and `below` the floor below's
+ * background, or null where the device does not hold that floor, whose
+ * bottom then shows nothing of it.
+ */
+export type Hole = { id: string; rect: CellRect; drop: number; below: string | null };
+
+type HoleCopy = Pick<RoomState, "scenes" | "floorLinks" | "buildChunks">;
+
+/**
+ * The holes on a floor, by id, from the device's own copy, so a player's
+ * reads only what they were sent: an end outside full fog, the floor below
+ * once they hold it, and its height only as the end's `rise`. The drop is
+ * fallDrop's, as the window's height chip reads it
+ * (features/floors/openingView.ts holeDrop): the rise, plus the ground
+ * under the hole, less the ground under the far end. Where the copy holds
+ * the floor below but not the far end, or either ground is not one
+ * height, it is BLIND_DROP_FT.
+ */
+export function floorHoles(view: HoleCopy, sceneId: SceneId): Hole[] {
+  const out: Hole[] = [];
+  for (const link of linksOn(view, sceneId) as LinkEnd[]) {
+    if (!isHole(view, link)) continue;
+    const far = link.to === undefined ? undefined : ownEntry(view.scenes, link.to);
+    out.push({ id: link.id, rect: link.rect, drop: far ? (holeDrop(view, link) ?? BLIND_DROP_FT) : BLIND_DROP_FT, below: far ? far.background : null });
+  }
+  return out;
+}
+
+/** A hole's drop as the copy reads it, or null where it holds no far end over the same squares or either ground is not one height there. */
+function holeDrop(view: HoleCopy, link: LinkEnd & { rise?: number }): number | null {
+  const to = link.to!;
+  const r = link.rect;
+  // A copy holds an end only on a floor it holds, and a player's names no pair: the far end is the opening on the floor below over the same squares.
+  const far = (linksOn(view, to) as LinkEnd[]).find((l) => l.kind === "opening" && l.rect.x === r.x && l.rect.y === r.y && l.rect.w === r.w && l.rect.h === r.h && (l.to === undefined || l.to === link.sceneId));
+  if (!far) return null;
+  const upper = rectGround(view.buildChunks, link.sceneId, r);
+  const lower = rectGround(view.buildChunks, to, far.rect);
+  if (upper === null || lower === null) return null;
+  return fallDrop(linkHeight(view, link), upper, lower);
+}
+
+/** The last answer `holesKey` gave, kept while the copy's links, floors and build are the same objects and the floor the same. */
+let lastHoles: { floorLinks: HoleCopy["floorLinks"]; scenes: HoleCopy["scenes"]; chunks: HoleCopy["buildChunks"]; sceneId: SceneId; key: string } | null = null;
+
+/**
+ * The floor's holes as one string, "" for none, so a board's read of the
+ * whole copy keeps one value while no hole, drop or floor below changes:
+ * every op makes a new copy, and the store keeps each collection's
+ * identity while nothing in it changed.
+ */
+export function holesKey(view: HoleCopy, sceneId: SceneId): string {
+  const last = lastHoles;
+  if (last && last.sceneId === sceneId && last.floorLinks === view.floorLinks && last.scenes === view.scenes && last.chunks === view.buildChunks) return last.key;
+  const holes = floorHoles(view, sceneId);
+  const key = holes.length === 0 ? "" : JSON.stringify(holes);
+  lastHoles = { floorLinks: view.floorLinks, scenes: view.scenes, chunks: view.buildChunks, sceneId, key };
+  return key;
+}
+
+/** The holes a `holesKey` names. */
+export function holesOfKey(key: string): readonly Hole[] {
+  return key === "" ? NO_HOLES : (JSON.parse(key) as Hole[]);
+}
+
+const NO_HOLES: readonly Hole[] = [];
+
+/** A cell of a hole as the relief draws it: its bottom, in cells of height, and the hole. */
+export type HoleFloor = { z: number; hole: Hole };
+
+/** A floor's holes cell by cell, as the relief reads them (canvas/relief/buckets.ts). */
+export type HoleFloors = { readonly holes: readonly Hole[]; at(x: number, y: number): HoleFloor | undefined };
+
+export const NO_HOLE_FLOORS: HoleFloors = { holes: NO_HOLES, at: () => undefined };
+
+/**
+ * Where each cell of a floor's holes draws its bottom: `drop` feet below
+ * its seen ground, never under MIN_HEIGHT_FT, in cells of height. Only
+ * while heights stand and on a cell this viewer has seen, as `drawnGround`
+ * reads it, so a hole under the fog draws nothing of itself. Only the
+ * relief reads it: picks, standees and marks keep the hole's own ground,
+ * where the rules hold a creature over it until it falls, so a drag over
+ * the hole keeps its ring under the finger.
+ */
+export function holeFloors(src: DrawnSource, holes: readonly Hole[], feetPerCell: number): HoleFloors {
+  if (holes.length === 0) return NO_HOLE_FLOORS;
+  if (!src.stand) return { holes, at: () => undefined };
+  const floors = new Map<number, HoleFloor>();
+  for (const hole of holes) {
+    const r = hole.rect;
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        const seen = seenGround(src, { x, y });
+        if (seen === null) continue;
+        floors.set(cellId({ col: x, row: y }), { z: Math.max(MIN_HEIGHT_FT, seen - hole.drop) / feetPerCell, hole });
+      }
+    }
+  }
+  return { holes, at: (x, y) => floors.get(cellId({ col: x, row: y })) };
 }
 
 // ---------------------------------------------------------------- picking
