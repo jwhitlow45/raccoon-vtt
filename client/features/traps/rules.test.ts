@@ -13,6 +13,14 @@ import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   afterSummary,
+  A_PIT,
+  floorBelow,
+  floorWord,
+  INTO_GROUP,
+  intoHelp,
+  intoOf,
+  intoPatch,
+  noFloorUnder,
   alsoSummary,
   cleanLine,
   crossedTraps,
@@ -336,4 +344,42 @@ describe("the pane's lines and its asks for rolls", () => {
 test("the trap icon is the wolf trap game-icons.net ships, unchanged", () => {
   const svg = readFileSync(new URL("../../../public/game-icons/82d94881/lorc/wolf-trap.svg", import.meta.url), "utf8");
   assert.equal(svg.match(/<path d="([^"]+)"/)?.[1], TRAP_ICON_PATH);
+});
+
+describe("a trapdoor's Into (docs/design/design-v1-floors.md phase 4, 4.6)", () => {
+  const rig = (over: Partial<TrapRig>): TrapRig => ({ on: ["enter"], who: "party", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, ...over });
+  const floor = (id: string, level: number, name: string) => ({ id, name: "Tower", order: 0, bounds: { w: 20, h: 20 }, floor: { of: "ground", level, name } });
+  const view = { scenes: { ground: floor("ground", 0, "Ground floor"), upper: floor("upper", 1, "Upper floor"), cellar: floor("cellar", -1, "Cellar"), cave: { id: "cave", name: "Cave", order: 1, bounds: { w: 20, h: 20 } } } } as never;
+
+  test("the floor just below, none on the lowest floor or a scene of one floor", () => {
+    assert.equal(floorBelow(view, "upper")?.id, "ground");
+    assert.equal(floorBelow(view, "ground")?.id, "cellar");
+    assert.equal(floorBelow(view, "cellar"), null);
+    assert.equal(floorBelow(view, "cave"), null);
+    assert.equal(floorWord(view, "cellar"), "Cellar");
+    assert.equal(floorWord(view, "cave"), "Cave");
+  });
+
+  test("Into reads the rig, and each choice clears the other, a pit starting 10 ft deep", () => {
+    assert.equal(intoOf(rig({})), null);
+    assert.equal(intoOf(rig({ pit: { floor: -10 } })), "pit");
+    assert.equal(intoOf(rig({ below: true })), "below");
+    assert.deepEqual(intoPatch("below", 0), { pit: null, below: true });
+    assert.deepEqual(intoPatch("pit", 5), { pit: { floor: -5 }, below: null });
+    // The patches pass the protocol's one-or-the-other rule as the pane sends them.
+    for (const choice of ["pit", "below"] as const) {
+      const parsed = clientOpSchema.safeParse({ t: "trap.update", trapId: "t1", patch: { rig: intoPatch(choice, 0) } });
+      assert.equal(parsed.success, true, choice);
+    }
+  });
+
+  test("its words and its line in the Aftermath summary", () => {
+    assert.equal(INTO_GROUP, "Into");
+    assert.equal(A_PIT, "A pit");
+    assert.equal(intoHelp("Ground floor"), "Creatures standing on it fall to Ground floor, onto the same squares.");
+    assert.equal(noFloorUnder("Cellar"), "There is no floor below Cellar.");
+    assert.equal(afterSummary(rig({ below: true }), null, false, "Ground floor"), "Goes off once, stops the creature, drops to Ground floor");
+    assert.equal(afterSummary(rig({ below: true }), null, false, null), "Goes off once, stops the creature, drops to no floor");
+    assert.equal(afterSummary(rig({}), null, false, "Ground floor"), "Goes off once, stops the creature", "no trapdoor, no floor named");
+  });
 });

@@ -1,5 +1,5 @@
 import { LIMITS } from "#shared/limits.ts";
-import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
+import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Scene, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect, hexAnchor, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
 import { onSqueezedLattice, ownWalk } from "#shared/rules/movement.ts";
@@ -15,6 +15,8 @@ import type { AskFill } from "../rolls/logic.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { findDoor, segmentDistance, type Point } from "../doors/doors.ts";
 import { cellWord, isHex, type Grid } from "#shared/rules/grid.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
+import { ownEntry } from "#shared/records.ts";
 
 /*
  * The Trap tool's rules (docs/design/design-v1-traps.md 4.1 and 4.2), as plain
@@ -621,14 +623,63 @@ export function triggerSummary(trap: Pick<Trap, "zone"> & { rig: TrapRig }): str
  * "Goes off once, stops the creature" or "Arms again at the start of the
  * next turn, 3 uses left": the words of the pane's own switch and uses
  * field, one wording per idea (docs/design/design-v1-look-pass-2.md 2.10).
+ * A trapdoor (`below`, docs/design/design-v1-floors.md phase 4, 4.6) names
+ * the floor it drops to, `below` its name, or null on the lowest floor,
+ * where it drops no one.
  */
-export function afterSummary(rig: TrapRig, pitDepth: number | null, opened = false): string {
+export function afterSummary(rig: TrapRig, pitDepth: number | null, opened = false, below: string | null = null): string {
   const parts = [rig.resets === "never" ? "Goes off once" : "Arms again at the start of the next turn"];
   if (rig.usesLeft !== undefined) parts.push(rig.usesLeft === 0 ? "no uses left" : `${rig.usesLeft} ${rig.usesLeft === 1 ? "use" : "uses"} left`);
   if (rig.stops) parts.push("stops the creature");
   if (opened) parts.push("its pit is open");
   else if (pitDepth !== null) parts.push(`opens a ${pitDepth} ft pit`);
+  else if (rig.below === true) parts.push(below === null ? "drops to no floor" : `drops to ${below}`);
   return parts.join(", ");
+}
+
+// A trapdoor (docs/design/design-v1-floors.md phase 4, 4.6): a pit that opens onto the floor below.
+
+/** The Into choice's name, under Opens a pit, where the trap's floor has a floor below. */
+export const INTO_GROUP = "Into";
+
+/** Into's first choice, the pit that lowers the trap's own squares. Its other is the floor below's name. */
+export const A_PIT = "A pit";
+
+/** Into's help while it drops to the floor below, in place of the pit's depth. */
+export function intoHelp(below: string): string {
+  return `Creatures standing on it fall to ${below}, onto the same squares.`;
+}
+
+/** The server's refusal of a trapdoor on a floor with none below it, which the pane shows where a stored one has none. */
+export function noFloorUnder(floor: string): string {
+  return `There is no floor below ${floor}.`;
+}
+
+/** The floor just below a trap's floor, among its scene's floors, or null on the lowest floor and on a scene of one floor. */
+export function floorBelow(view: Pick<RoomState, "scenes">, sceneId: string): Scene | null {
+  const floors = floorsOf(view, sceneId);
+  const at = floors.findIndex((f) => f.id === sceneId);
+  return at > 0 ? (floors[at - 1] ?? null) : null;
+}
+
+/** A floor's own name, else its scene's, for the words: "Cellar". */
+export function floorWord(view: Pick<RoomState, "scenes">, sceneId: string): string {
+  const scene = ownEntry(view.scenes, sceneId);
+  return scene?.floor?.name ?? scene?.name ?? "this floor";
+}
+
+/** What Into reads off the rig: a pit, the floor below, or neither while Opens a pit is off. */
+export function intoOf(rig: Pick<TrapRig, "pit" | "below">): "pit" | "below" | null {
+  return rig.below === true ? "below" : rig.pit !== undefined ? "pit" : null;
+}
+
+/**
+ * The rig's patch for an Into choice: the floor below clears the pit, and
+ * a pit clears the trapdoor and starts 10 ft deep, as Opens a pit does, so
+ * a rig never holds both (protocol.ts PIT_OR_BELOW).
+ */
+export function intoPatch(choice: "pit" | "below", ground: number): { pit: { floor: number } | null; below: true | null } {
+  return choice === "below" ? { pit: null, below: true } : { pit: { floor: pitFloor(ground, 10) }, below: null };
 }
 
 /** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at −10 ft.", with a true minus. */

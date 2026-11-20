@@ -37,16 +37,25 @@ import { openAsk } from "../rolls/open.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { diceLeft, diceRested, diceTyped, lineLeft, lineRested, lineTyped, NOTE_REST_MS, type DiceState, type LineState } from "./fieldNote.ts";
 import { trapScreenBox } from "./paneBox.ts";
+import { TRAP_INTO_ATTR } from "../floors/ids.ts";
 import { Pair, PartRow, Words } from "./PartRow.tsx";
 import {
   afterSummary,
+  A_PIT,
   alsoSummary,
   boxCenter,
   checkText,
   cleanNote,
   disarmFill,
   findSummary,
+  floorBelow,
+  floorWord,
   hitsSummary,
+  INTO_GROUP,
+  intoHelp,
+  intoOf,
+  intoPatch,
+  noFloorUnder,
   noteSummary,
   openedLine,
   pitFloor,
@@ -197,6 +206,10 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
   // An open pit's squares stand at its floor, so the ground there says nothing of its depth (4.2): it reads Opened, and its depth stays.
   const opened = rig.pit !== undefined && "cells" in trap.zone && pitOpen(chunks, trap.sceneId, trap.zone.cells, rig.pit);
   const pitDepth = rig.pit && !opened ? ground - rig.pit.floor : null;
+  // A trapdoor drops to the floor just below (docs/design/design-v1-floors.md phase 4, 4.6), which the DM's copy holds with every floor of the scene shown.
+  const below = useRoomView((s) => (s.view ? (floorBelow(s.view, trap.sceneId)?.floor?.name ?? null) : null));
+  const floorName = useRoomView((s) => (s.view ? floorWord(s.view, trap.sceneId) : ""));
+  const into = intoOf(rig);
   const from = presetLine(rig);
   const doorGone = "door" in trap.zone && findDoor(chunks, trap.sceneId, trap.zone.door) === null;
 
@@ -284,7 +297,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           <Switch label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
         </Group>
 
-        <Group label="Aftermath" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
+        <Group label="Aftermath" summary={afterSummary(rig, pitDepth, opened, below)} holds="rows" {...fold("after")}>
           {/* Off is the plain case, a trap that goes off once (docs/design/design-v1-look-pass-2.md 2.7). */}
           <Switch label="Arms again at the start of the next turn" checked={rig.resets === "nextTurn"} onChange={(on) => setRig({ resets: on ? "nextTurn" : "never" })} />
           <UsesField value={rig.usesLeft ?? null} onChange={(usesLeft) => setRig({ usesLeft })} />
@@ -295,11 +308,30 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
             <Switch
               label="Opens a pit"
               help={opened && rig.pit ? openedLine(rig.pit) : undefined}
-              checked={rig.pit !== undefined}
+              checked={into !== null}
               disabled={opened}
-              onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })}
+              onChange={(on) => setRig(on ? { pit: { floor: pitFloor(ground, 10) } } : { pit: null, below: null })}
             />
           ) : null}
+          {/* Into shows only where there is a floor to drop to, and never once a pit has opened, since its ground is already lowered. */}
+          {squares && into !== null && !opened && below !== null ? (
+            <div {...{ [TRAP_INTO_ATTR]: into }}>
+              <Segmented<"pit" | "below">
+                label={INTO_GROUP}
+                value={into}
+                even
+                // A floor's name may be long, so it wraps inside its option rather than pushing the pair off the pane.
+                wrap
+                options={[
+                  { value: "pit", label: A_PIT },
+                  { value: "below", label: below },
+                ]}
+                description={into === "below" ? intoHelp(below) : undefined}
+                onChange={(choice) => setRig(intoPatch(choice, ground))}
+              />
+            </div>
+          ) : null}
+          {squares && rig.below === true && below === null ? <Note>{noFloorUnder(floorName)}</Note> : null}
           {squares && pitDepth !== null ? (
             <PartRow>
               <Pair>
