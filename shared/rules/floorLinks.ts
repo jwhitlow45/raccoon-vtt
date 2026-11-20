@@ -78,7 +78,7 @@ export const LINK_WORDS = {
   pit: (floor: string) => `A pit trap lies under those squares on ${floor}.`,
   pastEdge: (floor: string) => `${floor} ends before those squares.`,
   overEnd: (kind: Kind, floor: string) => `Those squares already have ${KIND_WORDS[kind].bare} to ${floor}.`,
-  tooMany: (scene: string) => `${scene} has ${LIMITS.floorLinksPerScene} stairs and ladders, the most a scene can hold.`,
+  tooMany: (scene: string) => `${scene} has ${LIMITS.floorLinksPerScene} stairs, ladders and openings, the most a scene can hold.`,
   notNext: "Stairs join a floor and the floor just above or below it.",
   /** notNext for any kind (phase 4, 3): "An opening joins a floor and the floor just above or below it." */
   notNextFor: (kind: Kind) => `${KIND_WORDS[kind].joins} a floor and the floor just above or below it.`,

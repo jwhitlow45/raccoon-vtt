@@ -185,7 +185,7 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   };
   tokens: Record<string, ProjectedToken>;
   traps: Record<string, ProjectedTrap>;
-  /** The ends of stairs and ladders, each as stored for the DM and cut for a player (projectFloorLinkCtx), only while the copy holds one. */
+  /** The ends of stairs, ladders and openings, each as stored for the DM and cut for a player (projectFloorLinkCtx), only while the copy holds one. */
   floorLinks?: Record<string, FloorLink | ProjectedFloorLink>;
   characters: Record<string, ProjectedCharacter>;
   templates: Record<string, AreaTemplate>;
@@ -3146,7 +3146,7 @@ function projectStampCtx(ctx: Ctx, id: string): Stamp | null {
 }
 
 /**
- * An end of stairs or a ladder as a viewer gets it
+ * An end of stairs, a ladder or an opening as a viewer gets it
  * (docs/design/design-v1-floors.md phase 2, 4), on a floor they hold: the
  * DM every end as stored, a player one on revealed ground by the labels'
  * rule, as a found trap's zone, and never remembered. A player's is cut to
@@ -4836,7 +4836,7 @@ function projectStateKindsCtx(ctx: Ctx): ProjectedState {
   };
 }
 
-/** The ends of stairs and ladders the viewer gets, as a field only while it holds one, as keys.ts writeEntity keeps it. */
+/** The ends of stairs, ladders and openings the viewer gets, as a field only while it holds one, as keys.ts writeEntity keeps it. */
 function floorLinksField(ctx: Ctx): Pick<ProjectedState, "floorLinks"> {
   const links = projectMap(ctx.state.floorLinks ?? {}, (link) => projectFloorLinkCtx(ctx, link));
   return Object.keys(links).length > 0 ? { floorLinks: links } : {};

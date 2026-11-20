@@ -386,7 +386,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     await tapCell(dm, BOUNDS, STAIRS);
     await barOf(dm, "Thorn").waitFor();
     await keyOn(dm, "{");
-    await toast(dm, "Thorn isn't on stairs or a ladder going down.").waitFor();
+    await toast(dm, "Thorn isn't at stairs, a ladder or an opening going down.").waitFor();
     await keyOn(dm, "}");
     await waitFor("Thorn upstairs", () => (thornAt(dmSocket)?.sceneId === run.upper ? true : null));
     await showsFloor(dm, "Upper floor", "the DM's view follows the selected creature");
@@ -408,7 +408,7 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     await tapCell(bree, BOUNDS, { x: 3, y: 8 });
     await barOf(bree, "Bree").waitFor();
     await keyOn(bree, "}");
-    await toast(bree, "Bree isn't on stairs or a ladder.").waitFor();
+    await toast(bree, "Bree isn't at stairs, a ladder or an opening.").waitFor();
     await deselect(bree);
   });
 

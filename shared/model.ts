@@ -40,7 +40,7 @@ export type PinId = string;
 export type RollId = string;
 export type CastId = string;
 export type TrapId = string;
-/** A stairs or ladder end's plain id (`/^[A-Za-z0-9_-]{1,64}$/`), as a trap's. */
+/** An end's plain id (stairs, a ladder or an opening) (`/^[A-Za-z0-9_-]{1,64}$/`), as a trap's. */
 export type FloorLinkId = string;
 /**
  * A fall card's id (RoomState.falls, docs/design/design-v1-floors.md phase
@@ -246,7 +246,7 @@ export type RoomState = {
    */
   openFloors?: Record<SceneId, SceneMark>;
   /**
-   * The ends of stairs and ladders between floors next to each other
+   * The ends of stairs, ladders and openings between floors next to each other
    * (docs/design/design-v1-floors.md phase 2), `keys.floorLink(id)`, each
    * scene-scoped by the floor it lies on and written and removed in pairs.
    * A player gets an end only on a floor they hold, on revealed ground, cut
@@ -733,10 +733,11 @@ export type SceneFloor = {
 };
 
 /**
- * One end of stairs or a ladder between two floors next to each other in
- * one scene (docs/design/design-v1-floors.md phase 2). Written and removed
- * in pairs: each end lies on its own floor, on the same squares as its
- * pair, since floors line up from the top left.
+ * One end of stairs, a ladder or an opening between two floors next to
+ * each other in one scene (docs/design/design-v1-floors.md phase 2, phase
+ * 4). Written and removed in pairs: each end lies on its own floor, on the
+ * same squares as its pair unless stairs or a ladder lie on other squares
+ * of the far floor (phase 4, 8.2), since floors line up from the top left.
  */
 export type FloorLink = {
   id: FloorLinkId;

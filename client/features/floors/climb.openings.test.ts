@@ -49,14 +49,14 @@ describe("Fly up and Fly down's offer (phase 4, 5)", () => {
 
   test("off the squares, the key says what it says of stairs", () => {
     const away = at(GROUND, 0, { id: "goblin", name: "Goblin", x: 12, y: 12 });
-    assert.deepEqual(climbKey(room(away), DM, away, "up", "Goblin"), { say: "Goblin isn't on stairs or a ladder." });
+    assert.deepEqual(climbKey(room(away), DM, away, "up", "Goblin"), { say: "Goblin isn't at stairs, a ladder or an opening." });
     const high = at(GROUND, 5, { id: "goblin", name: "Goblin", x: 12, y: 12 });
     assert.equal(climbOffer(room(high), DM, high), null, "in the air away from the squares");
   });
 
   test("a creature its viewer may not move gets neither the button nor the flier's words", () => {
     const goblin = at(GROUND, 0, { id: "goblin", name: "Goblin" });
-    assert.deepEqual(climbKey(room(goblin), ANA, goblin, "up", "Goblin"), { say: "Goblin isn't on stairs or a ladder." });
+    assert.deepEqual(climbKey(room(goblin), ANA, goblin, "up", "Goblin"), { say: "Goblin isn't at stairs, a ladder or an opening." });
   });
 
   test("a rider of a mount the viewer receives waits for its mount, which flies, and one whose mount they do not receive flies alone", () => {

@@ -20,7 +20,7 @@ describe("stairs' words", () => {
     assert.equal(words.climbOffReason("squeeze", "stairs"), "Too big for these stairs. Squeeze to fit.");
     assert.equal(words.climbOffReason("tooBig", "ladder"), "Too big for this ladder.");
     assert.equal(words.climbOffReason("tooBig", "stairs"), LINK_WORDS.tooBig("stairs"));
-    assert.equal(words.notOnStairs("Thorn"), "Thorn isn't on stairs or a ladder.");
+    assert.equal(words.notOnStairs("Thorn"), "Thorn isn't at stairs, a ladder or an opening.");
   });
 
   test("the board's names: the far floor where held, else the kind and the way", () => {

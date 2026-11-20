@@ -87,9 +87,9 @@ describe("} and { (6.2)", () => {
     const s = withStairs();
     assert.equal("climb" in climbKey(s, DM, thorn(s), "up", "Thorn"), true);
     assert.deepEqual(climbKey(s, DM, thorn(s), "down", "Thorn"), { say: notOnStairsThatWay("Thorn", "down") });
-    assert.equal(notOnStairsThatWay("Thorn", "down"), "Thorn isn't on stairs or a ladder going down.");
-    assert.deepEqual(climbKey(s, DM, { ...thorn(s), x: 9, y: 9 }, "up", "Thorn"), { say: "Thorn isn't on stairs or a ladder." });
-    assert.deepEqual(climbKey(anaCopy(s), BREE, thorn(s), "up", "Thorn"), { say: "Thorn isn't on stairs or a ladder." }, "no right to move it, no stairs to take");
+    assert.equal(notOnStairsThatWay("Thorn", "down"), "Thorn isn't at stairs, a ladder or an opening going down.");
+    assert.deepEqual(climbKey(s, DM, { ...thorn(s), x: 9, y: 9 }, "up", "Thorn"), { say: "Thorn isn't at stairs, a ladder or an opening." });
+    assert.deepEqual(climbKey(anaCopy(s), BREE, thorn(s), "up", "Thorn"), { say: "Thorn isn't at stairs, a ladder or an opening." }, "no right to move it, no stairs to take");
   });
 
   test("a rider whose holder stands on stairs says its holder takes them", () => {

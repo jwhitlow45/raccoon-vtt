@@ -74,7 +74,7 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
   }
   for (const floor of floors) copyFloor(tx, op, floor.id, floor.to, copied);
 
-  // Stairs and ladders come with the floors they join, on the copies of both, each pair placed by this op
+  // Stairs, ladders and openings come with the floors they join, on the copies of both, each pair placed by this op
   // (docs/design/design-v1-floors.md phase 2, 3).
   const floorCopies = new Map(floors.map((floor) => [floor.id, floor.to]));
   for (const link of sortedById(Object.values(s.floorLinks ?? {}))) {

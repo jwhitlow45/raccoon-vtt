@@ -85,7 +85,7 @@ describe("placing, changing and removing stairs (3)", () => {
     let s = tower();
     for (let i = 0; i < 16; i++) s = run(s, putOp({ id: `a${i}`, pairId: `b${i}`, sceneId: i % 2 === 0 ? GROUND : UPPER, to: i % 2 === 0 ? UPPER : ATTIC, rect: { x: i, y: 10, w: 1, h: 1 } }));
     assert.equal(floorProblem(s, GROUND), null);
-    assert.equal(refusal(s, putOp({ id: "a16", pairId: "b16", rect: { x: 0, y: 0, w: 1, h: 1 } })), "Tower has 16 stairs and ladders, the most a scene can hold.");
+    assert.equal(refusal(s, putOp({ id: "a16", pairId: "b16", rect: { x: 0, y: 0, w: 1, h: 1 } })), "Tower has 16 stairs, ladders and openings, the most a scene can hold.");
   });
 
   test("removing a floor takes the stairs to it, and its undo brings them back", () => {

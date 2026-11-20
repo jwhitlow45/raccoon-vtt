@@ -1155,9 +1155,9 @@ export const roomStateSchema = z.strictObject({
   memoryShared: shareMarks.default({}),
   // The floors players reached (docs/design/design-v1-floors.md 9). Backups from before floors have none, which reads as none.
   openFloors: sceneMarks.optional(),
-  // Stairs and ladders (docs/design/design-v1-floors.md phase 2). Backups from before them have none, which reads as none.
-  // Each pair joins two floors of a scene, so the scenes a room may hold bound how many ends it holds.
-  floorLinks: byOwnId(floorLink, LIMITS.floorLinksPerScene * LIMITS.scenesPerRoom, "ends of stairs and ladders").optional(),
+  // Stairs, ladders and openings (docs/design/design-v1-floors.md phase 2, phase 4). Backups from before them have none,
+  // which reads as none. Each pair joins two floors of a scene, so the scenes a room may hold bound how many ends it holds.
+  floorLinks: byOwnId(floorLink, LIMITS.floorLinksPerScene * LIMITS.scenesPerRoom, "ends of stairs, ladders and openings").optional(),
   // Fall cards (docs/design/design-v1-floors.md phase 4, 4.4). Backups from before them have none, which reads as none.
   falls: byOwnId(fallCard, fallSchemas.fallsMost, "fall cards").optional(),
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).

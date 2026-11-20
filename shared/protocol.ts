@@ -2447,8 +2447,9 @@ const stateClientOps = [
    */
   op("floor.open", { sceneId: id, open: z.boolean() }),
   /**
-   * Places stairs or a ladder between a floor and the floor just above or
-   * below it (docs/design/design-v1-floors.md phase 2, 3): both ends, `id`
+   * Places stairs, a ladder or an opening between a floor and the floor
+   * just above or below it (docs/design/design-v1-floors.md phase 2, 3,
+   * phase 4 3): both ends, `id`
    * on `sceneId` and `pairId` on `to`, on the same squares. The reducer
    * sets each end's `ground`, `made` and `grid`. Setup.
    */
@@ -2472,7 +2473,7 @@ const stateClientOps = [
       .strictObject({ kind: floorLinkKind.optional(), locked: z.boolean().optional(), hidden: z.boolean().optional(), rect: floorLinkRect.optional(), pairRect: floorLinkRect.optional() })
       .refine((p) => Object.values(p).some((v) => v !== undefined), { message: "nothing to change" }),
   }),
-  /** Removes both ends of stairs or a ladder (3). Setup. */
+  /** Removes both ends of stairs, a ladder or an opening (3, phase 4 3). Setup. */
   op("floorLink.delete", { linkId: plainId }),
   op("scene.setMap", { sceneId: id, map: sceneMap.nullable() }),
   op("scene.setGrid", {
@@ -2536,6 +2537,8 @@ const stateClientOps = [
    * Go up or Go down (docs/design/design-v1-floors.md phase 2, 3): the
    * creature takes the stairs or ladder it stands on, by the end on its
    * floor, to the same squares of the other floor, with what it carries.
+   * Fly up and Fly down take an opening the same way, for a creature in
+   * the air under or over it (phase 4, 5).
    * The reducer plans the whole climb, so a device names no landing.
    */
   op("token.climb", { tokenId: id, linkId: plainId }),

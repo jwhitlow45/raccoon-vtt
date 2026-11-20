@@ -82,7 +82,7 @@ export type ParsedKey =
   | { kind: "memoryShared"; id: string }
   /** A floor's opened mark (RoomState.openFloors, docs/design/design-v1-floors.md 9), by the floor's id. */
   | { kind: "opened"; id: string }
-  /** A stairs or ladder end (RoomState.floorLinks, docs/design/design-v1-floors.md phase 2), by its id. */
+  /** An end of stairs, a ladder or an opening (RoomState.floorLinks, docs/design/design-v1-floors.md phase 2), by its id. */
   | { kind: "floorLink"; id: string }
   /** A fall card (RoomState.falls, docs/design/design-v1-floors.md phase 4, 4.4), by its id, `"<seq>:<n>"`. */
   | { kind: "fall"; id: string }
@@ -164,7 +164,7 @@ export const keys = {
   memoryShared: (sceneId: string): EntityKey => `memoryShared:${sceneId}`,
   /** A floor's opened mark (RoomState.openFloors): players have reached it. */
   opened: (sceneId: string): EntityKey => `opened:${sceneId}`,
-  /** A stairs or ladder end (RoomState.floorLinks). */
+  /** An end of stairs, a ladder or an opening (RoomState.floorLinks). */
   floorLink: (id: string): EntityKey => `floorLink:${id}`,
   /** A fall card (RoomState.falls), the DM's. Its id keeps its inner colon, as a log id does. */
   fall: (id: string): EntityKey => `fall:${id}`,

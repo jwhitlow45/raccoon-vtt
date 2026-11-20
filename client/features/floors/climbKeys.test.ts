@@ -71,7 +71,7 @@ describe("} and {", () => {
     const s = withStairs();
     const off = room(DM, { ...s, tokens: { ...s.tokens, thorn: { ...s.tokens.thorn!, x: 9, y: 9 } } }, ["thorn"]);
     off.key("}");
-    assert.deepEqual([...r.notes, ...off.notes], ["Thorn isn't on stairs or a ladder going down.", "Thorn isn't on stairs or a ladder."]);
+    assert.deepEqual([...r.notes, ...off.notes], ["Thorn isn't at stairs, a ladder or an opening going down.", "Thorn isn't at stairs, a ladder or an opening."]);
     assert.deepEqual([...r.ops, ...off.ops], []);
   });
 

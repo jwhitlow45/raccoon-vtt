@@ -62,9 +62,9 @@ export function climbOffReason(why: "locked" | "squeeze" | "tooBig", kind: Kind)
   return why === "squeeze" ? LINK_WORDS.tooBigSqueeze(kind) : LINK_WORDS.tooBig(kind);
 }
 
-/** What `}` or `{` says where the selected creature is on no stairs (6.2). */
+/** What `}` or `{` says where the selected creature is at no stairs, ladder or opening (6.2, phase 4 5). */
 export function notOnStairs(name: string): string {
-  return `${name} isn't on stairs or a ladder.`;
+  return `${name} isn't at stairs, a ladder or an opening.`;
 }
 
 /** The undo step's label after "Undo ": "moving Thorn up the stairs", the server's own (6.3). */

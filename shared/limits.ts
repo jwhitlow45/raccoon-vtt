@@ -184,9 +184,10 @@ export const LIMITS = {
   floorsPerScene: 8,
   floorNameChars: 40,
   /**
-   * Stairs and ladders between a scene's floors (docs/design/design-v1-floors.md
-   * phase 2): pairs in one scene, both ends of a pair counted as one, and the
-   * longest side of an end's squares.
+   * Stairs, ladders and openings between a scene's floors
+   * (docs/design/design-v1-floors.md phase 2, phase 4): pairs in one scene,
+   * both ends of a pair counted as one, and the longest side of an end's
+   * squares for stairs and ladders (an opening keeps to OPENING_SIDE).
    */
   floorLinksPerScene: 16,
   floorLinkSide: 4,

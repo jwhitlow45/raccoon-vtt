@@ -93,7 +93,7 @@ function carriedBy(view: Pick<RoomState, "tokens">, token: Token): Token | null 
  * What `}` or `{` does with one creature selected (6.2): climb that way
  * where the bar would offer it, else say why in the bar's or the server's
  * words. A creature on an end the other way says it is on none this way,
- * since "isn't on stairs" would not be true there (D-261109-138).
+ * since "isn't at stairs" would not be true there (D-261109-138).
  */
 export type ClimbKey = { climb: ClimbOffer } | { say: string };
 
@@ -113,9 +113,9 @@ export function climbKey(view: ClimbView, viewer: Viewer, token: Token, dir: Dir
   return { climb: offer };
 }
 
-/** "Thorn isn't on stairs or a ladder going up.": `}` on an end that leads down, or `{` on one that leads up. */
+/** "Thorn isn't at stairs, a ladder or an opening going up.": `}` on an end that leads down, or `{` on one that leads up. */
 export function notOnStairsThatWay(name: string, dir: Dir): string {
-  return `${name} isn't on stairs or a ladder going ${dir}.`;
+  return `${name} isn't at stairs, a ladder or an opening going ${dir}.`;
 }
 
 // ------------------------------------------------------------ the one wait

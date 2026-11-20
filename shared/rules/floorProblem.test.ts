@@ -134,6 +134,6 @@ describe("floorProblem's stairs", () => {
     const links = { ...s.floorLinks! };
     links.a16 = { ...links.a0!, id: "a16", pair: "b16", rect: { x: 0, y: 12, w: 1, h: 1 } };
     links.b16 = { ...links.b0!, id: "b16", pair: "a16", rect: { x: 0, y: 12, w: 1, h: 1 } };
-    assert.equal(floorProblem({ ...s, floorLinks: links }, GROUND), "Tower has 16 stairs and ladders, the most a scene can hold.");
+    assert.equal(floorProblem({ ...s, floorLinks: links }, GROUND), "Tower has 16 stairs, ladders and openings, the most a scene can hold.");
   });
 });
