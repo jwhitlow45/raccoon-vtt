@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { BOOKKEEPING_RESERVE, FAR } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, farByteLine } from "#shared/limits.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
-import { farRoomBytes } from "./sizeGuard.ts";
+import { farRoomBytes, FIGHT_HISTORY_FULL } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /*
@@ -69,6 +69,39 @@ describe("ops past the far line", () => {
     const logged = h.actor.committed.state.log.length;
     assert.equal(answer(await dm.send({ t: "encounter.remove", entryIds: [active] })), "taken", "the active row's removal");
     assert.ok(h.actor.committed.state.log.length > logged, "it wrote a line");
+  });
+});
+
+describe("a fight's start the far line refuses", () => {
+  const start = (f: ReturnType<typeof scopeFixture>) => ({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: f.goblin, value: 20 }, { id: uuidv7(), tokenId: f.pc, value: 10 }] });
+
+  test("past the line it says the room has no space left for the fight's history, and a create keeps the room-full words", async (t) => {
+    const f = filled(FAR.roomBytes + MIB);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.equal(answer(await dm.send(start(f))), `quota: ${FIGHT_HISTORY_FULL}`);
+    assert.equal(h.actor.committed.state.encounter, null, "no fight started");
+    const line = { t: "drawing.create", drawing: { id: uuidv7(), sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId: f.dm.id, visibility: "all" } };
+    assert.match(answer(await dm.send(line)), /^quota: the room is full: /, "the DM's create");
+  });
+
+  test("short of the DM's line by less than the history, the start alone is refused, in the fight's words", async (t) => {
+    // The DM's adds stop at their line, so a room half a MiB short of it takes a growing edit and refuses the 1 MiB a fight sets aside.
+    const dmLine = farByteLine("meets", "room", "dm")!;
+    const f = filled(dmLine - 3 * MIB);
+    for (let pad = 64 * 1024; farRoomBytes(f.state, true) <= dmLine - 512 * 1024; pad += 64 * 1024) f.state.tokens.n0 = { ...f.state.tokens.n0!, notes: "p".repeat(pad) };
+    assert.ok(farRoomBytes(f.state, true) <= dmLine - 256 * 1024, `${farRoomBytes(f.state, true)} short of the DM's line`);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: f.goblin, patch: { notes: "m".repeat(4_000) } })), "taken", "a growing edit");
+    assert.equal(answer(await dm.send(start(f))), `quota: ${FIGHT_HISTORY_FULL}`);
+  });
+
+  test("one the near line refuses keeps the room-full words", async (t) => {
+    const f = scopeFixture();
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 1_000, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.match(answer(await dm.send(start(f))), /^quota: the room is full: /);
   });
 });
 

@@ -155,6 +155,7 @@ export class SizeGuard {
    */
   #caps: string | null = null;
   #refusedScene: string | null = null;
+  #refusedFar = false;
   /** By how many bytes the room is past the far line at its widest, at the last exact reading (overFarLine). */
   #over = 0;
 
@@ -182,6 +183,11 @@ export class SizeGuard {
    */
   get refusedScene(): string | null {
     return this.#refusedScene;
+  }
+
+  /** Whether the far line refused the last check, so a fight's start says what it needs (actor.ts, FIGHT_HISTORY_FULL). */
+  get refusedFar(): boolean {
+    return this.#refusedFar;
   }
 
   /** The share a reserve reads a sharing layer at beside its own cap (layerCap): a whole cap, since marked scenes' shares are fixed. */
@@ -250,9 +256,12 @@ export class SizeGuard {
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false, player?: string): LimitCheck {
     this.#refusedScene = null;
+    this.#refusedFar = false;
     const near = role === "player" || exempt ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
     if (!near.ok || far === "none") return near;
-    return this.#far(next, before, far, exempt ? "exempt" : "meets", player);
+    const answer = this.#far(next, before, far, exempt ? "exempt" : "meets", player);
+    this.#refusedFar = !answer.ok;
+    return answer;
   }
 
   /**
@@ -740,6 +749,12 @@ export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
  * party's count at their widest from the switch on.
  */
 export const PER_PLAYER_FULL = "The room is too full for per-player sight on this scene: each player's map and the paths this fight recorded need room. Delete unused scenes to free space.";
+
+/**
+ * The refusal of a fight's start that the far line refuses, which counts
+ * the fight's history at its bound from its start (D-261120-091).
+ */
+export const FIGHT_HISTORY_FULL = `The room has no space left for the ${HISTORY_BYTES / 1024 / 1024} MiB a fight sets aside for its turn history. Delete unused scenes to free space.`;
 
 /*
  * Who a list names and what a holder explored depend on that player's
