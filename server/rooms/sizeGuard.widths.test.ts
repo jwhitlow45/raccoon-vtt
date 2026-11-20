@@ -466,6 +466,21 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
     assertTwinsAlike([order(false), order(true)], { t: "encounter.add", entries: [{ id: "rpet", tokenId: "pet", value: 100 }] } as Op);
   });
 
+  test("P1's warhorse walked with a seat that names a hidden rider on it, or with no rider (LP44R5-OPUS-3)", () => {
+    const horse = (rider: boolean) => {
+      const s = room({ tokens: { horse: token("horse", { kind: "npc", size: "large", name: "Warhorse", ownerIds: ["p1"], x: 2, y: 2, rev: 9 }) } });
+      if (rider) s.tokens.owl = token("owl", { kind: "pc", visibility: "dm", x: 3, y: 3, rev: 9, attached: { to: "horse", kind: "ride" } });
+      return s;
+    };
+    const seated: Op = { t: "token.move", tokenId: "horse", x: 10, y: 2, seat: { tokenId: "owl", x: 10, y: 2 } } as Op;
+    assert.ok(canApplyOk(seated, horse(true)), "P1 may walk the warhorse");
+    assertTwinsAlike([horse(false), horse(true)], seated);
+    const { seat: _seat, ...bare } = seated as Extract<Op, { t: "token.move" }>;
+    const place = (state: RoomState) => [state.tokens.owl!.x, state.tokens.owl!.y];
+    assert.deepEqual(place(run(horse(true), seated, P1)), place(run(horse(true), bare as Op, P1)), "P1's walk carries the hidden rider as with no seat");
+    assert.deepEqual(place(run(horse(true), seated, DM)), [10, 2], "where the DM's walk would seat her");
+  });
+
   test("a door Thorn opens, with a hidden creature behind it or none", () => {
     const door = (hidden: boolean) => {
       const s = tower();

@@ -435,6 +435,17 @@ const heldAsStored = (state: RoomState, memberId: string) => {
 };
 
 /**
+ * Whether a change touched the thing `key` names itself, a drawing or an
+ * ask held as stored, whose own content its hold counts so: a change
+ * anywhere else, such as where its creature stands, must leave it alike
+ * (LP44R5-OPUS-1).
+ */
+const ownContent = (key: string, where: string) => {
+  const at = key.replace(/^drawing:/, "drawings.").replace(/^cast:/, "casts.");
+  return where === at || where.startsWith(`${at}.`);
+};
+
+/**
  * Residual 7: an area of theirs their copy does not hold, put on or taken off
  * a creature or onto another floor, which only the DM does. Whose an area is
  * never changes once made. Its hide reads as a delete, residual 6's, and a
@@ -472,6 +483,8 @@ function namedBase(seed: number): RoomState {
   state.tokens.seen1 = token("seen1", { sceneId: scene, x: 1, y: 1, hpVisibility: "label", actor: { inline: actor({ hp: { cur: 7, max: 20, temp: 0 }, effects }) } });
   state.tokens.ghost = token("ghost", { sceneId: scene, x: 2, y: 2, visibility: "dm" });
   state.templates.ac = template("ac", { sceneId: scene, ownerId: "p1", attachedTo: "seen1", casterId: "ghost", label: "Faerie Fire" });
+  // P1's ruler kept on the hidden creature, which their copy does not hold and their exact part holds as stored.
+  state.drawings.kept = drawing("kept", { sceneId: scene, kind: "ruler", ownerId: "p1", anchors: [null, "ghost"], points: [1.5, 1.5, 2.5, 2.5] });
   state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor() });
   state.tokens.hero = token("hero", { kind: "pc", sceneId: scene, actor: { ref: "c1" }, ownerIds: ["p1"], x: 3, y: 1 });
   state.rolls.r1 = { id: "r1", rev: 3, test: { kind: "save", ability: "dex", choices: [] }, dc: 15, dcShown: false, resultShown: false, at: "2026-10-12T20:00:00.000Z", targets: [{ tokenId: "hero", total: 17, by: "p1", result: "pass" }] } as never;
@@ -493,6 +506,7 @@ const NAMED: Record<string, RegExp> = {
   "a hidden roll answer": /^rolls\.r1\.(targets\.0\.result|dc)$/,
   "a secret door's flags": /^buildChunks\.[^.]+\.edges\.3,2,w\./,
   "an HP line's hidden parts of conditions shown": /^log\.\d+\.data\.revert\.(added\.0\.(save\.dc|due\b)|removed\.0\.ends\.(at|clock))/,
+  "where the hidden creature a held ruler is kept on stands": /^tokens\.ghost\.(x|y|sceneId)$/,
 };
 
 describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out give them equal exact parts", () => {
@@ -532,7 +546,7 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
           for (const [name, re] of Object.entries(NAMED)) if (re.test(where)) named.set(name, (named.get(name) ?? 0) + 1);
           const [after, conditionsAfter] = [shownBy(twin, memberId), shownChanges(twin, memberId)];
           for (const key of new Set([...Object.keys(shown), ...Object.keys(after)])) {
-            if (shown[key] === after[key] || asStored.has(key) || (key.startsWith("template:") && areaMoved(where))) continue;
+            if (shown[key] === after[key] || (asStored.has(key) && ownContent(key, where)) || (key.startsWith("template:") && areaMoved(where))) continue;
             // Residual 9: an HP line moves only with what players are shown of its conditions.
             if (key.startsWith("log:") && conditions[key] !== conditionsAfter[key]) continue;
             found.push(`seed ${seed}, ${memberId}, ${where}${change.append ? " one longer" : ""}: ${key} ${shown[key] ?? "none"} against ${after[key] ?? "none"}`);
