@@ -55,7 +55,8 @@ import {
 import { answerChoiceMarks, requestMarks, rowTest, type LevelOf } from "./marks.ts";
 import { askSlot, closeAsk } from "./open.ts";
 import { RequestSheet } from "./RequestSheet.tsx";
-import { deskTraps, foldedWithTraps } from "../traps/desk.ts";
+import { deskFalls, deskTraps, fallRead, foldedWithFalls, foldedWithTraps } from "../traps/desk.ts";
+import { FallCard } from "../traps/FallCard.tsx";
 import { TrapCard } from "../traps/TrapCard.tsx";
 import { cardStyle, ResultBadge } from "./parts.tsx";
 import { labelsOf, useLabels } from "../../state/labels.ts";
@@ -63,22 +64,31 @@ import { labelsOf, useLabels } from "../../state/labels.ts";
 const NO_ROLLS = {};
 const NO_CASTS = {};
 const NO_TRAPS = {};
+const NO_FALLS = {};
 
 /** The ids of the parts the desk draws in the column, in order, so the dock's summary republishes when one is replaced by another of the same count. */
-export function deskDrawnIds(a: { traps: { due: { id: string } }[]; asks: { id: string }[]; cards: { id: string }[]; button: boolean }): string[] {
-  return [...a.traps.map(({ due }) => `trap:${due.id}`), ...a.asks.map((ask) => `cast:${ask.id}`), ...a.cards.map((request) => `roll:${request.id}`), ...(a.button ? ["rolls:summary"] : [])];
+export function deskDrawnIds(a: { traps: { due: { id: string } }[]; falls?: { id: string }[]; asks: { id: string }[]; cards: { id: string }[]; button: boolean }): string[] {
+  return [
+    ...a.traps.map(({ due }) => `trap:${due.id}`),
+    ...(a.falls ?? []).map((card) => `fall:${card.id}`),
+    ...a.asks.map((ask) => `cast:${ask.id}`),
+    ...a.cards.map((request) => `roll:${request.id}`),
+    ...(a.button ? ["rolls:summary"] : []),
+  ];
 }
 
 /**
  * How many of the desk's waiting things its summary words leave out
  * (docs/design/design-v1-visual.md 3.2.1): the words name the traps that went
- * off, else the asks for saves, else the roll requests, so the rest count
- * in the summary's "+N". "Dart plate went off +2" with two asks for saves
- * waiting, where the row once read "Dart plate went off" alone
- * (LP16-PT-3).
+ * off, else the creatures that fell, else the asks for saves, else the
+ * roll requests, so the rest count in the summary's "+N". "Dart plate went
+ * off +2" with two asks for saves waiting, where the row once read "Dart
+ * plate went off" alone (LP16-PT-3).
  */
-export function deskUnnamed(counts: { traps: number; asks: number; cards: number }): number {
-  if (counts.traps > 0) return counts.asks + counts.cards;
+export function deskUnnamed(counts: { traps: number; falls?: number; asks: number; cards: number }): number {
+  const falls = counts.falls ?? 0;
+  if (counts.traps > 0) return falls + counts.asks + counts.cards;
+  if (falls > 0) return counts.asks + counts.cards;
   if (counts.asks > 0) return counts.cards;
   return 0;
 }
@@ -106,6 +116,10 @@ export function deskUnnamed(counts: { traps: number; asks: number; cards: number
  * A trap that went off with something left for the DM (docs/design/design-v1-traps.md
  * 4.3) is a card above both, newest first, while its springing waits: it
  * waits for the DM too, so it leads the summary.
+ *
+ * A creature that fell through an opening (docs/design/design-v1-floors.md
+ * phase 4, 4.4) is a card under the traps, newest first, until the DM
+ * applies or dismisses it. It waits for the DM as a springing does.
  */
 export function DmDesk() {
   const scope = useRoomScope();
@@ -119,7 +133,11 @@ export function DmDesk() {
   const askWho = useRoomView((s) => (s.view && asked.length === 1 ? castWho(s.view, asked[0]!, labelsOf(s)) : ""));
   const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
   const sprung = useMemo(() => deskTraps(traps), [traps]);
-  const items = sprung.length + asked.length + cards.length;
+  const falls = useRoomView((s) => s.view?.falls ?? NO_FALLS);
+  const fallen = useMemo(() => deskFalls(falls), [falls]);
+  // The one card's creature, as the summary names it: "Thorn fell".
+  const fellWho = useRoomView((s) => (s.view && fallen.length === 1 ? (fallRead(s.view, fallen[0]!, s.sceneId, labelsOf(s)).name ?? "A creature") : ""));
+  const items = sprung.length + fallen.length + asked.length + cards.length;
   const tokens = useRoomView((s) => s.view?.tokens);
   const characters = useRoomView((s) => s.view?.characters);
   const held = useMemo(() => (tokens && characters ? heldBySaveEnds({ tokens, characters, rolls }) : new Set<string>()), [tokens, characters, rolls]);
@@ -155,7 +173,7 @@ export function DmDesk() {
   useEffect(() => {
     if (!focusAfter || layout.folded) return;
     // The column scrolls as a whole, and kept its place while the sheet folded it.
-    const first = sprung[0]?.due.id ?? asked[0]?.id ?? cards[0]?.id;
+    const first = sprung[0]?.due.id ?? fallen[0]?.id ?? asked[0]?.id ?? cards[0]?.id;
     revealAndFocus(first ? toggles.current.get(first) : null);
     setFocusAfter(false);
   }, [focusAfter, layout.folded]);
@@ -192,26 +210,51 @@ export function DmDesk() {
     if (focusAlert(scope.get(dockSlot).getState().column, null)) return;
     focusMap(scope.get(mapFocusSlot));
   }, [cards, scope]);
+  /*
+   * Dismiss goes with its card, and focus would fall to the page. Once the
+   * card is gone, focus goes to the next card in the column, else the
+   * column's first alert, else the map (docs/design/design-v1-floors.md
+   * phase 4, 12). A refused Dismiss keeps its card and its focus. Focus
+   * moves only from the page itself, so a press elsewhere since is kept.
+   */
+  const afterFall = useRef<{ id: string; next: string | null } | null>(null);
+  const order = [...sprung.map(({ due }) => due.id), ...fallen.map((c) => c.id), ...asked.map((a) => a.id), ...cards.map((c) => c.id)];
+  const nextFall = (id: string) => {
+    const at = order.indexOf(id);
+    return order[at + 1] ?? (at > 0 ? order[at - 1]! : null);
+  };
+  useLayoutEffect(() => {
+    const gone = afterFall.current;
+    if (!gone || fallen.some((c) => c.id === gone.id)) return;
+    afterFall.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    if (revealAndFocus(gone.next === null ? null : toggles.current.get(gone.next))) return;
+    if (focusAlert(scope.get(dockSlot).getState().column, null)) return;
+    focusMap(scope.get(mapFocusSlot));
+  }, [fallen, scope]);
   // A player's ask to change a roll waits for the DM, so then the rolls lead the dock's summary (docs/design/design-v1-roll-request.md 6).
   const asks = cards.reduce((n, c) => n + c.targets.filter((t) => t.change !== undefined).length, 0);
   const counted = answeredCount(cards);
   // An ask for saves waits for the DM too, so it leads: "Thorn asks for saves".
   const forSaves = asked.length === 0 ? null : asked.length === 1 ? `${askWho} asks for saves` : `${asked.length} asks for saves`;
   const wentOff = sprung.length === 0 ? null : sprung.length === 1 ? `${sprung[0]!.trap.name} went off` : `${sprung.length} traps went off`;
+  const fell = fallen.length === 0 ? null : fallen.length === 1 ? `${fellWho} fell` : `${fallen.length} creatures fell`;
   const rollsName = cards.length > 0 ? (asks > 0 ? `${counted.name}, ${asks} ${asks === 1 ? "asks" : "ask"} to change a roll` : counted.name) : null;
   const shownTraps = sprung.slice(0, stack.shown);
-  const shownAsks = asked.slice(0, Math.max(0, stack.shown - sprung.length));
-  const shownCards = cards.slice(0, Math.max(0, stack.shown - sprung.length - asked.length));
-  const drawnIds = deskDrawnIds({ traps: shownTraps, asks: shownAsks, cards: shownCards, button: stack.button !== null });
+  const shownFalls = fallen.slice(0, Math.max(0, stack.shown - sprung.length));
+  const shownAsks = asked.slice(0, Math.max(0, stack.shown - sprung.length - fallen.length));
+  const shownCards = cards.slice(0, Math.max(0, stack.shown - sprung.length - fallen.length - asked.length));
+  const drawnIds = deskDrawnIds({ traps: shownTraps, falls: shownFalls, asks: shownAsks, cards: shownCards, button: stack.button !== null });
   useAlertsSummary(
     items > 0
       ? {
-          text: wentOff ?? forSaves ?? counted.text,
-          name: [wentOff, forSaves, rollsName].filter((x): x is string => x !== null).join(", "),
-          waiting: asks > 0 || forSaves !== null || wentOff !== null,
+          text: wentOff ?? fell ?? forSaves ?? counted.text,
+          name: [wentOff, fell, forSaves, rollsName].filter((x): x is string => x !== null).join(", "),
+          waiting: asks > 0 || forSaves !== null || wentOff !== null || fell !== null,
           requests: items,
           drawnIds,
-          unnamed: deskUnnamed({ traps: sprung.length, asks: asked.length, cards: cards.length }),
+          unnamed: deskUnnamed({ traps: sprung.length, falls: fallen.length, asks: asked.length, cards: cards.length }),
           open,
         }
       : null,
@@ -221,12 +264,13 @@ export function DmDesk() {
   const phone = size.width < theme.layout.wideMinWidth;
   // One its save-ends card holds stays folded: Allow and Keep show once, on that card.
   const opensAt = (request: RollRequest, i: number) => !held.has(request.id) && (layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined)));
-  // The traps stand first, then the asks, so the newest two are counted over all three, and what folds is the rest of each.
-  const foldedCards = stack.button === "sheet" ? cards : cards.slice(Math.max(0, PHONE_CHIPS - sprung.length - asked.length));
-  const foldedAsks = stack.button === "sheet" ? asked : asked.slice(Math.max(0, PHONE_CHIPS - sprung.length));
+  // The traps stand first, then the falls, then the asks, so the newest two are counted over all four, and what folds is the rest of each.
+  const foldedCards = stack.button === "sheet" ? cards : cards.slice(Math.max(0, PHONE_CHIPS - sprung.length - fallen.length - asked.length));
+  const foldedAsks = stack.button === "sheet" ? asked : asked.slice(Math.max(0, PHONE_CHIPS - sprung.length - fallen.length));
+  const foldedFalls = stack.button === "sheet" ? fallen : fallen.slice(Math.max(0, PHONE_CHIPS - sprung.length));
   const foldedTraps = stack.button === "sheet" ? sprung : sprung.slice(PHONE_CHIPS);
   const summary = stack.button
-    ? foldedWithTraps(foldedWithAsks(foldedCards.length > 0 ? foldedChips(foldedCards, stack.button) : null, foldedAsks.length, stack.button), foldedTraps.length, stack.button)
+    ? foldedWithTraps(foldedWithFalls(foldedWithAsks(foldedCards.length > 0 ? foldedChips(foldedCards, stack.button) : null, foldedAsks.length, stack.button), foldedFalls.length, stack.button), foldedTraps.length, stack.button)
     : null;
   const summaryButton = summary ? (
     <Button
@@ -270,6 +314,17 @@ export function DmDesk() {
               // A springing waits for the DM, so it opens on a computer, and a phone's card starts folded to its first line.
               open={toggled[due.id] ?? !phone}
               onToggle={() => setToggled((t) => ({ ...t, [due.id]: !(t[due.id] ?? !phone) }))}
+            />
+          ))}
+          {shownFalls.map((card) => (
+            <FallCard
+              key={card.id}
+              card={card}
+              toggleRef={toggleRef(card.id)}
+              // A fall waits for the DM, so it opens on a computer, and a phone's card starts folded to its first line.
+              open={toggled[card.id] ?? !phone}
+              onToggle={() => setToggled((t) => ({ ...t, [card.id]: !(t[card.id] ?? !phone) }))}
+              onDismiss={() => (afterFall.current = { id: card.id, next: nextFall(card.id) })}
             />
           ))}
           {shownAsks.map((ask) => (

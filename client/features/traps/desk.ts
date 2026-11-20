@@ -1,5 +1,8 @@
-import type { BuildChunk, LogEntry, LogEvent, RoomState, Token, Trap, TrapAction, TrapDue } from "#shared/model.ts";
+import type { BuildChunk, Fall, LogEntry, LogEvent, RoomState, Token, Trap, TrapAction, TrapDue } from "#shared/model.ts";
 import { compareLogIds } from "#shared/keys.ts";
+import { ownEntry } from "#shared/records.ts";
+import { fallDice } from "#shared/rules/floorLinks.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 import { displayName } from "../../lib/scene.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { Labels } from "../../lib/labels.ts";
@@ -110,4 +113,73 @@ export function foldedWithTraps(base: { text: string; label: string } | null, tr
   const head = cut >= 0 ? base.label.slice(0, cut) : base.label;
   const rest = cut >= 0 ? base.label.slice(cut + 2) : "";
   return { text: `${count}, ${base.text}`, label: `${count}, ${head}: ${went}, ${rest}` };
+}
+
+// Fall cards (docs/design/design-v1-floors.md phase 4, 4.4).
+
+/** The fall cards waiting for the DM, newest first: by the op each was made in, then its place among that op's cards. */
+export function deskFalls(falls: Readonly<Record<string, Fall | undefined>> | undefined): Fall[] {
+  const place = (card: Fall) => Number(card.id.slice(card.id.indexOf(":") + 1));
+  return Object.values(falls ?? {})
+    .filter((card): card is Fall => card !== undefined)
+    .sort((a, b) => b.made - a.made || place(b) - place(a));
+}
+
+/**
+ * How the DM's copy reads a card: `here` where it holds the creature,
+ * `elsewhere` where the creature landed on another scene, whose tokens the
+ * copy does not hold until the DM goes there, and `gone` where it landed on
+ * the scene shown and is no longer on the map, as after a player dismissed
+ * their companion (4.4), which leaves its card for the DM.
+ */
+export type FallRead = {
+  kind: "here" | "elsewhere" | "gone";
+  name: string | null;
+  dice: number;
+  line: string;
+  /** The card's name as a region: "Fall: Thorn". */
+  region: string;
+  /** Its buttons' names end with it: "Dismiss Thorn's fall". */
+  whose: string;
+};
+
+/** The landing floor's name, "Ground floor". */
+function landedOn(view: Pick<RoomState, "scenes">, card: Fall): string {
+  const scene = ownEntry(view.scenes, card.sceneId);
+  return scene?.floor?.name ?? scene?.name ?? "another floor";
+}
+
+/**
+ * The card's line (4.4): "Thorn fell 10 ft to Ground floor: 1d6
+ * Bludgeoning, Prone.", under 10 ft "Thorn fell 5 ft to Ground floor: no
+ * damage.", "A creature fell 10 ft to Ground floor on Tower." for another
+ * scene, and "A creature no longer on the map fell 10 ft to Ground floor."
+ * No name is stored on the card, so it is read off the creature.
+ */
+export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall, shown: string | null, labels: Labels): FallRead {
+  const floor = landedOn(view, card);
+  const token = ownEntry(view.tokens, card.tokenId);
+  if (token) {
+    const name = displayName(token, labels);
+    const dice = fallDice(card.ft);
+    const hurt = dice > 0 ? `${dice}d6 Bludgeoning, Prone` : "no damage";
+    return { kind: "here", name, dice, line: `${name} fell ${card.ft} ft to ${floor}: ${hurt}.`, region: `Fall: ${name}`, whose: `${name}'s fall` };
+  }
+  const here = shown !== null && sameScene(view, card.sceneId, shown);
+  if (here) return { kind: "gone", name: null, dice: 0, line: `A creature no longer on the map fell ${card.ft} ft to ${floor}.`, region: "Fall: a creature", whose: "this fall" };
+  const scene = ownEntry(view.scenes, card.sceneId)?.name.trim();
+  return { kind: "elsewhere", name: null, dice: 0, line: `A creature fell ${card.ft} ft to ${floor} ${scene ? `on ${scene}` : "on another scene"}.`, region: "Fall: a creature", whose: "this fall" };
+}
+
+/** The desk's folded button with fall cards among what it folds, as with traps: "1 fall, Rolls 1/3", or "2 falls" alone. Its name starts with its text. */
+export function foldedWithFalls(base: { text: string; label: string } | null, falls: number, tap: "sheet" | "more" | "less"): { text: string; label: string } | null {
+  if (falls === 0) return base;
+  const count = `${falls} ${falls === 1 ? "fall" : "falls"}`;
+  const more = tap === "sheet" ? "" : "more ";
+  const fell = `${falls} ${more}${falls === 1 ? "creature" : "creatures"} fell`;
+  if (!base) return { text: count, label: `${count}: ${fell}.${tap === "sheet" ? ` Close the sheet to see ${falls === 1 ? "it" : "them"}.` : ""}` };
+  const cut = base.label.indexOf(": ");
+  const head = cut >= 0 ? base.label.slice(0, cut) : base.label;
+  const rest = cut >= 0 ? base.label.slice(cut + 2) : "";
+  return { text: `${count}, ${base.text}`, label: `${count}, ${head}: ${fell}, ${rest}` };
 }
