@@ -507,6 +507,7 @@ describe("LP44-PRIV-1: a player's own companion blocks never move their far bloc
     };
     const longer = withBlock(base, "p2b", "c2", 100);
     assert.equal(first(longer), first(base));
-    assert.equal(first(base), 2_001, "P1's own blocks meet the line at one step of their own");
+    // P1's 21 blocks count with their revs at their widest, 15 bytes more each than their copies' 0.
+    assert.equal(first(base), 2_001 - 21 * (String(Number.MAX_SAFE_INTEGER).length - 1), "P1's own blocks meet the line at one step of their own");
   });
 });

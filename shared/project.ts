@@ -1216,6 +1216,10 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
     },
     holds: (sceneId) => ctx.floors.has(sceneId),
     copy: (kind, id) => {
+      if (kind === "chunk") {
+        const parsed = parseKey(`chunk:${id}`);
+        return parsed?.kind === "chunk" ? projectEntityCtx(ctx, keys.chunk(parsed.sceneId, parsed.cx, parsed.cy)) : null;
+      }
       if (kind !== "row") return projectEntityCtx(ctx, keys[kind](id));
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
       return encounter?.entries.find((e) => e.id === id) ?? null;

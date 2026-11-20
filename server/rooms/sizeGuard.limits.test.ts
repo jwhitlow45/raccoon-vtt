@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, roundUp } from "#shared/limits.ts";
-import type { Actor, Member, PcStats, RoomState, Viewer } from "#shared/model.ts";
+import type { Actor, LogEntry, Member, PcStats, RoomState, Viewer } from "#shared/model.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
@@ -323,13 +323,21 @@ const UNSHOWN: Record<string, (state: RoomState) => void> = {
   "how often the DM wrote to P1's area": (s) => (s.templates.a1 = { ...s.templates.a1!, rev: 123_456_789 }),
 };
 
-/** A twin of `shown` with `unshown` applied and the DM's pad trimmed by what it stores, so both store the same bytes. */
+/** P1's stepped part before its rounding and reserves: the measure less what P1's exact part takes out of it. */
+function steppedOf(state: RoomState, sceneIds?: readonly string[]): number {
+  return (sceneIds ? projectedSceneBytes(state, sceneIds[0]!) : measuredStateBytes(state)) - ownHeldBytes(state, "p1", sceneIds).sub;
+}
+
+/**
+ * A twin of `shown` with `unshown` applied and the DM's pad trimmed by what it adds to P1's stepped part, so both read
+ * the same. A change to a field P1's own ops write too (OWN_WRITTEN), such as a rev, adds nothing there to trim.
+ */
 function unshownTwin(shown: RoomState, unshown: (state: RoomState) => void): { twin: RoomState; bytes: number } {
   const twin = structuredClone(shown);
   unshown(twin);
-  const bytes = measuredStateBytes(twin) - measuredStateBytes(shown);
+  const bytes = steppedOf(twin) - steppedOf(shown);
   const pad = shown.tokens.pad!.notes!.length;
-  assert.ok(bytes > 0 && bytes <= pad, `the change stores ${bytes} bytes the pad gives back`);
+  assert.ok(bytes >= 0 && bytes <= pad, `the change adds ${bytes} stepped bytes the pad gives back`);
   twin.tokens.pad = { ...twin.tokens.pad!, notes: "p".repeat(pad - bytes) };
   return { twin, bytes };
 }
@@ -340,14 +348,14 @@ function copyOf(state: RoomState): string {
 
 describe("LP43-PRIV-2: a player's exact part holds their own things only as their copy shows them", () => {
   for (const [what, unshown] of Object.entries(UNSHOWN)) {
-    test(`${what}: the twins' copies, stored bytes and P1's exact parts are equal`, () => {
+    test(`${what}: the twins' copies, P1's exact parts and stepped parts are equal`, () => {
       const shown = ownTable(4_000);
       const { twin } = unshownTwin(shown, unshown);
       assert.equal(copyOf(twin), copyOf(shown), "P1's copies are equal");
-      assert.equal(measuredStateBytes(twin), measuredStateBytes(shown), "the rooms store the same bytes");
-      assert.ok(ownHeldBytes(shown, "p1") > 0, "P1 holds their own things exactly");
-      assert.equal(ownHeldBytes(twin, "p1"), ownHeldBytes(shown, "p1"), "the room's exact part");
-      assert.equal(ownHeldBytes(twin, "p1", ["s1"]), ownHeldBytes(shown, "p1", ["s1"]), "the scene's exact part");
+      assert.ok(ownHeldBytes(shown, "p1").shown > 0, "P1 holds their own things exactly");
+      assert.equal(ownHeldBytes(twin, "p1").shown, ownHeldBytes(shown, "p1").shown, "the room's exact part");
+      assert.equal(ownHeldBytes(twin, "p1", ["s1"]).shown, ownHeldBytes(shown, "p1", ["s1"]).shown, "the scene's exact part");
+      assert.equal(steppedOf(twin), steppedOf(shown), "the room's stepped part");
     });
   }
 
@@ -392,9 +400,9 @@ describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", (
     const [own, dms] = [twin("p1"), twin("d1")];
     assert.equal(copyOf(own), copyOf(dms), "P1's copies are equal");
     assert.equal(measuredStateBytes(own), measuredStateBytes(dms), "the rooms store the same bytes");
-    assert.equal(ownHeldBytes(own, "p1"), ownHeldBytes(dms, "p1"), "P1's own ask behind a blackout, or the DM's");
+    assert.deepEqual(ownHeldBytes(own, "p1"), ownHeldBytes(dms, "p1"), "P1's own ask behind a blackout, or the DM's");
     // A blackout keeps their member and characters, which are not scene data, and drops every ask.
-    assert.equal(ownHeldBytes(own, "p1"), ownHeldBytes({ ...own, casts: {} }, "p1"), "as no ask at all");
+    assert.equal(ownHeldBytes(own, "p1").shown, ownHeldBytes({ ...own, casts: {} }, "p1").shown, "as no ask at all");
   });
 });
 
@@ -408,8 +416,8 @@ describe("LP43R2-1: the room the DM's adds leave the players", () => {
     // P2's one area, exact in the DM's reading and stepped in P1's, sized so it is 150 bytes more than what P1's reading
     // alone holds exactly, their member and character, which the DM's reading steps.
     base.templates.a2 = template("a2", { ownerId: "p2", label: "" });
-    base.templates.a2 = template("a2", { ownerId: "p2", label: "y".repeat(150 - (heldBytes(base) - ownHeldBytes(base, "p1"))) });
-    assert.equal(heldBytes(base) - ownHeldBytes(base, "p1"), 150);
+    base.templates.a2 = template("a2", { ownerId: "p2", label: "y".repeat(150 - (heldBytes(base) - ownHeldBytes(base, "p1").sub)) });
+    assert.equal(heldBytes(base) - ownHeldBytes(base, "p1").sub, 150);
     // P1's own area sized so what seats hold sits 100 bytes under a whole step. The DM's last add then leaves 100 bytes
     // of the DM's room, and P1's reading rounds P2's area up to a whole step, the most a reading rounds.
     base.templates.a1 = template("a1", { label: "" });
@@ -432,13 +440,16 @@ describe("LP43R2-1: the room the DM's adds leave the players", () => {
     const goblin = { t: "token.create", token: { id: "dmnew", sceneId: "s2", kind: "monster", name: "Goblin", size: "medium", x: 3, y: 3, actor: { inline: actor() } } } as Op;
     assert.deepEqual(judged(last, goblin, DM, guard, "dmAdd"), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's next add");
     const keeps = (state: RoomState) => players - farRoomBytes(state, true, measuredStateBytes(state), ownHeldBytes(state, "p1"));
+    // What P1's exact part counts past what it takes out of the stepped part: their own fields at their widths.
+    const widths = (state: RoomState) => ownHeldBytes(state, "p1").shown - ownHeldBytes(state, "p1").sub;
     const kept = keeps(last);
-    assert.ok(kept > KEPT_FOR_PLAYERS - FAR.byteStep && kept < KEPT_FOR_PLAYERS - FAR.byteStep + 4 * 1024, `the worst case: P1 keeps ${kept} bytes`);
+    const least = KEPT_FOR_PLAYERS - FAR.byteStep - widths(last);
+    assert.ok(kept > least && kept < least + 4 * 1024, `the worst case: P1 keeps ${kept} bytes, their widths ${widths(last)}`);
     // A player joins: their bytes come out of what P1 keeps, and the rounding P1 reads never takes more than its step.
     const joined: RoomState = { ...last, members: { ...last.members, p3: member("p3") } };
     const join = measuredStateBytes(joined) - measuredStateBytes(last);
     const left = keeps(joined);
-    assert.ok(left > KEPT_FOR_PLAYERS - FAR.byteStep - join, `after a join of ${join} bytes P1 keeps ${left} bytes`);
+    assert.ok(left > KEPT_FOR_PLAYERS - FAR.byteStep - widths(joined) - join, `after a join of ${join} bytes P1 keeps ${left} bytes`);
     // The guard reads the same: P1's own area of 1 KiB under what P1 keeps is taken, and of 1 KiB over it refused.
     const withArea = (label: string): RoomState => ({ ...joined, templates: { ...joined.templates, a3: template("a3", { label }) } });
     const overhead = measuredStateBytes(withArea("")) - measuredStateBytes(joined);
@@ -529,7 +540,7 @@ describe("LP44-PRIV-1: a player's own adds off the floors never move their stepp
     const edge = players - FAR.byteStep;
     const stepped = (state: RoomState) => {
       const exact = ownHeldBytes(state, "p1");
-      return farRoomBytes(state, true, measuredStateBytes(state), exact) - exact;
+      return farRoomBytes(state, true, measuredStateBytes(state), exact) - exact.shown;
     };
     const filledBase = filled(base, fillFor(base, edge) - 2 * FAR.byteStep);
     const padded = (n: number): RoomState => ({ ...filledBase, tokens: { ...filledBase.tokens, pad: token("pad", { sceneId: "s2", notes: "p".repeat(n) }) } });
@@ -540,7 +551,7 @@ describe("LP44-PRIV-1: a player's own adds off the floors never move their stepp
       if (stepped(padded(mid)) <= edge) lo = mid;
       else hi = mid;
     }
-    assertSweepsAlike(padded(lo - 600), Object.keys(SWEEPS), (state) => ownHeldBytes(state, "p1"));
+    assertSweepsAlike(padded(lo - 600), Object.keys(SWEEPS), (state) => ownHeldBytes(state, "p1").shown);
   });
 
   test("a scene's reading holds the room-level part of P1's exact part too, so the twins answer alike at the scene's line", () => {
@@ -549,7 +560,7 @@ describe("LP44-PRIV-1: a player's own adds off the floors never move their stepp
     const players = FAR.sceneBytes - BOOKKEEPING_RESERVE.scene;
     const edge = players - FAR.byteStep;
     const base = table();
-    const stepped = (state: RoomState) => roundUp(projectedSceneBytes(state, "s1") - ownHeldBytes(state, "p1", ["s1"]), FAR.byteStep);
+    const stepped = (state: RoomState) => roundUp(projectedSceneBytes(state, "s1") - ownHeldBytes(state, "p1", ["s1"]).sub, FAR.byteStep);
     const onScene = (bytes: number): RoomState => {
       const out = { ...base, tokens: { ...base.tokens } };
       for (let i = 0; i * MAX_NOTES < bytes; i++) out.tokens[`sf${String(i).padStart(5, "0")}`] = token(`sf${String(i).padStart(5, "0")}`, { x: 20, y: 20, notes: "n".repeat(Math.min(MAX_NOTES, bytes - i * MAX_NOTES)) });
@@ -564,6 +575,63 @@ describe("LP44-PRIV-1: a player's own adds off the floors never move their stepp
     }
     const shown = onScene(lo - 600);
     assert.ok(farRoomBytes(shown, true, measuredStateBytes(shown), ownHeldBytes(shown, "p1")) < FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * FAR.byteStep, "the room's reading is far under its line");
-    assertSweepsAlike(shown, ["their character's notes", "their character's sheet", "their character's stat block"], (state) => ownHeldBytes(state, "p1", ["s1"]));
+    assertSweepsAlike(shown, ["their character's notes", "their character's sheet", "their character's stat block"], (state) => ownHeldBytes(state, "p1", ["s1"]).shown);
+  });
+});
+
+describe("LP44-PRIV-1: what a player's own op writes past their copy counts at its width, so hidden values never move their reading", () => {
+  /** P1's room reading at its widest. */
+  const reading = (state: RoomState) => farRoomBytes(state, true, measuredStateBytes(state), ownHeldBytes(state, "p1"));
+
+  /**
+   * Twin rooms apart only in `hidden`, a value P1's copy does not hold in a
+   * thing P1's ops write, with a pad that puts the first room's stepped part
+   * on a step's edge, where a hidden byte would read a whole step more.
+   */
+  function twinsAtTheEdge(base: RoomState, hidden: (state: RoomState) => RoomState): [RoomState, RoomState] {
+    const filledBase = filled(base, fillFor(base, FAR.roomBytes - BOOKKEEPING_RESERVE.room - MIB) - 2 * FAR.byteStep);
+    const padded = (n: number): RoomState => ({ ...filledBase, tokens: { ...filledBase.tokens, pad: token("pad", { sceneId: "s2", notes: "p".repeat(n) }) } });
+    // The longest pad that reads as no pad does: the stepped part then ends on the step's edge.
+    const at = reading(padded(0));
+    let [lo, hi] = [0, FAR.byteStep + 1];
+    assert.ok(reading(padded(hi)) > at, "a step's pad reads a step more");
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (reading(padded(mid)) === at) lo = mid;
+      else hi = mid;
+    }
+    const first = padded(lo);
+    assert.ok(reading(padded(lo + 1)) > reading(first), "one more stored byte reads a step more");
+    return [first, hidden(first)];
+  }
+
+  function table(): RoomState {
+    const state = room();
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ notes: "", dmNotes: "" }) });
+    state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+    state.tokens.g1 = token("g1", { x: 6, y: 6, hpVisibility: "label", actor: { inline: actor({ dmNotes: "" }) } });
+    return state;
+  }
+
+  test("an HP change P1 made to a creature whose HP P1 does not read: its line's take-back data, 9 or 10 HP before", () => {
+    const base = table();
+    const vitals = (cur: number) => ({ hp: { cur, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
+    const line = (cur: number): LogEntry => ({ id: "900:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", tokenId: "g1", seen: true, change: "damage", amount: 3, label: "Healthy", left: { cur: cur - 3, max: 20, temp: 0 }, revert: { before: vitals(cur), after: vitals(cur - 3) } } as LogEntry["data"] });
+    base.log = [line(9)];
+    const [nine, ten] = twinsAtTheEdge(base, (s) => ({ ...s, log: [line(10)] }));
+    assert.equal(copyOf(ten), copyOf(nine), "P1's copies are equal");
+    assert.ok(measuredStateBytes(ten) > measuredStateBytes(nine), "the second room stores more");
+    assert.equal(reading(ten), reading(nine));
+  });
+
+  test("P1's answer to a roll request whose result P1 does not read: pass, or no result yet", () => {
+    const base = table();
+    const request = (target: RoomState["rolls"][string]["targets"][number]): RoomState["rolls"][string] =>
+      ({ id: "r1", rev: 3, test: { kind: "save", ability: "dex", choices: [] } as never, dc: 15, dcShown: false, resultShown: false, at: "2026-10-12T20:00:00.000Z", targets: [target] }) as RoomState["rolls"][string];
+    base.rolls = { r1: request({ tokenId: "hero", total: 17, by: "p1" }) };
+    const [open, passed] = twinsAtTheEdge(base, (s) => ({ ...s, rolls: { r1: request({ tokenId: "hero", total: 17, by: "p1", result: "pass" }) } }));
+    assert.equal(copyOf(passed), copyOf(open), "P1's copies are equal");
+    assert.ok(measuredStateBytes(passed) > measuredStateBytes(open), "the second room stores more");
+    assert.equal(reading(passed), reading(open));
   });
 });

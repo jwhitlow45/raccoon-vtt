@@ -249,7 +249,7 @@ function farScene(state: RoomState): { dm: number; held: number } {
 /** The players' scene as a player's far line reads it: all but their own copy's own things by its step, those exactly. */
 function playerScene(state: RoomState, memberId: string): number {
   const own = ownHeldBytes(state, memberId, ["s1"]);
-  return roundUp(projectedSceneBytes(state, "s1") - own, FAR.byteStep) + own;
+  return roundUp(projectedSceneBytes(state, "s1") - own.sub, FAR.byteStep) + own.shown;
 }
 
 /**

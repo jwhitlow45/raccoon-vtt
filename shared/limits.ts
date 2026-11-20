@@ -1537,9 +1537,11 @@ export type SeatView = {
  * The kinds of thing a player's far line can hold exactly: what their own
  * ops can grow, their creatures, areas, drawings, rows and asks, their
  * characters' stat blocks for companions, their member, their characters,
- * the roll requests their copy holds, and the log's lines.
+ * the roll requests their copy holds, the log's lines, and the build's
+ * chunks for the doors in them. A chunk goes by its state key,
+ * `"<sceneId>:<cx>,<cy>"`.
  */
-export type CopiedKind = "token" | "template" | "drawing" | "row" | "cast" | "companionBlock" | "member" | "character" | "roll" | "log";
+export type CopiedKind = "token" | "template" | "drawing" | "row" | "cast" | "companionBlock" | "member" | "character" | "roll" | "log" | "chunk";
 export type SeatViewOf = (state: RoomState) => SeatView;
 
 /** What one member's seats count in a scope: `sceneId` names the floor, tokens and riding areas count across its scene, and rows across the fight. */
@@ -1554,9 +1556,13 @@ export type SeatHeld = {
   pointValues: number;
   rows: ReadonlySet<string>;
   casts: ReadonlySet<string>;
-  /** Companion blocks held exactly, and their bytes as the far line's block measure counts them. */
+  /**
+   * Companion blocks held exactly: their stored bytes, which the blocks' far line takes out of its stepped part, and
+   * the bytes it counts them at, their copy's with the rev at its widest (D-261119-003).
+   */
   blocks: ReadonlySet<string>;
   blockBytes: number;
+  blockShown: number;
 };
 
 /** The character whose owners a token's seat belongs to: its own character, or the one it is a companion of. Lent monsters have none. */
@@ -1727,6 +1733,7 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
     // The DM's reading of the blocks rounds them all, as before seats.
     blocks: new Set(),
     blockBytes: 0,
+    blockShown: 0,
   };
 }
 
@@ -1773,9 +1780,15 @@ function playerFarHeld(state: RoomState, sceneId: string | null, memberId: strin
   const drawings = [...own.drawing].filter(([id]) => state.drawings[id]!.sceneId === sceneId);
   const pointValues = drawings.reduce((sum, [, copy]) => sum + (copy as Drawing).points.length, 0);
   const ids = (copies: ReadonlyMap<string, unknown>) => new Set(copies.keys());
+  // A player's own block update writes its rev, which their copy holds as 0: the stored block comes out of the
+  // stepped part, and the copy counts with the rev at its widest.
   let blockBytes = 0;
-  for (const copy of own.companionBlock.values()) blockBytes += companionBlockBytes(copy as CompanionBlock);
-  return { tokens: ids(own.token), templates: ids(own.template), drawings: new Set(drawings.map(([id]) => id)), pointValues, rows: ids(own.row), casts: ids(own.cast), blocks: ids(own.companionBlock), blockBytes };
+  let blockShown = 0;
+  for (const [id, copy] of own.companionBlock) {
+    blockBytes += companionBlockBytes(state.companionBlocks[id]!);
+    blockShown += companionBlockBytes(copy as CompanionBlock) - serializedBytes((copy as CompanionBlock).rev) + String(WIDEST_REV).length;
+  }
+  return { tokens: ids(own.token), templates: ids(own.template), drawings: new Set(drawings.map(([id]) => id)), pointValues, rows: ids(own.row), casts: ids(own.cast), blocks: ids(own.companionBlock), blockBytes, blockShown };
 }
 
 /** Who sent an op, as the live limits read it: a player's seats need their member id and their own view. */
@@ -1944,7 +1957,7 @@ export function farLimits(state: RoomState, sceneId: string | null, before?: Roo
   if ((!blocksBefore || blocks.count > blocksBefore.count) && farCount(blocks.count, held.blocks.size) > FAR.blocks) {
     return over(`The room can hold at most ${n(FAR.blocks)} companion stat blocks. Delete one first.`);
   }
-  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(Math.max(0, blocks.bytes - held.blockBytes), FAR.byteStep) + held.blockBytes > FAR.blockBytes) {
+  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(Math.max(0, blocks.bytes - held.blockBytes), FAR.byteStep) + held.blockShown > FAR.blockBytes) {
     return over(`The room can hold at most ${n(FAR.blockBytes / MiB)} MiB of companion stat blocks. Delete one first.`);
   }
   if (sceneId === null) return { ok: true };
