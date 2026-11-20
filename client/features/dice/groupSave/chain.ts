@@ -38,10 +38,12 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
  * is the creature that fell, and which Apply removes.
  * `tokenIds` of a live source are its last picks (followSelection), kept in
  * the draft, so a reload, which selects nothing, shows the same rows.
+ * An area's `floors` are its own and those an opening joins to it, read as
+ * its page starts (start.ts pageSource), where an opening joins any.
  */
 export type Source =
   | { kind: "selection"; tokenIds: string[]; live?: true; except?: string }
-  | { kind: "area"; templateId: string }
+  | { kind: "area"; templateId: string; floors?: string[] }
   | { kind: "trap"; trapId: string; due: string; tokenIds: string[] }
   | { kind: "fall"; fallId: string; tokenIds: string[] };
 

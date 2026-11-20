@@ -6,8 +6,15 @@ import { applyOp } from "#shared/reducer.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
 import { apply, mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
-import { applyWaits, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { applyWaits, buildPlan, damageTo, OFF_FLOOR_WORDS, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { groupRows } from "./rows.ts";
+import { ATTIC, GROUND, UPPER, thornToken, tower, withOpening } from "#shared/floorLinksTestutil.ts";
+import type { RoomState } from "#shared/model.ts";
+import { template } from "#shared/testutil.ts";
+import { draftOf } from "./reopen.ts";
+import { saveDraftSchema } from "./reopenContract.ts";
+import { pageSource } from "./start.ts";
+import type { Source } from "./chain.ts";
 
 /** What Apply freezes from the page (docs/design/design-v1-roll-options.md 5.4, 5.5). */
 
@@ -278,4 +285,64 @@ test("reapplication excludes deleted, moved, and reassigned creatures and builds
     const view = structuredClone(DICE.view); change(view);
     assert.equal(buildPlan(page, { ...DICE, view }, [], { plan: "replacement", newId: () => "new" }), null);
   }
+});
+
+describe("a group save across an opening (docs/design/design-v1-floors.md phase 4, 9.2, D-261119-110)", () => {
+  const IDS = { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000a", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000b" };
+  const goblin = (id: string, sceneId: string) => token(id, { kind: "monster", name: "Goblin", sceneId, x: 6, y: 6, actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } });
+  /** The tower with Upper floor reached, its opening at 6, 6, a fireball `a1` over the hole upstairs and a goblin below it. */
+  function view(opening = true): RoomState {
+    const s = tower({ tokens: { thorn: thornToken({ sceneId: UPPER, x: 2, y: 2 }), below: goblin("below", GROUND) }, templates: { a1: template("a1", { sceneId: UPPER, origin: { x: 7, y: 7, z: 0 } }) }, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } } });
+    return opening ? withOpening(s) : s;
+  }
+  const dice = (v: RoomState): DiceView => ({ you: { memberId: "dm1", role: "dm" }, view: v, srd: { monsters: [], rolls: {} } });
+  function rolled(v: RoomState, source: Source, more: Partial<Page> = {}): Page {
+    const rows = groupRows(dice(v), ["below"], { kind: "save", ability: "dex" }, false, new Map());
+    const page = newPage({ id: "p", sceneId: UPPER, source, test: { kind: "save", ability: "dex" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true }, outcome: { damage: "28 fire", conditions: [] } });
+    return mark({ ...page, phase: "rolled", rows, ...more }, rows[0]!.holder, "fail");
+  }
+  const area: Source = { kind: "area", templateId: "a1" };
+
+  test("an area's page holds its floor and the floor its opening joins, read as it starts, and other pages keep theirs", () => {
+    assert.deepEqual(pageSource(area, view(), UPPER), { kind: "area", templateId: "a1", floors: [UPPER, GROUND] });
+    assert.deepEqual(pageSource(area, view(false), UPPER), area, "no opening, one floor");
+    assert.deepEqual(pageSource(area, view(), ATTIC), area);
+    const trap: Source = { kind: "trap", trapId: "t1", due: "1:0", tokenIds: ["below"] };
+    assert.equal(pageSource(trap, view(), UPPER), trap, "a trap's page keeps its one floor");
+    assert.equal(pageSource(area, null, UPPER), area);
+  });
+
+  test("a fireball's page over a hole damages the goblin below", () => {
+    const v = view();
+    const page = rolled(v, pageSource(area, v, UPPER));
+    assert.equal(applyWaits(page, dice(v), [{ amount: 28, type: "fire" }]), null);
+    assert.deepEqual(buildPlan(page, dice(v), [{ amount: 28, type: "fire" }], IDS)?.targets.map((t) => [t.target, t.damage?.parts[0]?.amount]), [[{ tokenId: "below" }, 28]]);
+    const oneFloor = rolled(v, area);
+    assert.equal(buildPlan(oneFloor, dice(v), [{ amount: 28, type: "fire" }], IDS), null, "a page of its own floor alone would apply nothing below");
+  });
+
+  test("a player's cast over the hole damages its target below, by its area or by its targets", () => {
+    const v = view();
+    const ask = castAsk("k1", { sceneId: UPPER, area: "a1" });
+    const byArea = rolled(v, pageSource(area, v, UPPER), { cast: { ask, who: "Thorn" } });
+    assert.deepEqual(buildPlan(byArea, dice(v), [{ amount: 28, type: "fire" }], IDS)?.targets.map((t) => t.target), [{ tokenId: "below" }]);
+    const targeted = castAsk("k2", { sceneId: UPPER, area: undefined, targets: ["below"] });
+    const byTargets = rolled(v, pageSource({ kind: "selection", tokenIds: ["below"] }, v, UPPER), { cast: { ask: targeted, who: "Thorn" } });
+    assert.deepEqual(buildPlan(byTargets, dice(v), [{ amount: 28, type: "fire" }], IDS)?.targets.map((t) => t.target), [{ tokenId: "below" }]);
+  });
+
+  test("with no row left on the page's floors it is refused as empty, never applied to no one", () => {
+    const v = view();
+    const page = rolled(v, pageSource(area, v, UPPER));
+    const moved: RoomState = { ...v, tokens: { ...v.tokens, below: { ...v.tokens.below!, sceneId: ATTIC } } };
+    assert.equal(applyWaits(page, dice(moved), [{ amount: 28, type: "fire" }]), OFF_FLOOR_WORDS);
+    assert.equal(buildPlan(page, dice(moved), [{ amount: 28, type: "fire" }], IDS), null);
+  });
+
+  test("its floors stay with the page through a reload's draft", () => {
+    const v = view();
+    const page = rolled(v, pageSource(area, v, UPPER));
+    const read = saveDraftSchema.parse(draftOf({ page, reopen: null }));
+    assert.deepEqual(read.page.source, { kind: "area", templateId: "a1", floors: [UPPER, GROUND] });
+  });
 });

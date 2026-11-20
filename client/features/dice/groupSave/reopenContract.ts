@@ -96,7 +96,8 @@ const byteLimit = { message: "a save draft exceeds its byte limit" };
 const source = z.discriminatedUnion("kind", [
   // A scene holds up to its far line of tokens, players' seats beside the DM's cap (shared/limits.ts FAR), and a group save can pick them all.
   z.strictObject({ kind: z.literal("selection"), tokenIds: z.array(id).max(HARD.groupSaveTokens), live: z.literal(true).optional(), except: id.optional() }),
-  z.strictObject({ kind: z.literal("area"), templateId: id }),
+  // An area's page holds the floors an opening joins to its own (docs/design/design-v1-floors.md phase 4, 9.2).
+  z.strictObject({ kind: z.literal("area"), templateId: id, floors: z.array(z.string().max(64)).min(2).max(LIMITS.floorsPerScene).optional() }),
   z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens) }),
   // A fall card's page holds its one creature (docs/design/design-v1-floors.md phase 4, 4.4).
   z.strictObject({ kind: z.literal("fall"), fallId: fallSchemas.fallId, tokenIds: z.array(id).max(1) }),

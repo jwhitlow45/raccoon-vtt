@@ -235,13 +235,17 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
 
 /**
  * Whether a creature is where the page applies. A trap's or an area's page is
- * on its source's floor, and a creature that moved off it leaves its plan. A
- * selection holds the creatures the DM picked, which a tracker row can take from
- * several floors of one scene, and the server takes targets on any floor, so
- * only another scene drops one.
+ * on its source's floor, and a creature that moved off it leaves its plan. An
+ * area's page also holds each floor an opening joined to it as it started
+ * (start.ts pageSource, docs/design/design-v1-floors.md phase 4, 9.2), where
+ * the area reaches. A selection holds the creatures the DM picked, which a
+ * tracker row can take from several floors of one scene, and the server takes
+ * targets on any floor, so only another scene drops one.
  */
 function onPageScene(page: Page, token: { sceneId: string }, dice: DiceView): boolean {
-  return page.source.kind === "selection" ? sameScene(dice.view, token.sceneId, page.sceneId) : token.sceneId === page.sceneId;
+  const source = page.source;
+  if (source.kind === "selection") return sameScene(dice.view, token.sceneId, page.sceneId);
+  return token.sceneId === page.sceneId || (source.kind === "area" && source.floors !== undefined && source.floors.includes(token.sceneId));
 }
 
 /** Why a page whose creatures all moved off its floor cannot apply, so a trap is never settled with no one hit. */

@@ -15,6 +15,7 @@ import type { Taken } from "../useDicePanel.ts";
 import { useReceipts } from "../useReceipt.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
+import { pageFloors } from "../../areas/through.ts";
 
 /**
  * Reads the tab's draft back once after a reload (5.10). The DM's alerts
@@ -102,6 +103,21 @@ export function sourceScene(input: Pick<StartInput, "source" | "cast">, view: Pi
 }
 
 /**
+ * The source a page holds: an area's with its floors, its own and each
+ * floor an opening joins to it by the gate every device reads alike
+ * (areas/through.ts), read now, as the page starts
+ * (docs/design/design-v1-floors.md phase 4, 9.2, D-261119-110), so its
+ * creatures across an opening are on the page's floors (plan.ts). Every
+ * other source as it is: a trap's page keeps its one floor, a fall's its
+ * creature's, and a selection takes any floor of the scene.
+ */
+export function pageSource(source: Source, view: RoomState | null | undefined, sceneId: string): Source {
+  if (source.kind !== "area" || !view) return source;
+  const floors = pageFloors(view, sceneId);
+  return floors.length > 1 ? { kind: "area", templateId: source.templateId, floors } : { kind: "area", templateId: source.templateId };
+}
+
+/**
  * Starts a group save (5.1): one at a time in a browser tab, so a start
  * while one holds rolls returns false, and the caller asks "Discard the
  * Dexterity save for 6?" first (ReplaceConfirm), then starts again with
@@ -124,10 +140,12 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       const out = replace(old);
       if (!out.ok) return false;
       for (const c of out.send) if (c.kind === "op") actions.dispatch(c.op);
+      const view = room.getState().view;
+      const pageScene = sourceScene(input, view, sceneId);
       const page = newPage({
         id: uuidv7(),
-        sceneId: sourceScene(input, room.getState().view, sceneId),
-        source: input.source,
+        sceneId: pageScene,
+        source: pageSource(input.source, view, pageScene),
         test: input.test,
         dc: input.dc,
         // The page rolls the monsters, a player's creature being asked, and a DM's roll for a monster starts hidden from players (doc 1 17).
