@@ -1,10 +1,10 @@
-# Several floors in one scene: phases 1 to 3
+# Several floors in one scene: phases 1 to 4
 
 ## Summary
 
 A scene can hold a tower, a keep or a cellar as up to 8 floors. Each floor is a scene linked to its main floor, so it keeps its own map, build, fog, light, weather, scene sound, tokens, traps and explored ground, while the Scenes list, the grid shape, the 500 tokens, the 200 areas and the size budget belong to the whole scene. The DM builds floors in the scene's settings and moves creatures between them with Move to floor. A player's device holds only the floors their party has reached and the floors where a creature they own stands, and shows the floor of the creature it follows.
 
-This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet) and phase 3 (floors from Universal VTT files and generated dungeons, the walking ruler over stairs, and Move to floor in the search) are built, and their designs as built are the last parts of this note. The later phases (openings and falls, sight between floors) are not built. The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
+This note is the design as built in phase 1. Phase 2 (stairs and ladders players take themselves, keeping the turn's feet), phase 3 (floors from Universal VTT files and generated dungeons, the walking ruler over stairs, and Move to floor in the search) and phase 4 (openings and falls, sight between floors, and the leftovers of the first phases) are built, and their designs as built are the last parts of this note. The design's full text, with its rounds of review, is kept outside the repository, and this note gives what was built and where the build went its own way. Decision ids are in the project's decisions log.
 
 Versions: OP_VERSION 56 and SNAPSHOT_VERSION 43. The snapshot step is the identity, since `Scene.floor` and the room's `openFloors` are optional and absent reads as a scene of one floor, so no data migrates. The number moves so that an older build, which knows nothing of floors, refuses a v43 snapshot (its Delete would remove a main floor alone and leave the other floors naming a scene that is gone).
 
@@ -152,7 +152,7 @@ Where the build went its own way:
 - **The words of a kept step.** An undo that would put removed stairs back names what blocks them now in the builder's words, since no stairs stand to remove (FL2-OPUS-2). They are judged on the room as the undo would leave it, so stairs that come back with their floor are not held against the floor's absence (FL2-OPUS-10). The placer's sentence stays for stairs that stand.
 - **The far floor's limits.** A DM's climb meets the far floor's limits, its cap on lit token lights among them. A player's leaves them unread (FL2-ASTRA-03), and a player's undo or redo of a climb reads neither floor's own limits (FL2-SOL-05).
 - **The walls under an end.** `wallInside` tests only the walls whose box meets the end's box (`scripts/bench-floor-links.ts`).
-- **Not built:** arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 brought the ruler through stairs.
+- **Not built:** arrival traps, hidden stairs (D-261109-026) and a move or resize of a pair after placing (D-261109-022). Phase 3 brought the ruler through stairs, and phase 4 builds the rest.
 
 # Phase 3: floors from files and dungeons, the ruler over stairs, the search
 
@@ -189,4 +189,98 @@ Where the build went its own way:
 - **Words the design left open** (D-261110-192 to 195): Hide's busy words "Making the floor…", a refusal that stops the dialog in place with Back or Make still on, Map back on Blank on each open, and "Ground floor" before the first add. A lost create answer whose floor never shows within 30 seconds reads as a new scene's does: no floor was added, try again (D-261110-410).
 - **The twins** (T1 to T6) are in `floors.wire.itest.ts` beside the phase 2 ones, not in `floorSources.itest.ts` (D-261110-191). The delayed create answer and the other-device split order have unit and source tests only, since an e2e cannot delay one server answer.
 - **Alignment.** The Floors group per pick and both dialogs are measured in `e2e/floors-sources.e2e.ts`, and the ruler's row in `e2e/floors-ruler.e2e.ts`, not in `e2e/alignmentRoom.ts`.
-- **Not built:** openings and falls, fliers through openings, arrival traps, hidden stairs, moving a pair, ends on different squares, Export every floor, Start a fight on every floor and a new scene from several files (D-261110-084, 111).
+- **Not built:** openings and falls, fliers through openings, arrival traps, hidden stairs, moving a pair, ends on different squares, Export every floor, Start a fight on every floor and a new scene from several files (D-261110-084, 111). Phase 4 builds all of them.
+
+# Phase 4: openings and falls, sight between floors, and the leftovers
+
+A third kind of floor link, an opening, joins a floor to the floor just below it as a hole. A creature that ends a change wholly over one falls, a flier goes through it, light and sight cross it while players see both floors, and areas reach through it. Phase 4 also builds hidden stairs, pairs whose ends lie on different squares, arrival traps and reminders on every landing, the Isometric drop, Export every floor, Start a fight on every floor, a new scene from several files and the outliner's Other floors. This part is the design as built. The full text, with its four rounds of review, is kept outside the repository. Decisions: D-261119-040 to 066, 080 to 123, 190 to 258.
+
+Versions: OP_VERSION 64 (`OPENINGS_OP_VERSION`) and SNAPSHOT_VERSION 48 (`OPENINGS_SNAPSHOT_VERSION`), both identity steps, behind one gate `opensOps(v)`. No op stored at 63 or below names an opening, a hidden or moved end, a trapdoor, a fall or `fall.settle`, and the new passes run only from 64, so stored ops replay byte for byte (`floors4.replay.test.ts`, six rooms on squares and hexes at 62 and 63). A fence in `#countSnapshotDue` makes a room's first op of change format 64 commit with its snapshot at 48, so an older build refuses the room rather than serving a replayed prefix.
+
+## 14. Openings
+
+- `FloorLink.kind` gains `"opening"`. The upper end is the hole, the lower end lies on the floor below, and one `rect` serves both, up to `OPENING_SIDE` 8 squares a side (stairs and ladders keep 4). An opening is never locked or hidden, and a kind change to or from one is refused. `KIND_WORDS` holds each kind's words, so a message never reads an opening as a ladder.
+- **The pass order from op 64.** The fall pass (`reducer/falls.ts`) and the arrival step run between `remindAfter` and `keepNudges`, in a fixed order: dispatch and today's passes through the walk's trap step, `trapWrote` and the walk's reminders (a trapdoor's drop only records itself), then the walk's trapdoor drops, the fall pass, one arrival step on each creature's last landing, a second fall pass for creatures an arrival trapdoor dropped onto a hole, the link pass and `settleMounts`, `markOpened` over every landing, `trapWrote` for each key whose first writer after dispatch was a drop, an arrival or a second fall, and landing reminders.
+- **Who falls.** A candidate (a creature the op moved, raised, lowered, resized, squeezed, set down from a holder or moved to another floor, a creature a trapdoor dropped, and every creature on the upper end of an opening whose rect the op wrote) falls when it stands on the ground, its space lies wholly inside an upper end, and nothing holds it up. A holder counts for a DM's op always and for a player's only where every player sees it. Never on a create, an undo, a redo, `sys.restore` or a projected copy. A walk that only crosses a hole does not fall.
+- **The landing** is one function, `landThrough(tx, token, link, how)`, for a climb, a flight and a fall. The drop is `fallDrop`: the floor's height plus the upper end's ground less the lower's, at least 0, and one d6 for each full 10 ft, at most 20.
+- **The fall card** is `RoomState.falls`, key `fall`, DM only, room level, at most `FALLS_PER_ROOM` 10, the oldest `made` dropped. `fall.settle` dismisses one, and `actor.outcome` takes `fall: { fallId }` to remove it with the group save's apply.
+- **Undo and redo.** The fall pass returns a `FallRecord` per root that fell through an opening, `Applied.falls` carries them and the actor puts them on a player's step beside `climb`. `sys.restore.falls` crosses each record's two floors on an undo, and redo lands again with no new card. A step with falls never merges with its neighbor.
+- **Trapdoors.** `TrapRig.below` (squares only, never with `pit`) drops each creature `dropVictims` lists to the floor below, riders along, in a public springing. `belowOpens` lets a stopping walker stop over one.
+- **Fliers.** `token.climb` on an opening's end needs the creature in the air with its space inside the squares (`throughOpening`). It lands 5 ft above the far ground and costs the floor's height.
+- **Arrival traps and reminders.** `arrivalStep` in `trapStep.ts` builds the springings of a landing as a walk's, and landing reminders read `areaMoved`'s membership as a teleport's do. Move to floor stays a placement.
+- **Size.** The design reserves room for ten widest cards in the room's measure (`FALL_RESERVE`) while it holds an opening end, a trapdoor or a card, so no player's op turns the reserve on or off. See As built for what is built.
+
+## 15. Sight and light through an opening
+
+- A join is an opening whose two floors both have party vision on and that players both see (`playersSee`). Light on the join's sub-cells is the brighter of the two floors' own, and each class sees them at the better of its own level and the matching class's on the other floor. `visionRules.sightFor(state, sceneId, cls, pending?)` answers by class (`union`, `shared` or `{ holder }`), and every caller that read `partySight` or `holderSight` goes through it (`sightReads.test.ts` fails on a direct call).
+- `openingJoins` (`shared/rules/openingSight.ts`) lists the joins. A borrowed light is the other floor's own light, never borrowed again, swept by that floor's walls. A joined answer is cached by its own answer's identity and each join's link id, rev and rect, and each floor's id and answer.
+- `exploreOps` gathers every explored floor's pending joins before it builds any floor's `sys.explore`, so a player a later floor adds borrows into an earlier floor in the same pass.
+- A player gets an end on a held floor outside full fog, `to` and `rise` only with the far floor held, and `shift` only with the far end projected. A hidden end sends a player nothing. `playerView`'s unwatched copy drops the tokens of every floor of the scene, so no live sight crosses a hole into an exported file.
+- Accepted channels: a creature a player saw fall or fly leaves their frames and nothing of where it went unless they hold the landing floor and see the spot, and a lit column between two seen floors shows a level at the join, never a light's place or kind.
+
+## 16. Hidden stairs, moved and resized pairs
+
+`FloorLink.hidden` on both ends of stairs and ladders, written by `floorLink.update` (a Play step). Stairs and ladders on squares may have each end on its own squares of one size (`rect` and `pairRect`), and a climb lands shifted by `landingShift`. The Between floors builder moves an end by a drag and resizes by a corner handle, and the pane's **Line up** moves this floor's end onto the far end's squares.
+
+## 17. The rest
+
+- **Isometric** draws each upper end as a drop in the relief, from the device's own copy (`floorHoles` in `lib/view.ts`).
+- **Areas through openings.** The gate is an opening whose two floors players see, vision on or off. A creature across is judged by the part of it over the squares, at its elevation moved by the floors' separation (`AreaContext.through`, `partOverOpening`). The Areas panel's rows, the group save and the ask card and block read it, and an area or cast page holds its floors.
+- **Export every floor** saves a stored zip (`mapexport/zipStore.ts`, CRC-32, no dependency) with one PNG a floor.
+- **Start a fight on every floor**: `addCandidates` takes a set of floors.
+- **A scene from several files** (`FloorsImportDialog`): one Setup group of `scene.create` and then `floorCreateOf` per next file.
+- **The outliner's Other floors** (`outliner/otherFloors.ts`) reads the whole copy for one more group, and `companionOf` counts the character on any floor of the scene.
+
+## Phase 4 as built
+
+Where the build went its own way. Each entry names its decision.
+
+**Contract and rules (4A-0, 4A-1)**
+- **Limits.** `OPENING_SIDE` and `FALLS_PER_ROOM` live in `shared/model.ts`, not in `shared/limits.ts` beside the other limits, because the contract lane did not own that file.
+- **Sight on stand-ins.** `sightFor`'s own answer reads through `visionRules.partySight` and `holderSight`, so a test's stand-in vision applies (the other way, calling `vision.ts` directly, would bypass every one). `VisionWorld.openings` is optional, so a world without it joins nothing.
+- **Cards.** A stored card's id must start with its `made`. Stairs and ladders keep 4 a side in the put schema too ("Stairs and ladders are at most 4 squares a side.").
+- **Landing reminders** run at step 11 only, for every landing, climbs too. `movesIntoAreas` is unchanged, so a climb is never seen at step 4.
+- **Who falls.** Only creatures fall. One card goes to each root, and riders go down without one. A creature that falls or is dropped alone off a holder that does not count leaves its seat at once. Every springing in the trap step, a turn's start and a door's too, defers its drop to the fall pass.
+- **D-016's kept path** covers fall and drop roots too, so an undo returns them along it.
+- **A trapdoor's floor below** is judged only where an op sets `below`, so every edit of it is judged and a trapdoor locks after its floor below is removed.
+- **Words.** "Thorn is carried. Its holder goes through the opening.", "flying Thorn down through the opening", "Openings are at most 8 squares a side.", "Both ends of the stairs are one size.", "On hexes both ends of the stairs lie on the same hexes.", "An opening lies on the same squares of both floors.", "There is no floor below this scene.", "only a trap on squares drops to the floor below". The undo labels for hiding, moving and resizing a pair were defined and never read, and are now used.
+- **A found bug.** A DM's undo of a delete or a Dismiss could leave more than 10 cards, so every restore evicts.
+
+**Sight and projection (4A-2a)**
+- **Join keys** carry the floor's grid shape and both floors' sizes beside the opening's rect and rev, so two rooms sharing scene ids never share a cached answer (D-261119-190). A borrowed light widens a dark floor's source sweep boxes by the lit join, so a party member without darkvision upstairs sees the hall below light the hole (D-261119-191). Joined answers are kept weakly across states by their own answer's identity and strongly for each finished state (D-261119-192).
+- **An opening joins nothing** where an end is hidden, its pair is missing or on other squares, or the two floors' grids differ (D-261119-193).
+- **`shift`** is the far rect less the near, in `project.ts`, sent only while the far end is projected (D-261119-194). The fan-out re-projects an end's pair on a fog or sight change over the end and on any write to the end (D-261119-195).
+- **`classSight`** asks the shared class on a whole-party floor whatever holder it is given, and the fan-out diffs a whole-party floor's shared sight only where a join makes it differ from the union (D-261119-196). A DM's device predicts "seen by all" on a whole-party floor joined to a per-player floor from its own `sight`, since no `sightAll` goes to a whole-party floor (D-261119-197).
+- **An equivalent mutant**: borrowed light borrowed again cannot change an answer, so the rule stays as written (D-261119-198).
+- **Cost.** Two dark 100 by 100 floors with 16 openings of 8 by 8, lamps and a 40 step walk take 1.0 to 1.3 ms a step against 0.4 to 0.5 ms without openings, and memoizing raised tiles cut it from 4 ms. The planned OPEN-1 row and the `sightFor` timing hook are not built.
+
+**Server (4A-2b)**
+- **A fall record** is made only for a root the player received at the op, read on the projection of the room before it, so a creature unseen in the dark that a fall brings into a lit hall keeps its card through the player's undo (D-261119-210).
+- **An imported fall card** whose creature did not come through names a new server id that nothing holds, so it reads as a creature no longer on the map, and a card naming a floor the file lacks is dropped (D-261119-211).
+- **A DM's op that lands creatures on another floor** meets that floor's limits as a DM's climb does, and a player's undo or redo of a fall names neither floor (D-261119-212).
+- **A redo step's `card`** is the card the undo removed, and after a redo the record carries none (D-261119-213). The wire tests keep their own copy of the other file's comparison (D-261119-214).
+- **The room's measure.** The reducer leaves an emptied `falls: {}` while a stored room drops it, so `FALL_RESERVE` leaves the whole field out of the measure. `FALL_RESERVE`, `dropReserve` and falls and drops in the width tests are not in `server/rooms/sizeGuard.ts` yet, so the room's measure counts no reserve for fall cards or trapdoor drops.
+
+**Client (4A-3)**
+- **The window** leaves out stamps and labels, as one image load each for marks the veil all but hides (D-261119-208). A hole's name hangs under its rim and its chip over it (D-261119-207).
+- **Fly without the far floor** reads "Fly down through the opening" (D-261119-200). On the ground the keys say the server's words for a hand-made flight (D-261119-201), and the sheet reads "…or fly down through an opening it is over" (D-261119-202).
+- **The fall line is judged from the copy**: a DM's Move to floor onto a lower end reads "fell" and a trapdoor drop "is on" (D-261119-203).
+- **Into** shows only while Opens a pit is on, a floor below exists and the pit has not opened (D-261119-204).
+- **Fall cards** stand under the traps and above the asks, newest first, and Dismiss moves focus to the next card, else the one before, else the first alert, else the map (D-261119-205). A fall page's line reads "From Fall: No save, 1d6 Bludgeoning, Prone." and an unhurt row notes "No damage from the fall, so not Prone" (D-261119-206).
+- **An opening's pane** opens on Go to, and every end pane's title wraps to two lines (D-261119-209). A trapdoor's card line reads "Opened the trapdoor onto Ground floor."
+- **Follow-up:** openings 2 squares apart overlap their names at 390 wide.
+- **A found gap** in `shared/protocol.ts`: an outcome with no targets passes with `fall`, as with `trap`.
+
+**Isometric, areas and the builder (4B-1 to 4B-3)**
+- **Only the relief lowers a hole.** Picks, standees, rings, marks and areas keep the hole's own ground, so a creature over a hole floats at its height (D-261119-220). The bottom takes no pit shade (D-261119-221), is filled black by the relief itself where the floor below is not held (D-261119-222), and lies 10 ft down where the far end is not held or either ground under the hole is not one height (D-261119-223).
+- **One reader later.** `floorHoles` repeats the window's `holeDrop` rule because the two lanes were built apart. Sharing one reader is a follow-up (D-261119-224). The OPEN-ISO bench row (pan at 40 px gated at 1.75 times Top-down's, a turn within 150 ms) measured 6.2 ms against 5.9 ms on its own base and is to be run again on the stacked tip (D-261119-225).
+- **Areas.** Floors ride on the area source, not a page field, so Start over keeps them, and a cast page that names targets stays a selection page (D-261119-250, 251). A creature across is judged by its part over the hole, and "center" reads that part's middle (D-261119-252). A player's device lists it when the rays to that part are live on the area's floor and the part lies on live ground (D-261119-253). Rows carry no floor mark (D-261119-254). Floors of different grid shapes join nothing (D-261119-255). Rings, the aim preview and the tool line keep their own floor, and the ask card and block read the reach (D-261119-256, 257, 258).
+- **Builder.** Line up moves this floor's end onto the far end's squares. The handle shows only on the end whose pane is open, outside the corner, so a press on a small end always moves it. Hex stairs moved on one floor are refused client-side.
+
+**The rest (4B-4, 4B-5)**
+- **Export every floor** refuses at the scale the DM chose rather than lowering it (D-261119-230), names the zip with the size only where every floor shares it (D-261119-231), holds the floors "Players here" or "Reached" in the player view, numbered among themselves (D-261119-232), draws a reached floor players hold nothing of as its background (D-261119-233), and reads "Make the file" (D-261119-234).
+- **Start a fight on every floor.** Visible to players judges each creature by its own floor's fog and sight, not by whether players reached that floor (D-261119-235).
+- **Several files.** Each floor keeps its own defaults and the dialog has no per-file options (D-261119-236). Move up moves toward the lowest floor and a footer line says so (D-261119-237). A failed upload's sentence adds the server's reason (D-261119-238). The picker gains a second hint line (D-261119-239).
+- **Other floors.** The row height stays 56 px, so the window arithmetic holds. Marks on those rows are Hidden only, since projecting each other floor for fog marks would cost more than the design asked. The chip is hidden on a scene of one floor.
+- **Alignment.** The new roots are measured in their own e2e files (floors-openings, floors-iso, floors-areas, floors-rest, floors-outliner and floors-links-build), not in `e2e/alignmentRoom.ts`.
+- **Not built:** the OPEN-1 perf row and the `sightFor` timing hook, and the size accounting's reserves for fall cards and drops (`FALL_RESERVE`, `dropReserve`).
