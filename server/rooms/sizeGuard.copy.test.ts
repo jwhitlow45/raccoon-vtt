@@ -659,3 +659,19 @@ describe("D-261120-060: a player's creature's walk past its turn counts as their
     assert.ok(walks > 300, `${walks} walks compared`);
   });
 });
+
+test("on a Per player scene with fog, the walk P1's exact part keeps past its turn holds only the bends their copy held on it (D-261120-060)", () => {
+  const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) } });
+  state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor() });
+  // A leg no other player saw whole, whose bend lies on ground P1's fog hides.
+  const path = { turn: 7, stops: [{ x: 2, y: 2, elevation: 0 }, { x: 4, y: 4, elevation: 0, via: [2, 4], moved: 20, cost: 20 }] };
+  state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 4, y: 4, path });
+  state.encounter = { rev: 0, round: 1, activeEntryId: "rhero", entries: [entry("rhero", { tokenId: "hero" })], turnStart: { entryId: "rhero", tokenId: "hero", sceneId: "s1", x: 2, y: 2, elevation: 0, seq: 7 } };
+  const view = seatView(state, "p1");
+  const held = (view.copy("token", "hero") as { path?: { stops: Array<{ via?: unknown }> } }).path;
+  assert.ok(held && held.stops[1]!.via === undefined, "P1's copy holds the walk without the bend");
+  assert.equal(stableStringify(view.walk("hero")), stableStringify(held));
+  // Past the turn, which a turn of another row's started, the exact part keeps it so.
+  const later = { ...state, encounter: { ...state.encounter, activeEntryId: null, turnStart: undefined } } as RoomState;
+  assert.equal(stableStringify(seatView(later, "p1").walk("hero")), stableStringify(held));
+});
