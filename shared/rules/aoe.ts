@@ -1,7 +1,7 @@
-import type { AoeCoverage, AreaFootprint, AreaShape, AreaTemplate, DiagonalRule, RoomSettings, Token, TokenId } from "../model.ts";
+import type { AoeCoverage, AreaFootprint, AreaShape, AreaTemplate, CellRect, DiagonalRule, RoomSettings, SceneId, Token, TokenId } from "../model.ts";
 import { areaCentersOnScene } from "../migrate.ts";
 import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
-import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
+import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type CellRange, type FootprintToken, type PlacedToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
 import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
@@ -71,7 +71,26 @@ export type AreaContext = {
   tokens?: Readonly<Record<string, AreaToken>>;
   /** Samples per cell side: 16 by default, 4 while a template is being aimed. */
   samples?: number;
+  /**
+   * The floors next to the area's that it reaches through an opening
+   * (docs/design/design-v1-floors.md phase 4, 9.2), for who it catches.
+   * Absent, as every rule of the server's leaves it, an area catches only
+   * on its own floor.
+   */
+  through?: readonly AreaThrough[];
 };
+
+/**
+ * A floor an area reaches through an opening (docs/design/design-v1-floors.md
+ * phase 4, 9.2). A creature on `sceneId` counts only by the part of its
+ * space over the opening's squares, the one column the floors share, and
+ * stands `dz` feet higher in the area's floor than its own elevation says:
+ * minus the floors' separation for a floor below, plus it for one above
+ * (D-261119-109), so a creature below at 5 ft reads at -5 ft from a 10 ft
+ * floor above. Ranges are the floor plan's (D-261119-065), and only the
+ * area's own floor's walls clip it.
+ */
+export type AreaThrough = { sceneId: SceneId; rect: CellRect; dz: number };
 
 /** A shape in cells on every axis. */
 export type Shape3 = {
@@ -1168,6 +1187,12 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
  * several heights through its body (heightsThrough), and the best of them
  * counts, as if the slice through the creature were taken where the area
  * covers most of it.
+ *
+ * With `ctx.through` it also catches on the floors next to the area's
+ * through openings (docs/design/design-v1-floors.md phase 4, 9.2): a creature
+ * there by its space over the opening's squares, at its heights moved into
+ * the area's floor (AreaThrough), by the same rule as one on the area's own
+ * floor. A creature on any other floor is never caught.
  */
 export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
   const area = resolveArea(template, ctx);
@@ -1175,26 +1200,79 @@ export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<Ar
   if (ctx.grid.shape === "hex") return creaturesOnHexes(ctx.grid, template, area, tokens, ctx);
   const fpc = feetPerCellOf(ctx);
   const s = new Sampler(area, samplesOf(ctx), sceneBounds(ctx), areaCentersOnScene(ctx.opVersion));
-  const { aoeCoverage, aoeInclusion } = ctx.settings;
   const caught: TokenId[] = [];
   for (const t of tokens) {
-    if (template.sceneId !== undefined && t.sceneId !== undefined && t.sceneId !== template.sceneId) continue;
     if (!template.includeOrigin && t.id === area.originTokenId) continue;
-    const { lo, hi } = verticalExtentFt(t, fpc);
-    const sliceZ = area.sliceZ;
-    const zsAt: HeightsAt = sliceZ ? (x, y) => heightsThrough(lo / fpc, hi / fpc, sliceZ(x, y)) : () => [clamp(area.originZ, lo / fpc, hi / fpc)];
-    if (aoeInclusion === "center") {
-      const r = footprintRect(ctx.grid, t);
-      const cx = r.x + r.w / 2;
-      const cy = r.y + r.h / 2;
-      if (zsAt(cx, cy).some((z) => s.pointInside(cx, cy, z))) caught.push(t.id);
-    } else if (aoeInclusion === "majority") {
-      if (majorityInside(s, t, zsAt)) caught.push(t.id);
-    } else if (anyCellCovered(s, t, zsAt, aoeCoverage)) {
-      caught.push(t.id);
+    const height = verticalExtentFt(t, fpc);
+    if (onAreaFloor(template, t)) {
+      if (catchesOnSquares(s, area, ctx, footprintRect(ctx.grid, t), occupiedRange(SQUARES, t), height, fpc)) caught.push(t.id);
+      continue;
+    }
+    for (const j of ctx.through ?? []) {
+      if (j.sceneId !== t.sceneId) continue;
+      const part = partOverOpening(SQUARES, t, j.rect);
+      if (part?.kind === "squares" && catchesOnSquares(s, area, ctx, part.rect, part.range, { lo: height.lo + j.dz, hi: height.hi + j.dz }, fpc)) {
+        caught.push(t.id);
+        break;
+      }
     }
   }
   return caught;
+}
+
+/** Whether a creature stands on the area's own floor: the same floor, or either naming none. */
+function onAreaFloor(template: AreaTemplateInput, t: AreaToken): boolean {
+  return template.sceneId === undefined || t.sceneId === undefined || t.sceneId === template.sceneId;
+}
+
+/**
+ * The part of a creature's space over an opening's squares (AreaThrough),
+ * the only part an area reaches through it: on squares its footprint cut
+ * to them, `rect`, and the cells of both, `range`, since the squares are
+ * whole cells; on hexes its hexes among them, `whole` where that is all of
+ * them. Null where none of it lies over them.
+ */
+export type OpeningPart = { kind: "squares"; rect: Rect; range: CellRange } | { kind: "hexes"; hexes: Hex[]; whole: boolean };
+
+export function partOverOpening(g: Grid, t: PlacedToken, squares: CellRect): OpeningPart | null {
+  if (g.shape === "hex") {
+    const all = occupiedHexes(g, t);
+    const hexes = all.filter((h) => h.col >= squares.x && h.col < squares.x + squares.w && h.row >= squares.y && h.row < squares.y + squares.h);
+    return hexes.length === 0 ? null : { kind: "hexes", hexes, whole: hexes.length === all.length };
+  }
+  const rect = footprintRect(g, t);
+  const range = occupiedRange(g, t);
+  const E = 1e-9;
+  const x0 = Math.max(rect.x, squares.x);
+  const y0 = Math.max(rect.y, squares.y);
+  const x1 = Math.min(rect.x + rect.w, squares.x + squares.w);
+  const y1 = Math.min(rect.y + rect.h, squares.y + squares.h);
+  if (x1 - x0 <= E || y1 - y0 <= E) return null;
+  return {
+    kind: "squares",
+    rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+    range: { x0: Math.max(range.x0, squares.x), y0: Math.max(range.y0, squares.y), x1: Math.min(range.x1, squares.x + squares.w), y1: Math.min(range.y1, squares.y + squares.h) },
+  };
+}
+
+/**
+ * Whether the area catches a space on squares by the room's inclusion
+ * rule: its footprint `rect`, the cells it takes, `range`, and its
+ * heights in feet in the area's floor.
+ */
+function catchesOnSquares(s: Sampler, area: ResolvedArea, ctx: AreaContext, rect: Rect, range: CellRange, height: { lo: number; hi: number }, fpc: number): boolean {
+  const lo = height.lo / fpc;
+  const hi = height.hi / fpc;
+  const sliceZ = area.sliceZ;
+  const zsAt: HeightsAt = sliceZ ? (x, y) => heightsThrough(lo, hi, sliceZ(x, y)) : () => [clamp(area.originZ, lo, hi)];
+  const { aoeCoverage, aoeInclusion } = ctx.settings;
+  if (aoeInclusion === "center") {
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    return zsAt(cx, cy).some((z) => s.pointInside(cx, cy, z));
+  }
+  if (aoeInclusion === "majority") return majorityInside(s, rect, range, zsAt);
+  return anyCellCovered(s, range, zsAt, aoeCoverage);
 }
 
 /** The heights a creature is measured at above a map point, in cells. */
@@ -1215,8 +1293,7 @@ function heightsThrough(lo: number, hi: number, axis: number): number[] {
   return out;
 }
 
-function anyCellCovered(s: Sampler, t: AreaToken, zsAt: HeightsAt, rule: AoeCoverage): boolean {
-  const r = occupiedRange(SQUARES, t);
+function anyCellCovered(s: Sampler, r: CellRange, zsAt: HeightsAt, rule: AoeCoverage): boolean {
   for (let j = r.y0; j < r.y1; j++) {
     for (let i = r.x0; i < r.x1; i++) {
       for (const z of zsAt(i + 0.5, j + 0.5)) {
@@ -1228,10 +1305,8 @@ function anyCellCovered(s: Sampler, t: AreaToken, zsAt: HeightsAt, rule: AoeCove
   return false;
 }
 
-/** More than half of the sample points inside the footprint itself are inside the area, each cell at its best height. */
-function majorityInside(s: Sampler, t: AreaToken, zsAt: HeightsAt): boolean {
-  const rect = footprintRect(SQUARES, t);
-  const range = occupiedRange(SQUARES, t);
+/** More than half of the sample points inside the footprint itself, `rect` over the cells `range`, are inside the area, each cell at its best height. */
+function majorityInside(s: Sampler, rect: Rect, range: CellRange, zsAt: HeightsAt): boolean {
   const n = s.n;
   let inside = 0;
   let total = 0;
@@ -1672,43 +1747,70 @@ class HexSampler {
  * rule: the DM may stand a token on the hex past an odd row's end, whose
  * center lies on the scene's edge, and no hex past the edge is shaded
  * (review HX2-OPUS-14).
+ *
+ * Through an opening (`ctx.through`) a creature counts by its hexes in the
+ * opening's, and under "center" by its anchor where all its hexes are
+ * there, else by the middle of those that are.
  */
 function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: ResolvedArea, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
   const fpc = feetPerCellOf(ctx);
-  const scene = sceneBounds(ctx);
-  const s = new HexSampler(g, area, samplesOf(ctx), scene);
-  const { aoeCoverage, aoeInclusion } = ctx.settings;
+  const s = new HexSampler(g, area, samplesOf(ctx), sceneBounds(ctx));
   const caught: TokenId[] = [];
   for (const t of tokens) {
-    if (template.sceneId !== undefined && t.sceneId !== undefined && t.sceneId !== template.sceneId) continue;
     if (!template.includeOrigin && t.id === area.originTokenId) continue;
-    const { lo, hi } = verticalExtentFt(t, fpc);
-    const z0 = Math.floor(lo / fpc);
-    const layers: [number, number] = [z0, Math.max(z0 + 1, Math.ceil(hi / fpc))];
-    const sliceZ = area.sliceZ;
-    const zsAt = (p: Point) => (sliceZ ? heightsThrough(lo / fpc, hi / fpc, sliceZ(p.x, p.y)) : [clamp(area.originZ, lo / fpc, hi / fpc)]);
+    const height = verticalExtentFt(t, fpc);
     const hexes = occupiedHexes(g, t);
-    if (aoeInclusion === "center") {
-      if (!hexes.some((h) => hexInScene(g, scene, h))) continue;
-      const p = hexAnchor(g, t);
-      const d = area.reach ? hexSetSteps(g, area.reach.from, hexes) : undefined;
-      if (zsAt(p).some((z) => s.pointIn(p, z, d, layers))) caught.push(t.id);
+    if (onAreaFloor(template, t)) {
+      if (catchesOnHexes(g, s, area, ctx, hexes, hexAnchor(g, t), height, fpc)) caught.push(t.id);
       continue;
     }
-    const best = hexes.map((h) => {
-      let top = 0;
-      let center = false;
-      for (const z of zsAt(hexCenter(g, h))) {
-        const n = s.count(h, z, undefined, layers);
-        if (n > top || (n === top && s.center)) {
-          top = n;
-          center = s.center;
-        }
+    for (const j of ctx.through ?? []) {
+      if (j.sceneId !== t.sceneId) continue;
+      const part = partOverOpening(g, t, j.rect);
+      if (part?.kind !== "hexes") continue;
+      const p = part.whole ? hexAnchor(g, t) : middleOf(part.hexes.map((h) => hexCenter(g, h)));
+      if (catchesOnHexes(g, s, area, ctx, part.hexes, p, { lo: height.lo + j.dz, hi: height.hi + j.dz }, fpc)) {
+        caught.push(t.id);
+        break;
       }
-      return { n: top, center };
-    });
-    const hit = aoeInclusion === "majority" ? 2 * best.reduce((a, b) => a + b.n, 0) > best.length * s.total : best.some((b) => passes(b.n, s.total, b.center, aoeCoverage));
-    if (hit) caught.push(t.id);
+    }
   }
   return caught;
+}
+
+function middleOf(points: readonly Point[]): Point {
+  return { x: points.reduce((a, p) => a + p.x, 0) / points.length, y: points.reduce((a, p) => a + p.y, 0) / points.length };
+}
+
+/**
+ * Whether the area catches a space on hexes by the room's inclusion rule:
+ * its hexes, the point "center" reads, `p`, and its heights in feet in the
+ * area's floor.
+ */
+function catchesOnHexes(g: HexGrid, s: HexSampler, area: ResolvedArea, ctx: AreaContext, hexes: readonly Hex[], p: Point, height: { lo: number; hi: number }, fpc: number): boolean {
+  const lo = height.lo / fpc;
+  const hi = height.hi / fpc;
+  const z0 = Math.floor(lo);
+  const layers: [number, number] = [z0, Math.max(z0 + 1, Math.ceil(hi))];
+  const sliceZ = area.sliceZ;
+  const zsAt = (at: Point) => (sliceZ ? heightsThrough(lo, hi, sliceZ(at.x, at.y)) : [clamp(area.originZ, lo, hi)]);
+  const { aoeCoverage, aoeInclusion } = ctx.settings;
+  if (aoeInclusion === "center") {
+    if (!hexes.some((h) => hexInScene(g, s.scene, h))) return false;
+    const d = area.reach ? hexSetSteps(g, area.reach.from, hexes) : undefined;
+    return zsAt(p).some((z) => s.pointIn(p, z, d, layers));
+  }
+  const best = hexes.map((h) => {
+    let top = 0;
+    let center = false;
+    for (const z of zsAt(hexCenter(g, h))) {
+      const n = s.count(h, z, undefined, layers);
+      if (n > top || (n === top && s.center)) {
+        top = n;
+        center = s.center;
+      }
+    }
+    return { n: top, center };
+  });
+  return aoeInclusion === "majority" ? 2 * best.reduce((a, b) => a + b.n, 0) > best.length * s.total : best.some((b) => passes(b.n, s.total, b.center, aoeCoverage));
 }
