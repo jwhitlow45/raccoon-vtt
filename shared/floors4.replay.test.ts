@@ -143,6 +143,40 @@ describe("stored ops of change formats 62 and 63 replay to what they made (OPENI
     assert.equal(state.tokens.thorn!.sceneId, UPPER, "Thorn stands on Upper floor's landing");
   });
 
+  test("live, each op on the room as format 63 left it lands as at 63, except a climb an arrival meets", () => {
+    // Each op reads the room its stored run left before it, so one op's arrival never changes what the next is asked on.
+    const differs: string[] = [];
+    for (const [i, t] of pinned.tails.entries()) {
+      let state = t.initial;
+      for (const [k, s] of t.ops.entries()) {
+        const at63 = resultHash(state, s, 63);
+        if (resultHash(state, s, undefined).hash !== at63.hash) differs.push(`${i}:${k}`);
+        state = at63.state;
+      }
+    }
+    // The first room's climb up, on squares and on hexes: the ops before it are its setup, seven of them.
+    assert.deepEqual(differs, ["0:7", "3:7"]);
+  });
+
+  test("live, the climb onto the snare in Spirit Guardians springs the snare and reminds about Thorn", () => {
+    for (const i of [0, 3]) {
+      const t = pinned.tails[i]!;
+      let state = t.initial;
+      for (const s of t.ops.slice(0, 7)) state = resultHash(state, s, 63).state;
+      const climb = t.ops[7]!;
+      assert.equal(climb.op.t, "token.climb");
+      const live = applyOp(state, opSchema.parse(climb.op), climb.who, { seq: climb.seq, at: AT });
+      const old = applyOp(state, opSchema.parse(climb.op), climb.who, { seq: climb.seq, at: AT, opVersion: 63 });
+      assert.ok(live.ok && old.ok);
+      assert.equal(live.state.tokens.thorn!.sceneId, UPPER);
+      assert.equal(live.state.traps.tu!.state, "sprung", `${t.name}: the snare goes off on the landing`);
+      assert.equal(old.state.traps.tu!.state, "armed", `${t.name}: at 63 a climb sets off nothing`);
+      const reminded = (log: readonly { data?: { type?: string; templateId?: string; tokenId?: string } }[]) => log.some((l) => l.data?.type === "area" && l.data.templateId === "sg" && l.data.tokenId === "thorn");
+      assert.ok(reminded(live.log), `${t.name}: Spirit Guardians reminds about Thorn`);
+      assert.ok(!reminded(old.log), `${t.name}: at 63 a climb reminds about nobody`);
+    }
+  });
+
   test("the pinned rooms are the rooms this file builds, so a change to the fixtures shows here", () => {
     assert.deepEqual(
       pinned.tails.map((t) => t.name),
