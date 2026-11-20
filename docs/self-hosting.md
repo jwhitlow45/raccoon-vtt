@@ -620,8 +620,9 @@ server cleanly first, with
 update, because that saves a snapshot of every room. Then rebuild the commit
 you ran before, and every room loads. A clean stop's last log line is
 `shut down`. A server that crashed or was killed can leave changes an older
-build refuses, and it then refuses to open those rooms. So can a stop whose
-last line is `shutdown failed` or, after 25 seconds,
+build cannot replay, and it then serves those rooms read-only, as they stood
+before the first of them. So can a stop whose last line is `shutdown failed`
+or, after 25 seconds,
 `shutdown did not finish in time: forced exit`, both with exit code 1.
 Restore the backup taken just before the update instead, and every room
 loses what changed after it.
@@ -658,12 +659,13 @@ newest first.
   single file on hexes hold their height until the holder lands, step
   straight onto the holder's start from beside it where the other way ends
   out of reach, and step off their holder at a trap's stop where a clear
-  spot in reach is left. No data migrates, and changes saved before replay
-  as they ran. Until it reloads, an old page sends no seat, so a rider lands
-  on her usual seat. An older build cannot replay version 63 changes: it
-  serves a room with any after its last save read-only, as it stood before
-  the first of them. Going back needs the backups taken just before the
-  update for such a room.
+  spot in reach is left. A creature taken round a loop back to where it
+  started meets the traps and areas on the way. No data migrates, and
+  changes saved before replay as they ran. Until it reloads, an old page
+  sends no seat, so a rider lands on her usual seat. An older build cannot
+  replay version 63 changes: it serves a room with any after its last save
+  read-only, as it stood before the first of them. Going back needs the
+  backups taken just before the update for such a room.
 - **Single file hex by hex** ([design](design/design-v1-attach.md)):
   change format 62. A creature dragged in single file on hexes now walks
   onto the hex its holder sets out from and on along the holder's own hexes,
