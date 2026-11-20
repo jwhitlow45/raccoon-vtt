@@ -3,17 +3,18 @@ import type { FloorLink, RoomState, Token, Viewer } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { ownEntry } from "#shared/records.ts";
 import { onHolder } from "#shared/rules/attach.ts";
-import { LINK_WORDS, linkDir, linksOn, standsOn, type LinkEnd, type Stand } from "#shared/rules/floorLinks.ts";
+import { LINK_WORDS, linkDir, linksOn, standsOn, throughOpening, type LinkEnd, type Stand } from "#shared/rules/floorLinks.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import type { OnAnswer, PendingOp } from "../../state/types.ts";
 import { dragsToken } from "../attach/rights.ts";
-import { climbOffReason, notOnStairs } from "./linkWords.ts";
+import { climbOffReason, FLY_ONLY, notOnStairs } from "./linkWords.ts";
 
 /*
- * Go up and Go down (docs/design/design-v1-floors.md phase 2, 6): which
- * end a creature may climb on the viewer's own copy, and the one wait a
- * climb sent from this page holds, which the bar's button, the strip's
- * icon and the keys share. Plain functions, so node --test runs them.
+ * Go up and Go down (docs/design/design-v1-floors.md phase 2, 6), and Fly
+ * up and Fly down through an opening (phase 4, 5): which end a creature
+ * may take on the viewer's own copy, and the one wait a climb or flight
+ * sent from this page holds, which the bar's button, the strip's icon and
+ * the keys share. Plain functions, so node --test runs them.
  */
 
 type Dir = "up" | "down";
@@ -35,8 +36,11 @@ export type ClimbOffer = { link: LinkEnd; dir: Dir; kind: FloorLink["kind"]; flo
  * holder the viewer receives carries (that holder takes the stairs), or
  * one partly on the squares or in the air over them (standsOn). A holder
  * the viewer does not receive is not in their copy, so a creature riding
- * it climbs alone, as the server lets it (D-261109-018). An end whose way
- * the copy cannot tell is no offer.
+ * it climbs alone, as the server lets it (D-261109-018), and flies alone
+ * through an opening the same way. An opening is offered only to a
+ * creature in the air with its space inside the squares (throughOpening),
+ * so one on the ground gets no Fly up or Fly down. An end whose way the
+ * copy cannot tell is no offer.
  */
 export function climbOffer(view: ClimbView, viewer: Viewer, token: Token): ClimbOffer | null {
   if (!dragsToken(view, viewer, token)) return null;
@@ -44,11 +48,15 @@ export function climbOffer(view: ClimbView, viewer: Viewer, token: Token): Climb
   return endUnder(view, viewer, token);
 }
 
-/** The end a creature stands on, as standsOn reads it, preferring one it fits: a Large creature may overlap two small ends at once. */
+/**
+ * The end a creature stands on, as standsOn reads it, or flies in through
+ * an opening's squares, as throughOpening reads it, preferring one it
+ * fits: a Large creature may overlap two small ends at once.
+ */
 function endUnder(view: ClimbView, viewer: Viewer, token: Token): ClimbOffer | null {
   let found: ClimbOffer | null = null;
   for (const link of linksOn(view, token.sceneId)) {
-    const stand = standsOn(view as RoomState, viewer, token, link);
+    const stand = takes(view, viewer, token, link);
     const dir = stand === null ? null : linkDir(view, link);
     if (stand === null || dir === null) continue;
     const offer: ClimbOffer = { link, dir, kind: link.kind, floor: farFloor(view, link), off: link.locked === true ? "locked" : stand === "on" ? null : stand };
@@ -56,6 +64,16 @@ function endUnder(view: ClimbView, viewer: Viewer, token: Token): ClimbOffer | n
     found ??= offer;
   }
   return found;
+}
+
+/** How a creature may take one end: standing on stairs or a ladder, or in the air through an opening, which a creature on the ground never takes. */
+function takes(view: ClimbView, viewer: Viewer, token: Token, link: LinkEnd): Stand | null {
+  return link.kind === "opening" ? throughOpening(view as RoomState, viewer, token, link) : standsOn(view as RoomState, viewer, token, link);
+}
+
+/** Whether a creature stands on the ground with any of its space on an opening's squares, which only a flier goes through (phase 4, 5). */
+function onTheGround(view: ClimbView, viewer: Viewer, token: Token, link: LinkEnd): boolean {
+  return link.kind === "opening" && standsOn(view as RoomState, viewer, token, link) !== null;
 }
 
 /** The far floor's name, where the copy holds that floor: a player's end names `to` only then (4). */
@@ -86,8 +104,10 @@ export function climbKey(view: ClimbView, viewer: Viewer, token: Token, dir: Dir
     const under = endUnder(view, viewer, holder);
     return { say: under ? LINK_WORDS.carried(name, under.kind) : notOnStairs(name) };
   }
-  const offer = dragsToken(view, viewer, token) ? endUnder(view, viewer, token) : null;
-  if (offer === null) return { say: notOnStairs(name) };
+  const moves = dragsToken(view, viewer, token);
+  const offer = moves ? endUnder(view, viewer, token) : null;
+  // On the ground on an opening, the server's words for a hand-made flight say what the key would need.
+  if (offer === null) return { say: moves && linksOn(view, token.sceneId).some((link) => onTheGround(view, viewer, token, link)) ? FLY_ONLY : notOnStairs(name) };
   if (offer.dir !== dir) return { say: notOnStairsThatWay(name, dir) };
   if (offer.off !== null) return { say: climbOffReason(offer.off, offer.kind) };
   return { climb: offer };

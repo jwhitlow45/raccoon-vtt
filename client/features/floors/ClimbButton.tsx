@@ -36,8 +36,10 @@ export function useClimbOffer(token: Token): ClimbOffer | null {
 }
 
 /**
- * Go up or Go down (6.2, 6.4): in the bar's passing row with its words, or
- * in the strip as its icon alone (`compact`). A press sends the climb
+ * Go up or Go down (6.2, 6.4), and Fly up or Fly down through an opening
+ * (phase 4, 5) with an arrow for its icon in place of the stairwell: in
+ * the bar's passing row with its words, or in the strip as its icon alone
+ * (`compact`). A press sends the climb
  * through the Room's one wait (climb.ts), shows busy at once and the
  * spinner after the room's usual 200 ms, and takes no second press until
  * the server answers. The device then follows the creature by phase 1's
@@ -74,7 +76,7 @@ export function ClimbButton(props: { token: Token; offer: ClimbOffer; compact?: 
       // A new element for each way, so the hand-off finds the other way's button rather than this one renamed.
       key={offer.dir}
       size="sm"
-      icon="stairwell"
+      icon={offer.kind !== "opening" ? "stairwell" : offer.dir === "up" ? "arrowUp" : "arrowDown"}
       iconOnly={props.compact ? "always" : undefined}
       busy={late}
       aria-busy={waiting ? true : undefined}
@@ -82,13 +84,13 @@ export function ClimbButton(props: { token: Token; offer: ClimbOffer; compact?: 
       aria-keyshortcuts={key?.aria}
       aria-disabled={off ? true : undefined}
       aria-describedby={off ? props.noteId : undefined}
-      title={climbTip(offer.dir, offer.kind, key?.text ?? null)}
+      title={climbTip(offer.dir, offer.kind, key?.text ?? null, offer.floor)}
       {...{ [CLIMB_ATTR]: offer.dir }}
       onClick={press}
       // In the passing row it grows to share its line, as the row's buttons do (canvas/TokenActionBar.tsx ButtonRow). The strip's icon keeps its 44 px.
       style={{ flex: props.compact ? "none" : "1 1 auto", ...(off ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
     >
-      {climbWords(offer.dir)}
+      {climbWords(offer.dir, offer.kind)}
     </Button>
   );
 }
