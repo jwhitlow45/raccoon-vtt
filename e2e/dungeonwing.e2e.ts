@@ -172,6 +172,61 @@ function pane(page: Page = dm): Locator {
   return page.locator("[data-wing-pane]");
 }
 
+/** How long a wing's plan may take on a loaded runner, as the dungeon dialog's waits allow (dungeonsend.e2e.ts). */
+const PLAN_MS = 60_000;
+
+type WingAsks = { asked: number[]; answered: Record<number, boolean> };
+
+/**
+ * Keeps, from now on, the ids of the wing plans each of the page's workers is asked for and whether each answer
+ * planned, in the worker itself. A step then waits for the answer to the plan its own change asked for, where the
+ * pane's status line can still read an older plan's words, or the same words, until it takes the answer.
+ */
+async function watchWingAsks(page: Page): Promise<() => Promise<WingAsks>> {
+  const workers = await waitFor("the page's workers", () => (page.workers().length > 0 ? page.workers() : null), PLAN_MS);
+  for (const worker of workers) {
+    await worker.evaluate(() => {
+      type Message = { t?: string; id?: number; preview?: { ok?: boolean } };
+      const g = globalThis as unknown as { __wingAsks?: WingAsks; addEventListener(t: "message", f: (e: { data: Message }) => void): void; postMessage(m: Message): void };
+      if (g.__wingAsks) return;
+      const asks: WingAsks = { asked: [], answered: {} };
+      g.__wingAsks = asks;
+      g.addEventListener("message", (e) => {
+        if (e.data?.t === "wing" && typeof e.data.id === "number") asks.asked.push(e.data.id);
+      });
+      const own = g.postMessage.bind(g);
+      g.postMessage = (m) => {
+        if (m?.t === "preview" && typeof m.id === "number") asks.answered[m.id] = m.preview?.ok === true;
+        own(m);
+      };
+    });
+  }
+  return async () => {
+    const all: WingAsks = { asked: [], answered: {} };
+    for (const worker of workers) {
+      const one = await worker.evaluate(() => (globalThis as unknown as { __wingAsks?: WingAsks }).__wingAsks ?? { asked: [], answered: {} });
+      all.asked.push(...one.asked);
+      Object.assign(all.answered, one.answered);
+    }
+    return all;
+  };
+}
+
+/** The newest wing plan asked for so far, or 0. */
+async function newestAsk(asks: () => Promise<WingAsks>): Promise<number> {
+  return Math.max(0, ...(await asks()).asked);
+}
+
+/** Whether the newest wing plan asked for after `before` planned, once it is answered. */
+async function answerAfter(asks: () => Promise<WingAsks>, before: number, what: string): Promise<boolean> {
+  const answer = await waitFor(what, async () => {
+    const now = await asks();
+    const newest = Math.max(0, ...now.asked);
+    return newest > before && newest in now.answered ? { planned: now.answered[newest]! } : null;
+  }, PLAN_MS);
+  return answer.planned;
+}
+
 /** Whether a control is in sight as it stands: inside the screen, and the topmost thing at its middle. */
 async function inSight(target: Locator): Promise<string | null> {
   return target.evaluate((el) => {
@@ -461,22 +516,25 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await tapWorld(dm, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, BURROW);
     await lineIs("Area 29 hexes across and 19 rows down, joined at the ringed wall.");
     const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    const asks = await watchWingAsks(dm);
+    const opened = await newestAsk(asks);
     await bar.getByRole("button", { name: "Generate a wing" }).click();
     await pane().waitFor();
-    await pane().getByRole("radio", { name: "Wide", exact: true }).check();
-    // The pane opens on a random seed, and this crowded Wide join finds no way for about one seed in four, which the pane says with Reroll first: so Reroll until one plans.
-    for (let tries = 0; ; tries++) {
-      const outcome = await waitFor("the Wide plan's counts or its no way line", async () => {
-        const status = await pane().getByRole("status").innerText();
-        if (/rooms?\b.*doors?\b/.test(status) && (await pane().getByRole("button", { name: "Add the wing" }).isEnabled())) return "planned";
-        return /^No way from the area|^Could not fit two rooms/.test(status) ? "reroll" : null;
-      });
-      if (outcome === "planned") break;
-      assert.ok(tries < 8, "a Wide plan within 8 rerolls");
-      await pane().getByRole("button", { name: "Reroll", exact: true }).click();
-      // The next plan can say the same words, so the old line is given time to go: the pane waits 120 ms, and a plan here takes far less than the rest.
-      await dm.waitForTimeout(800);
+    const wide = pane().getByRole("radio", { name: "Wide", exact: true });
+    let asked = opened;
+    if (!(await wide.isChecked())) {
+      // The pane's first plan is answered before Wide asks again, so the answer read next is Wide's.
+      await answerAfter(asks, opened, "the pane's first plan");
+      asked = await newestAsk(asks);
+      await wide.check();
     }
+    // The pane opens on a random seed, and this crowded Wide join finds no way for about one seed in four, which the pane says with Reroll first: so Reroll until one plans.
+    for (let tries = 0; !(await answerAfter(asks, asked, "the Wide plan")); tries++) {
+      assert.ok(tries < 8, "a Wide plan within 8 rerolls");
+      asked = await newestAsk(asks);
+      await pane().getByRole("button", { name: "Reroll", exact: true }).click();
+    }
+    await waitFor("the Wide plan's counts, and Add the wing on", async () => (/rooms?\b.*doors?\b/.test(await pane().getByRole("status").innerText()) && (await pane().getByRole("button", { name: "Add the wing" }).isEnabled()) ? true : null), PLAN_MS);
     await shots.take(dm, "d3fix-1-wide-hex-wing");
     await pane().getByRole("button", { name: "Add the wing" }).click();
     await pane().waitFor({ state: "detached", timeout: 30_000 });
