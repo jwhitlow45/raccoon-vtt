@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ANA, applied, onThornsTurn, thornToken, tower } from "../floorLinksTestutil.ts";
+import { ANA, GROUND, applied, onThornsTurn, thornToken, tower } from "../floorLinksTestutil.ts";
 import type { Token } from "../model.ts";
-import { token } from "../testutil.ts";
+import { DM, token } from "../testutil.ts";
 
 /*
  * A creature a move carries outside its turn keeps the path it had from
@@ -28,3 +28,34 @@ describe("a creature a move carries outside its turn keeps its old path from 64 
     assert.equal(at63.state.tokens.goblin!.path, undefined);
   });
 });
+
+describe("a creature a walk takes out and back to where it started keeps its old path from 64 (D-261119-016)", () => {
+  // A Large horse on Ground floor with a goblin it drags beside it and an imp riding it, each with a path from an earlier turn.
+  const old = { turn: 1, stops: [{ x: 0, y: 0, elevation: 0 }] } as unknown as Token["path"];
+  const stable = (fight: boolean) => {
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", sceneId: GROUND, x: 10, y: 10 });
+    const goblin = token("goblin", { sceneId: GROUND, x: 12, y: 10, path: old, attached: { to: "horse", kind: "drag" } });
+    const imp = token("imp", { name: "Imp", size: "tiny", sceneId: GROUND, x: 10.5, y: 10.5, path: old, attached: { to: "horse", kind: "ride" } });
+    const state = tower({ tokens: { thorn: thornToken(), horse, goblin, imp } });
+    return fight ? onThornsTurn(state) : state;
+  };
+  // The DM walks the horse east and back to where it stood, so both walks leave their start and end on it.
+  const loop = { t: "token.move" as const, tokenId: "horse", x: 10, y: 10, route: [[14, 10, 1, 0], [10, 10, 1, 0]] as [number, number, number, 0][] };
+
+  for (const fight of [true, false]) {
+    test(`${fight ? "on Thorn's turn" : "with no fight"}, the goblin and the imp keep their paths at 64, lose them at 63, and are not written at 62`, () => {
+      const state = stable(fight);
+      const at64 = applied(state, loop, DM).state;
+      const at63 = applied(state, loop, DM, 63).state;
+      const at62 = applied(state, loop, DM, 62).state;
+      for (const id of ["goblin", "imp"]) {
+        const was = state.tokens[id]!;
+        for (const s of [at64, at63, at62]) assert.deepEqual([s.tokens[id]!.x, s.tokens[id]!.y], [was.x, was.y], `${id} ends where it started`);
+        assert.deepEqual(at64.tokens[id]!.path, old, `${id} keeps its path at 64`);
+        assert.equal(at63.tokens[id]!.path, undefined, `${id} loses its path at 63, as that version's walk out and back wrote it`);
+        assert.equal(at62.tokens[id], state.tokens[id], `${id} is not written at 62`);
+      }
+    });
+  }
+});
+
