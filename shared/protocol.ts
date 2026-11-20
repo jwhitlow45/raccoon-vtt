@@ -20,12 +20,14 @@ import {
   CONDITION_KEYS,
   CR_VALUES,
   CRIT_RULES,
+  FALLS_PER_ROOM,
   FREE_WALL_ID_LENGTH,
   FREE_WALL_LATTICE,
   MAX_FREE_WALL_CELLS,
   MAX_HEIGHT_FT,
   MAX_LIGHT_FT,
   MIN_HEIGHT_FT,
+  OPENING_SIDE,
   ORDER_REVEALS,
   SCENE_PRESETS,
   SKILL_KEYS,
@@ -1872,9 +1874,20 @@ function rectCells(rects: readonly { x: number; y: number; w: number; h: number 
   for (const r of rects) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) seen.add(`${x},${y}`);
   return seen.size;
 }
-/** Stairs' or a ladder's squares (docs/design/design-v1-floors.md phase 2, 2): 1 to LIMITS.floorLinkSide a side. */
-const floorLinkRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(LIMITS.floorLinkSide), h: z.number().int().min(1).max(LIMITS.floorLinkSide) });
-const floorLinkKind = z.enum(["stairs", "ladder"]);
+/**
+ * An end's squares (docs/design/design-v1-floors.md phase 2, 2): 1 to
+ * OPENING_SIDE a side, an opening's most (phase 4, 3). Stairs and ladders
+ * keep to LIMITS.floorLinkSide, which a put holds below and the reducer
+ * holds for a change of squares.
+ */
+const floorLinkRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(OPENING_SIDE), h: z.number().int().min(1).max(OPENING_SIDE) });
+const floorLinkKind = z.enum(["stairs", "ladder", "opening"]);
+/** The refusal of stairs or a ladder past their side (phase 4, 3). */
+export const STAIRS_SIDE_WORDS = `Stairs and ladders are at most ${LIMITS.floorLinkSide} squares a side.`;
+/** Whether stairs or a ladder keep to their side. An opening keeps to OPENING_SIDE, which floorLinkRect holds. */
+function linkSideFits(kind: "stairs" | "ladder" | "opening", rect: { w: number; h: number }): boolean {
+  return kind === "opening" || (rect.w <= LIMITS.floorLinkSide && rect.h <= LIMITS.floorLinkSide);
+}
 const cellRects = z
   .array(cellRect)
   .min(1)
@@ -1946,6 +1959,10 @@ const trapPreset = z.string().max(40).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not a p
 /** Ops set uses 1 to 99. Only the reducer leaves a trap at 0. */
 const trapUses = z.number().int().min(1).max(99);
 const trapPit = z.strictObject({ floor: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT - 1) });
+/** A trapdoor's mark (TrapRig.below, docs/design/design-v1-floors.md phase 4, 4.6). */
+const trapBelow = z.literal(true);
+/** A pit lowers its own squares and a trapdoor drops what stands on them to the floor below: a rig does one. */
+export const PIT_OR_BELOW = "A trap opens a pit or drops to the floor below, not both.";
 
 /** What a trap does, as an op sets it: never `noticedBy` or `due`, which only the reducer writes. */
 const trapRigInput = z.strictObject({
@@ -1958,6 +1975,7 @@ const trapRigInput = z.strictObject({
   stops: z.boolean(),
   foundOnSpring: z.boolean(),
   pit: trapPit.optional(),
+  below: trapBelow.optional(),
   hits: trapHitsSchema,
   save: trapSave.optional(),
   damage: trapDamage.optional(),
@@ -1985,6 +2003,7 @@ const trapRigPatch = z
     stops: z.boolean().optional(),
     foundOnSpring: z.boolean().optional(),
     pit: trapPit.nullable().optional(),
+    below: trapBelow.nullable().optional(),
     hits: trapHitsSchema.optional(),
     save: trapSave.nullable().optional(),
     damage: trapDamage.nullable().optional(),
@@ -1999,10 +2018,13 @@ const trapRigPatch = z
     note: trapNote.nullable().optional(),
     preset: trapPreset.nullable().optional(),
   })
-  .refine((p) => Object.keys(p).length > 0, { message: "a rig change changes something" });
+  .refine((p) => Object.keys(p).length > 0, { message: "a rig change changes something" })
+  .refine((p) => !p.pit || !p.below, { message: PIT_OR_BELOW, path: ["below"] });
 
 /** A new trap: armed, with a plain id, its rig whole. */
-const trapInput = z.strictObject({ id: plainId, sceneId: id, name: trapName, zone: trapZone, found: z.boolean().optional(), rig: trapRigInput });
+const trapInput = z
+  .strictObject({ id: plainId, sceneId: id, name: trapName, zone: trapZone, found: z.boolean().optional(), rig: trapRigInput })
+  .refine((t) => t.rig.pit === undefined || t.rig.below === undefined, { message: PIT_OR_BELOW, path: ["rig", "below"] });
 const trapPatch = z
   .strictObject({
     name: trapName.optional(),
@@ -2014,6 +2036,34 @@ const trapPatch = z
   .refine((p) => Object.keys(p).length > 0, { message: "a trap change changes something" });
 /** An occurrence by its line in the DM's trap log (TrapDue.id). */
 const trapDue = z.string().regex(/^\d{1,18}:\d{1,6}$/);
+
+// Falls through openings (docs/design/design-v1-floors.md phase 4, 4.4 and 4.5).
+
+/** A fall card's id (FallId): the seq of the op it was made in and its place among that op's cards. */
+const fallId = z.string().regex(/^\d{1,18}:\d{1,6}$/);
+/** The most feet a fall drops: the tallest floor above the lowest ground, from the highest ground (rules/floorLinks.ts fallDrop). */
+export const FALL_FEET_MOST = FLOOR_HEIGHT.max + MAX_HEIGHT_FT - MIN_HEIGHT_FT;
+/** A fall card as stored (Fall). */
+const fallCard = z.strictObject({
+  id: fallId,
+  rev: z.number().int().min(0),
+  tokenId: id,
+  sceneId: id,
+  from: id,
+  ft: z.number().int().min(0).max(FALL_FEET_MOST),
+  made: z.number().int().min(0),
+});
+/** One root's fall in a player's step (FallRecord), with the card its undo removed. */
+const fallRecord = z.strictObject({
+  tokenId: id,
+  linkId: plainId,
+  rev: z.number().int().min(0),
+  made: z.number().int().min(0),
+  from: id,
+  to: id,
+  fallId,
+  card: fallCard.optional(),
+});
 
 /**
  * What an `actor.use` spends (docs/design/design-v1-combat-controls.md 3.1). The
@@ -2404,12 +2454,21 @@ const stateClientOps = [
     link: z
       .strictObject({ id: plainId, pairId: plainId, sceneId: id, to: id, rect: floorLinkRect, kind: floorLinkKind })
       .refine((l) => l.id !== l.pairId, { message: "the two ends need their own ids" })
-      .refine((l) => l.sceneId !== l.to, { message: "stairs join two floors" }),
+      .refine((l) => l.sceneId !== l.to, { message: "stairs join two floors" })
+      .refine((l) => linkSideFits(l.kind, l.rect), { message: STAIRS_SIDE_WORDS, path: ["rect"] }),
   }),
-  /** Changes both ends' kind or lock (3): Play when it changes `locked` alone, else Setup. `to` and the squares never change. */
+  /**
+   * Changes both ends' kind, lock or hiding (3, phase 4 8.1): Play when it
+   * changes `locked` or `hidden` alone, else Setup. `rect` moves this end's
+   * squares, and an opening's pair's with them, and `pairRect` the far
+   * end's, for stairs and ladders on squares (phase 4, 8.2). `to` never
+   * changes, and neither does a kind to or from an opening.
+   */
   op("floorLink.update", {
     linkId: plainId,
-    patch: z.strictObject({ kind: floorLinkKind.optional(), locked: z.boolean().optional() }).refine((p) => p.kind !== undefined || p.locked !== undefined, { message: "nothing to change" }),
+    patch: z
+      .strictObject({ kind: floorLinkKind.optional(), locked: z.boolean().optional(), hidden: z.boolean().optional(), rect: floorLinkRect.optional(), pairRect: floorLinkRect.optional() })
+      .refine((p) => Object.values(p).some((v) => v !== undefined), { message: "nothing to change" }),
   }),
   /** Removes both ends of stairs or a ladder (3). Setup. */
   op("floorLink.delete", { linkId: plainId }),
@@ -2522,6 +2581,8 @@ const stateClientOps = [
     cast: id.optional(),
     /** The trap occurrence this outcome settles, in the same op (docs/design/design-v1-traps.md 6.2). */
     trap: z.strictObject({ trapId: id, due: trapDue }).optional(),
+    /** The fall card this outcome settles, removed in the same op (docs/design/design-v1-floors.md phase 4, 4.4). */
+    fall: z.strictObject({ fallId }).optional(),
     targets: z
       .array(
         z.strictObject({
@@ -2540,7 +2601,7 @@ const stateClientOps = [
     quiet: z.literal(true).optional(),
   })
     .refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG })
-    .refine((o) => o.cast === undefined || o.trap === undefined, { message: "an outcome settles one thing" })
+    .refine((o) => [o.cast, o.trap, o.fall].filter((settled) => settled !== undefined).length <= 1, { message: "an outcome settles one thing" })
     // A trap's springing that everyone passed with nothing to take settles with no creature (docs/design/design-v1-traps.md 4.4).
     .refine((o) => o.targets.length > 0 || o.trap !== undefined, { message: "an outcome names at least one creature" }),
   op("actor.damageMany", {
@@ -2722,6 +2783,8 @@ const stateClientOps = [
   op("trap.act", { trapId: id, due: trapDue }),
   /** Dismiss an occurrence, `sprung` marking the trap sprung (Mark sprung). */
   op("trap.settle", { trapId: id, due: trapDue, sprung: z.literal(true).optional() }),
+  /** Dismiss a fall card (docs/design/design-v1-floors.md phase 4, 4.4), the DM's: Play, and bookkeeping on the far line. */
+  op("fall.settle", { fallId }),
   op("encounter.start", { entries: z.array(entryInput).max(MAX_ENTRIES_PER_OP) }),
   op("encounter.end", {}),
   op("encounter.add", { entries: z.array(entryInput).min(1).max(MAX_ENTRIES_PER_OP) }),
@@ -3044,6 +3107,16 @@ export const serverOnlyOps = [
      * its own history.
      */
     climb: z.strictObject({ tokenId: id, linkId: plainId, rev: z.number().int().min(0), made: z.number().int().min(0), from: id, to: id }).optional(),
+    /**
+     * The falls through openings the step made (docs/design/design-v1-floors.md
+     * phase 4, 4.5), one record a root the player received, beside `climb`,
+     * never inside it. Under each the restore may move that root, its
+     * passengers and their areas between the record's two floors, and an
+     * undo removes the record's card while it is there, a redo writing back
+     * the `card` it carries. Only the server builds a restore, from its own
+     * history.
+     */
+    falls: z.array(fallRecord).min(1).max(MAX_MOVES).optional(),
   }).refine((o) => o.entries.length > 0 || o.saveOutcome !== undefined, { message: "an empty restore requires a save outcome transition" }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
@@ -3399,6 +3472,8 @@ export const castSchemas = { castInput, castEnd, castRolled };
 export const clockSchemas = { calendar, calendarName, clockTime, clockStep, clockDate, daylight };
 /** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design/design-v1-traps.md 6.2). */
 export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
+/** Falls' shapes, so the stored-state schema holds a room's fall cards to the bounds a restore's are held to (docs/design/design-v1-floors.md phase 4, 4.4). */
+export const fallSchemas = { fallId, fallCard, fallsMost: FALLS_PER_ROOM };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */
@@ -3917,6 +3992,7 @@ export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
   "trap.spring": "none",
   "trap.act": "none",
   "trap.settle": "none",
+  "fall.settle": "none",
   "encounter.start": { minted: (op) => op.entries.map((e) => e.id) },
   "encounter.end": "none",
   "encounter.add": { minted: (op) => op.entries.map((e) => e.id) },

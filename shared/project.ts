@@ -3191,6 +3191,7 @@ export const LINK_FOR_PLAYERS = {
   locked: "copied",
   // The shape its squares were written under, as public as the scene's shape, as a trap's.
   grid: "copied",
+  hidden: "dm: a hidden end reaches no player at all (docs/design/design-v1-floors.md phase 4, 8.1)",
   ground: "dm: the check that the ground under it stays put. A device reads ground from its own build chunks",
   made: "dm: the seq that tells stairs placed again from the stairs a climb took",
 } as const satisfies Record<keyof FloorLink, PlayerField>;
@@ -4563,6 +4564,9 @@ function projectEntityKindCtx(ctx: Ctx, key: EntityKey): unknown {
       return ctx.viewer.role === "dm" ? value : null;
     case "floorLink":
       return value ? projectFloorLinkCtx(ctx, value as FloorLink) : null;
+    // A fall card is the DM's alone, its drop and count too (docs/design/design-v1-floors.md phase 4, 10.2).
+    case "fall":
+      return ctx.viewer.role === "dm" ? value : null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
@@ -4810,6 +4814,7 @@ function projectStateKindsCtx(ctx: Ctx): ProjectedState {
     ...soundFields(ctx),
     ...openedField(ctx),
     ...floorLinksField(ctx),
+    ...fallsField(ctx),
   };
 }
 
@@ -4817,6 +4822,12 @@ function projectStateKindsCtx(ctx: Ctx): ProjectedState {
 function floorLinksField(ctx: Ctx): Pick<ProjectedState, "floorLinks"> {
   const links = projectMap(ctx.state.floorLinks ?? {}, (link) => projectFloorLinkCtx(ctx, link));
   return Object.keys(links).length > 0 ? { floorLinks: links } : {};
+}
+
+/** The fall cards, the DM's alone, as a field only while it holds one, as keys.ts writeEntity keeps it. */
+function fallsField(ctx: Ctx): Pick<ProjectedState, "falls"> {
+  const cards = ctx.state.falls;
+  return ctx.viewer.role === "dm" && cards !== undefined && Object.keys(cards).length > 0 ? { falls: cards } : {};
 }
 
 /** The floors players have reached, the DM's alone, as a field only while it holds a mark, as keys.ts writeEntity keeps it. */
@@ -4901,6 +4912,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
   for (const id of Object.keys(state.openFloors ?? {})) out.push(keys.opened(id));
   for (const id of Object.keys(state.floorLinks ?? {})) out.push(keys.floorLink(id));
+  for (const id of Object.keys(state.falls ?? {})) out.push(keys.fall(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
   // On a scene cut from held ground every position may hold a stub (docs/design/design-v1-map-discovery.md 5.6), and with fog on memory can name labels and stamps the build no longer has.
   const chunkKeys = new Set(Object.values(state.buildChunks).map((c) => keys.chunk(c.sceneId, c.cx, c.cy)));

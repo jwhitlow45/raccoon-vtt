@@ -100,9 +100,11 @@ describe("an end as each viewer gets it (4)", () => {
 
   test("every field of an end reaches a player as LINK_FOR_PLAYERS says, and nothing else but `dir` and, with `to`, `rise`", () => {
     const s = run(withStairs(tower(), { kind: "ladder" }), { t: "floorLink.update", linkId: "l1", patch: { locked: true } });
-    const stored: Required<FloorLink> = { ...s.floorLinks!.l1!, locked: true, grid: "hexRows" };
-    const state = { ...s, floorLinks: { ...s.floorLinks!, l1: stored } };
+    const stored: Required<FloorLink> = { ...s.floorLinks!.l1!, locked: true, grid: "hexRows", hidden: true };
     assert.deepEqual(Object.keys(LINK_FOR_PLAYERS).sort(), Object.keys(stored).sort(), "the stored end sets every field the list names");
+    // A hidden end reaches no player at all (phase 4, 8.1), so the fields are read off the same end shown.
+    const { hidden: _hidden, ...shown } = stored;
+    const state = { ...s, floorLinks: { ...s.floorLinks!, l1: shown } };
     for (const viewer of PLAYERS) {
       const copy = projectEntity(keys.floorLink("l1"), state, viewer, { sceneId: null }) as Record<string, unknown>;
       assert.ok(copy, viewer.memberId);

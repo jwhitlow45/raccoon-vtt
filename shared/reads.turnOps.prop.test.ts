@@ -73,6 +73,7 @@ const MADE: Partial<Record<Op["t"], (r: () => number, state: RoomState) => Op>> 
   "fog.publish": (r, state) => ({ t: "fog.publish", sceneId: pick(r, Object.keys(state.scenes)) }),
   "fog.discard": (r, state) => ({ t: "fog.discard", sceneId: pick(r, Object.keys(state.scenes)) }),
   "build.clear": (r, state) => ({ t: "build.clear", sceneId: pick(r, Object.keys(state.scenes)), forget: true }),
+  "fall.settle": (r, state) => ({ t: "fall.settle", fallId: pick(r, [...Object.keys(state.falls ?? {}), "1:0"]) }),
   "trap.spring": (r, state) => ({ t: "trap.spring", trapId: pick(r, [...Object.keys(state.traps), "missing"]), tokenIds: Object.keys(state.tokens).slice(0, int(r, 0, 2)) }),
   "encounter.setValue": (r, state) => ({ t: "encounter.setValue", entryId: anyEntry(r, state), value: pick(r, [1, 10, 20, 30, null]) }),
   "encounter.setValues": (r, state) => ({ t: "encounter.setValues", values: (state.encounter?.entries ?? [{ id: "missing" }]).map((e) => ({ entryId: e.id, value: int(r, -5, 30) })) }),

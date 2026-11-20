@@ -21,7 +21,7 @@ export const UNDO_SCOPE_BY_OP = {
   // A scene's floors are built in Setup, and Show and Hide are play, as fog is (docs/design/design-v1-floors.md 9).
   "floor.order": "setup",
   "floor.open": "play",
-  // Stairs are built in Setup, and Locked is a play step alone (docs/design/design-v1-floors.md phase 2, 3).
+  // Stairs are built in Setup, and Locked and Hidden from players are play steps alone (docs/design/design-v1-floors.md phase 2, 3, and phase 4, 8.1).
   "floorLink.put": "setup",
   "floorLink.update": "fields",
   "floorLink.delete": "setup",
@@ -95,6 +95,8 @@ export const UNDO_SCOPE_BY_OP = {
   "trap.spring": "play",
   "trap.act": "play",
   "trap.settle": "play",
+  // Dismissing a fall card is a play step, as dismissing a trap's occurrence is (docs/design/design-v1-floors.md phase 4, 4.4).
+  "fall.settle": "play",
   "encounter.start": "play",
   "encounter.end": "play",
   "encounter.add": "play",
@@ -186,6 +188,7 @@ const SPEED_FIELDS = new Set(["walk", "fly", "swim", "climb", "burrow", "hover"]
 // level picked by hand would turn Setup (docs/design/design-v1-calendar-c2c3.md 6.2).
 const VISION_FIELDS = new Set(["on", "light", "perPlayer", "byClock"]);
 const TRAP_PLAY_FIELDS = new Set(["state", "found"]);
+const LINK_PLAY_FIELDS = new Set(["locked", "hidden"]);
 
 function onlyFields(value: object, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));
@@ -235,7 +238,7 @@ export function undoScope(op: Op, before: RoomState): UndoScope {
     case "trap.update":
       return onlyFields(op.patch, TRAP_PLAY_FIELDS) ? "play" : "setup";
     case "floorLink.update":
-      return onlyField(op.patch, "locked") ? "play" : "setup";
+      return onlyFields(op.patch, LINK_PLAY_FIELDS) ? "play" : "setup";
     case "scene.update": {
       if (onlyField(op.patch, "thumb")) return "none";
       if (onlyField(op.patch, "suggestedView")) return "play";

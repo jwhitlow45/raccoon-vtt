@@ -9,6 +9,7 @@ import { sameScene } from "../rules/floors.ts";
 import { sceneGrid, shapeOfGrid } from "../rules/grid.ts";
 import { areasFollow, carriedAlong, judgedIn, placeCarried, withPath } from "./tokens.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
+import { notBuilt } from "./falls.ts";
 
 /*
  * Stairs and ladders between floors (docs/design/design-v1-floors.md phase
@@ -30,6 +31,7 @@ function byId(links: Iterable<FloorLink>): FloorLink[] {
  */
 export function floorLinkPut(tx: Tx, op: OpOf<"floorLink.put">): void {
   const draft = op.link;
+  if (draft.kind === "opening") throw notBuilt("An opening");
   if (ownEntry(tx.state.floorLinks, draft.id) || ownEntry(tx.state.floorLinks, draft.pairId)) throw invalid("those stairs are already on the map");
   const here = tx.scene(draft.sceneId);
   tx.scene(draft.to);
@@ -64,6 +66,8 @@ function pairOf(tx: Tx, linkId: string): [FloorLink, FloorLink] {
 
 /** `floorLink.update`: both ends' kind or lock, each end's rev moving on together. */
 export function floorLinkUpdate(tx: Tx, op: OpOf<"floorLink.update">): void {
+  const { kind, hidden, rect, pairRect } = op.patch;
+  if (kind === "opening" || hidden !== undefined || rect !== undefined || pairRect !== undefined) throw notBuilt("Hiding, moving or resizing stairs");
   for (const link of byId(pairOf(tx, op.linkId))) {
     const next: FloorLink = { ...link };
     if (op.patch.kind !== undefined) next.kind = op.patch.kind;
@@ -121,6 +125,17 @@ export function tokenClimb(tx: Tx, op: OpOf<"token.climb">): void {
   tx.write(keys.token(token.id), withPath(tx, token, next, judged, false, undefined, undefined, undefined, climbCost(tx.state, token, link)));
   placeCarried(tx, along, judged);
   areasFollow(tx, token.id, link.to);
+}
+
+/**
+ * The one landing of a climb, a flight and a fall through an opening
+ * (docs/design/design-v1-floors.md phase 4, 4.2): tokenClimb's body, on the
+ * far end's ground, 5 ft above it for a flight, shifted by landingShift
+ * where the far end lies on other squares. What sits on it rides along and
+ * its areas follow. A fall's path folds the turn's legs and adds nothing.
+ */
+export function landThrough(_tx: Tx, _token: Token, _link: FloorLink, _how: "climb" | "flight" | "fall"): void {
+  throw new Error("not built: landThrough");
 }
 
 /**

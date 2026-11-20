@@ -13,7 +13,7 @@ const inventory = {
     "encounter.start", "encounter.end", "encounter.add", "encounter.remove", "encounter.setValue", "encounter.setValues", "encounter.reorder", "encounter.next", "encounter.prev", "encounter.update",
     "roll.ask", "roll.answer", "roll.reopen", "roll.close", "template.create", "template.update", "template.delete", "drawing.create", "drawing.delete", "drawing.clear",
     "fog.draft", "fog.publish", "fog.discard", "fog.live", "fog.reset", "build.paint", "build.erase", "build.rect", "build.poly", "build.edge", "build.label", "build.clear", "build.walls", "build.stamps", "build.lights", "build.height", "build.stairs", "build.rough",
-    "door.set", "trap.spring", "trap.act", "trap.settle", "scene.setPhase", "room.setPlayerScene", "view.follow", "view.blackout", "journal.reveal", "handout.show", "handout.close",
+    "door.set", "trap.spring", "trap.act", "trap.settle", "fall.settle", "scene.setPhase", "room.setPlayerScene", "view.follow", "view.blackout", "journal.reveal", "handout.show", "handout.close",
     "clock.set", "clock.advance",
   ],
   setup: [
@@ -168,6 +168,9 @@ describe("undo classifier inventory", () => {
 
   test("locking stairs is Play, changing their kind is Setup (docs/design/design-v1-floors.md phase 2, 3)", () => {
     for (const locked of [true, false]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch: { locked } }), "play");
-    for (const patch of [{ kind: "ladder" }, { kind: "stairs", locked: true }]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch }), "setup");
+    // Hidden from players is a play step as Locked is, alone or with it (docs/design/design-v1-floors.md phase 4, 8.1).
+    for (const patch of [{ hidden: true }, { hidden: false }, { hidden: true, locked: true }]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch }), "play");
+    const rect = { x: 1, y: 1, w: 2, h: 2 };
+    for (const patch of [{ kind: "ladder" }, { kind: "stairs", locked: true }, { rect }, { pairRect: rect }, { hidden: true, rect }]) assert.equal(scope({ t: "floorLink.update", linkId: "l1", patch }), "setup");
   });
 });

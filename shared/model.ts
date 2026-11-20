@@ -43,6 +43,12 @@ export type TrapId = string;
 /** A stairs or ladder end's plain id (`/^[A-Za-z0-9_-]{1,64}$/`), as a trap's. */
 export type FloorLinkId = string;
 /**
+ * A fall card's id (RoomState.falls, docs/design/design-v1-floors.md phase
+ * 4, 4.4): `"<seq>:<n>"`, the seq of the op the creature fell in and the
+ * card's place among that op's cards, so two falls in one op make two cards.
+ */
+export type FallId = string;
+/**
  * A shipped game-icons.net icon (docs/design/design-v1-dm-tools.md 3.12):
  * `"<author>/<name>"`, such as "lorc/wolf-head". The author is part of the
  * key because some names exist under two authors. A key means the same in
@@ -248,6 +254,14 @@ export type RoomState = {
    * need no migration.
    */
   floorLinks?: Record<FloorLinkId, FloorLink>;
+  /**
+   * DM only: the fall cards waiting for the DM (docs/design/design-v1-floors.md
+   * phase 4, 4.4), `keys.fall(id)`, room level. Written in the undo step of
+   * the op a creature fell in, at most FALLS_PER_ROOM, the oldest `made`
+   * dropped. No player's projection holds one. Absent reads as none, so
+   * rooms from before them need no migration.
+   */
+  falls?: Record<FallId, Fall>;
   /**
    * Server only, `keys.numbering`: how many creature number groups the room
    * has ever made (shared/numbering.ts). A new group takes the next id, so
@@ -735,9 +749,14 @@ export type FloorLink = {
   pair: FloorLinkId;
   /** `w` and `h` 1 to LIMITS.floorLinkSide, the same on both ends. */
   rect: CellRect;
-  kind: "stairs" | "ladder";
-  /** Go up and Go down are off while it is set. */
+  kind: FloorLinkKind;
+  /** Go up and Go down are off while it is set. Never on an opening. */
   locked?: true;
+  /**
+   * Stairs and ladders only, both ends alike (phase 4, 8.1): players get
+   * nothing of either end, no key, count or id, while it is set.
+   */
+  hidden?: true;
   /** The hex shape `rect` was written under, absent for squares, held to both floors' shape as Trap.grid is. */
   grid?: GridShape;
   /**
@@ -761,7 +780,52 @@ export type FloorLink = {
  * height in feet, which comes exactly with `to` (phase 3, 4.3), so a
  * player's ruler prices the climb as the DM's does.
  */
-export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "made"> & { to?: SceneId; dir: "up" | "down"; rise?: number };
+export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "made" | "hidden"> & {
+  to?: SceneId;
+  dir: "up" | "down";
+  rise?: number;
+  /**
+   * Stairs or a ladder whose far end lies on other squares (phase 4, 8.2):
+   * the far end's offset in cells, sent only while the far end itself is
+   * projected to the viewer (D-261119-008), so it never tells a fogged
+   * end's place.
+   */
+  shift?: { dx: number; dy: number };
+};
+
+/**
+ * What joins two floors (phase 4, 3): stairs and ladders, and an opening, a
+ * hole in the upper floor onto the same squares of the floor just below.
+ */
+export type FloorLinkKind = "stairs" | "ladder" | "opening";
+
+/**
+ * Most squares a side of an opening (phase 4, 3), where stairs and ladders
+ * keep to LIMITS.floorLinkSide.
+ */
+export const OPENING_SIDE = 8;
+
+/** Most fall cards a room holds (phase 4, 4.4): a new one past it drops the oldest `made`. */
+export const FALLS_PER_ROOM = 10;
+
+/**
+ * A fall card (docs/design/design-v1-floors.md phase 4, 4.4), the DM's
+ * alone: a creature fell `ft` feet through an opening from the floor
+ * `from` to the floor `sceneId`, and waits on the DM's Apply, through the
+ * group save page, or Dismiss. `made` is the seq of the op it fell in,
+ * which orders the cards for eviction and the DM's toasts. No name is
+ * stored: the desk reads the creature by `tokenId`.
+ */
+export type Fall = { id: FallId; rev: number; tokenId: TokenId; sceneId: SceneId; from: SceneId; ft: number; made: number };
+
+/**
+ * One root's fall through an opening in one op (phase 4, 4.5), which the
+ * reducer returns (Applied.falls) and a player's step keeps beside its
+ * climb: the faller, the upper end by id, rev and `made` as it stood
+ * before the op, the floors from and to, and its card. `card` is only on a
+ * step's record: the card an undo removed, which the redo writes back.
+ */
+export type FallRecord = { tokenId: TokenId; linkId: FloorLinkId; rev: number; made: number; from: SceneId; to: SceneId; fallId: FallId; card?: Fall };
 
 /**
  * A hex grid's orientation (docs/design/design-v1-hex-grids.md 4.1): hex rows have
@@ -2722,6 +2786,13 @@ export type TrapRig = {
   foundOnSpring: boolean;
   /** Squares only: the ground its squares take when it opens, in feet, -100 to 199. */
   pit?: { floor: number };
+  /**
+   * Squares only, never with `pit` (docs/design/design-v1-floors.md phase 4,
+   * 4.6): a trapdoor, whose public springing drops each creature standing
+   * wholly on its squares to the floor just below, onto the same squares.
+   * Its squares do not change.
+   */
+  below?: true;
   hits: "trigger" | "zone" | { cells: CellRect[] } | { area: TrapArea };
   save?: { ability: AbilityKey; dc: number; onPass: "half" | "none" };
   /** 1 to 4, the Dice panel's formulas. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ANA, onThornsTurn, run, tower, withStairs } from "#shared/floorLinksTestutil.ts";
+import { ANA, fallCard, onThornsTurn, run, tower, trapdoor, withFalls, withHiddenStairs, withOpening, withStairs, withTrapdoor } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { IMPORT_LIMITS } from "./importRoom.ts";
 import { lastLineSeq, remapState } from "./remap.ts";
@@ -117,3 +117,54 @@ describe("stairs through an import's remap", () => {
     assert.equal(lastLineSeq(state), Math.max(lines, end(state, "l1").made));
   });
 });
+
+/*
+ * Phase 4's stored shapes (docs/design/design-v1-floors.md phase 4, 3, 4.4,
+ * 4.6 and 8.1): an opening's ends, hidden stairs, a trapdoor and the fall
+ * cards, each held to what the reducer writes. How a pair's ends fit
+ * together stays floorProblem's.
+ */
+describe("openings, hidden ends, trapdoors and fall cards in the stored-state schema", () => {
+  test("a room with each parses whole and keeps them", () => {
+    const state = JSON.parse(JSON.stringify(withFalls(withTrapdoor(withOpening(withHiddenStairs(tower()), { rect: { x: 8, y: 8, w: 8, h: 8 } })), fallCard(), fallCard({ made: 121 })))) as RoomState;
+    const parsed = parseRoomState(state);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.state.floorLinks, state.floorLinks);
+    assert.deepEqual(parsed.state.falls, state.falls);
+    assert.equal(parsed.state.traps.td1?.rig?.below, true);
+  });
+
+  test("an empty record of fall cards reads as none, and the import keeps none", () => {
+    const parsed = parseRoomState({ ...tower(), falls: {} });
+    assert.ok(parsed.ok);
+    assert.equal("falls" in parsed.state, false);
+  });
+
+  test("an opening is never locked or hidden and keeps to 8 squares a side, stairs and ladders to 4", () => {
+    const opened = withOpening(tower(), { rect: { x: 2, y: 2, w: 8, h: 8 } });
+    const broken = (patch: Record<string, unknown>, state: RoomState = opened, id = "o1") => ({ ...state, floorLinks: { ...state.floorLinks, [id]: { ...end(state, id), ...patch } } });
+    assert.equal(refusal(broken({ locked: true })), "floorLinks.o1.locked: Openings can't be locked.");
+    assert.equal(refusal(broken({ hidden: true })), "floorLinks.o1.hidden: Openings can't be hidden.");
+    assert.match(refusal(broken({ rect: { x: 2, y: 2, w: 9, h: 1 } })), /^floorLinks\.o1\.rect\.w: /);
+    const stairs = withStairs();
+    assert.equal(refusal(broken({ rect: { x: 3, y: 3, w: 1, h: 5 } }, stairs, "l1")), "floorLinks.l1.rect.h: Stairs and ladders are at most 4 squares a side.");
+    assert.match(refusal(broken({ hidden: false }, stairs, "l1")), /^floorLinks\.l1\.hidden: /);
+  });
+
+  test("a trapdoor never opens a pit too", () => {
+    const both = trapdoor("td1", { rig: { ...trapdoor().rig!, pit: { floor: -10 } } });
+    assert.equal(refusal(withTrapdoor(tower(), both)), "traps.td1.rig.below: A trap opens a pit or drops to the floor below, not both.");
+  });
+
+  test("a fall card keeps to its shape, made by an op a backup may name, whose seq leads its id", () => {
+    const card = (over: Record<string, unknown>) => ({ ...tower(), falls: { "120:0": { ...fallCard(), ...over } } });
+    assert.match(refusal(card({ extra: 1 })), /^falls\.120:0: /);
+    assert.match(refusal(card({ ft: -1 })), /^falls\.120:0\.ft: /);
+    assert.equal(refusal(card({ made: MADE_MOST + 1, id: `${MADE_MOST + 1}:0` })), "falls.120:0.made: a fall made past the newest op a backup may name");
+    assert.equal(refusal(card({ made: 121 })), "falls.120:0.id: a fall card's id names the op it was made in");
+    assert.match(refusal({ ...tower(), falls: { "121:0": fallCard() } }), /^falls\.121:0: an entry under another id/);
+    const many = Object.fromEntries(Array.from({ length: 11 }, (_, i) => fallCard({ made: 200 + i })).map((c) => [c.id, c]));
+    assert.match(refusal({ ...tower(), falls: many }), /^falls: at most 10 fall cards/);
+  });
+});
+

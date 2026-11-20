@@ -17,8 +17,8 @@ function noun(kind: Kind): string {
   return kind === "stairs" ? "stairs" : "ladder";
 }
 
-/** The kind's chip and pane choice: "Stairs", "Ladder". */
-export const KIND_NAMES = { stairs: "Stairs", ladder: "Ladder" } as const satisfies Record<Kind, string>;
+/** The kind's chip and pane choice: "Stairs", "Ladder", "Opening" (phase 4, 3). */
+export const KIND_NAMES = { stairs: "Stairs", ladder: "Ladder", opening: "Opening" } as const satisfies Record<Kind, string>;
 
 // The bar and the strip (6.2, 6.3).
 

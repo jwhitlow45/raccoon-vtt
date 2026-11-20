@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, OPENING_SIDE, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { FAR, LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
 import { namesPrototypeMember } from "#shared/records.ts";
@@ -18,7 +18,10 @@ import {
   MAX_RESTORE_ENTRIES,
   castSchemas,
   clockSchemas,
+  fallSchemas,
+  STAIRS_SIDE_WORDS,
   trapSchemas,
+  PIT_OR_BELOW,
   TRAP_SOUNDS,
   diceSchemas,
   dmToolSchemas,
@@ -980,6 +983,8 @@ const trap = z.strictObject({
       noticedBy: id.optional(),
       due: z.array(trapDue).max(LIMITS.trapDuePerTrap).optional(),
     })
+    // A trapdoor drops what stands on its squares and a pit lowers them (docs/design/design-v1-floors.md phase 4, 4.6).
+    .refine((rig) => rig.pit === undefined || rig.below === undefined, { message: PIT_OR_BELOW, path: ["below"] })
     .optional(),
   // The hex shape its zone was written under, absent for squares (docs/design/design-v1-hex-grids.md HX-D14).
   grid: mapSchemas.gridShape.optional(),
@@ -995,26 +1000,46 @@ export const MADE_MOST = 2 ** 48;
 
 /** A cell's key index on any scene, as an op's squares take it (grid.ts cellIndexMost). */
 const sceneCell = z.number().int().min(0).max(cellIndexMost(MAX_SCENE_CELLS));
-const linkSide = z.number().int().min(1).max(LIMITS.floorLinkSide);
+const linkSide = z.number().int().min(1).max(OPENING_SIDE);
 
 /**
- * An end of stairs or a ladder as stored (docs/design/design-v1-floors.md
- * phase 2, 2): its op's fields with what the reducer writes. How the two
- * ends and their floors fit together is floorProblem's to check, below.
+ * An end of stairs, a ladder or an opening as stored (docs/design/design-v1-floors.md
+ * phase 2, 2, and phase 4, 3): its op's fields with what the reducer writes,
+ * stairs and ladders within their side, and an opening never locked or
+ * hidden. How the two ends and their floors fit together is floorProblem's
+ * to check, below.
  */
-const floorLink = z.strictObject({
-  id: trapSchemas.plainId,
-  rev,
-  sceneId: id,
-  to: id,
-  pair: trapSchemas.plainId,
-  rect: z.strictObject({ x: sceneCell, y: sceneCell, w: linkSide, h: linkSide }),
-  kind: z.enum(["stairs", "ladder"]),
-  locked: z.literal(true).optional(),
-  grid: mapSchemas.gridShape.optional(),
-  ground: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT),
-  made: z.number().int().min(0).max(MADE_MOST, { message: "stairs placed past the newest op a backup may name" }),
-});
+const floorLink = z
+  .strictObject({
+    id: trapSchemas.plainId,
+    rev,
+    sceneId: id,
+    to: id,
+    pair: trapSchemas.plainId,
+    rect: z.strictObject({ x: sceneCell, y: sceneCell, w: linkSide, h: linkSide }),
+    kind: z.enum(["stairs", "ladder", "opening"]),
+    locked: z.literal(true).optional(),
+    hidden: z.literal(true).optional(),
+    grid: mapSchemas.gridShape.optional(),
+    ground: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT),
+    made: z.number().int().min(0).max(MADE_MOST, { message: "stairs placed past the newest op a backup may name" }),
+  })
+  .superRefine((end, ctx) => {
+    if (end.kind === "opening") {
+      if (end.locked) ctx.addIssue({ code: "custom", path: ["locked"], message: "Openings can't be locked." });
+      if (end.hidden) ctx.addIssue({ code: "custom", path: ["hidden"], message: "Openings can't be hidden." });
+      return;
+    }
+    for (const side of ["w", "h"] as const) if (end.rect[side] > LIMITS.floorLinkSide) ctx.addIssue({ code: "custom", path: ["rect", side], message: STAIRS_SIDE_WORDS });
+  });
+
+/**
+ * A fall card as stored (docs/design/design-v1-floors.md phase 4, 4.4): a
+ * restore's shape, made by an op a backup may name, whose seq leads its id.
+ */
+const fallCard = fallSchemas.fallCard
+  .extend({ made: z.number().int().min(0).max(MADE_MOST, { message: "a fall made past the newest op a backup may name" }) })
+  .refine((card) => card.id.startsWith(`${card.made}:`), { message: "a fall card's id names the op it was made in", path: ["id"] });
 
 /** The lines of the two trap logs (docs/design/design-v1-traps.md 6.3). */
 const trapLine = z.discriminatedUnion("type", [
@@ -1133,6 +1158,8 @@ export const roomStateSchema = z.strictObject({
   // Stairs and ladders (docs/design/design-v1-floors.md phase 2). Backups from before them have none, which reads as none.
   // Each pair joins two floors of a scene, so the scenes a room may hold bound how many ends it holds.
   floorLinks: byOwnId(floorLink, LIMITS.floorLinksPerScene * LIMITS.scenesPerRoom, "ends of stairs and ladders").optional(),
+  // Fall cards (docs/design/design-v1-floors.md phase 4, 4.4). Backups from before them have none, which reads as none.
+  falls: byOwnId(fallCard, fallSchemas.fallsMost, "fall cards").optional(),
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
   clock: roomClock.nullable().optional(),
   // Synced music and sound. Backups from before it have none, which reads as an empty library and silence, and absent and
@@ -1270,6 +1297,7 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
   // (phase 2, 3). An empty collection of marks or stairs reads as none, and the import keeps none.
   if (state.openFloors !== undefined && Object.keys(state.openFloors).length === 0) delete state.openFloors;
   if (state.floorLinks !== undefined && Object.keys(state.floorLinks).length === 0) delete state.floorLinks;
+  if (state.falls !== undefined && Object.keys(state.falls).length === 0) delete state.falls;
   const ends = Object.values(state.floorLinks ?? {}).flatMap((end) => [end.sceneId, end.to]);
   for (const sceneId of [...new Set([...Object.keys(state.scenes), ...Object.keys(state.openFloors ?? {}), ...ends])].sort()) {
     const problem = floorProblem(state, sceneId);

@@ -335,6 +335,20 @@ describe("undo step labels for traps (docs/design/design-v1-traps.md 6.5)", () =
   });
 });
 
+describe("the undo label of a fall card's Dismiss (docs/design/design-v1-floors.md phase 4, 4.4)", () => {
+  test("names the creature that fell as the DM reads it, and none where the card or its creature is gone", () => {
+    const s = state();
+    s.tokens.thorn = token("thorn", { kind: "pc", name: "Thorn", ownerIds: ["p1"] });
+    s.tokens.bess = token("bess", { kind: "pc", name: "Bess", ownerIds: ["p1"] });
+    const card = (id: string, tokenId: string) => ({ id, rev: 0, tokenId, sceneId: "s1", from: "s2", ft: 10, made: Number(id.split(":")[0]) });
+    s.falls = { "5:0": card("5:0", "thorn"), "5:1": card("5:1", "bess"), "6:0": card("6:0", "gone") };
+    assert.equal(describeOp({ t: "fall.settle", fallId: "5:0" }, s), "dismissing Thorn's fall");
+    assert.equal(describeOp({ t: "fall.settle", fallId: "5:1" }, s), "dismissing Bess' fall");
+    assert.equal(describeOp({ t: "fall.settle", fallId: "6:0" }, s), "dismissing a fall");
+    assert.equal(describeOp({ t: "fall.settle", fallId: "7:0" }, s), "dismissing a fall");
+  });
+});
+
 describe("the clock's undo labels (docs/design/design-v1-calendar.md 6.5)", () => {
   test("play steps name the step, the party's rest by its advance, and setup steps what changed", () => {
     const s = state();

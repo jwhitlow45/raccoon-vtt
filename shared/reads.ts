@@ -573,6 +573,9 @@ export function opReads(op: Op, state: RoomState): Reads {
     case "trap.delete":
     case "trap.settle":
       return of([{ key: keys.trap(op.trapId) }]);
+    // A fall card is the DM's, whose every view holds it (docs/design/design-v1-floors.md phase 4, 4.4).
+    case "fall.settle":
+      return of([{ key: keys.fall(op.fallId) }]);
     // Its players' line is numbered by the server, as a roll's is.
     case "trap.spring":
     case "trap.act":

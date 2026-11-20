@@ -434,6 +434,11 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `doing what ${trapName(before, op.trapId)} does`;
     case "trap.settle":
       return op.sprung ? `marking ${trapName(before, op.trapId)} sprung` : `dismissing ${trapName(before, op.trapId)}`;
+    // "dismissing Thorn's fall" (docs/design/design-v1-floors.md phase 4, 4.4). A card whose creature is gone names none.
+    case "fall.settle": {
+      const card = ownEntry(before.falls, op.fallId);
+      return card && ownEntry(before.tokens, card.tokenId) ? `dismissing ${possessive(token(card.tokenId))} fall` : "dismissing a fall";
+    }
     case "roll.ask":
       return `asking for ${testText(op.request.test)}`;
     case "roll.answer":

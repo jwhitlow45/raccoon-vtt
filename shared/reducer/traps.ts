@@ -11,6 +11,7 @@ import { sightPiecesCheck } from "../visionLimits.ts";
 import { buildHeight, heightsPainted } from "./heights.ts";
 import { doorSet } from "./map.ts";
 import { gone, invalid, Refuse, type Tx } from "./tx.ts";
+import { notBuiltWords } from "./falls.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -89,6 +90,7 @@ function trapProblem(tx: Tx, trap: Trap, set: { zone: boolean; hits: boolean }):
     if (!isHex(g) && ![a[0], a[1], b[0], b[1]].every((v) => Number.isInteger(v * 2))) return "a wire's ends are on cell corners and edge midpoints";
   }
   if (!rig) return null;
+  if (rig.below) return notBuiltWords("A trapdoor");
   const squares = "cells" in zone;
   if (squares && (rig.on.length < 1 || rig.on.length > 4)) return `a trap on ${word} goes off one to four ways`;
   if (!squares && rig.on.length > 0) return "a trip wire goes off when crossed and a door when opened";
@@ -312,6 +314,26 @@ function pitOpening(state: RoomState, trap: Trap): OpOf<"build.height"> | null {
 export function pitOpens(state: RoomState, trap: Trap): boolean {
   const op = pitOpening(state, trap);
   return op !== null && openedFits(state, op);
+}
+
+/**
+ * Whether a trapdoor (TrapRig.below, docs/design/design-v1-floors.md phase
+ * 4, 4.6) would drop what stands on it in `state`: its floor has a floor
+ * just below. The stop planner's `opening` asks it for a `below` trap, as
+ * it asks pitOpens for a pit, so a stopping walker stops over it.
+ */
+export function belowOpens(_state: RoomState, _trap: Trap): boolean {
+  throw new Error("not built: belowOpens");
+}
+
+/**
+ * The creatures a trapdoor drops (4.6, D-261119-112): each on the ground
+ * wholly inside its squares and held up by nothing by the fall pass's rule
+ * (4.1), applied before any holder filter, so a rider on a holder the op
+ * does not count is listed. Pits keep `standingOn` and replay as before.
+ */
+export function dropVictims(_tx: Tx, _trap: Trap): Token[] {
+  throw new Error("not built: dropVictims");
 }
 
 /**

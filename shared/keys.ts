@@ -4,6 +4,7 @@ import {
   type Encounter,
   type EncounterSnapshot,
   type ExploredTile,
+  type Fall,
   type FogDraft,
   type FloorLink,
   type FogTile,
@@ -83,6 +84,8 @@ export type ParsedKey =
   | { kind: "opened"; id: string }
   /** A stairs or ladder end (RoomState.floorLinks, docs/design/design-v1-floors.md phase 2), by its id. */
   | { kind: "floorLink"; id: string }
+  /** A fall card (RoomState.falls, docs/design/design-v1-floors.md phase 4, 4.4), by its id, `"<seq>:<n>"`. */
+  | { kind: "fall"; id: string }
   | { kind: "encounter" }
   | { kind: "encounterHistory" }
   /** The room's clock (RoomState.clock, docs/design/design-v1-calendar.md 6.1), a singleton like the encounter. */
@@ -163,6 +166,8 @@ export const keys = {
   opened: (sceneId: string): EntityKey => `opened:${sceneId}`,
   /** A stairs or ladder end (RoomState.floorLinks). */
   floorLink: (id: string): EntityKey => `floorLink:${id}`,
+  /** A fall card (RoomState.falls), the DM's. Its id keeps its inner colon, as a log id does. */
+  fall: (id: string): EntityKey => `fall:${id}`,
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
   clock: "clock" as EntityKey,
@@ -307,6 +312,7 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "playlist":
     case "opened":
     case "floorLink":
+    case "fall":
       return { kind, id: rest };
     case "fogDraft":
     case "holders":
@@ -428,6 +434,8 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "openFloors";
     case "floorLink":
       return "floorLinks";
+    case "fall":
+      return "falls";
     case "sound":
       return "sounds";
     case "playlist":
@@ -525,6 +533,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return ownEntry(state.openFloors, parsed.id) ?? null;
     case "floorLink":
       return ownEntry(state.floorLinks, parsed.id) ?? null;
+    case "fall":
+      return ownEntry(state.falls, parsed.id) ?? null;
     case "sound":
       return ownEntry(state.sounds, parsed.id) ?? null;
     case "playlist":
@@ -663,6 +673,9 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
     // As the opened marks: absent reads as none, and a copy holds the field only while it holds an end.
     case "floorLink":
       return withField(state, "floorLinks", withEntry(state.floorLinks ?? {}, parsed.id, value as FloorLink | null));
+    // As the stairs: absent reads as none, and a copy holds the field only while it holds a card.
+    case "fall":
+      return withField(state, "falls", withEntry(state.falls ?? {}, parsed.id, value as Fall | null));
     // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-music.md 6.7). A
     // projection holds each field only while it holds something (project.ts soundFields), so a change that empties one
     // takes it away, and a device's copy built from changes matches a fresh snapshot.
@@ -699,8 +712,8 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
   }
 }
 
-/** A state with the library, the playlists, the opened marks or the stairs replaced, and without the field once it is empty. */
-function withField(state: RoomState, field: "sounds" | "playlists" | "openFloors" | "floorLinks", map: Record<string, unknown>): RoomState {
+/** A state with the library, the playlists, the opened marks, the stairs or the fall cards replaced, and without the field once it is empty. */
+function withField(state: RoomState, field: "sounds" | "playlists" | "openFloors" | "floorLinks" | "falls", map: Record<string, unknown>): RoomState {
   const out = { ...state } as Record<string, unknown>;
   if (Object.keys(map).length === 0) delete out[field];
   else out[field] = map;

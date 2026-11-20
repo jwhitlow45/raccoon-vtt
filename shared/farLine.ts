@@ -87,6 +87,7 @@ export const FAR_TREATMENT: { readonly [T in OpType]: FarTreatment } = {
   "view.blackout": "bookkeeping",
   "trap.act": "bookkeeping",
   "trap.settle": "bookkeeping",
+  "fall.settle": "bookkeeping",
   "trap.spring": "bookkeeping",
   "clock.start": "bookkeeping",
   "clock.stop": "bookkeeping",

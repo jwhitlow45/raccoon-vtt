@@ -1,5 +1,5 @@
 import type { EntityKey } from "./keys.ts";
-import type { LogEntry, RoomState, Viewer } from "./model.ts";
+import type { FallRecord, LogEntry, RoomState, Viewer } from "./model.ts";
 import type { Op, RefusalCode, RestoreEntry } from "./protocol.ts";
 import {
   actorDamageMany,
@@ -84,6 +84,7 @@ import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.t
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
+import { fallSettle } from "./reducer/falls.ts";
 import { castAsk, castClose, dropCasterAsks } from "./reducer/casts.ts";
 import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
 import { noticeStep } from "./reducer/trapNotice.ts";
@@ -160,6 +161,12 @@ export type Applied = {
   withoutTraps?: () => ApplyResult;
   /** The keys only the trap step wrote, which a player's undo of the move leaves as they are (6.5). */
   trapWrote?: ReadonlySet<EntityKey>;
+  /**
+   * One record a root that fell through an opening in the op
+   * (docs/design/design-v1-floors.md phase 4, 4.5), with the upper end as it
+   * stood before, which a player's step keeps beside its climb.
+   */
+  falls?: FallRecord[];
 };
 
 export type Refusal = { ok: false; code: RefusalCode; message: string };
@@ -450,6 +457,8 @@ function dispatch(tx: Tx, op: Op): void {
       return trapAct(tx, op);
     case "trap.settle":
       return trapSettle(tx, op);
+    case "fall.settle":
+      return fallSettle(tx, op);
     case "encounter.start":
       return encounterStart(tx, op);
     case "encounter.end":

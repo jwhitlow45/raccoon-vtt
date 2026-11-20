@@ -1065,6 +1065,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "floorLink.delete":
     case "trap.act":
     case "trap.settle":
+    // A fall card is the DM's to dismiss, as a trap's occurrence is (docs/design/design-v1-floors.md phase 4, 4.4).
+    case "fall.settle":
     // The room's clock is the DM's to keep (docs/design/design-v1-calendar.md 6.2).
     case "clock.start":
     case "clock.stop":

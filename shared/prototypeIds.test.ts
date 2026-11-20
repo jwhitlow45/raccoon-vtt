@@ -81,6 +81,7 @@ function handMade(state: RoomState): Case[] {
   both({ t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true });
   both({ t: "build.ask", sceneId: "s1", ops: [{ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] }], part: 0 });
   both({ t: "trap.spring", trapId: Object.keys(state.traps)[0] ?? "trap1", tokenIds: [t0] });
+  both({ t: "fall.settle", fallId: Object.keys(state.falls ?? {})[0] ?? "1:0" });
   both({ t: "encounter.setValue", entryId: e0, value: 12 });
   both({ t: "encounter.setValues", values: [{ entryId: e0, value: 12 }] });
   both({ t: "encounter.reorder", entryIds: entries.length > 0 ? entries.map((e) => e.id).reverse() : [e0] });
