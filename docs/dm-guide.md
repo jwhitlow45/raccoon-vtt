@@ -304,7 +304,7 @@ In a fight, the tracker keeps every creature the players may see, whatever floor
 
 ### Moving between floors
 
-A character who climbs by [stairs or a ladder](#stairs-and-ladders) needs no help from you, but a character who has to cross floors another way asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. A floor smaller than the one they leave may not reach their squares, and its row then reads "Outside Attic" and stays off. It is one Undo step. A creature moved to another floor of its scene mid-turn keeps its **Moved** count, as a climb does, while a move to another scene starts it again.
+A character who climbs by [stairs or a ladder](#stairs-and-ladders) needs no help from you, but a character who has to cross floors another way asks you. Select the token and press **Move to floor…** in its action bar (**Floor…** where the row is short), or in the **More** sheet for a group. Pick the floor, and the creatures move to the same squares there, standing on that floor's ground, with what they carry, drag and their areas. A floor smaller than the one they leave may not reach their squares, and its row then reads "Outside Attic" and stays off. It is one Undo step. A floor row is off over a hole too, since the creature would fall at once ("Over an opening on Upper floor"). A creature moved to another floor of its scene mid-turn keeps its **Moved** count, as a climb does, while a move to another scene starts it again.
 
 ![Thorn's action bar on Upper floor in a fight, with Move to floor pressed: the Attic row warns "Players haven't reached Attic. Moving Thorn there opens it to them." and Ground floor waits under it, beside Upper floor's page in the Scenes panel.](dm-guide/floors-move.webp)
 
@@ -323,6 +323,12 @@ Stairs and ladders let a character change floors without asking you. They are no
 The squares must be open, level ground on both floors. A wall through them, two heights under them, a pit trap or the edge of a floor refuses the placement, and the box turns red with the reason under the toolbar. A scene holds 16 pairs. Once a pair is placed, the app keeps the ground under it as it is, so an undo of a climb always lands where the creature stood. A height, a paint stroke, an erase or a generated dungeon over its squares is refused, and so are a wall through them and a pit trap under them, each with "Remove them first." Adding a floor between two linked floors, or moving one there, is off too, with "Stairs join Ground floor and Upper floor. Remove them before putting a floor between." on the floor's page.
 
 Tap an end while **Between floors** is open to open its pane. **Kind** turns stairs into a ladder and back on both ends. **Locked** switches **Go up** and **Go down** off while it is on, which suits a stair you want shut until the party has earned it. **Go to Upper floor** shows the other end, and **Remove stairs** asks again as **Remove both ends**. Removing a floor takes the stairs to it with it, and the floor's undo brings them back.
+
+**Hidden stairs.** A secret stair behind a bookcase needs **Hidden from players** in the pane. While it is on, players receive nothing of the pair, so they see no end, their climb answers "There are no stairs here.", and no ruler names it. The pane's help reads "Players see nothing of these stairs until you turn this off." Switch it off when the party finds the stair. A party member who climbs a hidden stair still opens the far floor to the players, so lock the stairs too if the floor should stay shut.
+
+**Ends that do not line up.** A stair that climbs a steep tower rarely lands on the squares it left. In **Between floors**, press an end and drag to move it, and the other end stays where it is, so the pair now lands a few squares along. The creature lands on the far end's squares, shifted by the offset, and what it carries goes the same distance. A small handle just outside the open pane's bottom right corner, 44 px across, resizes: both ends take the new size, since the two ends of a stair are one size. The pane says "On Upper floor at other squares." where the ends differ, and **Line up with Upper floor** moves this floor's end back onto the far end's squares, or is off with the reason where that is refused. On hexes both ends keep the same hexes, and an opening keeps one place, so moving or resizing either end moves both. Creatures standing on the old squares stay where they are, except those an opening drops.
+
+![The Map builder in Between floors on Ground floor, with the pane of stairs up to Upper floor open: Hidden from players off, "On Upper floor at other squares." and Line up with Upper floor, and the stairs' end below the pane.](dm-guide/floors-line-up.webp)
 
 > [!NOTE]
 > A party member who climbs onto a floor the players have not reached opens it to them, as walking there would, even if you hid it. Lock the stairs until the party should go up.
@@ -343,7 +349,7 @@ Some creatures cannot take the stairs, and the button says why:
 
 A player's climb waits for the server before it shows anything, since only your own device works a climb out. The button shows busy and a second press does nothing. The phone then follows the creature ("Thorn is on Upper floor. Showing Upper floor.") and focus moves to the button for the way back. Your own screen follows the climb at once.
 
-Landing sets off no trap or area reminder, so put a trap a square beyond the stairs if you want the party to meet it on arrival.
+A landing sets off the traps and reminders of the floor it lands on, so a snare at the top of the stairs meets the climber who steps onto it (see [Falls](#falls)).
 
 A player's **Undo** takes a climb back down the same stairs, with what rode on the creature and its areas, and **Redo** takes it up again, as long as the stairs stand as they were and the creature has not moved since. Once you lock the stairs, remove them or place them again, the undo answers "Could not undo moving Thorn up the stairs: the stairs changed."
 
@@ -376,14 +382,66 @@ Where the players have not seen the landing, a shared ruler walks only the groun
 > [!NOTE]
 > A ruler carried over stairs reaches only the players who see the creature it started on and hold every floor it crossed. When that creature or those stairs leave a player's view, because you hid the creature, put a light out, closed a door or removed the stairs, the ruler ends on that player's screen at once.
 
+### Openings
+
+A trapdoor in a tavern floor, a collapsed roof over a cellar and a well shaft are all holes from one floor onto the floor below. An opening is the third kind of pair that **Between floors** places, after stairs and ladders. Its upper end is the hole and its lower end lies on the same squares of the floor below, up to 8 by 8 squares, or hexes on a hex scene. Pick **Opening** under **Kind**, choose the floor under **To**, and drag as you would for stairs. The box turns red with its reason where the hole cannot go, such as "There is no floor below this scene." on the lowest floor. An opening counts among the scene's 16 pairs.
+
+![The Map builder in Between floors on Upper floor with Kind on Opening: a dashed 4 by 4 hole in the boards showing the stone hall below, named Down to Ground floor, with its pane open above it showing Remove opening and Go to Ground floor.](dm-guide/floors-opening-builder.webp)
+
+An opening's pane has **Go to Ground floor**, which shows the floor below with the lower end open, and **Remove opening**, which asks again as **Remove both ends**. It has no **Locked** switch and no **Kind** choice, so to turn an opening into stairs, remove it and place stairs. Placing an opening, or moving it, drops every creature standing over its new squares (see [Falls](#falls)).
+
+A hole shows what lies under it. On a device that holds the floor below, the hole is a window onto that floor's map, walls and creatures, dimmed, with a "10 ft down" chip over it. Where the players have not reached the floor below, the hole is black and shows nothing of that floor, not even its name. A cellar you are still stocking is safe under a trapdoor until a party member goes down or you show it (see [What players are sent](#what-players-are-sent)).
+
+![Ana's phone on Upper floor with a 4 by 4 hole in the boards as a window onto the stone hall below, two creatures dimmed in it and a chip over the hole reading 10 ft down.](dm-guide/floors-opening-window.webp)
+
+Where players see both floors and both use party vision, light and sight cross the hole. A lamp burning in the cellar lights the squares of the hole upstairs, and a character who sees the cellar floor from above sees the creatures standing in the lit part of it. Each viewer sees through with their own kind of sight. You see with the party's sight on both floors, and a player who sees for themselves sees with their own. A hidden creature shows to no one, and a floor the players have not reached, or a blackout, shuts the hole to black. Distances along the way are measured on the plan, so the drop adds nothing to a range.
+
+An area cast over a hole reaches through it by the same rule, so it works where players see both floors, with party vision on or off. A creature on the far floor is caught by the part of it that lies over the hole, at the height the floors' separation puts it, so a Fireball over the trapdoor can burn the goblin in the cellar and miss the one in the far corner. The Areas panel lists it, and **Save and damage** reaches it. A player can name it as the target of an ask. The area draws only on its own floor, and walking costs and reminders stay there too.
+
+In the [isometric view](#the-isometric-view) each hole draws as a drop. Its walls sink like a pit's and the floor below shows at the bottom, or black where the players have not reached it. A creature standing over the hole is drawn at the floor's own height until it falls.
+
+### Falls
+
+A creature that ends a move standing on the ground wholly over a hole falls to the floor below. It lands on the same squares, on that floor's ground, with what it carries, what rides it and its areas, and a creature it was dragging is let go. A fall is the same step down that stairs take, with the damage of the SRD: 1d6 Bludgeoning for each full 10 ft, at most 20d6, and Prone unless the fall hurts nothing. The drop is the floor's height, 10 ft unless its page sets another, adjusted by the ground under each end.
+
+The app does not roll the damage for you. It gives you a card, as it does for a trap. A toast says "Thorn fell 10 ft to Ground floor." with **Show**, and the **Fall** card waits among your alerts under the traps: "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone." **Apply** opens the group save on the creature's floor with the dice and Prone filled in and no save, and settling it removes the card. **Dismiss** removes it with no damage, which suits a fall the table agrees was broken. A drop under 10 ft reads "no damage" and offers **Dismiss** alone. The room keeps 10 cards, and a card also goes when the move that made it is undone.
+
+![The DM's screen on Ground floor after Thorn fell: the toast "Thorn fell 10 ft to Ground floor." with Show, the Fall card with Apply and Dismiss, and Thorn standing in the hall among a goblin and a kobold.](dm-guide/floors-fall-card.webp)
+
+The creature's player is not given a card. Their screen goes with the creature and says "Thorn fell to Ground floor. Showing Ground floor.", and the other players see it leave. They see it land only where they hold the floor below and can see the spot.
+
+A fall happens where a change ends, not where a walk passes. A creature dragged across a hole and out the other side does not fall, so if the table wants it to, drop it on the hole. These count as ending over a hole: a move, a change of elevation, a resize, being set down from a mount or a carrier, an opening placed or moved under the creature, and a trapdoor. A creature in the air does not fall, and a rider does not fall while its mount holds it up. A mount that falls takes its rider along. Where a player moves a creature, a mount counts as holding it up only if every player sees the mount.
+
+While a fall is on a drag, the label beside the distance says "Falls to Ground floor", or "Falls through the opening" where the device does not hold that floor, so you see it before you let go. **Move to floor…** is off over a hole ("Over an opening on Upper floor"), since the creature would fall at once, so move the creature off the hole first or let it fall.
+
+A player's **Undo** takes their creature's fall back, with its areas, and **Redo** drops it again without a new card, so damage you already applied is never asked for twice. A fall is a step of its own and never merges with the move before it. Your own **Undo** restores every card the step made or removed.
+
+**Landing.** Any landing, whether a climb, a flight, a fall or a trapdoor, sets off the traps and reminders of the floor it lands on. A creature that lands on a snare whose trap goes off when a creature enters, or inside an aura that reminds on entering, meets it as if it had walked in. A creature that lands in the air sets off no trap on the floor, and a creature never enters its own aura by landing. A creature that falls through two floors in one move meets only what lies where it ends. Move to floor places a creature and sets off neither.
+
+### Flying through
+
+A flier goes through a hole as a climber takes stairs. A creature in the air with its space inside the hole's squares gets **Fly up** or **Fly down** in its action bar's passing row, where **Go up** and **Go down** stand at stairs, and on a phone in the strip. The keys are the same ones, `}` for up and `{` for down, so the selected creature takes whichever way is there. It lands 5 ft above the far floor's ground, and the flight costs the floor's height, with no extra for a ladder or a prone creature. Riders and areas come along. A creature too big reads "Too big for this opening. Squeeze to fit." where squeezing would help.
+
+The app keeps no record of who can fly. A creature stays in the air where you lifted it with **Elevation**, so when a flier should drop, lower it. On the ground, `}` and `{` answer "Only a creature in the air goes through an opening." A walking ruler is not carried through a hole, so measure a flight in two rulers.
+
+![Ana's phone with Thorn selected, flying 5 ft over the hole: his bar shows the arrow for Fly down beside Conditions, and the hole's chip reads 10 ft down.](dm-guide/floors-fly-strip.webp)
+
+### Trapdoors
+
+A trap on squares can drop its victims a floor instead of sinking them. In the trap's pane, under **Aftermath**, turn on **Opens a pit**. Where the floor has a floor below, **Into** appears with **A pit** and the floor's name, such as **Ground floor**. Pick the floor and every creature standing wholly on the trap when it goes off falls there, onto the same squares, with a card for each creature that falls on its own. The floor itself does not change, so an armed trap can drop the next creature too. The help under **Into** reads "Creatures standing on it fall to Ground floor, onto the same squares." On the lowest floor the pane says "There is no floor below Cellar." and **Into** stays off.
+
+![A trap's pane on Upper floor with Aftermath open: Opens a pit on, Into on Ground floor, and the help line under it.](dm-guide/floors-trapdoor-pane.webp)
+
+A trap that goes off in private drops no one. A walking creature stops over a trapdoor where it would stop over a pit, so it falls with the trap. A trapdoor is never placed over an opening's end, and a drop onto a second trapdoor on the floor below sets that one off, so one trap's drop can set off another's.
+
 ### What players are sent
 
 A player's device receives only the floors it holds: the floors of the players' scene that the party has reached, and any floor where a creature the player owns stands. A floor the players have not reached sends nothing, not its name, its map or what stands on it, so an attic you are still building is safe to prepare while the party fights downstairs. The players see their floors numbered among themselves, so an unreached floor leaves no gap. Traps go off by themselves only on floors the players have reached.
 
-The DM menu knows floors too. **Move players here** and **Show players** name the floor on your screen, such as "Tower · Upper floor". On another floor of the players' scene, **Bring everyone here** sits beside **Move players here**. It is off on a floor the players have not reached, with "Players haven't reached Attic, so their maps stay." under it. Each floor has its own fog, so the fog tools work on the floor on your screen. In the isometric view, the floor on screen shows alone, and **Export as image** names the file for it, such as `tower-upper-floor-30x20-70px.png`.
+The DM menu knows floors too. **Move players here** and **Show players** name the floor on your screen, such as "Tower · Upper floor". On another floor of the players' scene, **Bring everyone here** sits beside **Move players here**. It is off on a floor the players have not reached, with "Players haven't reached Attic, so their maps stay." under it. Each floor has its own fog, so the fog tools work on the floor on your screen. In the isometric view, the floor on screen shows alone, with each opening as a drop to the floor below. **Export as image** names the file for it, such as `tower-upper-floor-30x20-70px.png`, or saves every floor at once (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
 
 > [!NOTE]
-> Sight and light stay on their floor. A party cannot see down a stairwell, and a light on one floor does not reach the floor above it.
+> Sight and light stay on their floor except through an opening, and only while the players see both floors (see [Openings](#openings)). A party cannot see down a stairwell, and a light on one floor does not reach the floor above it.
 
 ## Starter art
 
@@ -609,6 +667,8 @@ The isometric view tilts the map so that the ground runs away from you at an ang
 **Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Trap** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
 
 **Floors and doors.** On squares, at any zoom, a raised floor draws as one solid surface rather than a stack of squares. Its side shows a line only at its ends and wherever its height or its floor changes, and a faint line on top still marks each square, grid or no grid, so you can count the squares across a dais as you would on the floor below it. Doors wear a darker stain than a wood floor, so they stand out even in a timber hall.
+
+**Floors below.** Where a floor has an opening, Isometric draws it as a drop. The squares of the hole sink by the drop, so its sides show as a pit's do, and the floor below appears at the bottom with its creatures flat on it. A hole over a floor the player has not reached is black, 10 ft down. A creature over the hole is drawn at the height of the floor it still stands on, until it falls (see [Openings](#openings)).
 
 **Depth up close.** Zoom in to 24 pixels a square or closer, or 48 with **Low power** on, and the view adds the finer shapes. Walls stand as stone slabs with a lighter top, and doors and windows stand between two stone posts. An open door stands upright on its hinge, swung into the room the way the top-down map shows it, and tapping the door itself opens its buttons, as tapping the doorway does. A straight run of stairs climbs in steps from the floor below it to the floor above, its sides in the floor it is painted on, and a creature on the stairs stands on the step under it. Stairs that turn a corner keep a flat top with their marks. Zoom back out and the simpler shapes return, which keeps a large map quick to draw: an open door lies flat on the floor again with its swing beside it, a closed door or a window stands as a single panel, and stairs keep a flat top. A creature on the stairs is at the same height for the rules at every zoom.
 
@@ -950,9 +1010,17 @@ A phase can also set the scene's light. Under **Light and weather**, **Light per
 
 Press **Create scene** to make it, and keep the page open until the walls have been added. One **Undo setup** in **Setup history** takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares, since the file states its own square grid (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
 
+**A scene from several files.** A tower drawn as one file a level can come in as one scene. In the file picker, choose several files at once and "New scene from 3 files" opens. It lists them lowest floor first, in file-name order with numbers read as numbers, so `Level 2` comes before `Level 10`. Each row has a **Floor name**, which starts as the file's name cut to 40 characters, and **Move up** and **Move down** buttons, "Move Level 2 up", where the order is wrong, and **Scene name** starts as the first file's. Each floor starts as its file would alone on your room's defaults, with its lights, walls and doors. A scene holds 8 floors and a room 50 scenes, and a pick that would pass either is refused before anything uploads. A damaged file or a failed upload sends nothing and leaves the rows for you to try again, and when it finishes "Crypt is made with 3 floors, with every wall, door and light." One **Undo setup** takes the whole scene back. The floors arrive unreached by the players, as any floor from a file does.
+
+![New scene from 3 files on the DM's screen: Level 1, Level 2 and Level 3 listed with their Floor name fields and Move up and Move down buttons, Scene name Crypt under them, and Make the scene in the footer.](dm-guide/floors-several-files.webp)
+
 ![Export as image, under Export in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
 **Exporting a map.** **Export as image**, under **Export** at the end of the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Choose how many **Pixels per square** to draw, 50, 70 or 100, then the **Player view** or the **DM view**, and whether to include the **Grid**. On a hex scene the same choices read **Pixels per hex** and **Hex lines**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later. A hex scene's file is named like `crypt-hex-70px.png` instead, since a size in squares would mislead.
+
+**Every floor.** On a scene with floors, **Floors** appears above the size choices with **This floor** and **Every floor**. Every floor makes one picture a floor and saves them together in one `.zip` file, named like `tower-30x20-70px.zip`, with `-dm` after it for the DM view. The pictures in it are `01-ground-floor.png`, `02-upper-floor.png` and on, numbered from the lowest floor among the floors the file holds. The button reads **Make the file**, and while it works it says "Making Upper floor (2 of 3)…". Each floor has to stay within 16.7 million pixels at your size and the whole file within 67 million, and a scene too big says "Every floor at this size is too much for one file. Pick fewer pixels a square." and leaves the size to you. The player view holds only the floors the players have reached or stand on, and says so, "Players have reached 2 of Tower's 3 floors, so the file holds those." A floor the players have reached but hold nothing of is drawn as its background, so a floor keeps its number.
+
+![Export as image in the Scenes panel with Every floor chosen: Floors on Every floor, Version on Player view, and the note "Players have reached 2 of Tower's 3 floors, so the file holds those." above Make the file.](dm-guide/floors-export-every.webp)
 
 ## Animated maps
 
@@ -1155,6 +1223,8 @@ With no fight running, **New fight** offers you a choice of who is in it:
 - **Nobody yet**: an empty fight to fill in later.
 
 ![The Initiative panel with no fight running and Goblin Warrior 3 selected, its action bar open on the map: New fight offers Goblin Warrior 3, Everyone here (7), Visible to players (3) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/initiative-start.webp)
+
+On a scene with floors, **Floors** appears above those buttons with **This floor** and **Every floor**. This floor is the one on your screen, and Every floor changes the buttons to "Everyone on every floor (12)" and "Visible to players (7)". Each creature is judged where it stands, by that floor's own fog and sight, so a fight that spans a staircase starts in one step. The choice belongs to New fight alone.
 
 If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
@@ -1438,6 +1508,10 @@ An area a player puts on someone else's creature, and a ruler a player keeps on 
 
 Every area is a shape in three dimensions, and every creature has a height that comes from its size. That means a 20 ft Fireball centered on the ground misses a Medium creature flying 25 ft up. The squares under the flier are still shaded, so trust the "In area" list, not the shading. To reach a flier, put the Sphere on its token, raise the **Elevation** before placing, or aim a Cone or Line upward. An area put down on a platform starts at the platform's height.
 
+### Areas through openings
+
+An area cast over a hole reaches the floor below (see [Openings](#openings)), and one cast under a hole reaches the floor above, while the players see both floors. The Areas panel's rows and **Save and damage** count creatures across it, judged by the part of each that lies over the hole, and your cast card says "In the area: 3" including creatures you hid. A player's ask names a target across only through an end their device holds. The area draws on its own floor alone, and its walking cost and reminders stay there.
+
 ### Areas in Isometric
 
 The [isometric view](#the-isometric-view) draws each area as its true shape. A Fireball rises from the floor as a ball, a Cone aimed upward climbs at its angle, Moonbeam stands as a tall column, and Spirit Guardians wraps its cleric and walks with them. Each shape is see-through with a bright outline, so you can see what lies inside it: a bat flying inside a Fireball shows inside the ball, while one flying over it shows above. A shape reaches down into a pit as far as it really goes, and every creature an area catches wears a ring in the area's color round its feet.
@@ -1466,7 +1540,7 @@ Players' routes count an area only as the players see it: a DM-only area never b
 
 ## The group save
 
-The group save rolls one saving throw for many creatures at once and applies the damage and conditions to all of them in a single step, with a single undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options.
+The group save rolls one saving throw for many creatures at once and applies the damage and conditions to all of them in a single step, with a single undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options. A group save started from a trap card, an area or a player's ask belongs to that source's floor, so **Apply** works while you look at another floor of the scene, and a save across floors of one scene keeps every creature. If its creatures have moved off the page's floor, the page says "Its creatures have moved off this page's floor. Discard this page and start it again from its source."
 
 ![The group save for a Fireball before the roll: the fill line, the Save, Check and No save choice, the Ability, the DC with the Recent DCs 13 and 15 under it, the switches and the damage field.](dm-guide/group-save.webp)
 
@@ -1598,6 +1672,7 @@ These cards wait for an answer:
 - **Legendary Resistance**: when a monster with uses left fails a roll on a Concentration or save-ends card, the card offers **Use Legendary Resistance (2 left)** or **Accept failure**.
 - **A roll request** you sent, which counts the answers as they come in (see [Asking for rolls](#asking-for-rolls)).
 - **A trap went off**: "Hidden Pit went off", with who set it off and who it hits, **Save and damage** and **Dismiss**. It comes in and out of fights alike, and stays until you settle it. See [Traps](#traps).
+- **A fall**: "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone." with **Apply** and **Dismiss**, for a creature that went through a hole. See [Falls](#falls).
 
 The **Roll** on a Concentration, save-ends or death save card has the one-roll menu for Advantage or Disadvantage: hold it, right-click it, or press `Shift+F10` on it. Who sees those dice is set by the creature, so **Roll secretly** shows but can't be picked. A recharge card's **Roll** has no menu, since its one roll has nothing to choose.
 
@@ -1721,7 +1796,7 @@ Your list reaches further than your players' lists do: tokens up to 30 feet away
 
 Drag the holder, and everything it carries comes along: the warhorse takes its rider, the cart its passengers, the fighter her torch, and anything those carry in turn. A token on a holder rises and falls with it, so a rider stays in the saddle of a flying mount. A dragged creature walks beside its holder on its own ground, tied to it by a thin dashed line, and comes loose if it ends up out of reach.
 
-Dragging the rider of a controlled mount moves the mount, since that is how the rider steers, and the mount goes where the rider lands on the square you drop her on. Beside a wall, where the mount has no room to seat her on that square, she lands on a square near it, and so does a rider your player drops beside the edge of a rise or a pit, where the mount would stand across the edge. The same goes for a rider that covers its whole mount, such as a Small rider on a Medium mastiff, which moves the mount when you drag it and gets off with **Get off**. Any other carried token can be dragged on its own to take it off: drop the torch somewhere else and it has been thrown, or pull the grappled goblin away and it is free. A carried token dropped back on its holder takes a new seat there.
+Dragging the rider of a controlled mount moves the mount, since that is how the rider steers, and the mount goes where the rider lands on the square you drop her on. She sits on the square or hex you let go over, with what rides her, wherever the mount can stand there at full size. Beside a rise or a pit, a player's drag prefers a stand where the mount is clear of the edge, and yours puts her under the finger with the mount across it. A rider dragging a creature the player can see keeps her usual seat, so that creature stays beside her. The same goes for a rider that covers its whole mount, such as a Small rider on a Medium mastiff, which moves the mount when you drag it and gets off with **Get off**. Any other carried token can be dragged on its own to take it off: drop the torch somewhere else and it has been thrown, or pull the grappled goblin away and it is free. A carried token dropped back on its holder takes a new seat there.
 
 When the holder stands on the ground, a creature dragged off it walks from the ground beside it, as if it had stepped down first, so an independent mount's rider who slides off, or a passenger climbing out of a cart, is measured and priced from the ground rather than from the saddle. From there it walks on its own feet: it crosses the step under a mount that straddles two heights, but it can't step off a cliff at the mount's side or climb a ledge beyond it. Off a holder in the air, such as a flying mount, the walk starts from the seat.
 
@@ -1873,7 +1948,7 @@ A creature falls in only when it stands wholly over the opening, so a pit that s
 
 That is on ground the players can see, or that you have revealed. In the dark, the stops in [When a trap goes off](#when-a-trap-goes-off) decide where a creature falls in. The same warhorse walks on over the open pit unless its walk bends or ends with it wholly over the opening. A creature squeezing through a corridor narrower than it is walks on over the open pit to where it stands at full size again, unless its move ends in the corridor with its squeezed shape wholly over the opening, and then it does fall in there. Where the party can see the ground, or you have revealed it, the pit catches a squeezing creature as it would any creature that fits.
 
-A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does. Once the pit is open, its pane reads "Opened" with the depth of its floor, and its depth can no longer be changed.
+A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does. Once the pit is open, its pane reads "Opened" with the depth of its floor, and its depth can no longer be changed. A pit can drop to the floor below instead, as a trapdoor (see [Trapdoors](#trapdoors)).
 
 # Deeper tools
 
@@ -1885,12 +1960,16 @@ The **Outliner** (DM only) lists everything on the scene you are viewing, along 
 
 ![The Outliner on the crypt: Search the scene (/) with its key, the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
 
-- Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings**, **Doors** (windows too) and **Traps**. The chips at the top show one group at a time.
+- Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings**, **Doors** (windows too) and **Traps**. On a scene with floors, **Other floors** comes last. The chips at the top show one group at a time.
 - Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. A trap's row reads **Hidden** until the players have found it and **Found** after, with **Armed**, **Sprung** or **Disarmed** under its name. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
 - **Search the scene** filters the list as you type. Every word must match a row's name or the line under it, so `companion` finds every companion and `secret` finds secret doors. The marks themselves aren't searched, so use the chips and scan the marks to find, say, everything under fog.
 - Tap a row to find it on the map. A token is selected, with its action bar open. A label, pin, stamp, light or trap opens in its tool. A drawing, door or window flashes so you can spot it.
 
-A companion whose character has no token on this scene reads **Away from Bree**, which is how you find companions left behind when the party moves on. See [The party travels between scenes](#the-party-travels-between-scenes).
+**Other floors** lists the creatures and objects standing on the scene's other floors, one row each with that floor's name under it, lowest floor first. Search finds a row by its floor's name, and a creature you hid is marked **Hidden**. Press a row to show that floor, select the creature, and frame it, which is how you find who is in the cellar without leaving the floor you are on. The chip appears only on a scene with more than one floor.
+
+![The Outliner on Upper floor with the Other floors chip chosen: Goblin, Kobold, Lurker marked Hidden, and Thorn under Ground floor, and Rat under Attic.](dm-guide/floors-outliner-other.webp)
+
+A companion whose character has no token on this scene reads **Away from Bree**, which is how you find companions left behind when the party moves on. A character on another floor of the same scene does not count as away. See [The party travels between scenes](#the-party-travels-between-scenes).
 
 ## DM panel
 
