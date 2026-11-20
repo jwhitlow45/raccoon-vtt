@@ -88,15 +88,18 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
     assert.deepEqual(held.filter((key) => key === "template:a1" || key === "drawing:r1"), []);
   });
 
-  test("a creature's walk counts at the walk width for a player who may move it, and as their copy holds it for one who only applies damage", () => {
-    const walked = (settings: Partial<RoomState["meta"]["settings"]>) => {
+  test("a creature's walk counts at the walk width on the turn P1's copy shows, for a player who may move it, and as the copy holds it otherwise", () => {
+    const walked = (settings: Partial<RoomState["meta"]["settings"]>, active: string) => {
       const state = room();
       state.meta = { ...state.meta, settings: { ...state.meta.settings, ...settings } };
       state.tokens.wolf = token("wolf", { x: 5, y: 3, path: { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true }, { x: 5, y: 3, elevation: 0, seen: true }] } });
+      state.tokens.bat = token("bat", { x: 8, y: 8 });
+      state.encounter = { rev: 0, round: 1, activeEntryId: `r${active}`, entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rbat", { tokenId: "bat", value: 10 })], turnStart: { entryId: `r${active}`, tokenId: active, sceneId: "s1", x: 3, y: 3, elevation: 0, seen: true, seq: 7 } };
       return exactCopies(state, "p1").get(keys.token("wolf"))!;
     };
-    const [mover, healer] = [walked({ playersMoveAny: "all" }), walked({ playersApplyDamage: true })];
+    const [mover, healer, after] = [walked({ playersMoveAny: "all" }, "wolf"), walked({ playersApplyDamage: true }, "wolf"), walked({ playersMoveAny: "all" }, "bat")];
     assert.ok(mover.shown - healer.shown > 20_000, `${mover.shown} against ${healer.shown}`);
+    assert.ok(mover.shown - after.shown > 20_000, `${mover.shown} against ${after.shown} once the turn passed`);
   });
 
   test("the DM hides P1's area, renames it or resizes it while its creature is out of P1's sight", () => {

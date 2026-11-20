@@ -369,7 +369,7 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
     assert.ok((run(base, move, P1).tokens.owl!.path?.stops.length ?? 0) > 0, "the rider's walk took a leg");
   });
 
-  test("a turn ends on a creature P1 moves but does not own, with a stop P1's move wrote past their sight or none", () => {
+  test("on the turn P1's copy shows, P1 moves a creature they do not own, with an earlier stop past their sight or none", () => {
     const walked = (unseen: boolean) => {
       const s = tower();
       s.meta.settings = { ...s.meta.settings, playersMoveAny: "all" };
@@ -378,9 +378,9 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
       s.encounter = { rev: 9, round: 1, activeEntryId: "rwolf", entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rthorn", { tokenId: "thorn", value: 10 })], turnStart: { entryId: "rwolf", tokenId: "wolf", sceneId: GROUND, x: 3, y: 3, elevation: 0, seen: true, seq: 7 } };
       return s;
     };
-    const next: Op = { t: "encounter.next" } as Op;
-    assertTwinsAlike([walked(false), walked(true)], next, DM);
-    assert.ok(run(walked(true), next).tokens.wolf!.path, "the walk stays after the turn");
+    const move: Op = { t: "token.move", tokenId: "wolf", x: 6, y: 3 };
+    assert.ok(canApplyOk(move, walked(true)), "P1 may move the wolf");
+    assertTwinsAlike([walked(false), walked(true)], move);
   });
 
   test("the turn's walk counts alike whatever its lists of who saw each stop hold, as the measure counts them at the roster's widest", () => {

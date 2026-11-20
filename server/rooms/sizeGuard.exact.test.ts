@@ -3,9 +3,11 @@ import { describe, test } from "node:test";
 import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
-import type { RoomState } from "#shared/model.ts";
+import { serializedBytes } from "#shared/limits.ts";
+import type { RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
+import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { entry, env, P1, randomDiceRoll, randomOp, randomState, rng, token } from "#shared/testutil.ts";
@@ -20,7 +22,8 @@ import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedScen
  * and their ops never write. Each op kind a player may send is checked here
  * on random rooms and a fixed one: their stepped parts, the room's and each
  * scene's, move only by hidden things the op took away, never by a byte it
- * added, but by the residuals the private log tracks (D-261119-019).
+ * added, but by the residuals the private log tracks (D-261119-019), one of
+ * which, a walk's bytes the copy leaves out, this test allows.
  */
 
 const DEPS = { canUseAsset: () => true, canRestoreAsset: () => true } as never;
@@ -48,6 +51,20 @@ function sightChanged(before: RoomState, after: RoomState, was: ReadonlyMap<Enti
 }
 
 /**
+ * The bytes of a walk P1's copy leaves out, of a creature P1 may move but
+ * does not own, off the turn their copy shows: the move-any residual the
+ * private log tracks (D-261120-003), which stays in the stepped part.
+ */
+function walkUnseen(state: RoomState, key: string): number {
+  if (!key.startsWith("token:")) return 0;
+  const id = key.slice("token:".length);
+  const stored = state.tokens[id];
+  if (stored?.path === undefined || stored.ownerIds.includes("p1")) return 0;
+  const copy = seatView(state, "p1").copy("token", id) as Token | null;
+  return serializedBytes({ path: stored.path }) - serializedBytes(copy?.path === undefined ? {} : { path: copy.path });
+}
+
+/**
  * What of P1's op moved their stepped parts other than hidden things it took
  * away or carried from one thing to another: hidden bytes it added on the
  * whole, or bytes it wrote outside their exact part. What a scene's part
@@ -59,13 +76,16 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
   const was = exactCopies(before, "p1");
   const is = exactCopies(after, "p1");
   const out: string[] = [];
-  const moved = new Map<string, { hidden: number }>();
+  const moved = new Map<string, { hidden: number; walks: number }>();
   for (const key of new Set([...was.keys(), ...is.keys()])) {
     const gain = (is.get(key)?.hidden ?? 0) - (was.get(key)?.hidden ?? 0);
     if (gain === 0) continue;
+    const walks = gain > 0 ? Math.max(0, Math.min(gain, walkUnseen(after, key) - walkUnseen(before, key))) : 0;
+    if (walks > 0) accepted.push(`${key} keeps ${walks} bytes of its walk P1's copy leaves out`);
     const on = is.get(key)?.on ?? was.get(key)!.on;
-    const at = moved.get(on) ?? { hidden: 0 };
-    at.hidden += gain;
+    const at = moved.get(on) ?? { hidden: 0, walks: 0 };
+    at.hidden += gain - walks;
+    at.walks += walks;
     moved.set(on, at);
   }
   const [b, a] = [steppedParts(before), steppedParts(after)];
@@ -74,14 +94,16 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
     const where = scope === "room" ? "the room" : `scene ${scope}`;
     const floors = scope === "room" ? null : new Set(floorsOf(before, scope).map((f) => f.id));
     let hidden = 0;
+    let walks = 0;
     for (const [on, bytes] of moved) {
       if (scope !== "room" && on !== "room" && !floors!.has(on)) continue;
       hidden += bytes.hidden;
+      walks += bytes.walks;
     }
     const carried = Math.max(0, Math.min(hidden, hidden - whole));
     if (carried > 0) accepted.push(`${carried} hidden bytes carried into ${where}`);
     if (hidden - carried > 0 || (still && hidden !== carried)) out.push(`${hidden - carried} hidden bytes in ${where}`);
-    const outside = after - (b.get(scope) ?? after) - hidden;
+    const outside = after - (b.get(scope) ?? after) - hidden - walks;
     if (outside !== 0) out.push(`${outside} bytes outside P1's exact part in ${where}`);
   }
   return out;

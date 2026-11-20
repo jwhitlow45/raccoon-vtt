@@ -1531,6 +1531,8 @@ export type SeatView = {
   showsRow(entryId: string): boolean;
   holds(sceneId: string): boolean;
   copy(kind: CopiedKind, id: string): unknown;
+  /** The creatures whose turn the copy shows under way: the active row's, and the mounts sharing its turn the copy holds. */
+  turn(): ReadonlySet<string>;
 };
 
 /**

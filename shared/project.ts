@@ -1224,6 +1224,12 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
       return encounter?.entries.find((e) => e.id === id) ?? null;
     },
+    turn: () => {
+      if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
+      const active = encounter?.entries.find((e) => e.id === encounter!.activeEntryId)?.tokenId;
+      const start = encounter?.turnStart;
+      return new Set([active, start?.tokenId, ...(start?.mounts ?? [])].filter((id): id is string => id !== undefined));
+    },
   };
 }
 
