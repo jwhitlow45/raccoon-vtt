@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { GROUND, UPPER, applied, fallCard, run, thornToken, tower, trapdoor, withFalls, withOpening, withTrapdoor } from "#shared/floorLinksTestutil.ts";
+import { ANA, GROUND, UPPER, applied, fallCard, run, thornToken, tower, trapdoor, withFalls, withOpening, withTrapdoor } from "#shared/floorLinksTestutil.ts";
 import { keys } from "#shared/keys.ts";
 import { FAR, LIMITS, roundUp, serializedBytes, utf8Bytes } from "#shared/limits.ts";
 import { FALL_RIDERS_MOST, type Fall, type RoomState } from "#shared/model.ts";
@@ -8,7 +8,7 @@ import { projectState, stableStringify } from "#shared/project.ts";
 import { FALL_FEET_MOST, type Op } from "#shared/protocol.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { DM, actor, token } from "#shared/testutil.ts";
-import { FALL_RESERVE, fallsReserved, farRoomBytes, farWidths, growthBound, measuredFromStored, measuredStateBytes, ownHeldBytes, projectedSceneBytes, roomLevelBytes } from "./sizeGuard.ts";
+import { FALL_RESERVE, fallsReserved, farRoomBytes, farWidths, growthBound, measuredFromStored, measuredStateBytes, openedMeasure, ownHeldBytes, projectedSceneBytes, roomLevelBytes } from "./sizeGuard.ts";
 import { MADE_MOST, parseRoomState } from "./stateSchema.ts";
 import { UndoTable } from "./undoTesting.ts";
 
@@ -17,7 +17,9 @@ import { UndoTable } from "./undoTesting.ts";
  * 4.7, D-261119-089): no card counts at its bytes, and FALL_RESERVE, ten
  * cards at their widest, counts while the room may hold one, so a card's
  * creation, eviction, settlement and cleanup move no measure and how many
- * the DM keeps never shows in a player's answer. O11's and O11b's stepped parts (10.5) are here: a
+ * the DM keeps never shows in a player's answer. The reached floors' marks
+ * count at their widest too, so a player's own landing writes nothing into
+ * their stepped part. O11's and O11b's stepped parts (10.5) are here: a
  * player's fall, its undo and redo read alike whatever cards, passengers
  * and victims the DM keeps hidden.
  */
@@ -82,7 +84,7 @@ describe("D-261119-089: fall cards count at their widest while the room may hold
     assert.ok(stableStringify(projectState(withFalls(base, ...cards(10)), DM, { sceneId: GROUND }).falls ?? {}).length > 2, "the DM's projection holds the cards");
   });
 
-  test("a snapshot measures as the room does, its cards swapped for their widest, an emptied record and a reload alike", () => {
+  test("a snapshot measures as the room does, its cards and marks swapped for their widest, an emptied record and a reload alike", () => {
     const marked = (s: RoomState): RoomState => ({ ...s, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 }, [GROUND]: { sceneId: GROUND, rev: 7 } } });
     const rooms = [tower(), withOpening(tower()), withFalls(withOpening(tower()), ...cards(10)), { ...withOpening(tower()), falls: {} }, withFalls(tower(), fallCard()), marked(tower()), marked(withFalls(withTrapdoor(tower()), widestCard(0)))];
     for (const state of rooms) {
@@ -105,6 +107,32 @@ describe("D-261119-089: fall cards count at their widest while the room may hold
     const written = [keys.token("gob"), ...Object.keys(fell.falls ?? {}).map((id) => keys.fall(id)), keys.fall("20:0")];
     assert.equal(growthBound(holed, fell, written), growthBound(holed, fell, [keys.token("gob")]));
     assert.equal(measuredStateBytes(fell) - measuredStateBytes(holed), measuredStateBytes({ ...fell, falls: holed.falls }) - measuredStateBytes(holed), "the card moved nothing");
+  });
+});
+
+describe("the reached floors' marks count at their widest on every floor", () => {
+  test("a floor's mark, written or not, moves no measure, and only a new floor grows them", () => {
+    const base = tower();
+    const marked: RoomState = { ...base, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } } };
+    assert.equal(measuredStateBytes(marked), measuredStateBytes(base));
+    const stored = serializedBytes({ openFloors: Object.fromEntries(floorsOf(base, GROUND).map((f) => [f.id, { sceneId: f.id, rev: Number.MAX_SAFE_INTEGER }])) }) - 1;
+    assert.ok(stored <= openedMeasure(base), `${stored} stored at the widest against ${openedMeasure(base)}`);
+    assert.equal(openedMeasure({ ...base, scenes: { s2: base.scenes.s2! } }), 0, "no floor, no mark");
+    assert.equal(growthBound(base, marked, [keys.opened(UPPER)]), 0);
+    // A DM's new floor grows its mark's width, which the growth bound holds with the floor.
+    const before = settled(base);
+    const { state: added, touched } = applied(before, { t: "scene.create", scene: { id: "cellar-of-the-tower", name: "Tower", bounds: { w: 20, h: 20 } }, floor: { beside: "at", side: "above" } } as Op);
+    assert.ok(openedMeasure(added) > openedMeasure(before), "the new floor's mark counts");
+    const grown = measuredStateBytes(added) - measuredStateBytes(before);
+    assert.ok(growthBound(before, added, touched) >= grown, `${growthBound(before, added, touched)} bound for ${grown} grown`);
+  });
+
+  test("Ana's climb onto a floor the party never reached writes its mark and moves none of her stepped parts", () => {
+    const state = run(tower(), { t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: GROUND, to: UPPER, rect: { x: 3, y: 3, w: 1, h: 1 }, kind: "stairs" } } as Op);
+    assert.equal(state.openFloors?.[UPPER], undefined, "Upper floor is not reached");
+    const up = run(state, { t: "token.climb", tokenId: "thorn", linkId: "l1" } as Op, ANA);
+    assert.ok(up.openFloors?.[UPPER] !== undefined, "her climb marks it");
+    assert.deepEqual(moved(state, up, "p1"), { room: 0, [GROUND]: 0, s2: 0 });
   });
 });
 
