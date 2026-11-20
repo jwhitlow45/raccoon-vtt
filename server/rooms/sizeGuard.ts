@@ -2089,7 +2089,9 @@ function listHidden(stored: readonly unknown[], copy: readonly unknown[], path: 
     return hidden;
   }
   const keyOf = (item: unknown) => (isRecord(item) ? (item.id ?? item.tokenId ?? item.characterId) : undefined);
-  if (stored.every((item) => typeof keyOf(item) === "string") && copy.every((item) => typeof keyOf(item) === "string")) {
+  // Matched by key only where each key names one element, as two rolls of a line for one creature do not.
+  const keyed = (items: readonly unknown[]) => items.every((item) => typeof keyOf(item) === "string") && new Set(items.map(keyOf)).size === items.length;
+  if (keyed(stored) && keyed(copy)) {
     const copies = new Map(copy.map((item) => [keyOf(item) as string, item]));
     let hidden = 0;
     for (const item of stored) {

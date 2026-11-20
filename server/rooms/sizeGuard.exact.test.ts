@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
-import { readEntity, type EntityKey } from "#shared/keys.ts";
+import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
 import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
@@ -164,6 +164,15 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
       assert.deepEqual(strays(state, result.state, [], true), []);
       state = result.state;
     }
+  });
+
+  test("a dice line with two rolls for one creature beside one for a creature P1 does not see: only that roll stays in the stepped part", () => {
+    const state = table();
+    state.tokens.ghost = token("ghost", { visibility: "dm", x: 9, y: 9 });
+    const roll = (label: string, tokenId: string, total: number) => ({ formula: "1d20", faces: [total], total, label, tokenId, ...(tokenId === "hero" ? { seen: true } : {}) });
+    const hidden = roll("Roll 2", "ghost", 10);
+    state.log = [{ id: "900:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "dice", by: "p1", to: "all", rolls: [roll("Roll 1", "hero", 18), hidden, roll("Roll 3", "hero", 16)] }, parts: { rolls: [null, [], null] } } as never];
+    assert.equal(exactCopies(state, "p1").get(keys.log("900:0"))!.hidden, JSON.stringify(hidden).length + 1);
   });
 
   test("a stored field past its width keeps the rest in the stepped part, so the exact part never counts less than it takes out", () => {
