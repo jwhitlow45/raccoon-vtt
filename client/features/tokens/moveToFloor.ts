@@ -5,7 +5,8 @@ import { footprintSize, occupiedHexes } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { hexInScene } from "#shared/rules/hex.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { carriedGroup } from "#shared/rules/attach.ts";
+import { carriedGroup, onHolder } from "#shared/rules/attach.ts";
+import { linkDir, linksOn, spaceOn } from "#shared/rules/floorLinks.ts";
 import { ownEntry } from "#shared/records.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -19,7 +20,7 @@ import type { Labels } from "../../lib/labels.ts";
  * and the reducer takes the passengers and the attached areas along.
  */
 
-type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openFloors" | "buildChunks">;
+type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openFloors" | "buildChunks" | "floorLinks">;
 
 /** One floor the move could go to: whether it is off and why, and the line warning that it opens the floor to players. */
 export type FloorChoice = { floor: Scene; name: string; off: string | null; warning: string | null };
@@ -61,9 +62,29 @@ export function nameList(names: readonly string[]): string {
 }
 
 /**
+ * Whether the move would set a token down on the ground wholly over an opening on the floor
+ * (docs/design/design-v1-floors.md phase 4, 4.1 and 11, D-261119-061): one standing on the ground lands on the ground
+ * there at its full size, as moveToFloorOps lands it, and a passenger whose holder moves with it stays on its holder.
+ * Move to floor is a placement and drops no one, so such a floor is off.
+ */
+function landsOverOpening(view: Pick<RoomState, "buildChunks" | "scenes" | "floorLinks">, moved: readonly Token[], floor: Scene): boolean {
+  const holes = linksOn(view, floor.id).filter((l) => l.kind === "opening" && linkDir(view, l) === "down");
+  if (holes.length === 0) return false;
+  const ids = new Set(moved.map((t) => t.id));
+  return moved.some((t) => {
+    if (t.attached && onHolder(t.attached.kind) && ids.has(t.attached.to)) return false;
+    if (t.elevation !== footprintGround(view.buildChunks, t)) return false;
+    const { squeeze: _squeeze, ...full } = t;
+    const landed = { ...full, sceneId: floor.id };
+    return holes.some((l) => spaceOn(view, landed, l));
+  });
+}
+
+/**
  * The floors of the named creatures' scene they can move to, top first: every floor but the one all of them
- * already stand on. A floor is off where a creature's full space lies outside it ("Outside Attic"). A floor
- * players have not reached warns, in one line, when the whole move holds an unhidden party member (D-261102-484).
+ * already stand on. A floor is off where a creature's full space lies outside it ("Outside Attic"), or where one on
+ * the ground would land wholly over an opening ("Over an opening on Upper floor"). A floor players have not reached
+ * warns, in one line, when the whole move holds an unhidden party member (D-261102-484).
  */
 export function floorChoices(view: View, named: readonly Token[], labels: Labels): FloorChoice[] {
   const first = named[0];
@@ -75,12 +96,13 @@ export function floorChoices(view: View, named: readonly Token[], labels: Labels
     if (named.every((t) => t.sceneId === floor.id)) continue;
     const name = floor.floor?.name ?? floor.name;
     const outside = moved.some((t) => !fitsOn(floor, t));
+    const overOpening = !outside && landsOverOpening(view, moved, floor);
     // Only the players' scene opens by a party member's arrival (markOpened), so a move on a scene the DM prepares in private opens nothing and warns of nothing.
     const warns = party.length > 0 && onPlayersScene(view, floor.id) && !openFloor(view as RoomState, floor.id);
     choices.push({
       floor,
       name,
-      off: outside ? `Outside ${name}` : null,
+      off: outside ? `Outside ${name}` : overOpening ? `Over an opening on ${name}` : null,
       warning: warns ? `Players haven't reached ${name}. Moving ${nameList(party.map((t) => displayName(t, labels)))} there opens it to them.` : null,
     });
   }
