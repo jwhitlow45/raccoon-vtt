@@ -1754,20 +1754,30 @@ export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" |
  * holds every player's stored things, so it would.
  */
 export function ownHeld(state: RoomState, memberId: string, view: SeatView, floors: ReadonlySet<string>): OwnHeld {
-  const copies = <T extends { id: string }>(kind: CopiedKind, things: Iterable<T>, own: (thing: T) => boolean): Map<string, unknown> => {
+  const copies = <T extends { id: string }>(kind: CopiedKind, things: Iterable<T>, own: (thing: T) => boolean, unseen?: (thing: T) => unknown): Map<string, unknown> => {
     const out = new Map<string, unknown>();
     for (const thing of things) {
       if (!own(thing)) continue;
-      const copy = view.copy(kind, thing.id);
+      const copy = view.copy(kind, thing.id) ?? unseen?.(thing) ?? null;
       if (copy !== null) out.set(thing.id, copy);
     }
     return out;
   };
+  // A kept ruler or an area on a creature out of their sight, which their copy holds again once it is back: held as
+  // stored, its fields that follow the creature at their widest (D-261119-017).
+  const onUnseen = (thing: { sceneId: string; visibility?: string }) => view.holds(thing.sceneId) && thing.visibility !== "dm";
+  const unseenArea = (t: AreaTemplate) => {
+    if (t.attachedTo === undefined || !onUnseen(t)) return null;
+    if (t.casterId === undefined || view.sees(t.casterId)) return t;
+    const { casterId: _unseen, ...uncast } = t;
+    return uncast;
+  };
+  const unseenRuler = (d: Drawing) => (d.anchors?.some((id) => id !== null) && onUnseen(d) ? d : null);
   return {
     // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
     token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && (t.ownerIds.includes(memberId) || (seatCharacter(state, t)?.ownerIds.includes(memberId) ?? false))),
-    template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId),
-    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId),
+    template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId, unseenArea),
+    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, unseenRuler),
     row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
     cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId),
     companionBlock: copies("companionBlock", Object.values(state.companionBlocks), (b) => ownEntry(state.characters, b.characterId)?.ownerIds.includes(memberId) ?? false),

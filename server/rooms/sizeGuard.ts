@@ -1806,11 +1806,12 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
 
 /**
  * The room's facts a field's width may read: the player and the creatures
- * they own, the roster's ids and a list of them at its widest, the Per player
+ * they own, the longest scene id, the creatures whose walk the turn under
+ * way writes, the roster's ids and a list of them at its widest, the Per player
  * scenes, which every player sees, and the characters the player plays only
  * through a creature of theirs.
  */
-type WidthRoom = { readonly memberId: string; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly sceneIdMost: number; readonly turn: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -1828,6 +1829,8 @@ type OwnField = {
   readonly key: string;
   readonly width: (parent: Readonly<Record<string, unknown>>, room: WidthRoom, thing: Readonly<Record<string, unknown>>, stored: unknown) => number;
   readonly kept?: (stored: unknown, parent: Readonly<Record<string, unknown>>, room: WidthRoom) => number;
+  /** Whether the field counts at its width on this thing, always unless given. Where it does not, it counts as any other. */
+  readonly applies?: (parent: Readonly<Record<string, unknown>>, room: WidthRoom, thing: Readonly<Record<string, unknown>>) => boolean;
 };
 
 /** A number's widest digits: a rev (WIDEST_REV), a clock tick, an HP value. */
@@ -1840,6 +1843,10 @@ const VITALS_MOST = serializedBytes({ hp: { cur: 100_000, max: 100_000, temp: 10
 const HP_MOST = serializedBytes({ cur: 100_000, max: 100_000, temp: 100_000 });
 /** An id a device chose, at its widest as JSON: 64 characters, each escaped to six bytes at most. */
 const ID_MOST = 6 * 64 + 2;
+/** An id at 64 single-byte characters, as JSON. A longer one counts at its bytes. */
+const ID_BYTES = 66;
+/** A link to a holder at its widest. */
+const ATTACHED_BYTES = serializedBytes({ to: "x".repeat(64), kind: "perch", steer: true });
 /** A single line of text of `max` characters at its widest as JSON: three bytes a character at most, no control characters. */
 const textMost = (max: number) => 3 * max + 2;
 /**
@@ -1897,6 +1904,11 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     copyOnly("actor.inline", "hpBar"),
     // A player's own create stores the DM's notes empty. What the DM writes past that stays stepped.
     fixed("actor.inline", "dmNotes", 2),
+    // A link to a holder, as if present: the copy holds it only while the holder is in sight (D-261119-017).
+    fixed("", "attached", ATTACHED_BYTES),
+    // The turn's walk of a creature they move but do not own, at the far line's walk width, as if present: the copy
+    // holds only the stops players saw (D-261119-017).
+    { ...field("", "path", (_t, room) => fieldBytes("path") + pathMost(room.listWidth) + 1), applies: (_t, room, token) => !room.owns.has(token.id as string) && room.turn.has(token.id as string) },
     // A walk's stops: whether players saw each, and on a Per player scene which of them did, as wide as the roster allows,
     // and what a stop took and how, which a player who moves a creature not theirs writes and does not read back.
     // What the turn took on floors the creature left, which owners get whole and other players only in part.
@@ -1911,16 +1923,28 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     shownOr("path.stops[]", "cost", DIGITS.hp),
     shownOr("path.stops[]", "diag", serializedBytes([100_000, 100_000])),
   ],
-  template: [fixed("", "rev", DIGITS.rev)],
-  // An anchored ruler's stops as the player kept them, where the copy holds them where its creatures stand.
-  drawing: [
+  // An area on a creature: the floor and the creature it follows, and the creature that cast it, at their widest, as
+  // if present. The copy holds the area only while that creature is in sight, and its caster only while the caster is
+  // (D-261119-017).
+  template: [
     fixed("", "rev", DIGITS.rev),
-    field("", "points", (d) => memberBytes("points", d.points) + 2 * NUMBER_MOST * ((d.anchors as unknown[] | undefined) ?? []).filter((a) => a !== null).length),
+    { ...field("", "sceneId", (_t, room) => fieldBytes("sceneId") + room.sceneIdMost + 1), applies: (t) => t.attachedTo !== undefined },
+    { ...fixed("", "attachedTo", ID_BYTES), applies: (t) => t.attachedTo !== undefined },
+    fixed("", "casterId", ID_BYTES),
   ],
+  // A kept ruler's stops on creatures, and the creatures, at their widest: the copy holds the ruler only while its
+  // creatures are in sight, each such stop where its creature stands then (D-261119-017).
+  drawing: [fixed("", "rev", DIGITS.rev), field("", "points", (d) => anchoredPoints(d)), field("", "anchors", (d) => anchorsWidth(d))],
   // A row's group, which an add writes from its creature and the DM may change, and its place among ties, which every
   // row's add or new value moves on.
   row: [fixed("", "groupKey", textMost(MAX_NAME)), fixed("", "tieOrder", TIE_ORDER_MOST)],
-  cast: [fixed("", "rev", DIGITS.rev)],
+  // An ask's targets at the most an ask names and its area, at their widest: the copy holds only those in sight
+  // (D-261119-017).
+  cast: [
+    fixed("", "rev", DIGITS.rev),
+    { ...fixed("", "targets", 2 + LIMITS.rollTargets * (ID_BYTES + 1)), applies: (c) => c.targets !== undefined },
+    { ...fixed("", "area", ID_BYTES), applies: (c) => c.targets === undefined },
+  ],
   companionBlock: [fixed("", "rev", DIGITS.rev)],
   member: [fixed("", "rev", DIGITS.rev)],
   character: [
@@ -1975,6 +1999,23 @@ const ownRolls = (line: Readonly<Record<string, unknown>>, room: WidthRoom) => {
   return fieldBytes("rolls") + 2 + (data.rolls?.length ?? 0) * (readersWidth(room) + 1) + 1;
 };
 
+
+/** A ruler's points, each stop on a creature at its widest and the others as kept. */
+function anchoredPoints(drawing: Readonly<Record<string, unknown>>): number {
+  const points = (drawing.points as number[] | undefined) ?? [];
+  const anchors = (drawing.anchors as (string | null)[] | undefined) ?? [];
+  let bytes = fieldBytes("points") + 2 + Math.max(0, points.length - 1) + 1;
+  for (let i = 0; i < points.length; i++) bytes += anchors[Math.floor(i / 2)] != null ? NUMBER_MOST : serializedBytes(points[i]);
+  return bytes;
+}
+
+/** A ruler's creatures, each id at its widest. */
+function anchorsWidth(drawing: Readonly<Record<string, unknown>>): number {
+  const anchors = drawing.anchors as (string | null)[] | undefined;
+  if (anchors === undefined) return 0;
+  return fieldBytes("anchors") + 2 + Math.max(0, anchors.length - 1) + sum(anchors, (a) => (a === null ? 4 : ID_BYTES)) + 1;
+}
+
 /** How many lists of readers a shared event line's parts hold at most, by its type (shared/project.ts partsOf). */
 const PARTS_OF: Readonly<Record<string, number>> = { hp: 2, rest: 2, concentration: 1, deathSave: 1, use: 1, turn: 1 };
 
@@ -2024,7 +2065,7 @@ function hiddenOf(stored: unknown, copy: unknown, path: string, index: FieldInde
     const listed = index.byParent.get(path);
     let hidden = 0;
     for (const key of new Set([...Object.keys(stored), ...Object.keys(copy)])) {
-      const own = listed?.find((f) => f.key === key);
+      const own = listed?.find((f) => f.key === key && (!f.applies || f.applies(copy, room, thing)));
       if (own) {
         const kept = own.kept?.(stored[key], copy, room) ?? 0;
         hidden += kept + Math.max(0, memberBytes(key, stored[key]) - kept - own.width(copy, room, thing, stored[key]));
@@ -2086,7 +2127,8 @@ function ownFields(copy: unknown, stored: unknown, path: string, index: FieldInd
   }
   if (!isRecord(copy)) return;
   const from = isRecord(stored) ? stored : {};
-  for (const f of index.byParent.get(path) ?? []) {
+  const applying = (index.byParent.get(path) ?? []).filter((f) => !f.applies || f.applies(copy, room, thing));
+  for (const f of applying) {
     const width = f.width(copy, room, thing, from[f.key]);
     out.widths += width;
     out.stripped += memberBytes(f.key, copy[f.key]);
@@ -2094,7 +2136,7 @@ function ownFields(copy: unknown, stored: unknown, path: string, index: FieldInd
   }
   for (const [key, value] of Object.entries(copy)) {
     const at = childPath(index, path, key);
-    if (index.prefixes.has(at)) ownFields(value, from[key], at, index, room, thing, out);
+    if (index.prefixes.has(at) && !applying.some((f) => f.key === key)) ownFields(value, from[key], at, index, room, thing, out);
   }
 }
 
@@ -2340,8 +2382,11 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   const characters = new Set(owned);
   for (const token of Object.values(state.tokens)) if (token.ownerIds.includes(memberId) && "ref" in token.actor) characters.add(token.actor.ref);
   const viewer: Viewer = { memberId, role: "player" };
+  const turnOf = widthsRoom(state).turn;
   const room: WidthRoom = {
     memberId,
+    sceneIdMost: Math.max(0, ...Object.keys(state.scenes).map((id) => utf8Bytes(JSON.stringify(id)))),
+    turn: turnOf,
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),

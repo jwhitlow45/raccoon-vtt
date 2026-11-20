@@ -697,3 +697,34 @@ describe("LP44-PRIV-1: the far line's quick bound holds a player's widths, so ev
     assert.equal(answer(true).ok, false);
   });
 });
+
+describe("D-261119-017: a player's things that follow a creature stay in their exact part, in sight of it or not", () => {
+  /**
+   * P1's things that follow a wolf of the DM's: a kept ruler from Hero to
+   * it, an area on it, a companion riding it and an ask naming it, the wolf
+   * in P1's sight or out of it, its name one character longer out of sight
+   * so both rooms store the same bytes.
+   */
+  function onTheWolf(seen: boolean): RoomState {
+    const state = room();
+    state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+    state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+    state.tokens.wolf = token("wolf", { x: 6, y: 6, name: seen ? "Wolf" : "Wolf1", visibility: seen ? "all" : "dm" });
+    state.tokens.pet = token("pet", { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 6, y: 6, size: "tiny", attached: { to: "wolf", kind: "ride" }, actor: { inline: actor({ dmNotes: "" }) } });
+    state.drawings.r1 = drawing("r1", { kind: "ruler", ownerId: "p1", anchors: ["hero", "wolf"], points: [2.5, 2.5, 6.5, 6.5] });
+    state.templates.a1 = template("a1", { ownerId: "p1", attachedTo: "wolf", casterId: "wolf", label: "Faerie Fire" });
+    state.casts.k1 = castAsk("k1", { by: "p1", caster: "hero", area: undefined, targets: ["hero", "wolf"] });
+    return state;
+  }
+
+  test("a kept ruler, an area, a ride and an ask on a creature: P1's exact part and stepped part read the same whether P1 sees it", () => {
+    const [seen, unseen] = [onTheWolf(true), onTheWolf(false)];
+    assert.equal(measuredStateBytes(seen), measuredStateBytes(unseen), "the rooms store the same bytes");
+    assert.notEqual(copyOf(seen), copyOf(unseen), "P1 sees the wolf in one");
+    assert.ok(ownHeldBytes(seen, "p1").shown > 0);
+    assert.deepEqual(ownHeldBytes(unseen, "p1"), ownHeldBytes(seen, "p1"), "the room's exact part");
+    assert.deepEqual(ownHeldBytes(unseen, "p1", ["s1"]), ownHeldBytes(seen, "p1", ["s1"]), "the scene's exact part");
+    assert.equal(steppedOf(unseen), steppedOf(seen), "the room's stepped part");
+    assert.equal(steppedOf(unseen, ["s1"]), steppedOf(seen, ["s1"]), "the scene's stepped part");
+  });
+});

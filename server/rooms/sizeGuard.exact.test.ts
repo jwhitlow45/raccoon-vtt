@@ -3,11 +3,9 @@ import { describe, test } from "node:test";
 import { resolveDiceOp, type DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { readEntity, type EntityKey } from "#shared/keys.ts";
-import { serializedBytes } from "#shared/limits.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
-import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { actor, character, drawing, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, template, token } from "#shared/testutil.ts";
@@ -21,11 +19,7 @@ import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedScen
  * and their ops never write. Each op kind a player may send is checked here
  * on random rooms and a fixed one: their stepped parts, the room's and each
  * scene's, move only by hidden things the op took away, never by a byte it
- * added. The turn's end, which writes the DM's history and every row's
- * marks, a change of what their copy holds (sight), the stops their copy
- * leaves out of a walk under Players move any token, and a hidden thing
- * carried into the room-level part, which other scenes' parts hold too,
- * are the exceptions, all accepted (D-261119-003).
+ * added, but by the residuals the private log tracks (D-261119-019).
  */
 
 const DEPS = { canUseAsset: () => true, canRestoreAsset: () => true } as never;
@@ -53,51 +47,24 @@ function sightChanged(before: RoomState, after: RoomState, was: ReadonlyMap<Enti
 }
 
 /**
- * The one accepted way a player's own op adds hidden bytes (D-261119-003):
- * a walk of a creature they move but do not own, under Players move any
- * token, keeps the stops players could not see, which their copy leaves out.
- * These are those stops' bytes: each stored stop P1's copy does not hold,
- * matched in order by place. Every other field of the walk counts at its width.
- */
-function unseenStopBytes(state: RoomState, key: string): number {
-  if (!key.startsWith("token:")) return 0;
-  const id = key.slice("token:".length);
-  const stored = state.tokens[id];
-  if (stored === undefined || stored.ownerIds.includes("p1")) return 0;
-  const held = (seatView(state, "p1").copy("token", id) as Token | null)?.path?.stops ?? [];
-  let next = 0;
-  let bytes = 0;
-  for (const stop of stored.path?.stops ?? []) {
-    const kept = held[next];
-    if (kept !== undefined && kept.x === stop.x && kept.y === stop.y && kept.elevation === stop.elevation) next++;
-    else bytes += serializedBytes(stop) + 1;
-  }
-  return bytes;
-}
-
-/**
  * What of P1's op moved their stepped parts other than hidden things it took
  * away or carried from one thing to another: hidden bytes it added on the
- * whole, or bytes it wrote outside their exact part. A hidden thing carried
- * from a floor into the room-level part, such as a condition the DM hid that
- * an HP change ended into its line, joins every other scene's part, which
- * holds the room-level part too (D-261119-003, accepted). With `still`, the
- * op takes nothing hidden away, so each part moves by that alone.
+ * whole, or bytes it wrote outside their exact part. What a scene's part
+ * holds from what was carried on another floor is D-261119-012's. With
+ * `still`, the op takes nothing hidden away, so each part moves by that
+ * alone.
  */
 function strays(before: RoomState, after: RoomState, accepted: string[] = [], still = false): string[] {
   const was = exactCopies(before, "p1");
   const is = exactCopies(after, "p1");
   const out: string[] = [];
-  const moved = new Map<string, { hidden: number; accepted: number }>();
+  const moved = new Map<string, { hidden: number }>();
   for (const key of new Set([...was.keys(), ...is.keys()])) {
     const gain = (is.get(key)?.hidden ?? 0) - (was.get(key)?.hidden ?? 0);
     if (gain === 0) continue;
     const on = is.get(key)?.on ?? was.get(key)!.on;
-    const at = moved.get(on) ?? { hidden: 0, accepted: 0 };
-    const unseen = gain > 0 ? Math.min(gain, unseenStopBytes(after, key) - unseenStopBytes(before, key)) : 0;
-    if (unseen > 0) accepted.push(`${key} keeps ${unseen} bytes of unseen stops`);
-    at.accepted += Math.max(0, unseen);
-    at.hidden += gain - Math.max(0, unseen);
+    const at = moved.get(on) ?? { hidden: 0 };
+    at.hidden += gain;
     moved.set(on, at);
   }
   const [b, a] = [steppedParts(before), steppedParts(after)];
@@ -106,16 +73,14 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
     const where = scope === "room" ? "the room" : `scene ${scope}`;
     const floors = scope === "room" ? null : new Set(floorsOf(before, scope).map((f) => f.id));
     let hidden = 0;
-    let kept = 0;
     for (const [on, bytes] of moved) {
       if (scope !== "room" && on !== "room" && !floors!.has(on)) continue;
       hidden += bytes.hidden;
-      kept += bytes.accepted;
     }
     const carried = Math.max(0, Math.min(hidden, hidden - whole));
     if (carried > 0) accepted.push(`${carried} hidden bytes carried into ${where}`);
     if (hidden - carried > 0 || (still && hidden !== carried)) out.push(`${hidden - carried} hidden bytes in ${where}`);
-    const outside = after - (b.get(scope) ?? after) - hidden - kept;
+    const outside = after - (b.get(scope) ?? after) - hidden;
     if (outside !== 0) out.push(`${outside} bytes outside P1's exact part in ${where}`);
   }
   return out;
@@ -168,7 +133,7 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
     }
     assert.deepEqual(apart.slice(0, 10), [], `${apart.length} of ${checked} ops moved P1's stepped part`);
     assert.ok(checked > 5 * sight, `${checked} ops checked, ${sight} changed what P1's copy holds`);
-    assert.ok(accepted.length < checked / 50, `${accepted.length} walks kept unseen stops`);
+    assert.ok(accepted.length < checked / 50, `${accepted.length} ops carried hidden bytes into other scenes`);
   });
 
   /** A room where P1 plays Hero (c1) with a companion, a creature the DM lent them, an area, a line, a row and a door, every rev at 9. */
