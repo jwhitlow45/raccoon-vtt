@@ -337,32 +337,75 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.equal(reading(a1) === reading(b1), reading(a) === reading(b), `P1 reads ${reading(a)} and ${reading(b)} before, ${reading(a1)} and ${reading(b1)} after`);
   });
 
-  test("P1's climb off the floor their drawing, ask and area stand on, and back, leaves P1's stepped parts as they were", () => {
+  /**
+   * Two floors and stairs between them, with Thorn, P1's, on the ground
+   * floor and a goblin of the DM's upstairs. The DM hid Thorn, so no climb of
+   * theirs opens a floor: P1 holds the upper floor only while Thorn stands
+   * on it.
+   */
+  const tower = (): RoomState => {
     const floor = (id: string, level: number) => scene(id, { name: "Tower", order: 0, bounds: { w: 20, h: 20 }, floor: { of: "s1", level, name: `Floor ${level}`, height: 10 } });
-    // Thorn, whom the DM hid, so no climb of theirs opens a floor: P1 holds the upper floor only while Thorn stands on it.
     const state = room({
       scenes: { s1: floor("s1", 0), up: floor("up", 1), s2: scene("s2", { order: 1 }) },
       characters: { thorn: character("thorn", { name: "Thorn", ownerIds: ["p1"], actor: actor({ speeds: { walk: 30 } }) }) },
-      tokens: { thorn: token("thorn", { kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "thorn" }, sceneId: "s1", x: 9, y: 9, visibility: "dm" }) },
+      tokens: {
+        thorn: token("thorn", { kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "thorn" }, sceneId: "s1", x: 9, y: 9, visibility: "dm" }),
+        gob: token("gob", { name: "Goblin", sceneId: "up", x: 4, y: 4 }),
+      },
     });
     const linked = applyOp(state, { t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: "s1", to: "up", rect: { x: 9, y: 9, w: 1, h: 1 }, kind: "stairs" } } as Op, DM, env(1_900_000));
     assert.ok(linked.ok, linked.ok ? "" : linked.message);
-    const still = (before: RoomState, next: RoomState, op: Op) => assert.deepEqual(strays(before, next, [], true), [], op.t);
-    const up = played(linked.state, [{ t: "token.climb", tokenId: "thorn", linkId: "l1" } as Op], still);
+    return linked.state;
+  };
+  const [climbUp, climbDown] = [{ t: "token.climb", tokenId: "thorn", linkId: "l1" }, { t: "token.climb", tokenId: "thorn", linkId: "l2" }] as [Op, Op];
+  const still = (before: RoomState, next: RoomState, op: Op) => assert.deepEqual(strays(before, next, [], true), [], op.t);
+  /** An area of P1's on the upper floor, loose or on the goblin. */
+  const areaOf = (id: string, attachedTo?: string): Op =>
+    ({ t: "template.create", template: { id, sceneId: "up", shape: "sphere", size: 10, origin: { x: 1, y: 1, z: 0 }, yaw: 0, includeOrigin: false, color: "#ff0000", ownerId: "p1", visibility: "all", label: "L".repeat(60), ...(attachedTo ? { attachedTo } : {}) } }) as Op;
+
+  test("P1's climb off the floor their drawing, ask and area stand on, and back, leaves P1's stepped parts as they were", () => {
+    const up = played(tower(), [climbUp], still);
     const made = played(
       up,
       [
         { t: "drawing.create", drawing: { id: "d1", sceneId: "up", kind: "free", ownerId: "p1", visibility: "all", style: { stroke: "#ff0000", width: 2, opacity: 1 }, points: Array.from({ length: 400 }, (_, i) => i % 97) } },
-        { t: "template.create", template: { id: "a1", sceneId: "up", shape: "sphere", size: 10, origin: { x: 1, y: 1, z: 0 }, yaw: 0, includeOrigin: false, color: "#ff0000", ownerId: "p1", visibility: "all", label: "L".repeat(60) } },
+        areaOf("a1"),
         { t: "cast.ask", cast: { id: "c1", caster: "thorn", sceneId: "up", spell: "S".repeat(60), targets: ["thorn"] } },
       ] as Op[],
       still,
     );
     const theirs = ["drawing:d1", "template:a1", "cast:c1"] as EntityKey[];
-    const down = played(made, [{ t: "token.climb", tokenId: "thorn", linkId: "l2" } as Op], still);
+    const down = played(made, [climbDown], still);
     assert.ok(!seatView(down, "p1").holds("up"), "P1 no longer holds the upper floor");
     assert.deepEqual(theirs.filter((key) => !exactCopies(down, "p1").has(key)), [], "their things stay in P1's exact part");
-    played(down, [{ t: "token.climb", tokenId: "thorn", linkId: "l1" } as Op], still);
+    played(down, [climbUp], still);
+  });
+
+  test("P1's area the DM hid reads as one the DM deleted through P1's climb, loose on a floor and on a creature (D-261120-012)", () => {
+    for (const [id, area] of [["a1", areaOf("a1")], ["a2", areaOf("a2", "gob")]] as const) {
+      const made = played(played(tower(), [climbUp]), [area]);
+      const [hidden, deleted] = [{ t: "template.update", templateId: id, patch: { visibility: "dm" } }, { t: "template.delete", templateId: id }].map((op) => {
+        const result = applyOp(made, op as Op, DM, env(1_950_000));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        return result.state;
+      }) as [RoomState, RoomState];
+      const shown = (state: RoomState) => Object.fromEntries([...exactCopies(state, "p1")].map(([key, part]) => [key, `${part.shown} B on ${part.shownOn ?? part.on}`]));
+      const copyOf = (state: RoomState) => stableStringify(projectState(state, P1, { sceneId: null }));
+      const [hiddenDown, deletedDown] = [played(hidden, [climbDown]), played(deleted, [climbDown])];
+      assert.equal(copyOf(hidden), copyOf(deleted), `${id}: P1's copies are alike`);
+      assert.equal(copyOf(hiddenDown), copyOf(deletedDown), `${id}: and after P1's climb`);
+      assert.deepEqual(shown(hiddenDown), shown(deletedDown), `${id}: P1's exact parts are alike after the climb`);
+      const moved = (before: RoomState, after: RoomState) => [...steppedParts(after)].map(([scope, bytes]) => [scope, bytes - steppedParts(before).get(scope)!]);
+      assert.deepEqual(moved(hidden, hiddenDown), moved(deleted, deletedDown), `${id}: the climb moves P1's stepped parts alike`);
+    }
+  });
+
+  test("a drawing the DM makes under P1's id and hides from players is not in P1's exact part (D-261120-012)", () => {
+    const state = table();
+    const made = applyOp(state, { t: "drawing.create", drawing: { id: "dmd", sceneId: "s1", kind: "free", ownerId: "p1", visibility: "dm", style: { stroke: "#ff0000", width: 2, opacity: 1 }, points: [1, 1, 2, 2] } } as Op, DM, env(1_960_000));
+    assert.ok(made.ok, made.ok ? "" : made.message);
+    assert.equal(stableStringify(projectState(made.state, P1, { sceneId: null })), stableStringify(projectState(state, P1, { sceneId: null })), "P1's copy is as it was");
+    assert.ok(!exactCopies(made.state, "p1").has("drawing:dmd" as EntityKey));
   });
 
   /**
