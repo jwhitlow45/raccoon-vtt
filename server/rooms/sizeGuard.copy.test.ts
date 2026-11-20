@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { readEntity, type EntityKey } from "#shared/keys.ts";
+import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
-import { exactCopies } from "./sizeGuard.ts";
+import { exactCopies, ownHeldBytes } from "./sizeGuard.ts";
 
 /*
  * D-261116-015 and D-261119-021: a player's exact part counts only what
@@ -73,9 +73,30 @@ function onHidden(): RoomState {
 
 describe("D-261119-021: an op that leaves a player's copy as it was leaves what their exact part shows as it was", () => {
   test("the DM moves the hidden creature P1's area and ruler are on to a scene P1 does not hold", () => {
-    const { moved, unchanged } = moves(onHidden(), { t: "token.update", tokenId: "y", patch: { sceneId: "s2", x: 3, y: 3 } } as Op);
-    assert.ok(unchanged > 0, "P1's copy is as it was");
+    const state = onHidden();
+    const { next, moved, unchanged } = moves(state, { t: "token.update", tokenId: "y", patch: { sceneId: "s2", x: 3, y: 3 } } as Op);
+    assert.ok(unchanged > 0 && next, "P1's copy is as it was");
     assert.deepEqual(moved, []);
+    assert.equal(next.templates.a1!.sceneId, "s2", "the area went along");
+    for (const scope of [undefined, ["s1"], ["s2"]]) assert.equal(ownHeldBytes(next, "p1", scope).shown, ownHeldBytes(state, "p1", scope).shown, `P1's reading of ${scope?.[0] ?? "the room"}`);
+  });
+
+  test("behind a blackout P1's copy holds none of their own things, an area or a ruler on a hidden creature included", () => {
+    const state = onHidden();
+    state.meta = { ...state.meta, view: { ...state.meta.view, blackout: true } };
+    const held = [...exactCopies(state, "p1").keys()];
+    assert.deepEqual(held.filter((key) => key === "template:a1" || key === "drawing:r1"), []);
+  });
+
+  test("a creature's walk counts at the walk width for a player who may move it, and as their copy holds it for one who only applies damage", () => {
+    const walked = (settings: Partial<RoomState["meta"]["settings"]>) => {
+      const state = room();
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, ...settings } };
+      state.tokens.wolf = token("wolf", { x: 5, y: 3, path: { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true }, { x: 5, y: 3, elevation: 0, seen: true }] } });
+      return exactCopies(state, "p1").get(keys.token("wolf"))!;
+    };
+    const [mover, healer] = [walked({ playersMoveAny: "all" }), walked({ playersApplyDamage: true })];
+    assert.ok(mover.shown - healer.shown > 20_000, `${mover.shown} against ${healer.shown}`);
   });
 
   test("the DM hides P1's area, renames it or resizes it while its creature is out of P1's sight", () => {
