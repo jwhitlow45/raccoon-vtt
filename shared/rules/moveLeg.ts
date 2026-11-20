@@ -61,6 +61,15 @@ export type MovedToken = {
    * lead's moments. None where `route` has a point per point of the lead's.
    */
   along?: readonly FileAlong[];
+  /**
+   * Its walk as its place carries it, where a rider's dropped seat
+   * (`DroppedSeat`), on it or up its chain of holders, moves only the
+   * walk's end. It sits where its place carries it until the walk ends, so
+   * a trap's step reads it there at every moment before the end, where a
+   * stop leaves it, as the cut op, which drops the seat, lands it (traps.ts
+   * walksOf, review HEXOP-ASTRA-1).
+   */
+  carried?: RoutePoint[];
 };
 
 /**
@@ -304,7 +313,8 @@ function followGroup(before: RoomState, lead: MovedToken, members: readonly stri
     // move, which the private pass may stop short, moves it on (review FU45B-ASTRA-12).
     const walk = own && up && upOwn && !cut ? behindStop(g, member, own, upOwn, up.route) : own;
     const seat = dropped?.tokenId === id && holderMove === lead && (!byPlayer || pub(id)) ? dropped : undefined;
-    const moved = follow(before, member, holderMove, pub(id), byPlayer, env, { file: walk, kept: cut?.own?.get(id), seats: seatsOn, stands: stands && cut?.judged(member) !== true, ...(seat ? { seat } : {}) });
+    const how: Following = { file: walk, kept: cut?.own?.get(id), seats: seatsOn, stands: stands && cut?.judged(member) !== true };
+    const moved = withCarried(follow(before, member, holderMove, pub(id), byPlayer, env, { ...how, ...(seat ? { seat } : {}) }), before, member, holderMove, pub(id), byPlayer, env, how);
     if (!moved) continue;
     walked.set(id, moved);
     out.push(moved);
@@ -476,10 +486,11 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
       return kept ? { x: kept.x, y: kept.y, elevation: kept.elevation ?? p.elevation + oz } : { ...(seats?.[i] ?? { x: p.x + ox, y: p.y + oy }), elevation: p.elevation + oz };
     });
     const seat = how.seat ? droppedSeat(before, member, holder, how.seat) : null;
+    const carried = seat ? route.slice() : null;
     if (seat) route[route.length - 1] = { ...seat, elevation: route[route.length - 1]!.elevation };
     if (!onHolder(kind) && floorChange(before, member, holder, env)) route[route.length - 1] = draggedOntoFloor(before.buildChunks, member, route[route.length - 1]!, holder.to.sceneId);
     const last = route[route.length - 1]!;
-    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass, ...(reached ? { along: reached } : {}) };
+    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass, ...(reached ? { along: reached } : {}), ...(carried ? { carried } : {}) };
   }
   const chunks = before.buildChunks;
   // A holder walking off its own mount walks on the ground once clear of it (attach.ts walkerFor), and so does what it drags:
@@ -518,6 +529,20 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
     ...(how.file ? { file: true as const } : {}),
     ...(reached ? { along: reached.slice(0, route.length) } : {}),
   };
+}
+
+/**
+ * `moved`, a member of a group, with its walk as its place carries it
+ * (MovedToken `carried`) where its holder's dropped seat moved only the
+ * end of the holder's walk: the same follow of the holder's carried walk.
+ */
+function withCarried(moved: MovedToken | null, before: RoomState, member: Token, holder: MovedToken, isPublic: boolean, byPlayer: boolean, env: Versioned, how: Following): MovedToken | null {
+  if (!moved || !holder.carried) return moved;
+  const end = holder.carried[holder.carried.length - 1]!;
+  const was = follow(before, member, { ...holder, route: holder.carried, to: { ...holder.to, x: end.x, y: end.y, elevation: end.elevation } }, isPublic, byPlayer, env, how);
+  if (!was) return moved;
+  const same = was.route.length === moved.route.length && was.route.every((p, i) => p.x === moved.route[i]!.x && p.y === moved.route[i]!.y && p.elevation === moved.route[i]!.elevation);
+  return same ? moved : { ...moved, carried: was.route };
 }
 
 /**

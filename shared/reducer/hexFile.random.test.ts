@@ -812,11 +812,11 @@ for (const [name, g] of [
           assert.ok(r.ok, at);
           const cut = planTrapMove(op, s, actor, {}).op !== op;
           for (const [id, pose] of trapLandings(op, s, actor, {})) {
-            // A passenger on a holder a cut lands short of its walk sits on the seat the cut gives it, where the trap step read it at
-            // its walk's spot, the gap `checkedMove` leaves too: the cut drops the seat, so that one lands on the seat its place
-            // carries it to.
+            // A passenger on a holder a cut lands squeezed short of its walk sits on the squeezed stand, where the trap step read it
+            // at its walk's spot there, the gap older than op 51 `checkedMove` leaves too. Every other passenger, the seated rider
+            // and what rides on her among them, lands where the trap step had it (review HEXOP-ASTRA-1).
             const link = s.tokens[id]!.attached;
-            if (cut && link && onHolder(link.kind)) continue;
+            if (cut && link && onHolder(link.kind) && r.state.tokens[link.to]?.squeeze === true) continue;
             const t: Token = r.state.tokens[id]!;
             assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
           }
