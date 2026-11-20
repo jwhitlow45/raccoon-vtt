@@ -508,6 +508,54 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.ok(!exactCopies(made.state, "p1").has("drawing:dmd" as EntityKey));
   });
 
+  /** How each of P1's stepped parts moved from one state to the next. */
+  const movedBy = (before: RoomState, after: RoomState) => {
+    const was = steppedParts(before);
+    return Object.fromEntries([...steppedParts(after)].map(([scope, bytes]) => [scope, bytes - (was.get(scope) ?? bytes)]));
+  };
+  const endTurn = (entry: string): Op => ({ t: "encounter.next", from: { entry, round: 1 } }) as Op;
+
+  /**
+   * A fight on Hero's turn, with a goblin of the DM's last, and what P1
+   * chose by their own ops: a companion of a name and a place, its row
+   * after Hero's, Hero's walk this turn and a condition on Hero that ends
+   * with it. With `ghost`, a hidden row of the DM's after every other.
+   */
+  const fightOf = (chose: { name: number; x: number; stops: number; label: number }, ghost = false): RoomState => {
+    const state = table();
+    state.tokens.gob = token("gob", { x: 9, y: 9, actor: { inline: actor({ dmNotes: "" }) } });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "rhero", entries: [entry("rhero", { tokenId: "hero", value: 20 }), entry("rgob", { tokenId: "gob", value: 5 })], turnStart: { entryId: "rhero", tokenId: "hero", sceneId: "s1", x: 2, y: 2, elevation: 0, seen: true, seq: 7 } };
+    if (ghost) {
+      state.tokens.ghost = token("ghost", { visibility: "dm", x: 15, y: 15 });
+      state.encounter.entries.push(entry("rghost", { tokenId: "ghost", value: 1, hidden: true }));
+    }
+    const create = hoot() as Extract<Op, { t: "token.create" }>;
+    return played(state, [
+      { ...create, token: { ...create.token, name: "N".repeat(chose.name), x: chose.x } } as Op,
+      { t: "encounter.add", entries: [{ id: "rpet2", tokenId: "pet2", value: 15 }] } as Op,
+      ...Array.from({ length: chose.stops }, (_, i) => ({ t: "token.move", tokenId: "hero", x: 2, y: 3 + i }) as Op),
+      { t: "actor.effect.add", target: { characterId: "c1" }, effect: { id: "e9", key: "custom", label: "L".repeat(chose.label), duration: { mode: "turnEnd", of: { tokenId: "hero" } } } } as Op,
+    ], undefined, 2_300_000);
+  };
+
+  test("P1's End Turn, the turn after it and their companion's dismissal move P1's stepped parts alike whatever P1 chose: a name, a place, a walk and a condition (D-261120-060)", () => {
+    let [a, b] = [fightOf({ name: 1, x: 3, stops: 1, label: 1 }), fightOf({ name: 60, x: 13, stops: 6, label: 60 })];
+    for (const [i, op] of [endTurn("rhero"), endTurn("rpet2"), { t: "token.delete", tokenId: "pet2" } as Op].entries()) {
+      const [a1, b1] = [played(a, [op], undefined, 2_400_000 + i), played(b, [op], undefined, 2_400_000 + i)];
+      assert.deepEqual(movedBy(a, a1), movedBy(b, b1), op.t);
+      [a, b] = [a1, b1];
+    }
+    assert.equal(b.encounterHistory.length, 2, "the fight kept both steps");
+    assert.ok(b.tokens.hero!.path!.stops.length > 6, "Hero keeps its walk past its turn");
+  });
+
+  test("P1's End Turn with a hidden row of the DM's after every other, or none, moves P1's stepped parts alike (D-261120-060)", () => {
+    const chose = { name: 4, x: 3, stops: 2, label: 4 };
+    const [a, b] = [fightOf(chose), fightOf(chose, true)];
+    assert.equal(stableStringify(projectState(a, P1, { sceneId: null })), stableStringify(projectState(b, P1, { sceneId: null })), "P1's copies are equal");
+    assert.deepEqual(movedBy(a, played(a, [endTurn("rhero")])), movedBy(b, played(b, [endTurn("rhero")])));
+  });
+
   /**
    * Kinds the room above stands for: a recharge roll or a turn prompt
    * writes the actor of the player's creature as a use does, a roll ask the

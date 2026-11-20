@@ -1247,7 +1247,18 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
       const start = encounter?.turnStart;
       return new Set([active, start?.tokenId, ...(start?.mounts ?? [])].filter((id): id is string => id !== undefined));
     },
+    walk: (tokenId) => {
+      const token = ownEntry(state.tokens, tokenId);
+      return token?.path && ownsToken(state, ctx.viewer, token) ? ownersWalkCtx(ctx, token, token.path) : null;
+    },
   };
+}
+
+/** A walk as its owners' copy holds one on its creature's own turn (projectPathCtx): every stop, and what it took on floors it left. */
+function ownersWalkCtx(ctx: Ctx, token: Token, path: TokenPath): TokenPath | null {
+  const stops = ownersStopsCtx(ctx, token, path.stops);
+  if (stops.length === 0 && !path.prior) return null;
+  return path.prior ? { turn: path.turn, prior: ownersPrior(path.prior), stops } : { turn: path.turn, stops };
 }
 
 /**

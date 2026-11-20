@@ -311,7 +311,7 @@ describe("D-261120-003: rooms whose copies are equal give a player equal exact p
         const twin = structuredClone(base);
         if (!omit(twin)) continue;
         for (const id of players(base)) {
-          if (copyOf(base, id) !== copyOf(twin, id)) continue;
+          if (knownBy(base, id) !== knownBy(twin, id)) continue;
           compared.set(name, (compared.get(name) ?? 0) + 1);
           const [a, b] = [shownBy(base, id), shownBy(twin, id)];
           const shownThen = residual ? [shownChanges(base, id), shownChanges(twin, id)] : undefined;
@@ -442,11 +442,19 @@ const heldAsStored = (state: RoomState, memberId: string) => {
 const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId|visibility)$/.test(where);
 
 /**
- * What `memberId` holds of a room: their copy, and the shared lines as they
- * read them when written (linesHeld), which their exact part counts so.
- * Twins alike in both must give equal exact parts.
+ * What `memberId` holds of a room: their copy, the shared lines as they
+ * read them when written (linesHeld), and the walks of their creatures as
+ * their copy held them on their turns (SeatView `walk`), which their exact
+ * part counts so. Twins alike in all three must give equal exact parts.
  */
-const knownBy = (state: RoomState, memberId: string) => `${copyOf(state, memberId)}\n${stableStringify([...linesHeld(state, memberId)].map(([line, held]) => [line.id, held]))}`;
+const knownBy = (state: RoomState, memberId: string) => {
+  const view = seatView(state, memberId);
+  const walks = Object.keys(state.tokens).sort().flatMap((id) => {
+    const walk = view.walk(id);
+    return walk === null ? [] : [[id, walk]];
+  });
+  return `${copyOf(state, memberId)}\n${stableStringify([...linesHeld(state, memberId, view)].map(([line, held]) => [line.id, held]))}\n${stableStringify(walks)}`;
+};
 
 /** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
 function namedBase(seed: number): RoomState {
@@ -534,5 +542,39 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
     assert.deepEqual(found.slice(0, 10), []);
     assert.ok(compared > 400, `${compared} twins compared`);
     for (const name of Object.keys(NAMED)) assert.ok((named.get(name) ?? 0) > 0, `${name}: no twin compared`);
+  });
+});
+
+
+describe("D-261120-060: a player's creature's walk past its turn counts as their copy held it on that turn", () => {
+  test("random rooms through the DM's and P1's ops: wherever P1's copy holds a walk of a creature of theirs, it is the walk their exact part keeps", () => {
+    const found: string[] = [];
+    let walks = 0;
+    for (let seed = 1; seed <= 400 && found.length < 10; seed++) {
+      const r = rng(seed * 59 + 3);
+      let state = randomState(r);
+      // A fight on the turn of a creature of P1's, which P1 walks now and then.
+      const mine = Object.values(state.tokens).find((t) => t.ownerIds.includes("p1") && t.attached === undefined);
+      if (mine) state.encounter = { rev: 0, round: 1, activeEntryId: "rmine", entries: [entry("rmine", { tokenId: mine.id, value: 30 }), ...(state.encounter?.entries ?? [])], turnStart: { entryId: "rmine", tokenId: mine.id, sceneId: mine.sceneId, x: mine.x, y: mine.y, elevation: mine.elevation, seq: 5 } };
+      for (let k = 0; k < 10; k++) {
+        const who: Viewer = k % 2 === 0 ? DM : { memberId: "p1", role: "player" };
+        const at = mine ? state.tokens[mine.id] : undefined;
+        const op: Op = at && k % 2 === 1 && r() < 0.7 ? ({ t: "token.move", tokenId: at.id, x: at.x + Math.floor(r() * 5) - 2, y: at.y + Math.floor(r() * 5) - 2 } as Op) : randomOp(r, state, who);
+        const result = applyOp(state, op, who, env(8_000_000 + seed * 20 + k));
+        if (!result.ok) continue;
+        state = result.state;
+        const view = seatView(state, "p1");
+        for (const id of Object.keys(state.tokens)) {
+          const held = (view.copy("token", id) as { path?: unknown } | null)?.path;
+          if (held === undefined) continue;
+          const walk = view.walk(id);
+          if (walk === null) continue;
+          walks++;
+          if (stableStringify(held) !== stableStringify(walk)) found.push(`seed ${seed}, ${id}: ${stableStringify(held)} against ${stableStringify(walk)}`);
+        }
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(walks > 300, `${walks} walks compared`);
   });
 });

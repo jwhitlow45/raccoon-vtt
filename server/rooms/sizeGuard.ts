@@ -2,8 +2,9 @@ import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, ti
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type AreaTemplate, type BuildChunk, type Effect, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import type { HpLabel } from "#shared/rules/hp.ts";
+import { MAX_HISTORY } from "#shared/reducer/encounter.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
@@ -693,7 +694,7 @@ export function roomLevelBytes(state: RoomState): number {
     else if (name === "log") bytes += fieldBytes(name) + collectionBytes(measuredLog(state.log));
     // Each list of who saw at its widest, whoever it names (docs/design/design-v1-per-player-vision.md 6.8).
     else if (name === "encounter") bytes += fieldBytes(name) + valueBytes(state.encounter) - encounterLists(state.encounter).extra + encounterLists(state.encounter).count * widestListExtra(state.members);
-    else if (name === "encounterHistory") bytes += fieldBytes(name) + collectionBytes(state.encounterHistory) - historyLists(state.encounterHistory).extra + historyLists(state.encounterHistory).count * widestListExtra(state.members);
+    else if (name === "encounterHistory") bytes += historyBytes(state);
     // Each scene's rev at its widest and its creature numbers left out (numberingAdjust).
     else if (name === "scenes") bytes += fieldBytes(name) + collectionBytes(state.scenes) + scenesNumbering(state.scenes);
     else bytes += fieldBytes(name) + (name === "meta" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
@@ -808,6 +809,12 @@ function encounterLists(encounter: Encounter | null): Lists {
 
 function historyLists(history: readonly EncounterSnapshot[]): Lists {
   return listsOf(history, () => history.map((snap) => snap.encounter.turnStart?.seenBy));
+}
+
+/** The fight's history as the measures count it, with its field name: each step's list of who saw its turn start at its widest. */
+function historyBytes(state: RoomState): number {
+  const lists = historyLists(state.encounterHistory);
+  return fieldBytes("encounterHistory") + collectionBytes(state.encounterHistory) - lists.extra + lists.count * widestListExtra(state.members);
 }
 
 /** A layer of a scene at its widest, every tile present: its entries' bytes, key and colon included, and how many. */
@@ -2392,15 +2399,75 @@ export function farWidthsByFloor(state: RoomState, only?: (key: EntityKey) => bo
 }
 
 /**
+ * A fight's turn start at its widest, with its key and comma: every id at
+ * its widest, the floor at the room's longest scene id, the spot at the
+ * widest numbers, the list of who saw it at the roster's widest, and as
+ * many mounts as a turn shares.
+ */
+const turnStartMost = (room: WidthsRoom) =>
+  fieldBytes("turnStart") +
+  serializedBytes({
+    entryId: ID_AT_WIDEST,
+    tokenId: ID_AT_WIDEST,
+    sceneId: "",
+    x: WIDEST_NUMBER,
+    y: WIDEST_NUMBER,
+    elevation: WIDEST_NUMBER,
+    seen: true,
+    seenBy: [],
+    seq: Number.MAX_SAFE_INTEGER,
+    mounts: Array.from({ length: LIMITS.turnMounts }, () => ID_AT_WIDEST),
+  }) -
+  serializedBytes("") +
+  room.sceneIdMost +
+  room.listWidth +
+  1;
+
+/** A fight's history at its bound as the measures count it (historyBytes): MAX_HISTORY steps in HISTORY_BYTES, each with a list of who saw its turn start. */
+const historyMost = (room: WidthsRoom) => fieldBytes("encounterHistory") + 2 + (MAX_HISTORY - 1) + HISTORY_BYTES + MAX_HISTORY * room.listWidth;
+
+/**
+ * What the far line counts beyond the measure of the fight's history, which
+ * a turn's end fills with rows, creatures and conditions a player chose
+ * (D-261120-060). The room's reading counts it at its bound while a fight
+ * runs, so no step a Next keeps or drops, nor one a companion's removal
+ * rewrites, moves it, and the stored state stays within the room's line. A
+ * scene's reading counts it as empty: every scene's projection holds the
+ * room's one history, which its own bound holds to HISTORY_BYTES. A
+ * history kept past its bound from before the bound held counts at its
+ * bytes in the room's reading.
+ */
+function historyWidth(state: RoomState, inScene: boolean): number {
+  const stored = historyBytes(state);
+  if (inScene) return fieldBytes("encounterHistory") + 2 - stored;
+  return state.encounter ? Math.max(0, historyMost(widthsRoom(state)) - stored) : 0;
+}
+
+/**
+ * What the far line counts beyond the measure of where the turn under way
+ * began, which a turn's end copies from the creature that starts, a
+ * player's own included: at its widest (D-261120-060).
+ */
+function turnStartWidth(state: RoomState, encounter: Encounter): number {
+  const room = widthsRoom(state);
+  const lists = encounterLists(encounter);
+  const stored = encounter.turnStart === undefined ? 0 : memberBytes("turnStart", encounter.turnStart) - lists.extra + lists.count * room.listWidth;
+  return Math.max(0, turnStartMost(room) - stored);
+}
+
+/**
  * What the far line counts beyond the measure in the room-level part, of
  * the rows `only` takes when given: the fight's rev and each row's place
  * among ties (`tieOrder`), which a player's row moves on for rows they do
- * not receive, at their widths (D-261119-011).
+ * not receive, at their widths (D-261119-011), and the fight's turn start
+ * and history at theirs, the history as a scene's reading counts it when
+ * `inScene`.
  */
-export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => boolean): number {
+export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => boolean, inScene = false): number {
   const encounter = state.encounter;
-  if (!encounter) return 0;
-  let bytes = only ? 0 : Math.max(0, fieldBytes("rev") + DIGITS.rev + 1 - memberBytes("rev", encounter.rev));
+  const history = only ? 0 : historyWidth(state, inScene);
+  if (!encounter) return history;
+  let bytes = history + (only ? 0 : Math.max(0, fieldBytes("rev") + DIGITS.rev + 1 - memberBytes("rev", encounter.rev)) + turnStartWidth(state, encounter));
   for (const row of encounter.entries) {
     if (only && !only(`row:${row.id}` as EntityKey)) continue;
     bytes += Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder));
@@ -2417,7 +2484,7 @@ export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => 
  * hold. Falls and trapdoors count by the same widths.
  */
 export function farWidths(state: RoomState, floors?: ReadonlySet<string>): number {
-  let bytes = farWidthsRoomLevel(state);
+  let bytes = farWidthsRoomLevel(state, undefined, floors !== undefined);
   for (const [floor, extra] of farWidthsByFloor(state)) if (!floors || floors.has(floor)) bytes += extra;
   const pits = new Set(Object.values(state.traps ?? {}).filter((trap) => trap.rig?.pit && (!floors || floors.has(trap.sceneId))).map((trap) => trap.sceneId));
   return bytes - pits.size * PIT_TOKENS_RESERVE;
@@ -2541,7 +2608,15 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   };
   const entity = (kind: CopiedKind, id: string, stored: unknown, copy: unknown, on: string) => ({ on, ...exactBytes(kind, stored, measured(kind, id, stored), copy, entityBytes(id, copy), room) });
   const own = ownHeld(state, memberId, view, new Set(Object.keys(state.scenes)));
-  for (const [id, copy] of own.token) out.set(keys.token(id), entity("token", id, state.tokens[id], copy, state.tokens[id]!.sceneId));
+  // A creature of theirs keeps its walk past its turn, which no copy then holds: it counts as their copy held it on that
+  // turn, so a turn's end moves none of the stops they chose into the stepped part (D-261120-060).
+  const walked = (id: string, copy: unknown) => {
+    const held = copy as { path?: unknown };
+    if (held.path !== undefined || !room.owns.has(id)) return copy;
+    const walk = view.walk(id);
+    return walk === null ? copy : { ...held, path: walk };
+  };
+  for (const [id, copy] of own.token) out.set(keys.token(id), entity("token", id, state.tokens[id], walked(id, copy), state.tokens[id]!.sceneId));
   // Every creature their copy holds while the room lets them move any, or change any one's HP, and the characters those
   // play, whose actor the change writes.
   if (movesAnyToken(state.meta.settings, memberId) || state.meta.settings.playersApplyDamage) {

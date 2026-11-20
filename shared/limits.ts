@@ -1540,6 +1540,12 @@ export type SeatView = {
   written(lineId: string): unknown;
   /** The creatures whose turn the copy shows under way: the active row's, and the mounts sharing its turn the copy holds. */
   turn(): ReadonlySet<string>;
+  /**
+   * The walk a creature of theirs holds, as their copy holds a walk on its
+   * own turn, whatever turn is under way now, or null where they do not
+   * own it or it holds none.
+   */
+  walk(tokenId: string): unknown;
 };
 
 /**
