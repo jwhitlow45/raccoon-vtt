@@ -3,8 +3,8 @@ import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules, type BuildState } from "../ruleHooks.ts";
-import { carriedGroup, footprintInScene, linkHolds, moveGroups, onHolder, overlaps, publicMembers, seatedAt, seatSpot, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
-import { footprintRect, placedOnHex, snapStep, tokenRefHex } from "./footprint.ts";
+import { attachReachFt, carriedGroup, footprintInScene, fullRect, linkHolds, moveGroups, onHolder, overlaps, publicMembers, seatedAt, seatSpot, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
+import { footprintRect, footprintSize, placedOnHex, snapStep, tokenRefHex } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexKey, hexLine, hexNeighbors } from "./hex.ts";
@@ -606,10 +606,11 @@ function withCarried(moved: MovedToken | null, before: RoomState, member: Token,
 
 /**
  * Where a creature players cannot see that a seated rider drags arrives
- * (reviews HEXOP-OPUS2-2, HEXOP-ASTRA-4, HEXOP-OPUS4-1): off the mount and
- * in her reach where she sits. Its walk as her place carries her (`was`)
- * ends beside her own seat, which the dropped seat may leave two squares or
- * hexes off, so where that walk went all the way it takes the spot nearest
+ * (reviews HEXOP-OPUS2-2, HEXOP-ASTRA-4, HEXOP-OPUS4-1, HEXOP-ASTRA-6): off
+ * the mount and in her reach where she sits. Its walk as her place carries
+ * her (`was`) ends beside her own seat, which the dropped seat may leave
+ * squares or hexes off, so where that walk went all the way it takes, of
+ * every spot that can be in her reach whatever the sizes, the one nearest
  * its end that keeps its whole footprint inside the scene, off the mount's
  * stand and in her reach there, at the height a drag takes it to there, a
  * step from that end through no wall or ledge, standing clear, and its
@@ -650,19 +651,29 @@ function besideSeat(before: RoomState, member: Token, was: MovedToken, holder: M
     return movementRules.legBlocker(build, from, { x: p.x, y: p.y, elevation: placed.elevation, squeeze: false }) === null && !offGridWallThrough(build, walkEnd(build, from, p));
   };
   if (fits(end)) return was;
+  // Every spot in her reach, bounded as attach.ts getOffSpot bounds a place to get off: by both footprints and the reach.
   const spots: Point[] = [];
+  const reach = attachReachFt(settings.feetPerCell) / settings.feetPerCell;
   if (isHex(g)) {
-    // The hexes up to three steps from her seat's.
+    // A footprint reaches at most two hexes from its reference hex, so a hex of it in her reach lies within both reaches, the
+    // reach in hexes and one more, of her seat's.
+    const rings = 2 + 2 + Math.ceil(reach) + 1;
     let ring = [tokenRefHex(g, there)];
     const seen = new Set(ring.map(hexKey));
-    for (let d = 0; d < 3; d++) {
+    for (let d = 0; d < rings; d++) {
       const next = ring.flatMap((h) => hexNeighbors(g, h)).filter((n) => !seen.has(hexKey(n)) && seen.add(hexKey(n)) !== undefined);
       for (const h of next) spots.push(placedOnHex(g, self, h));
       ring = next;
     }
   } else {
+    // Its box within the reach of hers, one more cell either way for the snap, on the grid it snaps to.
     const step = snapStep(self);
-    for (let dy = -3; dy <= 3; dy += step) for (let dx = -3; dx <= 3; dx += step) spots.push({ x: seat.x + dx, y: seat.y + dy });
+    const size = footprintSize(self);
+    const box = fullRect(g, there);
+    const first = (v: number) => Math.floor(v / step) * step;
+    for (let y = first(box.y - size.h - reach - 1); y <= box.y + box.h + reach + 1; y += step) {
+      for (let x = first(box.x - size.w - reach - 1); x <= box.x + box.w + reach + 1; x += step) spots.push({ x, y });
+    }
   }
   const best = spots
     .filter(fits)
