@@ -1,8 +1,12 @@
-import type { LogEntry, RoomState, TrapSound, Viewer } from "#shared/model.ts";
+import type { Fall, LogEntry, RoomState, TrapSound, Viewer } from "#shared/model.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { describeEvent, type LogNames } from "#shared/logText.ts";
 import { isPoseOp, type ClientOp } from "#shared/protocol.ts";
 import { ownsToken } from "../tokens/access.ts";
+import type { Labels } from "../../lib/labels.ts";
+import { displayName } from "../../lib/scene.ts";
+import { ownEntry } from "#shared/records.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 
 /*
  * What a trap going off tells each device (docs/design/design-v1-traps.md 4.3),
@@ -60,6 +64,49 @@ export function dmAlerts(lines: readonly LogEntry[], state: RoomState, viewing: 
     out.push({ text: `${describeEvent(data, namesOf(state), true)}${unseen}`, ...sound, trapId: data.trapId, due: e.id });
   }
   return out;
+}
+
+/**
+ * The newest card's `made` among the DM's fall cards (docs/design/design-v1-floors.md
+ * phase 4, 4.4), or -1 with none: what a device held when it loaded, so a
+ * later card is new and a reconnect, which brings the same cards back,
+ * toasts nothing old.
+ */
+export function newestMade(falls: Readonly<Record<string, Fall | undefined>> | undefined): number {
+  let most = -1;
+  for (const card of Object.values(falls ?? {})) if (card && card.made > most) most = card.made;
+  return most;
+}
+
+/** The fall cards made after `after`, oldest first, so their toasts come in the order they fell. */
+export function fallsAfter(falls: Readonly<Record<string, Fall | undefined>> | undefined, after: number): Fall[] {
+  const place = (card: Fall) => Number(card.id.slice(card.id.indexOf(":") + 1));
+  return Object.values(falls ?? {})
+    .filter((card): card is Fall => card !== undefined && card.made > after)
+    .sort((a, b) => a.made - b.made || place(a) - place(b));
+}
+
+/** A fall's toast for the DM: its words, and Show where the floor it names is not the one shown. */
+export type FallAlert = { text: string; show?: { sceneId: string } };
+
+/**
+ * The DM's toasts for new fall cards (4.4): "Thorn fell 10 ft to Ground
+ * floor.", with Show where that floor is not the one shown, and "A creature
+ * fell 10 ft to Ground floor on Tower." with Show for another scene, whose
+ * creatures the DM's copy does not hold. No name is stored on the card, so
+ * it is read off the creature the copy holds.
+ */
+export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
+  return cards.map((card) => {
+    const scene = ownEntry(state.scenes, card.sceneId);
+    const floor = scene?.floor?.name ?? scene?.name ?? "another floor";
+    const token = ownEntry(state.tokens, card.tokenId);
+    const show = scene && card.sceneId !== viewing ? { show: { sceneId: card.sceneId } } : {};
+    if (token) return { text: `${displayName(token, labels)} fell ${card.ft} ft to ${floor}.`, ...show };
+    // The copy holds every floor of the scene shown, so a creature missing from it is no longer on the map there.
+    if (viewing !== null && sameScene(state, card.sceneId, viewing)) return { text: `A creature no longer on the map fell ${card.ft} ft to ${floor}.` };
+    return { text: `A creature fell ${card.ft} ft to ${floor} ${scene?.name.trim() ? `on ${scene.name.trim()}` : "on another scene"}.`, ...show };
+  });
 }
 
 /** The toast the DM gets once Show brought them to the trap's scene: the line read again, with the creatures' names. */

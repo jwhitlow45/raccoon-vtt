@@ -6,7 +6,8 @@ import { useStartGroupSave } from "../dice/groupSave/start.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
-import { dmAlerts, linesAfter, newestId, playerAlerts, shownAlert, trapMoveWatch, type MoveAnswers, type TrapAlert } from "./alerts.ts";
+import { dmAlerts, fallAlerts, fallsAfter, linesAfter, newestId, newestMade, playerAlerts, shownAlert, trapMoveWatch, type MoveAnswers, type TrapAlert } from "./alerts.ts";
+import { labelsOf } from "../../state/labels.ts";
 import { GROUP_SAVE_HELD } from "./rules.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
@@ -22,6 +23,8 @@ const NO_LINES: readonly LogEntry[] = [];
  * A DM's toast for a trap on another scene offers Show, which goes there
  * and toasts again with the creatures' names and the button, since only
  * then does the DM hold the trap, its creatures and its card.
+ * A DM also gets one for each new fall card (docs/design/design-v1-floors.md
+ * phase 4, 4.4), with Show where its floor is not the one shown.
  * And once the server's answer to a player's move shows a trap stopped it
  * or told its players, the token bar's Undo move and the stopped walk's
  * Teleport here go, since the server would refuse them now.
@@ -77,6 +80,7 @@ export function useTrapAlerts(): void {
     });
     let seenLog: string | null = null;
     let seenSeen: string | null = null;
+    let seenMade = -1;
     let moves: ((now: MoveAnswers) => void) | null = null;
     const update = () => {
       const now = store.getState();
@@ -96,6 +100,7 @@ export function useTrapAlerts(): void {
       if (!moves) {
         seenLog = newestId(trapLog);
         seenSeen = newestId(trapSeen);
+        seenMade = newestMade(held.falls);
         moves = trapMoveWatch(now, scope.get(lastMoveSlot), scope.get(stopNoteSlot));
         return;
       }
@@ -109,6 +114,15 @@ export function useTrapAlerts(): void {
         // Each is a line of the trap log, the DM's or the players', which the Log shows too.
         ui.notify(a.text, "info", undefined, action, true);
         if (a.sound) playTrapSound(a.sound);
+      }
+      if (you.role === "dm") {
+        // A card an undo brought back keeps its old `made`, so only a fall since the last toast is new.
+        const fell = fallsAfter(held.falls, seenMade);
+        seenMade = Math.max(seenMade, newestMade(held.falls));
+        for (const a of fallAlerts(fell, view, now.sceneId, labelsOf(now))) {
+          const to = a.show?.sceneId;
+          ui.notify(a.text, "info", undefined, to ? { label: "Show", run: () => actions.switchScene(to) } : undefined);
+        }
       }
       if (you.role === "player") moves(now);
     };
