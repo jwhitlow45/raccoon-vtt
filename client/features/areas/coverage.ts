@@ -1,21 +1,26 @@
 import type { Character, RoomState, Scene, Token } from "#shared/model.ts";
 import {
+  convexHull,
   CoverageCache,
   coverageCacheKey,
   creaturesInArea,
+  partOverOpening,
   resolveArea,
   SAMPLES,
   type AreaContext,
   type AreaTemplateInput,
+  type AreaThrough,
   type AreaToken,
   type CoverageResult,
 } from "#shared/rules/aoe.ts";
 import { FREE_WALL_LATTICE } from "#shared/model.ts";
+import { placedOnHex, type PlacedToken } from "#shared/rules/footprint.ts";
 import { convexLive, type Ground } from "#shared/rules/held.ts";
 import { rayHull } from "#shared/reducer/areaTriggers.ts";
 import { sceneWalls, type WallSet } from "#shared/rules/walls.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { HEX_R, hexCenter } from "#shared/rules/hex.ts";
+import { HEX_R, hexCenter, hexKey, type HexGrid } from "#shared/rules/hex.ts";
+import type { ThroughInputs } from "./through.ts";
 import { auraClip } from "../../canvas/markStand.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { standingStretches } from "../../canvas/relief/runs.ts";
@@ -184,8 +189,29 @@ function groundKey(live: Ground | undefined): string {
  * The tokens on `sceneId` a template catches, in the view's order, and on
  * a player's device only those whose rays lie on its live ground
  * (`raysLive`). Cached until any token, or the live ground, changes.
+ *
+ * With `through` (through.ts) the list goes on with the creatures it
+ * catches across its openings (docs/design/design-v1-floors.md phase 4,
+ * 9.2), by opening and then in the copy's order: the DM's rows and an area's
+ * group save read them. A caller that draws on the floor shown leaves it
+ * out, since the area draws only on its own floor.
  */
-export function caughtTokens(t: AreaTemplateInput, ctx: DeviceAreaContext, sceneId: string): string[] {
+export function caughtTokens(t: AreaTemplateInput, ctx: DeviceAreaContext, sceneId: string, through?: ThroughInputs): string[] {
+  const own = caughtOnFloor(t, ctx, sceneId);
+  if (!through) return own;
+  const across = caughtThrough(t, ctx, sceneId, through);
+  if (across.length === 0) return own;
+  let byAcross = joined.get(own);
+  if (!byAcross) joined.set(own, (byAcross = new WeakMap()));
+  let both = byAcross.get(across);
+  if (!both) byAcross.set(across, (both = [...own, ...across]));
+  return both;
+}
+
+/** Each floor's list joined to each list across its openings, kept while both are, so a caller sees one list while neither changes. */
+const joined = new WeakMap<string[], WeakMap<string[], string[]>>();
+
+function caughtOnFloor(t: AreaTemplateInput, ctx: DeviceAreaContext, sceneId: string): string[] {
   const tokens = ctx.tokens;
   if (!tokens) return NOBODY;
   let byKey = caught.get(tokens);
@@ -217,6 +243,82 @@ export function caughtTokens(t: AreaTemplateInput, ctx: DeviceAreaContext, scene
 export function raysLive(t: AreaTemplateInput, creature: AreaToken, ctx: AreaContext, live: Ground): boolean {
   const attached = t.attachedTo !== undefined ? ctx.tokens?.[t.attachedTo] : undefined;
   return convexLive(live, rayHull(ctx.grid, t, resolveArea(t, ctx), attached, creature));
+}
+
+const across = new WeakMap<readonly AreaToken[], Map<string, string[]>>();
+
+/** A serial per opening list, so the answers across one list are kept apart from another's. */
+const lists = new WeakMap<readonly AreaThrough[], number>();
+let listSerial = 0;
+
+function listKey(list: readonly AreaThrough[]): number {
+  let k = lists.get(list);
+  if (k === undefined) lists.set(list, (k = ++listSerial));
+  return k;
+}
+
+/**
+ * The creatures on the floors across an area's openings that it catches
+ * (aoe.ts creaturesInArea's `through`), one opening at a time, so each is
+ * judged live by the opening it is caught through (`throughLive`). Cached
+ * while the creatures across, the openings, the live grounds and the
+ * area's own inputs are.
+ */
+function caughtThrough(t: AreaTemplateInput, ctx: DeviceAreaContext, sceneId: string, through: ThroughInputs): string[] {
+  let byKey = across.get(through.tokens);
+  if (!byKey) across.set(through.tokens, (byKey = new Map()));
+  const there = [...through.grounds.values()].map((g) => groundKey(g ?? undefined)).join(",");
+  const key = `${sceneId}|${listKey(through.list)}|${groundKey(ctx.live)}|${there}|${coverageCacheKey(t, ctx)}`;
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const ids: string[] = [];
+  const taken = new Set<string>();
+  for (const j of through.list) {
+    const on = through.tokens.filter((tok) => tok.sceneId === j.sceneId && !taken.has(tok.id));
+    if (on.length === 0) continue;
+    const ground = through.grounds.get(j.sceneId) ?? null;
+    const byId = new Map(on.map((tok) => [tok.id, tok]));
+    for (const id of creaturesInArea({ ...t, sceneId }, on, { ...ctx, through: [j] })) {
+      if ((ctx.live || ground) && !throughLive(t, byId.get(id)!, ctx, j, ctx.live ?? null, ground)) continue;
+      taken.add(id);
+      ids.push(id);
+    }
+  }
+  const out = ids.length > 0 ? ids : NOBODY;
+  byKey.set(key, out);
+  if (byKey.size > CAUGHT_PER_MAP) {
+    const oldest = byKey.keys().next().value;
+    if (oldest !== undefined) byKey.delete(oldest);
+  }
+  return out;
+}
+
+/**
+ * Whether a player's device lists a creature an area reaches through an
+ * opening (docs/design/design-v1-floors.md phase 4, 9.2), by `raysLive`'s
+ * rule on both floors: every ray to the part of its space over the
+ * opening's squares lies on the area's floor's live ground, and that part
+ * lies on its own floor's. A floor whose ground is null (fog off) has it
+ * all live.
+ */
+export function throughLive(t: AreaTemplateInput, creature: AreaToken, ctx: AreaContext, j: AreaThrough, here: Ground | null, there: Ground | null): boolean {
+  const g = ctx.grid;
+  const part = partOverOpening(g, creature, j.rect);
+  if (!part) return false;
+  // The rays end on the part's cells as they would on a creature standing on just those cells.
+  const ends: PlacedToken[] =
+    part.kind === "squares"
+      ? [{ size: "custom", w: part.range.x1 - part.range.x0, h: part.range.y1 - part.range.y0, x: part.range.x0, y: part.range.y0 }]
+      : part.hexes.map((h) => ({ size: "medium", ...placedOnHex(g as HexGrid, { size: "medium", x: 0, y: 0 }, h) }));
+  if (here) {
+    const attached = t.attachedTo !== undefined ? ctx.tokens?.[t.attachedTo] : undefined;
+    const area = resolveArea(t, ctx);
+    if (!convexLive(here, convexHull(ends.flatMap((end) => rayHull(g, t, area, attached, end))))) return false;
+  }
+  if (!there) return true;
+  if (part.kind === "hexes") return part.hexes.every((h) => there.keyLive(hexKey(h)));
+  for (let y = part.range.y0; y < part.range.y1; y++) for (let x = part.range.x0; x < part.range.x1; x++) if (!there.live(x, y)) return false;
+  return true;
 }
 
 export type InAreaEntry = { id: string; name: string; ally: boolean; dead: boolean };

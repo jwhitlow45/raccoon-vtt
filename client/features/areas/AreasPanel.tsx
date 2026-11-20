@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import type { AreaTemplate, RoomState } from "#shared/model.ts";
+import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { displayName } from "../../lib/scene.ts";
@@ -13,6 +13,7 @@ import { useGroupSave, useGroupSaveStore } from "../dice/groupSave/store.ts";
 import { pickTemplate } from "./AreaTool.tsx";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { useLiveGround } from "./liveGround.ts";
+import { useAreaThrough } from "./through.ts";
 import { areaTitle } from "./labels.ts";
 import { triggerSummary } from "./placement.ts";
 import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
@@ -27,7 +28,9 @@ import { useLabels } from "../../state/labels.ts";
  * watched while the party walks with the select tool, which is when the
  * area tool's own bar is closed. The DM also rolls an area's save and
  * applies its damage here, through the group save that takes the panel's
- * place (docs/design/design-v1-roll-options.md 5.6).
+ * place (docs/design/design-v1-roll-options.md 5.6). An area over an
+ * opening lists, and its save takes, the creatures it reaches on the floor
+ * across (docs/design/design-v1-floors.md phase 4, 9.2).
  */
 
 const EMPTY: RoomState["templates"] = {};
@@ -55,13 +58,18 @@ export default function AreasPanel(props: PanelProps) {
   const fog = useViewerFog({ scene, role: you?.role ?? "player", fog: scene?.fogEnabled !== false });
   // And list only creatures whose rays lie on their live ground (coverage.ts raysLive).
   const ground = useLiveGround(scene, you?.role ?? "player");
+  // And reach across the openings on its floor (through.ts), by the gate every device reads alike.
+  const throughOf = useAreaThrough(you?.role ?? "player");
+  const across = scene ? throughOf(scene.id) : undefined;
+  // The rows name creatures across an opening too, which the floor's own tokens lack.
+  const named = useMemo(() => (across ? { ...live.tokens, ...Object.fromEntries(across.tokens.map((t): [string, Token] => [t.id, t])) } : live.tokens), [live.tokens, across]);
   if (!view || !scene || !you) return null;
 
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
   // The rows of an area's group save follow its caught creatures as they move, until the roll.
   const areaIds = (templateId: string) => {
     const t = templates[templateId];
-    return t ? caughtTokens(t, ctx, t.sceneId) : [];
+    return t ? caughtTokens(t, ctx, t.sceneId, throughOf(t.sceneId)) : [];
   };
   if (you.role === "dm" && group) return <GroupSave parent="Areas" onBack={() => groupStore.setState({ shownIn: null })} areaIds={areaIds} />;
   const damaged = damageId ? templates[damageId] : undefined;
@@ -75,7 +83,7 @@ export default function AreasPanel(props: PanelProps) {
   return (
     <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(2) }}>
       {list.map((t) => {
-        const entries = inAreaEntries(caughtTokens(t, ctx, scene.id), live.tokens, view.characters, labels);
+        const entries = inAreaEntries(caughtTokens(t, ctx, scene.id, across), named, view.characters, labels);
         const caster = t.casterId ? view.tokens[t.casterId] : undefined;
         const attached = t.attachedTo ? view.tokens[t.attachedTo] : undefined;
         const editable = canEdit(env, t);
