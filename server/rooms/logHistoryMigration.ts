@@ -45,9 +45,12 @@ import { archiveAdmitted, completeLines, incompleteLines, storedKey, type Archiv
  * (shutdown, or the deletion of the room it works on): connecting, waiting
  * for a lock (polled, between cancellable waits), and each query (its
  * query timeout). A cancelled step sends the backend PostgreSQL's cancel
- * request and then closes the connection, with no more SQL on it, which
- * ends the backend and every lock it held. The job's turn and lease are
- * given back only after that, and stop() resolves only after that.
+ * request and then closes the connection, with no more SQL on it. The job's
+ * turn and lease are given back only after that, and stop() resolves only
+ * after that. The backend ends, and every lock it held with it, once it
+ * reads the closed socket: a moment later, or once its statement ends when
+ * the cancel missed it. A job that meets such a lock reports the room
+ * locked, and the room's next read asks for it again.
  */
 
 export const UNINDEXED_INDEX = "room_log_unindexed_room";

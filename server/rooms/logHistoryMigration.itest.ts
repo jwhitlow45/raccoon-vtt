@@ -184,6 +184,25 @@ function worker(opts: Partial<MigrationOptions> = {}, budget = new LogScanBudget
   return { m, budget, steps, logged, outcome, connects: () => connects };
 }
 
+/**
+ * Asks `w` for a room until a job completes it. A job that finds the room's
+ * lock held reports "locked" and completes nothing, and a stopped worker's
+ * backend can still hold that lock after stop() resolves: its socket is
+ * closed, but it ends only once it reads that, after any statement a lost
+ * cancel left running. The room is asked again once no lock is held, as the
+ * room's next read asks for it on a server.
+ */
+async function completeRoom(w: Worker, roomId: string): Promise<void> {
+  for (;;) {
+    const done = w.outcome(roomId);
+    w.m.want(roomId);
+    const outcome = await done;
+    if (outcome === "complete") return;
+    assert.equal(outcome, "locked", `room ${roomId}: the job's outcome`);
+    await until(async () => (await leftovers()).locks === 0, `room ${roomId}: the stale lock let go`);
+  }
+}
+
 /** Holds a step until its job is cancelled, as a statement does that the cancel stops. */
 function heldUntilCancelled(signal: AbortSignal): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -588,6 +607,59 @@ describe("the backfill", () => {
     assert.equal(await nulls(roomId) > 0, true, "the cut batch completed nothing it held");
     await w.m.stop();
   });
+
+  test("a stopped worker's backend can hold the room's lock past stop(): a new job reports locked and completes nothing, and the room completes once asked again", async () => {
+    const roomId = await newRoom();
+    const { rows } = lines(rng(56), 0, 300);
+    await legacyInsert(pool, roomId, rows);
+    const budget = new LogScanBudget();
+    // A cancel that never lands, as one does that reaches the backend before it reads the statement.
+    const stopped = worker({ batchRows: 100, cancel: async () => undefined }, budget);
+    stopped.m.start();
+    await until(() => stopped.m.ready, "ready");
+    const holder = await pool.connect();
+    let held = true;
+    const letGo = async () => {
+      if (!held) return;
+      held = false;
+      await holder.query("rollback");
+      holder.release();
+    };
+    try {
+      await holder.query("begin");
+      await holder.query("select 1 from room_log where room_id = $1 for update", [roomId]);
+      stopped.m.want(roomId);
+      await until(async () => (await pool.query("select 1 from pg_stat_activity where application_name = $1 and wait_event_type = 'Lock'", [appName])).rowCount === 1, "the batch waiting on the row locks");
+      await stopped.m.stop();
+      assert.deepEqual(await leftovers(), { backends: 1, locks: 1 }, "the closed connection's backend still runs its statement, holding the room's lock");
+      assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+
+      const outcomes: string[] = [];
+      let nullsWhenLocked = -1;
+      const next = worker({
+        onStep: async (step) => {
+          if (step.kind !== "room") return;
+          outcomes.push(step.outcome);
+          // The row locks go only once a job has met the room's lock, so that job runs while the stale backend holds it.
+          if (step.outcome === "locked") {
+            nullsWhenLocked = await nulls(roomId);
+            await letGo();
+          }
+        },
+      });
+      next.m.start();
+      await until(() => next.m.ready, "ready");
+      await completeRoom(next, roomId);
+      assert.deepEqual(outcomes, ["locked", "complete"]);
+      assert.equal(nullsWhenLocked, rows.length, "the locked job completed nothing");
+      assert.equal(await nulls(roomId), 0);
+      assert.equal(await accessCount(roomId), expectedAccess(rows));
+      await next.m.stop();
+    } finally {
+      await letGo();
+    }
+    await noLeftovers("after the stale lock");
+  });
 });
 
 describe("the access table's plans", () => {
@@ -804,9 +876,7 @@ describe("backfill, index builds, live writes, reads and shutdowns in random ord
       last.m.start();
       await until(() => last.m.ready, "ready");
       for (const roomId of [roomA, roomB]) {
-        const done = last.outcome(roomId);
-        last.m.want(roomId);
-        await done;
+        await completeRoom(last, roomId);
         assert.equal(await nulls(roomId), 0);
         assert.equal(await accessCount(roomId), expectedAccess(stored.get(roomId)!));
         for (const viewer of VIEWERS) {
