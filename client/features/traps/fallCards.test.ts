@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Fall, RoomState } from "#shared/model.ts";
 import { character, room, scene, token } from "#shared/testutil.ts";
-import { WAITS } from "../floors/openings.testing.ts";
 import { deskFalls, fallRead, foldedWithFalls } from "./desk.ts";
 
 const { fallStart, FallCard } = await import("./FallCard.tsx");
@@ -53,7 +52,7 @@ describe("fall cards on the DM desk", () => {
     assert.deepEqual(deskFalls(undefined), []);
   });
 
-  test("a creature the copy holds: its name, the drop and what Apply will do", { skip: WAITS.fallDice }, () => {
+  test("a creature the copy holds: its name, the drop and what Apply will do", () => {
     const read = fallRead(view(), card(), "upper", NO_LABELS);
     assert.equal(read.kind, "here");
     assert.equal(read.line, "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.");
@@ -73,7 +72,7 @@ describe("fall cards on the DM desk", () => {
     assert.equal(fallRead(view(), card({ tokenId: "wolf" }), "crypt2", NO_LABELS).kind, "elsewhere", "from Crypt, Tower's creatures are not in the copy");
   });
 
-  test("Apply's page: the creature that fell, by the card's id, in the Dice panel", { skip: WAITS.fallDice }, () => {
+  test("Apply's page: the creature that fell, by the card's id, in the Dice panel", () => {
     const input = fallStart(card());
     assert.deepEqual(input.source, { kind: "fall", fallId: "120:0", tokenIds: ["thorn"] });
     assert.equal(input.panel, "dice");
@@ -103,7 +102,7 @@ describe("the fall card's buttons", () => {
   }
   const buttons = (html: string) => [...html.matchAll(/<button[^>]*>(?:<[^>]*>)*([^<]*)</g)].map((m) => m[1]).filter((t) => t !== "");
 
-  test("a region named for its creature, found by its card's id, titled Fall", { skip: WAITS.fallDice }, () => {
+  test("a region named for its creature, found by its card's id, titled Fall", () => {
     const html = markup(card());
     assert.match(html, /role="region" aria-label="Fall: Thorn" data-fall-card="120:0"/);
     assert.deepEqual(buttons(html), ["Fall", "Apply", "Dismiss"]);

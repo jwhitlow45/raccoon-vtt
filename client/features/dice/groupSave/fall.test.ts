@@ -3,7 +3,6 @@ import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
 import { opSchema } from "#shared/protocol.ts";
 import { actor, character, customMonster, room, scene, token } from "#shared/testutil.ts";
-import { WAITS } from "../../floors/openings.testing.ts";
 import type { DiceView } from "../creature.ts";
 import { mark, newPage, sourceIds, type Page, type Source } from "./chain.ts";
 import { fallFill, FALL_NAME } from "./fills.ts";
@@ -71,7 +70,7 @@ describe("a fall card's group save", () => {
     assert.equal(sourceScene({ source }, tower({ thornOn: "upper" }), "ground"), "upper", "climbed back up before the DM applied it");
   });
 
-  test("fills as a fall reads: no save, the dice of its drop, Bludgeoning and Prone", { skip: WAITS.fallDice }, () => {
+  test("fills as a fall reads: no save, the dice of its drop, Bludgeoning and Prone", () => {
     const ten = fallFill({ ft: 10 });
     assert.deepEqual(ten.test, { kind: "none" });
     assert.equal(ten.dc, null);

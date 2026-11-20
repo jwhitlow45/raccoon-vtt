@@ -7,7 +7,6 @@ import { projectState } from "#shared/project.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { P1 } from "#shared/testutil.ts";
-import { WAITS } from "../floors/openings.testing.ts";
 import { farShift, priorOut, stairsPlan, type Stairs } from "./carry.ts";
 import { tokenStop } from "./ruler.ts";
 import type { WalkInput } from "./walkRuler.ts";
@@ -47,10 +46,15 @@ function plan(view: RoomState, role: "dm" | "player"): Stairs | null {
   return stairsPlan({ role, share: false, rulerId: "r1", walkInput, walked: null, carried: null, held: ALL, whole: view });
 }
 
-/** Ana's copy, her end of the stairs with or without the `shift` the projection sends once the far end is projected to her. */
+/**
+ * Ana's copy, her end of the stairs with or without the `shift` the
+ * projection sends once the far end is projected to her. Here it is: Upper
+ * floor is open and unfogged, so null takes it off, as a fogged far end
+ * would leave it.
+ */
 function anaCopy(s: RoomState, shift: { dx: number; dy: number } | null): RoomState {
   const ana = projectState(s, P1, { sceneId: GROUND }) as unknown as RoomState;
-  const end = ana.floorLinks!.l1!;
+  const { shift: _sent, ...end } = ana.floorLinks!.l1! as FloorLink & { shift?: { dx: number; dy: number } };
   return { ...ana, floorLinks: { ...ana.floorLinks!, l1: (shift ? { ...end, shift } : end) as FloorLink } };
 }
 
@@ -67,7 +71,14 @@ describe("a carried ruler over stairs with ends on different squares (phase 4, 8
     assert.deepEqual(priorOut(moved.plan.carry.prior), priorOut(same.plan.carry.prior), "the frame's prior tells nothing of the offset");
   });
 
-  test("the DM's copy lands by the stored pair's offset", { skip: WAITS.landingShift }, () => {
+  test("the projection's own `shift` lands Ana's ruler on the far end, as the DM's does", () => {
+    const s = room({ x: 11, y: 3 });
+    const ana = projectState(s, P1, { sceneId: GROUND }) as unknown as RoomState;
+    assert.deepEqual((ana.floorLinks!.l1! as FloorLink & { shift?: unknown }).shift, { dx: 3, dy: 0 }, "the far end is projected to her");
+    assert.deepEqual(plan(ana, "player")!.plan.stop, { x: 11.5, y: 3.5, z: 5 });
+  });
+
+  test("the DM's copy lands by the stored pair's offset", () => {
     const s = room({ x: 11, y: 3 });
     assert.deepEqual(farShift(s, s.floorLinks!.l1!), { dx: 3, dy: 0 });
     assert.deepEqual(plan(s, "dm")!.plan.stop, { x: 11.5, y: 3.5, z: 5 });

@@ -3,7 +3,6 @@ import { describe, test } from "node:test";
 import { ATTIC, GROUND, OPENING_RECT, UPPER, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
-import { WAITS } from "./openings.testing.ts";
 import { farChunks, farEnd, farTokensIn, holeDrop, holeDrops, holeOutline, holesOn, windowPxPerCell, WINDOW_MAX_PX } from "./openingView.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
@@ -49,7 +48,7 @@ describe("the holes on a floor", () => {
 });
 
 describe("the height chip", () => {
-  test("the floor's height plus the ground under the hole less the ground below, where the copy holds the far floor and its end", { skip: WAITS.fallDrop }, () => {
+  test("the floor's height plus the ground under the hole less the ground below, where the copy holds the far floor and its end", () => {
     const s = withOpening(tower());
     assert.equal(holeDrop(s, s.floorLinks!.o1!), 10);
     assert.equal(holeDrops(s, UPPER), "o1=10");
