@@ -12,9 +12,9 @@ import { DM, FULL_TILE_BITS, deepClone, reveal } from "./testutil.ts";
 /*
  * What players get of ends (docs/design/design-v1-floors.md phase 4, 8.1
  * and 8.2, 10.1): nothing of a hidden end, no key, count or id, so a climb
- * there, its undo and a ruler naming it answer as on no stairs; and a far
- * end's offset, `shift`, only while that far end is itself projected, so
- * it never tells a fogged end's place (D-261119-008, 094).
+ * there, its undo and a ruler naming it answer as on no stairs. A far
+ * end's offset, `shift`, comes only while that far end is itself
+ * projected, so it never tells a fogged end's place (D-261119-008, 094).
  */
 
 const DISPLAY: Viewer = { memberId: "display:table", role: "player" };

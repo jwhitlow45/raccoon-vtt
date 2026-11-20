@@ -1227,10 +1227,10 @@ function onAreaFloor(template: AreaTemplateInput, t: AreaToken): boolean {
 
 /**
  * The part of a creature's space over an opening's squares (AreaThrough),
- * the only part an area reaches through it: on squares its footprint cut
- * to them, `rect`, and the cells of both, `range`, since the squares are
- * whole cells; on hexes its hexes among them, `whole` where that is all of
- * them. Null where none of it lies over them.
+ * the only part an area reaches through it. On squares it is its footprint
+ * cut to them, `rect`, and the cells of both, `range`, since the squares
+ * are whole cells. On hexes it is its hexes among them, `whole` where that
+ * is all of them. Null where none of it lies over them.
  */
 export type OpeningPart = { kind: "squares"; rect: Rect; range: CellRange } | { kind: "hexes"; hexes: Hex[]; whole: boolean };
 

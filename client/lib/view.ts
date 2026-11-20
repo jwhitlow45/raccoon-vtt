@@ -401,8 +401,8 @@ type HoleCopy = Pick<RoomState, "scenes" | "floorLinks" | "buildChunks">;
  * The holes on a floor, by id, from the device's own copy, so a player's
  * reads only what they were sent: an end outside full fog, the floor below
  * once they hold it, and its height only as the end's `rise`. The holes and
- * their drops are the window's own (features/floors/openingView.ts holesOn
- * and holeDrop), so the relief's bottom and the height chip never tell two
+ * their drops are the window's own (features/floors/holes.ts holesOn and
+ * holeDrop), so the relief's bottom and the height chip never tell two
  * depths. Where the copy holds the floor below but cannot tell the drop, it
  * is BLIND_DROP_FT.
  */
