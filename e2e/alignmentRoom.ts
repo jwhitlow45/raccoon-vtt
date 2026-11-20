@@ -1376,6 +1376,29 @@ async function settled(el: Locator): Promise<void> {
   }, SHOWS_MS);
 }
 
+/**
+ * Waits until the side panel's tab row holds still, over two reads two frames apart, where the page draws one. The
+ * row fits its tabs again as a badge lands or the room loads, and More's menu closes at every new fit
+ * (pages/SideTabs.tsx), so a More opened before then can close under the click on its item.
+ */
+async function tabRowSettled(page: Page): Promise<void> {
+  const list = page.getByRole("tablist", { name: "Panels" });
+  const panels = page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+  await list.or(panels).first().waitFor({ timeout: SHOWS_MS });
+  if (!(await visible(list))) return;
+  let last = "";
+  await waitFor("the tab row to hold still", async () => {
+    await twoFrames(list);
+    const now = JSON.stringify(await list.getByRole("tab").evaluateAll((tabs) => tabs.map((t) => {
+      const box = (t as unknown as { getBoundingClientRect(): { x: number; width: number } }).getBoundingClientRect();
+      return [(t as unknown as { textContent: string | null }).textContent, box.x, box.width];
+    })));
+    const still = now === last;
+    last = now;
+    return still ? true : null;
+  }, SHOWS_MS);
+}
+
 /** Two animation frames of `el`'s page. */
 function twoFrames(el: Locator): Promise<unknown> {
   return el.page().evaluate(() => {
@@ -8987,10 +9010,13 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
         const page = await dmPageFor(size);
         let hold = false;
         const held: (() => void)[] = [];
+        // The newest batch's number the page was sent, for the wait on the op socket's batches below.
+        let pageSeq = 0;
         await page.routeWebSocket(/\/ws\?room=/, (socket) => {
           const upstream = socket.connectToServer();
           upstream.onMessage((message) => {
-            const parsed = JSON.parse(String(message)) as { t?: string };
+            const parsed = JSON.parse(String(message)) as { t?: string; seq?: number };
+            if (parsed.t === "ev" && typeof parsed.seq === "number") pageSeq = Math.max(pageSeq, parsed.seq);
             if (hold && parsed.t === "history") held.push(() => socket.send(message));
             else socket.send(message);
           });
@@ -9002,6 +9028,10 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           await wire.apply({ t: "character.create", character: { id: characterId, name: "Bree, keeper of the western beacon and the lanterns along the harbor", size: "medium", ownerIds: [], actor: actor() } });
           await wire.apply({ t: "character.update", characterId, patch: { actor: { ac: 19 } } });
           await wire.apply({ t: "actor.hp", target: { characterId }, change: { kind: "damage", amount: 4 } });
+          // The op socket's batches reach the page after their answers, and their badges fit the tab row again, which closes More's menu.
+          const wireSeq = ([...wire.received].reverse().find((m) => m.t === "ev") as { seq?: number } | undefined)?.seq ?? 0;
+          await waitFor("the page sent the op socket's batches", () => (pageSeq >= wireSeq ? true : null), SHOWS_MS);
+          await tabRowSettled(page);
           const { sheet, opener } = await setupHistory(page);
           await sweep.measure(page, "undo-scope-sheet", sheet);
           await shots.take(page, `undo-scope-${name}-${scale}-setup`);
@@ -9031,6 +9061,7 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           assert.ok(await opener.evaluate((button) => button === button.ownerDocument.activeElement));
           hold = true;
           await reopenRoom(page);
+          await tabRowSettled(page);
           const loading = (await setupHistory(page)).sheet;
           await loading.getByText("Loading undo history…", { exact: true }).waitFor();
           // A turning spinner's box grows by up to 3.7 px each side at 45 degrees, though its ring stays in place. Measure it still, as reduced motion draws it.
