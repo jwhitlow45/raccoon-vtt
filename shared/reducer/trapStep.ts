@@ -6,6 +6,7 @@ import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, typ
 import { pressChangesNothing } from "./encounter.ts";
 import { addDue, dmLine, orderedBy, PIT_ACTION, pitOpens, plainList, playersLine, runActions } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
+import type { Landing } from "./falls.ts";
 import { ownEntry } from "../records.ts";
 
 /*
@@ -185,4 +186,16 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
   const line = dmLine(tx, next, { how: s.how, by: by.list, more: by.more, hits: s.hits.length, did, seen: s.seen, hidden: false });
   if (perceived) playersLine(tx, next, by.list.filter((id) => s.seen.has(id)));
   if (rig.save || rig.damage || rig.conditions) addDue(tx, trap.id, occurrence(line.id, { ...(perceived ? { perceived: true as const } : {}), acted: true }));
+}
+
+/**
+ * The arrival step (docs/design/design-v1-floors.md phase 4, 6, 4.3 step
+ * 6), once an op from version 64: each creature's last landing sets off
+ * every armed trap on the landing floor whose squares its space overlaps
+ * and whose rig goes off on `enter`, by `who`, `minSize` and `floor`, as a
+ * walk's would, public or private alike. A trapdoor it springs drops at
+ * once.
+ */
+export function arrivalStep(_tx: Tx, _before: RoomState, _landings: readonly Landing[]): TrapWrites | null {
+  throw new Error("not built: arrivalStep");
 }

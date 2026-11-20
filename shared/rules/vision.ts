@@ -5,6 +5,8 @@ import {
   MAX_LIGHT_FT,
   type Actor,
   type BuildChunk,
+  type CellRect,
+  type FloorLinkId,
   type LightLevel,
   type MemberId,
   type RoomState,
@@ -59,9 +61,25 @@ export const GREY = 1;
 export const DIM = 2;
 export const BRIGHT = 3;
 
-/** What the server needs beyond the state: the scene's derived walls (shared/rules/walls.ts `sceneWalls`). */
+/**
+ * An opening through which sight and light cross between two floors
+ * (docs/design/design-v1-floors.md phase 4, 7.1): one whose two floors both
+ * have party vision on and that players both see. `rect` is its squares,
+ * the same on both floors, `other` the floor across it, and `subs` the fog
+ * sub-cells of its squares, as `[sx, sy]`, where each floor's answer is
+ * raised to the other's.
+ */
+export type Join = { linkId: FloorLinkId; rev: number; rect: CellRect; other: SceneId; subs: readonly (readonly [number, number])[] };
+
+/**
+ * What the server needs beyond the state: the scene's derived walls
+ * (shared/rules/walls.ts `sceneWalls`), and the openings joined to a floor
+ * (shared/rules/openingSight.ts), so this file imports neither walls.ts nor
+ * the stairs' rules. A world without `openings` joins none.
+ */
 export type VisionWorld = {
   walls(scene: Scene, buildChunks: Readonly<Record<string, BuildChunk>>): WallSet;
+  openings?(state: RoomState, sceneId: SceneId): Join[];
 };
 
 // ---------------------------------------------------------------------------

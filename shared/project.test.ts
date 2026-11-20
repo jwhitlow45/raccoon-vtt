@@ -33,7 +33,7 @@ import { footprintRect } from "./rules/footprint.ts";
 import { compareEntries } from "./rules/initiative.ts";
 import { DOOR_COVER_OP_VERSION } from "./migrate.ts";
 import { applyOp } from "./reducer.ts";
-import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
+import { visionRules, type PartySight, type StandInVision } from "./ruleHooks.ts";
 import { derivedId } from "./reducer/duplicate.ts";
 import { DM, P1, P2, actor, apply, chance, character, companionBlock, customMonster, member, deepClone, drawing, entry, env, imageRef, numbered, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
 import { tableNumber } from "./numbering.ts";
@@ -739,7 +739,7 @@ describe("projection properties over random rooms with a party that sees", () =>
    * the scene's west half puts creatures on both sides of the line, so the
    * vision rule is checked on rooms where it matters.
    */
-  const fake: VisionRules = {
+  const fake: StandInVision = {
     partySight: (): PartySight => ({ seesSubcells: () => false, seesToken: (t) => t.x < 15, tiles: new Map([["1,0", { f: 1 }]]) }),
     // No scene here is per player, so nothing asks.
     holderSight: () => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),

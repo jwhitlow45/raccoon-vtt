@@ -4,7 +4,7 @@ import { LIMITS } from "./limits.ts";
 import { FOG_SUBCELLS, type Actor, type FogTile, type RoomState, type SightTile, type Token, type Viewer } from "./model.ts";
 import type { Op } from "./protocol.ts";
 import { orderShown, ownsToken, pageReadableBy, perPlayerScene, pinCells, playerOwned, stampCells } from "./project.ts";
-import { visionRules, type PartySight, type SightProbe, type VisionRules } from "./ruleHooks.ts";
+import { visionRules, type PartySight, type SightProbe, type StandInVision } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { occupiedCells, type CellRange } from "./rules/footprint.ts";
 import { zoneRanges } from "./rules/traps.ts";
@@ -116,7 +116,7 @@ function sightOfSources(state: RoomState, sceneId: string, sources: readonly Tok
 }
 
 /** The stub rules: whole-cell sight, the union for `partySight` and each holder's own sources for `holderSight`. */
-export const cellVision: VisionRules = {
+export const cellVision: StandInVision = {
   partySight: (state, sceneId) => sightOfSources(state, sceneId, lendingSources(state, sceneId)),
   holderSight: (state, sceneId, memberId) => sightOfSources(state, sceneId, holderSources(state, sceneId, memberId)),
   sightFromTiles,

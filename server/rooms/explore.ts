@@ -42,6 +42,18 @@ export function exploreOp(state: RoomState, sceneId: string | null = startFloor(
 }
 
 /**
+ * Every explored floor's `sys.explore` at once (docs/design/design-v1-floors.md
+ * phase 4, 7.2, D-261119-100): it first gathers each floor's pending joins
+ * to the holder lists (joinsOf), then builds each floor's op with them all
+ * as pending, so a player a later floor adds borrows sight into an earlier
+ * floor in the same pass, whatever the floors' order. With no opening the
+ * ops equal those the actor reads floor by floor today.
+ */
+export function exploreOps(_state: RoomState, _floors: readonly string[]): OpOf<"sys.explore">[] {
+  throw new Error("not built: exploreOps");
+}
+
+/**
  * The floors the explore step reads, bottom first: every floor of the
  * players' scene players see now (playersSee), the start floor alone on a
  * scene without floors, and none behind a blackout. A floor whose vision or

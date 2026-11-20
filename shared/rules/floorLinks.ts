@@ -150,6 +150,43 @@ export function linkHeight(state: Pick<RoomState, "scenes">, link: Pick<LinkEnd,
 }
 
 // ---------------------------------------------------------------------------
+// Openings (docs/design/design-v1-floors.md phase 4)
+
+/**
+ * How far a creature falls through an opening (4.2): the floor's height
+ * (`rise`, linkHeight) plus the upper end's ground less the lower end's, at
+ * least 0. The server reads both grounds from the pair, and a device from
+ * its own build chunks with its end's `rise`.
+ */
+export function fallDrop(_rise: number, _upperGround: number, _lowerGround: number): number {
+  throw new Error("not built: fallDrop");
+}
+
+/** A fall's d6 of Bludgeoning damage (SRD 5.2.1): one for each full 10 ft dropped, at most 20, none under 10 ft. */
+export function fallDice(_ft: number): number {
+  throw new Error("not built: fallDice");
+}
+
+/**
+ * Whether a flier may take an opening (5): standsOn's test with the
+ * creature in the air (`elevation > footprintGround`) and its space inside
+ * the squares, squeeze rules unchanged. A creature on the ground gets null,
+ * as it gets no Fly up or Fly down.
+ */
+export function throughOpening(_view: RoomState, _viewer: Viewer, _token: Token, _link: LinkEnd): Stand | null {
+  throw new Error("not built: throughOpening");
+}
+
+/**
+ * The offset a climb lands by where the far end of stairs or a ladder lies
+ * on other squares (8.2): the far end's place less this end's, in cells.
+ * A player's end carries it as `shift` only while the far end is projected.
+ */
+export function landingShift(_near: Pick<FloorLink, "rect">, _far: Pick<FloorLink, "rect">): { dx: number; dy: number } {
+  throw new Error("not built: landingShift");
+}
+
+// ---------------------------------------------------------------------------
 // Squares
 
 /** The cell keys of an end's squares: x, y on squares, column and row on hexes, as a trap's zone keys them. */

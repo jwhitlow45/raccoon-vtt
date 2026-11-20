@@ -5,6 +5,8 @@ import type { Point } from "./rules/geom.ts";
 import type { Grid } from "./rules/grid.ts";
 import { holderSight, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
+import { openingJoins } from "./rules/openingSight.ts";
+import { ownEntry } from "./records.ts";
 
 /**
  * The wave 4 rules as the core calls them (docs/design/design-v1-maps-vision.md
@@ -110,17 +112,45 @@ export type VisionRules = {
    * with none sees nothing.
    */
   sightFromTiles(tiles: Readonly<Record<string, SightTile>>, sceneId: SceneId): PartySight;
+  /**
+   * On the server: one class's sight on a floor, joined through its
+   * openings (docs/design/design-v1-floors.md phase 4, 7.2). Its own answer
+   * is the union's `partySight`, the shared class's `holderSight(F, null)`
+   * on a per-player floor and `partySight` on a whole-party one, and a
+   * holder's `holderSight(F, m)`, which a caller asks for only where m sees
+   * for themselves on F. The joined answer raises it in each join's
+   * sub-cells to the other floor's answer for the same class. `pending`
+   * holds an exploration's joins not yet on the holder lists, by floor, of
+   * which only those with `on` lend sight. With no join, the own answer.
+   */
+  sightFor(state: RoomState, sceneId: SceneId, cls: SightClass, pending?: PendingJoins): PartySight;
 };
+
+/** Whose sight on a floor (docs/design/design-v1-floors.md phase 4, 7.2): the DM's union, the shared class, or one sight holder's own. */
+export type SightClass = "union" | "shared" | { holder: MemberId };
+
+/** An exploration's joins to the holder lists, by floor, as explore.ts joinsOf finds them, each on or off at the cap. */
+export type PendingJoins = Readonly<Record<SceneId, readonly { memberId: MemberId; on: boolean }[]>>;
 
 /*
  * Sight reads the derived walls through this world, not by importing
  * walls.ts, whose areas sweep uses atan2: vision.ts and everything it
  * imports keep to the arithmetic every engine rounds alike (section 4.3.4).
  */
-const VISION_WORLD: VisionWorld = { walls: sceneWalls };
+const VISION_WORLD: VisionWorld = { walls: sceneWalls, openings: openingJoins };
 
 export const visionRules: VisionRules = {
   partySight: (state, sceneId) => partySight(state, sceneId, VISION_WORLD),
   holderSight: (state, sceneId, memberId) => holderSight(state, sceneId, memberId, VISION_WORLD),
   sightFromTiles,
+  // Each floor's own answer, through the two rules above so a test's stand-in sight answers here too. No opening joins a
+  // floor until joins are built.
+  sightFor: (state, sceneId, cls) => {
+    if (cls === "union") return visionRules.partySight(state, sceneId);
+    if (cls !== "shared") return visionRules.holderSight(state, sceneId, cls.holder);
+    return ownEntry(state.scenes, sceneId)?.vision?.perPlayer === true ? visionRules.holderSight(state, sceneId, null) : visionRules.partySight(state, sceneId);
+  },
 };
+
+/** Stand-in vision rules a test swaps in, whose `sightFor` stays the real one and reads them (VisionRules.sightFor). */
+export type StandInVision = Omit<VisionRules, "sightFor">;

@@ -5,7 +5,7 @@ import type { RoomState, SightTile } from "./model.ts";
 import type { Op } from "./protocol.ts";
 import { allKeys, dependents, inSightOfNonOwners, projectEntity, projectState, seenByNonOwners, stableStringify, withheldWhereItStands } from "./project.ts";
 import { applyOp } from "./reducer.ts";
-import { visionRules, type PartySight, type SightProbe, type VisionRules } from "./ruleHooks.ts";
+import { visionRules, type PartySight, type SightProbe, type StandInVision } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, TILE_BYTES } from "./rules/fog.ts";
 import { DM, P1, P2, character, env, reveal, room, scene, token } from "./testutil.ts";
 
@@ -17,7 +17,7 @@ import { DM, P1, P2, character, env, reveal, room, scene, token } from "./testut
  * x = 10 and holds one sight tile, (0, 0).
  */
 const seesWest = (t: SightProbe) => t.x < 10;
-const fake: VisionRules = {
+const fake: StandInVision = {
   partySight: (): PartySight => ({ seesSubcells: () => false, seesToken: seesWest, tiles: new Map<string, SightTile>([["0,0", { f: 3 }]]) }),
   // No scene here is per player, so nothing asks.
   holderSight: (): PartySight => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),

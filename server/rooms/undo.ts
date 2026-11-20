@@ -1,5 +1,5 @@
 import { parseKey, readEntity } from "#shared/keys.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { FallRecord, RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
 /** A route as `token.move` carries it. */
@@ -140,6 +140,15 @@ export type UndoEntry = {
    * finds its own stairs.
    */
   climb?: ClimbRecord;
+  /**
+   * The falls through openings the step made (docs/design/design-v1-floors.md
+   * phase 4, 4.5), beside `climb`, never inside it: one record a root the
+   * player received at the op whose key stays in the inverse, read by the
+   * server off the reducer's `falls`. Its undo and redo carry them on the
+   * restore, with the card the undo removed, and it never merges with
+   * another step, either way.
+   */
+  falls?: FallRecord[];
 };
 
 /** A controlled ride on one turn's list of mounts. */
@@ -153,7 +162,7 @@ export type Origin = { client: string; n: number };
 
 type Stacks = { undo: UndoEntry[]; redo: UndoEntry[] };
 type MemberHistory = { play: Stacks; setup: Stacks; serial: number; latest: UndoEntry | null };
-export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean; saveOutcome?: SaveOutcomeIdentity; climb?: ClimbRecord };
+export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean; saveOutcome?: SaveOutcomeIdentity; climb?: ClimbRecord; falls?: FallRecord[] };
 
 export class UndoStacks {
   #members = new Map<string, MemberHistory>();

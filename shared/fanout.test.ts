@@ -6,7 +6,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, hash128, hashValue, heldOf, projectArchivedLog, projectEntity, projectState, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
-import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
+import { visionRules, type PartySight, type StandInVision } from "./ruleHooks.ts";
 import { clearVisionCache } from "./rules/vision.ts";
 import { AT, DM, FULL_TILE_BITS, P1, P2, actor, apply, character, env, randomOp, randomState, reveal, rng, room, scene, token } from "./testutil.ts";
 
@@ -151,7 +151,7 @@ describe("fan-out invariant on vision scenes", () => {
    * this checks the token side of the narrow diff alone. The test above
    * runs real sight, whose changed tiles the narrow diff finds.
    */
-  const fake: VisionRules = {
+  const fake: StandInVision = {
     partySight: (): PartySight => ({ seesSubcells: () => false, seesToken: (t) => t.x < 15, tiles: new Map([["0,0", { f: 2 }]]) }),
     // No scene here is per player, so nothing asks.
     holderSight: (): PartySight => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),
