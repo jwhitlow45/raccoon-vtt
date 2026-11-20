@@ -619,6 +619,22 @@ function draggedHeight(before: RoomState, member: Token, holder: Pick<MovedToken
 }
 
 /**
+ * The height a dragged creature takes at a spot of `sceneId` its move
+ * leaves it on, given its holder's height there: on its own scene by the
+ * drag's rule (`draggedHeight`), and where its holder took it to another
+ * floor or scene as it follows there (`follow`), on the ground under its own
+ * space on another floor where it stood on its ground, else its height over
+ * its holder, never below that ground (`draggedOntoFloor`), and on another
+ * scene by its holder's change of height alone (review FLR4INT-ASTRA-04).
+ */
+function landingHeight(before: RoomState, member: Token, holder: Pick<MovedToken, "trace" | "from">, sceneId: string, env: Versioned): (x: number, y: number, holderElevation: number) => number {
+  if (sceneId === member.sceneId) return draggedHeight(before, member, holder);
+  const over = (holderElevation: number) => member.elevation + (holderElevation - holder.from.elevation);
+  if (!floorsOps(env.opVersion) || !sameScene(before, member.sceneId, sceneId)) return (_x, _y, holderElevation) => over(holderElevation);
+  return (x, y, holderElevation) => draggedOntoFloor(before.buildChunks, member, { x, y, elevation: over(holderElevation) }, sceneId).elevation;
+}
+
+/**
  * `moved`, a member of a group, where its holder's dropped seat moved only
  * the end of the holder's walk (MovedToken `carried`): what rides on the
  * holder takes the seat with it on arriving, its walk as the holder's place
@@ -717,11 +733,11 @@ export function dragEnd(before: RoomState, member: Token, end: RoutePoint, scene
   if (!holder) return null;
   const reachOf = { ...holder, x: direct.at.x, y: direct.at.y, elevation: direct.at.elevation, sceneId };
   if (holds(end) && (!keepInReach || linkHolds(g, settings, "drag", { ...self, sceneId, x: end.x, y: end.y, elevation: end.elevation }, reachOf))) return null;
-  const height = draggedHeight(before, member, direct.move);
+  const height = landingHeight(before, member, direct.move, sceneId, env);
   const at = (p: Point) => ({ ...self, sceneId, x: p.x, y: p.y, elevation: height(p.x, p.y, direct.at.elevation) });
   const build = storedBuild(before, env.opVersion);
-  // A step from its end there, as it walks, through no wall or ledge, standing clear.
-  const from = followerTrace(member, [end])[0]!;
+  // A step from its end there, as it walks, through no wall or ledge, standing clear, on the floor or scene it ends on.
+  const from = followerTrace({ ...member, sceneId }, [end])[0]!;
   const steps = (p: Point): boolean => movementRules.legBlocker(build, from, { x: p.x, y: p.y, elevation: at(p).elevation, squeeze: false }) === null && !offGridWallThrough(build, walkEnd(build, from, p));
   // Clear too of where the move leaves the others it takes along that it reads, so it never moves onto one of them. One every player
   // sees reads only those whose walks are every player's (MovedToken `pass`).

@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { wall } from "../discoveryTestutil.ts";
+import { GROUND, tower, UPPER } from "../floorLinksTestutil.ts";
+import { chunkKey } from "../keys.ts";
 import { dragsEndClear } from "../migrate.ts";
-import type { RoomState, Viewer } from "../model.ts";
+import { CHUNK_CELLS, type RoomState, type Viewer } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { projectState, stableStringify } from "../project.ts";
-import type { OpOf } from "../protocol.ts";
+import type { Op, OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { footprintInScene, linkHolds, overlaps } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex, snapStep, tokenRefHex } from "../rules/footprint.ts";
 import { isHex, SQUARES, type Grid } from "../rules/grid.ts";
+import { encodeHeights } from "../rules/heights.ts";
 import { hexKey, type Hex, type HexGrid } from "../rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { caseOf, insideCaseOf, intoCorridor, keepOf, withImpAhead, withMouse, withOgre } from "./hexFile.testkit.ts";
 import { hexStandPlace } from "../rules/movement.ts";
 import { planMove, planWalks, wayOf } from "../rules/moveLeg.ts";
-import { DM, env, P1, room, scene, token } from "../testutil.ts";
+import { DM, env, P1, P2, room, scene, token } from "../testutil.ts";
 
 /*
  * Where a creature a move drags along ends, from change format 64
@@ -31,7 +34,7 @@ const deps = { canUseAsset: () => true };
 const at = (s: RoomState, id: string) => [s.tokens[id]!.x, s.tokens[id]!.y];
 const hexesOf = (g: HexGrid, s: RoomState, id: string) => occupiedHexes(g, s.tokens[id]!).map(hexKey);
 
-function run(s: RoomState, op: OpOf<"token.move">, who: Viewer, opVersion?: number): RoomState {
+function run(s: RoomState, op: Op, who: Viewer, opVersion?: number): RoomState {
   const r = applyOp(s, op, who, { ...env(1), ...(opVersion !== undefined ? { opVersion } : {}) });
   assert.ok(r.ok, r.ok ? "" : r.message);
   return r.state;
@@ -176,6 +179,63 @@ describe("a creature a move drags along ends where it can stand, from change for
       }
     }
     assert.ok(moves >= 300 && hiddenSettled >= 20, `moves ${moves}, hidden ones landed beside their holders ${hiddenSettled}`);
+  });
+
+  describe("onto another floor (FLR4INT-ASTRA-04)", () => {
+    /**
+     * The tower, every floor walled by the build, Upper floor's ground and
+     * the road's 10 ft up: a squeezed warhorse of the DM's on 3.5, 3.5 of
+     * Ground floor, dragging a goblin on 5, 4, at `z`, shown or hidden.
+     */
+    function stable(hidden: boolean, z = 0): RoomState {
+      const s = tower();
+      s.scenes.r = scene("r", { name: "Road", bounds: { w: 30, h: 20 }, order: 1 });
+      for (const id of [GROUND, UPPER, "r"]) s.scenes[id] = { ...s.scenes[id]!, blockMovement: true };
+      for (const id of [UPPER, "r"]) s.buildChunks[chunkKey(id, 0, 0)] = { sceneId: id, cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(new Int16Array(CHUNK_CELLS * CHUNK_CELLS).fill(10)) };
+      s.tokens.horse = token("horse", { sceneId: GROUND, size: "large", x: 3.5, y: 3.5, squeeze: true, name: "Warhorse", kind: "npc" });
+      s.tokens.gob = token("gob", { sceneId: GROUND, x: 5, y: 4, elevation: z, name: "Goblin", attached: { to: "horse", kind: "drag" }, ...(hidden ? { visibility: "dm" as const } : {}) });
+      return s;
+    }
+    // Move to floor's own op for the warhorse alone (client tokens/moveToFloor.ts), onto the ground up there.
+    const up: OpOf<"token.update"> = { t: "token.update", tokenId: "horse", patch: { sceneId: UPPER, elevation: 10 } };
+    const pose = (s: RoomState, id: string) => [s.tokens[id]!.sceneId, s.tokens[id]!.x, s.tokens[id]!.y, s.tokens[id]!.elevation, s.tokens[id]!.attached?.to];
+
+    test("up to a floor whose ground is 10 ft, the goblin off the warhorse's space lands on 5, 3 on that ground, still dragged, shown or hidden, where op 63 left it on 5, 4 over the warhorse", () => {
+      for (const hidden of [false, true]) {
+        const where = hidden ? "hidden" : "shown";
+        assert.deepEqual(pose(run(stable(hidden), up, DM, 63), "gob"), [UPPER, 5, 4, 10, "horse"], `${where}, op 63`);
+        const after = run(stable(hidden), up, DM);
+        assert.deepEqual(pose(after, "horse"), [UPPER, 3.5, 3.5, 10, undefined], where);
+        assert.deepEqual(pose(after, "gob"), [UPPER, 5, 3, 10, "horse"], where);
+        assert.ok(!overlaps(SQUARES, after.tokens.gob!, after.tokens.horse!), `${where}: off the warhorse`);
+        assert.ok(linkHolds(SQUARES, after.meta.settings, "drag", after.tokens.gob!, after.tokens.horse!), `${where}: in reach`);
+        if (!hidden) continue;
+        // The twin with no goblin: every player's copy the same.
+        const alone = stable(true);
+        delete alone.tokens.gob;
+        for (const viewer of [P1, P2]) assert.equal(stableStringify(projectState(after, viewer, { sceneId: UPPER })), stableStringify(projectState(run(alone, up, DM), viewer, { sceneId: UPPER })), `${viewer.memberId}'s copy`);
+      }
+    });
+
+    test("the walls it steps past are the floor's it lands on: one on Upper floor's line 4 sends it to 6, 4, and one on Ground floor's changes nothing", () => {
+      const walled = (sceneId: string) => {
+        const s = stable(false);
+        wall(s, "dragend00008", [4, 4], [7, 4], { kind: "wall" }, sceneId);
+        return run(s, up, DM);
+      };
+      assert.deepEqual(pose(walled(UPPER), "gob"), [UPPER, 6, 4, 10, "horse"], "a wall up there");
+      assert.deepEqual(pose(walled(GROUND), "gob"), [UPPER, 5, 3, 10, "horse"], "a wall left below");
+    });
+
+    test("one in the air keeps its height over its holder up there, one on its ground lands on the ground there under a holder flying higher, and on another scene the holder's change of height alone, as op 63 had them", () => {
+      for (const v of [63, undefined]) {
+        assert.deepEqual(pose(run(stable(false, 15), up, DM, v), "gob").slice(0, 4), [UPPER, 5, v === 63 ? 4 : 3, 25], `op ${v ?? 64}: 15 ft over the warhorse`);
+        const flying: OpOf<"token.update"> = { t: "token.update", tokenId: "horse", patch: { sceneId: UPPER, elevation: 15 } };
+        assert.deepEqual(pose(run(stable(false), flying, DM, v), "gob"), [UPPER, 5, v === 63 ? 4 : 3, 10, "horse"], `op ${v ?? 64}: on the ground under a warhorse 15 ft up`);
+        const road: OpOf<"token.update"> = { t: "token.update", tokenId: "horse", patch: { sceneId: "r" } };
+        assert.deepEqual(pose(run(stable(false), road, DM, v), "gob"), ["r", 5, v === 63 ? 4 : 3, 0, "horse"], `op ${v ?? 64}: onto the road`);
+      }
+    });
   });
 
   describe("out of a squeeze (LP45-DRAG-1)", () => {
