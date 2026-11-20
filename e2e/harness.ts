@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request } from "playwright-core";
+import { chromium, type BrowserContext, type CDPSession, type Locator, type Page, type Request } from "playwright-core";
 import pg from "pg";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
