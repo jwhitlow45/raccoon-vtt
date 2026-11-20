@@ -1,6 +1,6 @@
 import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
-import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
+import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type AreaTemplate, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import type { HpLabel } from "#shared/rules/hp.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
@@ -1811,12 +1811,12 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
 
 /**
  * The room's facts a field's width may read: the player and the creatures
- * they own, the longest scene id, the creatures whose walk the turn under
- * way writes, the roster's ids and a list of them at its widest, the Per player
- * scenes, which every player sees, and the characters the player plays only
+ * they own, the creatures whose walk the turn under way writes, the
+ * roster's ids and a list of them at its widest, the Per player scenes,
+ * which every player sees, and the characters the player plays only
  * through a creature of theirs.
  */
-type WidthRoom = { readonly memberId: string; readonly sceneIdMost: number; readonly turn: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly turn: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -1859,6 +1859,42 @@ const ID_MOST = 6 * 64 + 2;
 const ID_BYTES = 66;
 /** A link to a holder at its widest. */
 const ATTACHED_BYTES = serializedBytes({ to: "x".repeat(64), kind: "perch", steer: true });
+/** An id at its widest (ID_MOST), a text of MAX_NAME characters at its widest and a number at its widest, as values. */
+const ID_AT_WIDEST = "\u0001".repeat(64);
+const TEXT_AT_WIDEST = "\u20ac".repeat(MAX_NAME);
+const NUMBER_AT_WIDEST = -1.2345678901234567e-300;
+/**
+ * An area at its widest as stored, every field present (protocol.ts
+ * templateFields): what an area on a creature counts in its owner's exact
+ * part while their copy holds neither, whatever it holds then
+ * (D-261119-021).
+ */
+const AREA_MOST = serializedBytes({
+  id: ID_AT_WIDEST,
+  rev: WIDEST_REV,
+  sceneId: ID_AT_WIDEST,
+  shape: "emanation",
+  size: NUMBER_AT_WIDEST,
+  width: NUMBER_AT_WIDEST,
+  height: NUMBER_AT_WIDEST,
+  origin: { x: NUMBER_AT_WIDEST, y: NUMBER_AT_WIDEST, z: NUMBER_AT_WIDEST },
+  yaw: NUMBER_AT_WIDEST,
+  pitch: NUMBER_AT_WIDEST,
+  faceOffset: { u: NUMBER_AT_WIDEST, v: NUMBER_AT_WIDEST },
+  anchor: "bottom",
+  attachedTo: ID_AT_WIDEST,
+  footprint: { w: NUMBER_AT_WIDEST, h: NUMBER_AT_WIDEST, elevation: NUMBER_AT_WIDEST, height: NUMBER_AT_WIDEST, size: "gargantuan" },
+  triggers: ["turnStart", "turnEnd", "enter"],
+  oncePerTurn: true,
+  slows: { kind: "difficult", foes: true },
+  includeOrigin: false,
+  color: "#ffffffff",
+  label: TEXT_AT_WIDEST,
+  spell: TEXT_AT_WIDEST,
+  casterId: ID_AT_WIDEST,
+  ownerId: ID_AT_WIDEST,
+  visibility: "all",
+} satisfies Required<AreaTemplate>);
 /** A single line of text of `max` characters at its widest as JSON: three bytes a character at most, no control characters. */
 const textMost = (max: number) => 3 * max + 2;
 /**
@@ -1876,7 +1912,7 @@ const BOOLEAN_MOST = 5;
 /** An HP label's widest as JSON (shared/rules/hp.ts HpLabel). */
 const HP_LABEL_MOST = Math.max(...Object.keys({ Healthy: 0, Bloodied: 0, Dying: 0, Dead: 0 } satisfies Record<HpLabel, 0>).map((label) => serializedBytes(label)));
 /** Whether the turn under way writes the walk of a creature the player moves but does not own. */
-const turnWalk = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => !room.owns.has(token.id as string) && room.turn.has(token.id as string);
+const movedWalk = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => !room.owns.has(token.id as string) && room.turn.has(token.id as string);
 
 const field = (parent: string, key: string, width: OwnField["width"], kept?: OwnField["kept"]): OwnField => ({ parent, key, width, kept });
 /** A field at a fixed number of value bytes. */
@@ -1940,8 +1976,8 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     // holds only the stops players saw (D-261119-017).
     {
       ...field("", "path", (_t, room) => fieldBytes("path") + pathMost(room.listWidth) + 1),
-      applies: (_t, room, token) => turnWalk(room, token),
-      most: (_t, room, token) => (turnWalk(room, token) ? fieldBytes("path") + pathMost(room.listWidth) + 1 : 0),
+      applies: (_t, room, token) => movedWalk(room, token),
+      most: (_t, room, token) => (movedWalk(room, token) ? fieldBytes("path") + pathMost(room.listWidth) + 1 : 0),
     },
     // A walk's stops: whether players saw each, and on a Per player scene which of them did, as wide as the roster allows,
     // and what a stop took and how, which a player who moves a creature not theirs writes and does not read back.
@@ -1960,15 +1996,9 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     shownOr("path.stops[]", "cost", DIGITS.hp),
     shownOr("path.stops[]", "diag", serializedBytes([100_000, 100_000])),
   ],
-  // An area on a creature: the floor and the creature it follows, and the creature that cast it, at their widest, as
-  // if present. The copy holds the area only while that creature is in sight, and its caster only while the caster is
-  // (D-261119-017).
-  template: [
-    fixed("", "rev", DIGITS.rev),
-    { ...field("", "sceneId", (_t, room) => fieldBytes("sceneId") + room.sceneIdMost + 1), applies: (t) => t.attachedTo !== undefined, most: (t, room) => (t.attachedTo !== undefined ? fieldBytes("sceneId") + room.sceneIdMost + 1 : 0) },
-    { ...fixed("", "attachedTo", ID_BYTES), applies: (t) => t.attachedTo !== undefined, most: (t) => (t.attachedTo !== undefined ? fieldBytes("attachedTo") + ID_BYTES + 1 : 0) },
-    fixed("", "casterId", ID_BYTES),
-  ],
+  // The creature that cast an area, at its widest, as if present: the copy holds it only while the caster is in sight
+  // (D-261119-017). An area on a creature out of their sight counts whole at AREA_MOST (exactCopies).
+  template: [fixed("", "rev", DIGITS.rev), fixed("", "casterId", ID_BYTES)],
   // A kept ruler's stops on creatures, and the creatures, at their widest: the copy holds the ruler only while its
   // creatures are in sight, each such stop where its creature stands then (D-261119-017).
   drawing: [fixed("", "rev", DIGITS.rev), field("", "points", (d) => anchoredPoints(d)), field("", "anchors", (d) => anchorsWidth(d))],
@@ -2391,20 +2421,16 @@ export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView 
   const floors = new Map<string, ExactBytes>();
   const roomLevel = { sub: 0, shown: 0 };
   const blocks = { sub: 0, shown: 0 };
-  const add = (to: { sub: number; shown: number }, part: ExactBytes) => {
-    to.sub += part.sub;
-    to.shown += part.shown;
-  };
   const floor = (id: string) => {
     const part = floors.get(id) ?? { sub: 0, shown: 0 };
     floors.set(id, part);
     return part;
   };
   const exact = exactCopies(state, memberId, view);
-  for (const { on, sub, shown } of exact.values()) {
-    if (on === "room") add(roomLevel, { sub, shown });
-    else if (on === "blocks") add(blocks, { sub, shown });
-    else add(floor(on), { sub, shown });
+  for (const { on, sub, shown, shownOn } of exact.values()) {
+    const part = (where: string) => (where === "room" ? roomLevel : where === "blocks" ? blocks : floor(where));
+    part(on).sub += sub;
+    part(shownOn ?? on).shown += shown;
   }
   // The far line counts every creature's and area's FAR_WIDTHS fields at their widths (farWidths). The exact part counts
   // its own as the copy holds them, so it takes those widths out of the stepped part with the rest.
@@ -2416,16 +2442,15 @@ export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView 
 /**
  * The room's facts a player's widths read (WidthRoom), and the characters
  * they own or a creature they own plays, whose actor their ops on that
- * creature write.
+ * creature write: a creature `held` says their copy holds.
  */
-function exactRoom(state: RoomState, memberId: string): { room: WidthRoom; characters: Set<string> } {
+function exactRoom(state: RoomState, memberId: string, held: (tokenId: string) => boolean = () => true): { room: WidthRoom; characters: Set<string> } {
   const owned = new Set(Object.values(state.characters).filter((c) => c.ownerIds.includes(memberId)).map((c) => c.id));
   const characters = new Set(owned);
-  for (const token of Object.values(state.tokens)) if (token.ownerIds.includes(memberId) && "ref" in token.actor) characters.add(token.actor.ref);
+  for (const token of Object.values(state.tokens)) if (token.ownerIds.includes(memberId) && "ref" in token.actor && held(token.id)) characters.add(token.actor.ref);
   const viewer: Viewer = { memberId, role: "player" };
   const room: WidthRoom = {
     memberId,
-    sceneIdMost: Math.max(0, ...Object.keys(state.scenes).map((id) => utf8Bytes(JSON.stringify(id)))),
     turn: widthsRoom(state).turn,
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
@@ -2438,13 +2463,21 @@ function exactRoom(state: RoomState, memberId: string): { room: WidthRoom; chara
 }
 
 /**
- * Each thing a player's exact part holds (ownCopyBytes), by its key: where
- * the reading counts it, a floor, the room-level part every scene counts or
- * only the room's blocks, and its part (exactBytes).
+ * A thing in a player's exact part (exactCopies): where its stored bytes
+ * are, a floor, the room-level part every scene counts or only the room's
+ * blocks, where it counts what it shows when not there too, and its part.
  */
-export function exactCopies(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<EntityKey, { on: string } & ExactBytes> {
-  const out = new Map<EntityKey, { on: string } & ExactBytes>();
-  const { room, characters } = exactRoom(state, memberId);
+export type ExactCopy = { on: string; shownOn?: "room" } & ExactBytes;
+
+/**
+ * Each thing a player's exact part holds (ownCopyBytes), by its key: where
+ * the reading counts it and its part (exactBytes).
+ */
+export function exactCopies(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<EntityKey, ExactCopy> {
+  const out = new Map<EntityKey, ExactCopy>();
+  // A character counts as played through a creature of theirs that their copy holds, so a creature's delete or hand-off
+  // they cannot see moves nothing (D-261119-021).
+  const { room, characters } = exactRoom(state, memberId, (id) => view.copy("token", id) !== null);
   // A thing at its bytes in the measures: a creature's lists of who saw at their widest and its numbers and rev at theirs.
   const measured = (kind: CopiedKind, id: string, stored: unknown) => {
     const bytes = entityBytes(id, stored);
@@ -2465,8 +2498,20 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
       if (state.meta.settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
     }
   }
-  for (const [id, copy] of own.template) out.set(keys.template(id), entity("template", id, state.templates[id], copy, state.templates[id]!.sceneId));
-  for (const [id, copy] of own.drawing) out.set(keys.drawing(id), entity("drawing", id, state.drawings[id], copy, state.drawings[id]!.sceneId));
+  // An area or a ruler on a creature out of their sight counts in every scene's reading, wherever it is stored, and an
+  // area at its widest, so neither a floor it moves to nor the DM's edit unseen moves the exact part (D-261119-021).
+  for (const [id, copy] of own.template) {
+    const area = state.templates[id]!;
+    if (!own.unseen.template.has(id)) out.set(keys.template(id), entity("template", id, area, copy, area.sceneId));
+    else {
+      const shown = fieldBytes(id) + AREA_MOST + 1;
+      out.set(keys.template(id), { on: area.sceneId, shownOn: "room", sub: Math.min(measured("template", id, area), shown), shown, hidden: 0 });
+    }
+  }
+  for (const [id, copy] of own.drawing) {
+    const ruler = state.drawings[id]!;
+    out.set(keys.drawing(id), { ...entity("drawing", id, ruler, copy, ruler.sceneId), ...(own.unseen.drawing.has(id) ? { shownOn: "room" as const } : {}) });
+  }
   // A row is an entry of the fight's list, with its comma, and has no key of its own: it goes by `row:` and its id.
   const rows = new Map((state.encounter?.entries ?? []).map((e) => [e.id, e]));
   for (const [id, copy] of own.row) out.set(`row:${id}`, { on: "room", ...exactBytes("row", rows.get(id), valueBytes(rows.get(id)) + 1, copy, valueBytes(copy) + 1, room) });
@@ -2605,8 +2650,8 @@ export function exactPastMost(state: RoomState, memberId: string, each?: (key: E
   const floors = new Map<string, number>();
   let roomLevel = 0;
   let blocks = 0;
-  const most = (kind: CopiedKind, key: EntityKey, stored: unknown) => {
-    const bytes = isRecord(stored) ? widthsMost(stored, "", FIELD_INDEX.get(kind)!, room, stored) + containersOf(stored) : 0;
+  const most = (kind: CopiedKind, key: EntityKey, stored: unknown, least = 0) => {
+    const bytes = Math.max(least, isRecord(stored) ? widthsMost(stored, "", FIELD_INDEX.get(kind)!, room, stored) + containersOf(stored) : 0);
     each?.(key, bytes);
     return bytes;
   };
@@ -2617,8 +2662,17 @@ export function exactPastMost(state: RoomState, memberId: string, each?: (key: E
     if (anyToken || ownsSeatToken(state, memberId, token)) onFloor(token.sceneId, most("token", keys.token(token.id), token));
     if (settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
   }
-  for (const t of Object.values(state.templates)) if (t.ownerId === memberId) onFloor(t.sceneId, most("template", keys.template(t.id), t));
-  for (const d of Object.values(state.drawings)) if (d.ownerId === memberId) onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
+  // An area or a ruler on a creature may count in every scene's reading, an area at its widest (exactCopies).
+  for (const t of Object.values(state.templates)) {
+    if (t.ownerId !== memberId) continue;
+    if (t.attachedTo === undefined) onFloor(t.sceneId, most("template", keys.template(t.id), t));
+    else roomLevel += most("template", keys.template(t.id), t, fieldBytes(t.id) + AREA_MOST + 1);
+  }
+  for (const d of Object.values(state.drawings)) {
+    if (d.ownerId !== memberId) continue;
+    if (d.anchors?.some((id) => id !== null)) roomLevel += most("drawing", keys.drawing(d.id), d);
+    else onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
+  }
   for (const chunk of Object.values(state.buildChunks)) onFloor(chunk.sceneId, most("chunk", keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), chunk));
   for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry)) roomLevel += most("row", `row:${entry.id}` as EntityKey, entry);
   for (const cast of Object.values(state.casts)) if (cast.by === memberId) roomLevel += most("cast", keys.cast(cast.id), cast);

@@ -782,13 +782,14 @@ describe("D-261119-017: a player's things that follow a creature stay in their e
     return state;
   }
 
-  test("a kept ruler, an area, a ride and an ask on a creature: P1's exact part and stepped part read the same whether P1 sees it", () => {
+  test("a kept ruler, an area, a ride and an ask on a creature: P1's exact part takes out the same and their stepped part reads the same whether P1 sees it", () => {
     const [seen, unseen] = [onTheWolf(true), onTheWolf(false)];
     assert.equal(measuredStateBytes(seen), measuredStateBytes(unseen), "the rooms store the same bytes");
     assert.notEqual(copyOf(seen), copyOf(unseen), "P1 sees the wolf in one");
     assert.ok(ownHeldBytes(seen, "p1").shown > 0);
-    assert.deepEqual(ownHeldBytes(unseen, "p1"), ownHeldBytes(seen, "p1"), "the room's exact part");
-    assert.deepEqual(ownHeldBytes(unseen, "p1", ["s1"]), ownHeldBytes(seen, "p1", ["s1"]), "the scene's exact part");
+    // What the exact part shows follows the copy, which shows the wolf in one room only.
+    assert.equal(ownHeldBytes(unseen, "p1").sub, ownHeldBytes(seen, "p1").sub, "the room's exact part");
+    assert.equal(ownHeldBytes(unseen, "p1", ["s1"]).sub, ownHeldBytes(seen, "p1", ["s1"]).sub, "the scene's exact part");
     assert.equal(steppedOf(unseen), steppedOf(seen), "the room's stepped part");
     assert.equal(steppedOf(unseen, ["s1"]), steppedOf(seen, ["s1"]), "the scene's stepped part");
   });
@@ -799,7 +800,7 @@ describe("D-261119-017: a player's things that follow a creature stay in their e
       state.characters.c1 = character("c1", { ownerIds: ["p1"] });
       state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
       state.tokens[id] = token(id, { x: at, y: at, visibility: "dm" });
-      state.templates[id] = template(id, { x: at, visibility: "dm" } as never);
+      state.templates[id] = template(id, { x: at, ownerId: "dm1", visibility: "dm" } as never);
       state.tokens.pet = token("pet", { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 5, y: 5, size: "tiny", attached: { to: id, kind: "ride" }, actor: { inline: actor({ dmNotes: "" }) } });
       state.drawings.r1 = drawing("r1", { kind: "ruler", ownerId: "p1", anchors: ["hero", id], points: [2.5, 2.5, at + 0.5, at + 0.5] });
       state.templates.a1 = template("a1", { ownerId: "p1", attachedTo: id, casterId: "hero", label: "Faerie Fire" });

@@ -73,7 +73,7 @@ const HIDDEN_DIMS = {
     if (s.encounter) s.encounter = { ...s.encounter, rev: 10 };
   },
   "an attached area": (s: RoomState) => {
-    s.templates.hzb = template("hzb", { sceneId: s.tokens.hz1!.sceneId, attachedTo: "hz1", visibility: "dm", label: "Hidden aura" });
+    s.templates.hzb = template("hzb", { sceneId: s.tokens.hz1!.sceneId, attachedTo: "hz1", ownerId: "dm1", visibility: "dm", label: "Hidden aura" });
   },
   "a link": (s: RoomState) => {
     const hz1 = s.tokens.hz1!;
@@ -89,10 +89,10 @@ function patchToken(s: RoomState, id: string, patch: Partial<Token>): void {
   s.tokens = { ...s.tokens, [id]: { ...s.tokens[id]!, ...patch } };
 }
 
-/** A hidden creature perched on `holder`, a creature P1 owns, with its own hidden area, revs at 9. */
+/** A hidden creature perched on `holder`, a creature P1 owns, with a hidden area of the DM's on it, revs at 9. */
 function hide(s: RoomState, holder: Token): void {
   s.tokens.hz1 = token("hz1", { kind: "pc", size: "tiny", visibility: "dm", sceneId: holder.sceneId, x: holder.x, y: holder.y, elevation: holder.elevation, rev: 9, attached: { to: holder.id, kind: "perch" } });
-  s.templates.hza = template("hza", { sceneId: holder.sceneId, attachedTo: "hz1", visibility: "dm", rev: 99 });
+  s.templates.hza = template("hza", { sceneId: holder.sceneId, attachedTo: "hz1", ownerId: "dm1", visibility: "dm", rev: 99 });
   if (s.encounter) s.encounter = { ...s.encounter, rev: 9 };
 }
 
@@ -273,11 +273,11 @@ function tower(): RoomState {
   return run(state, { t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: GROUND, to: UPPER, rect: { x: 9, y: 9, w: 1, h: 1 }, kind: "stairs" } } as Op);
 }
 
-/** A hidden creature on Thorn, at its widest numbers' edge, with a hidden area of its own. */
+/** A hidden creature on Thorn, at its widest numbers' edge, with a hidden area of the DM's on it. */
 function hiddenRider(state: RoomState, over: Partial<Token> = {}): RoomState {
   const s = structuredClone(state);
   s.tokens.owl = token("owl", { kind: "pc", size: "tiny", visibility: "dm", sceneId: GROUND, x: 9, y: 9, rev: 9, attached: { to: "thorn", kind: "perch" }, ...over });
-  s.templates.owlaura = template("owlaura", { sceneId: GROUND, attachedTo: "owl", visibility: "dm", rev: 9 });
+  s.templates.owlaura = template("owlaura", { sceneId: GROUND, attachedTo: "owl", ownerId: "dm1", visibility: "dm", rev: 9 });
   return s;
 }
 
