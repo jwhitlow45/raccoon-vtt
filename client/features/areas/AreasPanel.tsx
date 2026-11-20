@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
+import type { AreaTemplate, RoomState } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { displayName } from "../../lib/scene.ts";
@@ -13,7 +13,7 @@ import { useGroupSave, useGroupSaveStore } from "../dice/groupSave/store.ts";
 import { pickTemplate } from "./AreaTool.tsx";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { useLiveGround } from "./liveGround.ts";
-import { useAreaThrough } from "./through.ts";
+import { namesAcross, useAreaThrough } from "./through.ts";
 import { areaTitle } from "./labels.ts";
 import { triggerSummary } from "./placement.ts";
 import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
@@ -62,7 +62,7 @@ export default function AreasPanel(props: PanelProps) {
   const throughOf = useAreaThrough(you?.role ?? "player");
   const across = scene ? throughOf(scene.id) : undefined;
   // The rows name creatures across an opening too, which the floor's own tokens lack.
-  const named = useMemo(() => (across ? { ...live.tokens, ...Object.fromEntries(across.tokens.map((t): [string, Token] => [t.id, t])) } : live.tokens), [live.tokens, across]);
+  const named = namesAcross(live.tokens, across);
   if (!view || !scene || !you) return null;
 
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);

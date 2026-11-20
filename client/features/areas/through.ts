@@ -84,6 +84,23 @@ export function throughInputs(view: RoomState, sceneId: SceneId, role: "dm" | "p
 }
 
 /**
+ * The tokens an In area line names its creatures from: the floor's own,
+ * and with `through` the creatures across its openings, which the floor's
+ * own tokens lack. Kept per pair, so a caller's line holds while neither
+ * changes.
+ */
+export function namesAcross(tokens: Readonly<Record<string, Token>>, through: ThroughInputs | undefined): Readonly<Record<string, Token>> {
+  if (!through || through.tokens.length === 0) return tokens;
+  let byThrough = named.get(tokens);
+  if (!byThrough) named.set(tokens, (byThrough = new WeakMap()));
+  let both = byThrough.get(through);
+  if (!both) byThrough.set(through, (both = { ...tokens, ...Object.fromEntries(through.tokens.map((t): [string, Token] => [t.id, t])) }));
+  return both;
+}
+
+const named = new WeakMap<Readonly<Record<string, Token>>, WeakMap<ThroughInputs, Readonly<Record<string, Token>>>>();
+
+/**
  * `throughInputs` for each area's floor from the room as this device holds
  * it, kept while the copy is: one answer a floor, so the caught lists'
  * caches hold across renders.

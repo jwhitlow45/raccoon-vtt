@@ -10,6 +10,8 @@ import { creatureKey } from "../options.ts";
 import { areaPresetOf, byName, sameSpell, spellLevel } from "./cast.ts";
 import type { Labels } from "../../../lib/labels.ts";
 import { displayName } from "../../../lib/scene.ts";
+import { areaContext, caughtTokens } from "../../areas/coverage.ts";
+import type { ThroughInputs } from "../../areas/through.ts";
 
 /**
  * The DM's side of a player's ask for saves (docs/design/design-v1-player-save-spell.md
@@ -156,6 +158,19 @@ export type CastCardText = {
   openName: string;
   dismissName: string;
 };
+
+/**
+ * The creatures an ask's area catches as the DM's page will count them
+ * (CastCard's "In the area"): every creature in it on its floor, hidden ones
+ * included, and with `through` (areas/through.ts, the DM's) those it
+ * reaches across an opening (docs/design/design-v1-floors.md phase 4, 9.2),
+ * as the page's rows read them.
+ */
+export function askCaught(view: RoomState, template: AreaTemplate, through: ThroughInputs | undefined): string[] {
+  const scene = view.scenes[template.sceneId];
+  if (!scene) return [];
+  return caughtTokens(template, areaContext(view, scene), template.sceneId, through);
+}
 
 /**
  * The card's words (3.3, 6). The DM's view holds only the scene on screen,

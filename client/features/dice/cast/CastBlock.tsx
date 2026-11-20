@@ -13,6 +13,7 @@ import { useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "../../areas/coverage.ts";
 import { useLiveGround } from "../../areas/liveGround.ts";
+import { namesAcross, useAreaThrough } from "../../areas/through.ts";
 import { presetDraft } from "../../areas/presets.ts";
 import { resolvedChoice, samplesNow, setDraft, startDraft, useAreaScope } from "../../areas/store.ts";
 import { useLiveTokens } from "../../areas/useLiveTokens.ts";
@@ -243,7 +244,13 @@ function SendStatus(props: { send: CastSend; again?: () => string | null; onClos
   );
 }
 
-/** The live tokens' coverage of an area, as its In area line reads it: on a player's device by the walls they could know (areas/coverage.ts heldWalls). */
+/**
+ * The live tokens' coverage of an area, as its In area line reads it: on a
+ * player's device by the walls they could know (areas/coverage.ts
+ * heldWalls), and across the openings on its floor by the gate every device
+ * reads alike (areas/through.ts), so the line names a creature below the
+ * hole as the Areas panel does (docs/design/design-v1-floors.md phase 4, 9.2).
+ */
 function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: string | null) {
   const labels = useLabels();
   const live = useLiveTokens();
@@ -252,10 +259,12 @@ function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: st
   const fog = useViewerFog({ scene, role, fog: scene?.fogEnabled !== false });
   // A player's line names only creatures whose rays lie on their live ground (areas/coverage.ts raysLive).
   const ground = useLiveGround(scene, role);
+  const throughOf = useAreaThrough(role);
   const template = areaId ? view.templates[areaId] : undefined;
   if (!template || !scene || template.sceneId !== scene.id) return null;
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
-  return inAreaEntries(caughtTokens(template, ctx, scene.id), live.tokens, view.characters, labels);
+  const across = throughOf(scene.id);
+  return inAreaEntries(caughtTokens(template, ctx, scene.id, across), namesAcross(live.tokens, across), view.characters, labels);
 }
 
 /**

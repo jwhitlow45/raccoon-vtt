@@ -5,21 +5,22 @@ import { Icon } from "../../../components/Icon.tsx";
 import { Loading } from "../../../components/Loading.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../../state/view.ts";
-import { areaContext, caughtTokens } from "../../areas/coverage.ts";
+import { useAreaThrough } from "../../areas/through.ts";
 import { cardStyle } from "../../rolls/parts.tsx";
 import { Note } from "../../tokens/ui.tsx";
 import { ReplaceConfirm } from "../groupSave/ReplaceConfirm.tsx";
 import { useStartGroupSave, type StartInput } from "../groupSave/start.ts";
 import { useDiceView } from "../useDiceView.ts";
-import { castCardText, castStart, readingWords } from "./castStart.ts";
+import { askCaught, castCardText, castStart, readingWords } from "./castStart.ts";
 import { labelsOf, useLabels } from "../../../state/labels.ts";
 
 /**
  * A player's ask for saves on the DM's desk (docs/design/design-v1-player-save-spell.md
  * 3.3 and 6): the ask in a line, the caster's roll, the area's count (hidden
- * creatures included) or the targets, then Open, which starts the group save
- * filled from the DM's own view, and Dismiss, which is final. It sits above
- * the live cards in their look, and folds to its first line as they do.
+ * creatures and those across an opening included) or the targets, then
+ * Open, which starts the group save filled from the DM's own view, and
+ * Dismiss, which is final. It sits above the live cards in their look, and
+ * folds to its first line as they do.
  */
 export function CastCard(props: { ask: CastAsk; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
   const labels = useLabels();
@@ -33,11 +34,12 @@ export function CastCard(props: { ask: CastAsk; open: boolean; onToggle(): void;
   const tokens = view?.tokens;
   const template = ask.area !== undefined ? view?.templates[ask.area] : undefined;
   const scene = view?.scenes[ask.sceneId];
-  // The DM's page catches every creature in the area, hidden ones included, so the card counts as it will.
+  // The DM's page catches every creature in the area, hidden ones included and those across its openings, so the card counts as it will.
+  const throughOf = useAreaThrough("dm");
   const caught = useMemo(() => {
     if (!view || !template || !scene || viewing !== ask.sceneId) return null;
-    return caughtTokens(template, areaContext(view, scene), template.sceneId).length;
-  }, [tokens, template, scene, viewing, ask.sceneId]); // eslint-disable-line react-hooks/exhaustive-deps
+    return askCaught(view, template, throughOf(template.sceneId)).length;
+  }, [tokens, template, scene, viewing, ask.sceneId, throughOf]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!view) return null;
   const text = castCardText(view, ask, { viewing, caught, labels });
 
