@@ -668,6 +668,11 @@ newest first.
   version 64 is not yet saved that way opens read-only in an older build, as
   it stood before that change, as at version 63. Going back needs the
   backups taken just before the update.
+  From version 64 a creature a move drags along ends on its own squares or
+  hexes, inside the scene and off every creature that holds it. Otherwise it
+  takes the nearest full-size spot in its holder's reach that a step reaches
+  through no wall, or is let go where its walk last held. Drags stored at
+  change format 63 and earlier replay as they ran.
 - **A fight's room** ([design](design/design-v1-player-limits.md)): no
   format step. While a fight runs, the room's size limit counts its turn
   history at the 1 MiB it may keep. No data migrates. A fight already
