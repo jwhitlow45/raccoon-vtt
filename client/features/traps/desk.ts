@@ -6,6 +6,7 @@ import { sameScene } from "#shared/rules/floors.ts";
 import { displayName } from "../../lib/scene.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { Labels } from "../../lib/labels.ts";
+import { floorBelow, floorWord } from "./rules.ts";
 
 /*
  * What a trap going off shows the DM (docs/design/design-v1-traps.md 4.3), as
@@ -63,16 +64,30 @@ const DOOR_DONE: Record<"open" | "closed" | "locked", [string, string]> = { open
  * What it did and could not do (4.3), one line each in the trap's order:
  * "Closed a door.", "Could not show a creature: it was deleted." Read from
  * the DM's line, whose outcomes name the actions by their place in the
- * list, and the pit as -1.
+ * list, and the pit as -1. A trapdoor's opening is that -1 too
+ * (docs/design/design-v1-floors.md phase 4, 4.6), and drops what stood on
+ * it to the floor below, so it names that floor.
  */
 export function didLines(trap: Trap, did: readonly { action: number; ok: boolean }[], view: Pick<RoomState, "tokens" | "lights" | "stamps" | "scenes"> & { buildChunks: Readonly<Record<string, BuildChunk>> }, labels: Labels): string[] {
   const actions = trap.rig?.actions ?? [];
   return did.map(({ action, ok }) => {
+    if (action === -1 && trap.rig?.below === true) return trapdoorLine(trap, ok, view);
     if (action === -1) return ok ? "Opened the pit." : `Could not open the pit: ${pitOutside(trap, view) ? "some of its squares lie outside the scene" : "the scene is at its wall limit"}.`;
     const a = actions[action];
     if (!a) return ok ? "Did something it no longer lists." : "Could not do something it no longer lists.";
     return actionLine(a, ok, view, trap.sceneId, labels);
   });
+}
+
+/**
+ * A trapdoor's line: "Opened the trapdoor onto Ground floor.", or where
+ * its floor has none below, as after Remove floor, "Could not open the
+ * trapdoor: there is no floor below Cellar.", the pane's words for it.
+ */
+function trapdoorLine(trap: Trap, ok: boolean, view: Pick<RoomState, "scenes">): string {
+  const below = floorBelow(view, trap.sceneId);
+  if (ok) return `Opened the trapdoor onto ${below?.floor?.name ?? "the floor below"}.`;
+  return below === null ? `Could not open the trapdoor: there is no floor below ${floorWord(view, trap.sceneId)}.` : "Could not open the trapdoor.";
 }
 
 /** Whether a squares trap reaches past its scene's edge, as a scene made smaller leaves it: the one other reason a pit cannot open. */
