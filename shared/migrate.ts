@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 47;
-export const OP_VERSION = 63;
+export const SNAPSHOT_VERSION = 48;
+export const OP_VERSION = 64;
 
 export type MigrationStep = {
   from: number;
@@ -293,6 +293,13 @@ export const snapshotMigrations: MigrationStep[] = [
   // number moves so that an older build refuses a room this one saved, whose fixed shares and conditions it would not
   // keep.
   { from: 46, to: 47, apply: (state) => state },
+  // Openings between floors, phase 4 (docs/design/design-v1-floors.md, OPENINGS_SNAPSHOT_VERSION): an end's `opening`
+  // kind and `hidden`, a trap's `below` and the room's `falls` are new, and absent reads as before, so a v47 room is a v48
+  // room as it is. The number moves so that an older build refuses a v48 snapshot instead of loading it: it would draw an
+  // opening as a ladder and let a creature climb it, send players a hidden end and drop the fall cards. The room's first
+  // commit at change format 64 carries this snapshot (server/rooms/actor.ts #countSnapshotDue), so no older build ever
+  // loads a room part way through ops it does not know.
+  { from: 47, to: 48, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1499,6 +1506,21 @@ export const opMigrations: MigrationStep[] = [
     to: 63,
     apply: (op) => op,
   },
+  {
+    // Openings between floors, phase 4 (docs/design/design-v1-floors.md, OPENINGS_OP_VERSION): `fall.settle` is new,
+    // `floorLink.put` and `.update` may name an opening, `.update` may carry `hidden`, `rect` and `pairRect`, a trap's rig
+    // `below`, `actor.outcome` a `fall` and `sys.restore` its `falls`, all of which an older strict schema refuses, so no
+    // stored op changes shape and the step is the identity. From this version (opensOps) a creature an op leaves standing
+    // wholly over an opening falls to the floor below, a public trapdoor drops what stands on it, and every landing sets
+    // off the landing floor's arrival traps and reminds for its areas. Ops stored before met no opening and replay as
+    // they ran: no arrival springing or reminder after a climb.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup for any room this version saved, since its first commit writes a v48 snapshot that an older build
+    // refuses.
+    from: 63,
+    to: 64,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2179,6 +2201,24 @@ export function stopsStepApartInReach(opVersion: number | undefined): boolean {
  */
 export function seatsWhereDropped(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
+
+/** The first op version and snapshot version of openings between floors, falls, trapdoors and arrivals (opensOps). */
+export const OPENINGS_OP_VERSION = 64;
+export const OPENINGS_SNAPSHOT_VERSION = 48;
+
+/**
+ * Whether the op knows openings between floors (docs/design/design-v1-floors.md
+ * phase 4, 4.3): after the walk's reminders it runs the deferred trapdoor
+ * drops, the fall pass, one arrival step on each creature's last landing, a
+ * fall pass for what that step dropped, the link pass again, `markOpened`
+ * with the op's landings, the arrival writes into `trapWrote`, and the
+ * landing reminders, all before `keepNudges`. Ops stored before version 64
+ * met no opening, landed on no arrival trap and reminded for no landing,
+ * and replay so. Live ops carry no stored version and take today's rule.
+ */
+export function opensOps(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < OPENINGS_OP_VERSION);
 }
 
 /**

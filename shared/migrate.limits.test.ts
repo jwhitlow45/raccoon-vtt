@@ -16,7 +16,7 @@ describe("op version 61 and snapshot 47, player limits", () => {
     assert.equal(PLAYER_LIMITS_OP_VERSION, 61);
     assert.equal(PLAYER_LIMITS_SNAPSHOT_VERSION, 47);
     assert.ok(OP_VERSION >= 61);
-    assert.equal(SNAPSHOT_VERSION, 47);
+    assert.ok(SNAPSHOT_VERSION >= 47);
     for (const op of ops) {
       assert.equal(runMigrations(op, 60, 61, opMigrations), op);
       assert.equal(migrateOp(op, 61), op);

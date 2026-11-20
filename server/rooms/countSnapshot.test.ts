@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, NUMBERING_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
+import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, NUMBERING_SNAPSHOT_VERSION, OP_VERSION, OPENINGS_SNAPSHOT_VERSION, SNAPSHOT_VERSION, runMigrations, snapshotMigrations } from "#shared/migrate.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { seqTwins } from "#shared/seqTestutil.ts";
@@ -85,6 +85,21 @@ describe("the first commit of a room saved before the count", () => {
     assert.equal(db.snapshotWrites, 1);
     assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
     assert.throws(() => runMigrations(db.snapshot.state, db.snapshot.version, NUMBERING_SNAPSHOT_VERSION - 1, snapshotMigrations), /down/);
+  });
+
+  // The fence of openings between floors (docs/design/design-v1-floors.md phase 4, 11, FLR4-SOL-05): an older build
+  // would draw an opening as a ladder and replay a prefix of ops it does not know.
+  test("a room saved after player limits but before openings stores its snapshot with its first commit too, which a build before openings refuses", async (t) => {
+    const f = scopeFixture();
+    const db = new StoredRoomDb(f.state, { version: OPENINGS_SNAPSHOT_VERSION - 1 });
+    const h = await storedActor(t, db);
+    const dm = await h.connect(f.dm);
+    await dm.apply({ t: "log.chat", text: "one" });
+    assert.equal(db.snapshotWrites, 1);
+    assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
+    assert.throws(() => runMigrations(db.snapshot.state, db.snapshot.version, OPENINGS_SNAPSHOT_VERSION - 1, snapshotMigrations), /down/);
+    await dm.apply({ t: "log.chat", text: "two" });
+    assert.equal(db.snapshotWrites, 1, "written once: the next commit carries none");
   });
 
   test("a hello's watermark alone does too", async (t) => {

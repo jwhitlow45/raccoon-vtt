@@ -4,7 +4,7 @@ import { idTime } from "#shared/ids.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, OPENINGS_SNAPSHOT_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -671,8 +671,9 @@ export class RoomActor {
     if (aheadMs > NUMBERS_AHEAD_WARN_MS) this.#log.warn({ roomId: this.roomId, aheadMs }, "room numbers are ahead of the server's clock: check the clock");
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
     // From the numbering upgrade on, and so for the automatic Unconscious upgrade (persistence.ts automaticUpgrade): a
-    // room loaded across it is saved with its first commit, so its converted ids are stored once.
-    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION;
+    // room loaded across it is saved with its first commit, so its converted ids are stored once. And across openings
+    // between floors, so an older build refuses a room once its first op of change format 64 is stored.
+    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < OPENINGS_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);

@@ -48,6 +48,9 @@ import {
   FLOOR_SOURCE_OP_VERSION,
   NUMBERING_OP_VERSION,
   NUMBERING_SNAPSHOT_VERSION,
+  OPENINGS_OP_VERSION,
+  OPENINGS_SNAPSHOT_VERSION,
+  opensOps,
   meetsNumbers,
   needsNumberingUpgrade,
   seatsApart,
@@ -2130,6 +2133,42 @@ describe("op version 60 and snapshot 46, creature numbers the table gives", () =
   test("a build at 59 and 45 refuses a room from this one", () => {
     assert.throws(() => runMigrations(update, 60, 59, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 46, 45, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 64 and snapshot 48, openings between floors (docs/design/design-v1-floors.md phase 4, 11)", () => {
+  const climb = { t: "token.climb", tokenId: "thorn", linkId: "l1" };
+  const put = { t: "floorLink.put", link: { id: "l1", pairId: "l2", sceneId: "s1", to: "s2", rect: { x: 1, y: 1, w: 2, h: 2 }, kind: "stairs" } };
+  const opening = { t: "floorLink.put", link: { id: "o1", pairId: "o2", sceneId: "s2", to: "s1", rect: { x: 1, y: 1, w: 8, h: 8 }, kind: "opening" } };
+  const settle = { t: "fall.settle", fallId: "120:0" };
+
+  test("keeps stored ops and snapshots unchanged through the identity steps, and the new ops parse", () => {
+    assert.equal(OPENINGS_OP_VERSION, 64);
+    assert.equal(OPENINGS_SNAPSHOT_VERSION, 48);
+    assert.ok(OP_VERSION >= OPENINGS_OP_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= OPENINGS_SNAPSHOT_VERSION);
+    for (const op of [climb, put]) {
+      assert.equal(runMigrations(op, 63, 64, opMigrations), op);
+      assert.equal(migrateOp(op, 62), op);
+      assert.equal(migrateOp(op, 63), op);
+      assert.ok(opSchema.safeParse(op).success, op.t);
+    }
+    for (const op of [opening, settle]) {
+      assert.equal(migrateOp(op, 64), op);
+      assert.ok(opSchema.safeParse(op).success, op.t);
+    }
+    const state = room({ floorLinks: {} });
+    assert.equal(runMigrations(state, 47, 48, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 47), state);
+  });
+
+  test("gates the openings' passes at 64, so ops stored at 62 and 63 replay as they ran", () => {
+    assert.deepEqual([opensOps(1), opensOps(62), opensOps(63), opensOps(64), opensOps(undefined)], [false, false, false, true, true]);
+  });
+
+  test("a build at 63 and 47 refuses a room from this one, so it never draws an opening as a ladder", () => {
+    assert.throws(() => runMigrations(opening, 64, 63, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 48, 47, snapshotMigrations), /down/);
   });
 });
 
