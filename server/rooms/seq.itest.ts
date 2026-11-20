@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import type pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
 import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { FAMILIAR, FrameReader, IN_Q, numbersIn, seqTwins, T0, type SeqTwinOptions } from "#shared/seqTestutil.ts";
 import { SizeGuard } from "./sizeGuard.ts";
-import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
+import { SocketClosed, startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
 import { UndoStacks } from "./undo.ts";
 
 /**
@@ -29,10 +31,12 @@ type Event = Extract<ServerMessage, { t: "ev" }>;
 /** Every die lands on its middle, the same in both rooms. */
 const draw = (sides: number) => Math.ceil(sides / 2);
 const BOOKKEEPING = ["sys.explore", "sys.remember", "sys.sound"];
-const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+/** How long a step waits for what a room owes it: a loaded runner can stall for seconds, and what never comes still fails, named. */
+const OWED_MS = 30_000;
 
 const clock = { now: T0 };
 let t: Engine;
+let pinged = 0;
 
 /** One twin room on the engine: the members' devices, and P1's sockets, each restart's in turn, whose frames are compared. */
 class RoomTwin {
@@ -55,7 +59,11 @@ class RoomTwin {
       const socket = await t.connect(this.roomId, this.clients[who]);
       if (who === "p1") {
         const frames: unknown[] = [...socket.received];
-        socket.ws.on("message", (data) => frames.push(JSON.parse(data.toString())));
+        socket.ws.on("message", (data) => {
+          const frame = JSON.parse(data.toString()) as ServerMessage;
+          // The pongs answer the steps' own pings (drained), not the room.
+          if (frame.t !== "pong") frames.push(frame);
+        });
         this.watched.push({ label: `p1#${++this.#opened}`, frames });
       }
       await socket.snapshot(randomUUID());
@@ -72,6 +80,24 @@ class RoomTwin {
     const event = await this.send(who, op);
     assert.equal(event.rejects, undefined, `${this.name}: ${who}'s ${String(op.t)} taken`);
     return event;
+  }
+
+  /**
+   * Waits until each device holds every frame the room sent it so far: the pong of a ping comes behind each of them,
+   * and a socket the room closed holds them all once its close lands.
+   */
+  async drained(): Promise<void> {
+    await Promise.all(
+      Object.values(this.sockets).map(async (socket) => {
+        const k = ++pinged;
+        socket.send({ t: "ping", k });
+        try {
+          await socket.next("pong", (m) => m.k === k, OWED_MS);
+        } catch (err) {
+          if (!(err instanceof SocketClosed)) throw err;
+        }
+      }),
+    );
   }
 
   frames(): string[] {
@@ -129,21 +155,62 @@ async function twins(opts: SeqTwinOptions = {}): Promise<Pair> {
   return pair;
 }
 
-/** Moves the shared clock, then runs the step in each room in turn, the door's first, and lets each room's own work land. */
+/**
+ * Moves the shared clock, then runs the step in each room in turn, the door's first. A run waits for its answer, which
+ * comes after its batch's commit, so each room's own work, done in that batch, lands first, and then for the frames that
+ * batch sent the other devices.
+ */
 async function step(pair: Pair, run: (twin: RoomTwin) => Promise<unknown>, ms = 1_000): Promise<void> {
   clock.now += ms;
   for (const twin of pair) {
     await run(twin);
-    await settle();
+    await twin.drained();
   }
+}
+
+/** Waits until `check` holds, for what a room owes the test outside any answer, such as a faulted op's commit. */
+async function until(check: () => boolean, what: string): Promise<void> {
+  const end = Date.now() + OWED_MS;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`${what}: not within ${OWED_MS} ms`);
+    await delay(10);
+  }
+}
+
+/** Holds every commit on the engine's pool for `ms`, as a loaded runner's database can, until the call it returns. */
+function holdCommits(ms: number): () => void {
+  type Connect = (cb?: unknown) => Promise<pg.PoolClient> | void;
+  const pool = t.pool as unknown as { connect: Connect };
+  const original = pool.connect.bind(pool);
+  pool.connect = (cb?: unknown) => {
+    // pg's own `pool.query`, which the test's reads use, takes the callback form. Only a client taken for a transaction holds its commit.
+    if (typeof cb === "function") return original(cb);
+    return (original() as Promise<pg.PoolClient>).then((client) => {
+      const query = client.query.bind(client) as (...args: unknown[]) => Promise<pg.QueryResult>;
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop !== "query") return Reflect.get(target, prop, receiver);
+          return async (...args: unknown[]) => {
+            if (typeof args[0] === "string" && /^commit$/i.test(args[0])) await delay(ms);
+            return query(...args);
+          };
+        },
+      });
+    });
+  };
+  return () => {
+    pool.connect = original;
+  };
 }
 
 /** The engine stops every room as a deploy does, each writing its snapshot, and the members' devices connect again. */
 async function restart(pair: Pair): Promise<void> {
   clock.now += 1_000;
   await t.restart();
-  for (const twin of pair) await twin.connect();
-  await settle();
+  for (const twin of pair) {
+    await twin.connect();
+    await twin.drained();
+  }
 }
 
 function same(pair: Pair, what: string): void {
@@ -297,8 +364,8 @@ describe("twin rooms on the database give their devices the same frames", () => 
             await t.manager.unload(twin.roomId, undefined, false);
             await t.pool.query("update room_snapshots set schema_version = $2 where room_id = $1", [twin.roomId, old]);
             await twin.connect();
+            await twin.drained();
           }
-          await settle();
           for (const twin of pair) assert.equal((await saved(twin)).schema_version, old, `${twin.name}: still at the format below the count's just before the fault`);
         }
         const before = pair.map((twin) => actorOf(twin).committed.pub);
@@ -307,12 +374,20 @@ describe("twin rooms on the database give their devices the same frames", () => 
         clock.now = Math.max(clock.now, Date.now());
         const SKETCH = uuidv7(clock.now);
         const mocked = when === "before" ? tc.mock.method(SizeGuard.prototype, "check") : tc.mock.method(UndoStacks.prototype, "push");
-        await step(pair, async (twin) => {
-          mocked.mock.mockImplementationOnce(() => {
-            throw new Error("a fault the test throws");
+        // The fault can close P1's socket before any answer, so each room's step waits for the commit the op owes it,
+        // which comes as late as the database lets it: held here as a loaded runner's can hold it.
+        const release = holdCommits(250);
+        try {
+          await step(pair, async (twin) => {
+            mocked.mock.mockImplementationOnce(() => {
+              throw new Error("a fault the test throws");
+            });
+            twin.sockets.p1.op(sketchOf(SKETCH));
+            await until(() => actorOf(twin).committed.pub > before[pair.indexOf(twin)]!, `${twin.name}: the faulted op's commit`);
           });
-          twin.sockets.p1.op(sketchOf(SKETCH));
-        });
+        } finally {
+          release();
+        }
         mocked.mock.restore();
         for (const [i, twin] of pair.entries()) {
           const { state, pub, seq } = actorOf(twin).committed;
@@ -452,7 +527,7 @@ describe("twin rooms on the database give their devices the same frames", () => 
       const ev = await room.send("p2", { t: "token.update", tokenId: "a", patch: { name: `Not mine ${i}` } });
       assert.equal(ev.rejects?.length, 1, "refused");
     }
-    await settle();
+    // A refusal's answer goes out after the commit that stored its number.
     assert.ok((await room.count()) === clock.now && clock.now > before, "the last refusal's number is stored");
     await t.restart();
     const { rows } = await t.pool.query<{ seq: string }>("select seq::text from room_snapshots where room_id = $1", [room.roomId]);

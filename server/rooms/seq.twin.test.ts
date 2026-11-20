@@ -495,7 +495,13 @@ describe("an op that faults before its install or after it", () => {
           });
           twin.clock.now += 1_000;
           const p1 = twin.clients.p1;
+          // The fault can close P1's socket before any answer, so the step waits for the commit the op owes the room,
+          // which comes as late as the database lets it: held here past the settle's quiet spell, as a loaded runner can.
+          const hold = holdCommit(twin);
           void twin.actor.op(p1.conn, ++p1.n, sketch);
+          await hold.entered;
+          setTimeout(hold.release, 50);
+          await until(() => (twin.actor.committed.pub > before[pair.indexOf(twin)]!.pub ? true : undefined), `${twin.name}: the faulted op's commit`);
           await twin.settle();
         });
         mocked.mock.restore();
