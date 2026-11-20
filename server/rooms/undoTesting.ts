@@ -10,7 +10,7 @@ import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { env } from "#shared/testutil.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
-import { climbOf, keptFrom, MOVED_SINCE, plannedOn, poseRestore, posesAfter, ridesChanged, TRAPPED_ON_THE_WAY, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { climbOf, fallsKept, fallsRestored, keptFrom, MOVED_SINCE, plannedOn, poseRestore, posesAfter, ridesChanged, TRAPPED_ON_THE_WAY, UndoStacks, withoutFallCards, type UndoEntry, type Walk } from "./undo.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { describeOp } from "./undoLabels.ts";
 
@@ -20,9 +20,10 @@ import { describeOp } from "./undoLabels.ts";
  * DM action enters its classified scope with semantic after-values and
  * eligible poses. DM restores adapt those poses and carry correction data.
  * A player's op passes `canApply` first, goes on their stack with the poses
- * their copy shows and the rides it ended or made, and an undo or a redo
- * is built by `poseRestore` and passes `canApply` as the player before it
- * applies. Every applied op is kept in order, as the room's op log.
+ * their copy shows, the rides it ended or made and the falls it keeps,
+ * with no fall card, and an undo or a redo is built by `poseRestore` and
+ * passes `canApply` as the player before it applies. Every applied op is
+ * kept in order, as the room's op log.
  */
 
 const deps = { canUseAsset: () => true };
@@ -41,8 +42,7 @@ export class UndoTable {
     this.state = state;
   }
 
-  #shows(who: Viewer): (id: string) => boolean {
-    const state = this.state;
+  #shows(who: Viewer, state: RoomState = this.state): (id: string) => boolean {
     return (id) => who.role === "dm" || projectEntity(keys.token(id), state, who, { sceneId: state.meta.playerSceneId }) !== null;
   }
 
@@ -80,8 +80,9 @@ export class UndoTable {
     if (scope !== "none" && (r.inverse || saveOutcome) && UndoStacks.records(who.role, op, before)) {
       const pose = who.role === "player" && (isPoseOp(op) || isResizeOp(op));
       const all = r.inverse ?? [];
-      const inverse = pose && r.trapWrote ? all.filter((entry) => !r.trapWrote!.has(entry.key)) : all;
+      const inverse = pose ? withoutFallCards(r.trapWrote ? all.filter((entry) => !r.trapWrote!.has(entry.key)) : all) : all;
       const poses = pose ? posesAfter(this.state, inverse, this.#shows(who), plannedOn(before, op)) : undefined;
+      const falls = pose ? fallsKept(r.falls, inverse, this.#shows(who, before)) : [];
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       const walk: Walk | undefined = poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.state) : undefined;
@@ -89,6 +90,7 @@ export class UndoTable {
       this.stacks.push(who.memberId, inverse, describeOp(op as ClientOp, before, who, this.state), group, poses, undefined, undefined, teleport, walk, rides, r.trapped === true, {
         scope: who.role === "dm" ? scope : "play",
         ...(climb ? { climb } : {}),
+        ...(falls.length > 0 ? { falls } : {}),
         ...(saveOutcome ? { saveOutcome } : {}),
         ...(who.role === "dm" ? { values: dmHistoryValues(inverse, this.state, scope === "play") } : {}),
       });
@@ -151,6 +153,7 @@ export class UndoTable {
       ...(from === "redo" && step.routed && step.routes ? { routes: step.routes } : {}),
       ...(step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {}),
       ...(step.poses && step.climb ? { climb: step.climb } : {}),
+      ...(step.poses && step.falls && step.falls.length > 0 ? { falls: step.falls } : {}),
       ...(quiet ? { quiet } : {}),
       ...(saveOutcome ? { saveOutcome } : {}),
     };
@@ -161,10 +164,13 @@ export class UndoTable {
     const r = this.#apply(who, checked.data);
     if (!r.ok) return this.#failed(who, from, scope, step, r.code, r.message);
     this.stacks.consume(who.memberId, from, scope, step.id!);
-    const inverse = r.inverse ?? (saveOutcome ? [] : null);
+    const all = r.inverse ?? (saveOutcome ? [] : null);
+    const inverse = all && step.poses ? withoutFallCards(all) : all;
+    const falls = step.poses ? fallsRestored(step.falls, from, this.last!.before, this.state) : undefined;
     if (inverse) this.stacks.pushRestored(who.memberId, from, inverse, step.label, step.poses ? posesAfter(this.state, inverse, this.#shows(who), keptFrom(step.poses, this.last!.before)) : undefined, step.origin, step.teleport === true, step, {
       scope,
       ...(who.role === "dm" ? { values: dmHistoryValues(inverse, this.state, scope === "play") } : {}),
+      ...(falls ? { falls } : {}),
     });
     return "ok";
   }

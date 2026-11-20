@@ -1,4 +1,4 @@
-import { parseKey, readEntity } from "#shared/keys.ts";
+import { keys, parseKey, readEntity } from "#shared/keys.ts";
 import type { FallRecord, RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
@@ -240,7 +240,8 @@ export class UndoStacks {
       return "too-large";
     }
     const top = s.undo.at(-1);
-    const climbs = history.climb !== undefined || top?.climb !== undefined;
+    // A climb's or a fall's step stands alone either way: its undo must start where its stairs or its hole are (D-261119-107).
+    const climbs = history.climb !== undefined || top?.climb !== undefined || (history.falls?.length ?? 0) > 0 || top?.falls !== undefined;
     if (group !== undefined && top?.group === group && !top.saveOutcome && !climbs && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
       const merged = mergeInverses(top.entries, inverse);
       if (merged && merged.length <= MAX_RESTORE_ENTRIES) {
@@ -281,6 +282,7 @@ export class UndoStacks {
     const recorded = withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin);
     if (saveOutcome) recorded.saveOutcome = { ...saveOutcome };
     if (history.climb) recorded.climb = { ...history.climb };
+    if (history.falls && history.falls.length > 0) recorded.falls = history.falls.map((record) => ({ ...record }));
     if (group !== undefined) recorded.gesture = { group, ...(origin ? { client: origin.client } : {}), declared: history.declared === true };
     if (history.values) recorded.values = history.values;
     this.#identify(recorded);
@@ -318,7 +320,8 @@ export class UndoStacks {
    * After a restore applied: its own inverse goes on the opposite stack,
    * under the same label and origin, since a step undone and redone is
    * still the one its op made. It carries no group, so nothing sent later
-   * merges into a step that was undone and redone.
+   * merges into a step that was undone and redone. A fall's records come
+   * in `history.falls`, as fallsRestored made them for the opposite stack.
    */
   pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture" | "saveOutcome" | "climb">, history: RecordHistory = {}): void {
     const saveOutcome = walked?.saveOutcome ?? history.saveOutcome;
@@ -340,6 +343,8 @@ export class UndoStacks {
     if (walked?.rides) entry.rides = walked.rides;
     // A climb undone is still one, so its redo crosses back by the same stairs, and every later undo and redo after it.
     if (walked?.climb) entry.climb = walked.climb;
+    // So is a fall, its records with the card the undo removed, so the redo writes back that card and no other (4.5).
+    if (history.falls && history.falls.length > 0) entry.falls = history.falls.map((record) => ({ ...record }));
     if (walked?.gesture && !saveOutcome) entry.gesture = walked.gesture;
     if (saveOutcome) entry.saveOutcome = { ...saveOutcome };
     const recorded = withExtras(entry, poses, origin);
@@ -545,6 +550,51 @@ export function climbOf(before: RoomState, op: Op): ClimbRecord | undefined {
   return link && token ? { tokenId: token.id, linkId: link.id, rev: link.rev, made: link.made, from: token.sceneId, to: link.to } : undefined;
 }
 
+/**
+ * A player's inverse without its fall cards (docs/design/design-v1-floors.md
+ * phase 4, 4.5), on the op's step and on every undone or redone one: a
+ * card is the DM's, and the step settles one only through its records
+ * (`falls`), so a player's undo never puts back a card the DM settled or
+ * one the room evicted, and their restore holds no key a player may not write.
+ */
+export function withoutFallCards(inverse: RestoreEntry[]): RestoreEntry[] {
+  return inverse.some(isFallCard) ? inverse.filter((entry) => !isFallCard(entry)) : inverse;
+}
+
+function isFallCard(entry: RestoreEntry): boolean {
+  return parseKey(entry.key)?.kind === "fall";
+}
+
+/**
+ * The fall records a player's step keeps (4.5, D-261119-120): those of
+ * roots the player received at the op whose own key stays in the step's
+ * inverse, after the trap step's keys left it. Any other faller, a hidden
+ * creature the walk dragged in or a trapdoor's victim that went on through
+ * a hole, gets none: it crosses back only as a silent passenger does, or
+ * stays where it is, and its card is never the player's to remove.
+ */
+export function fallsKept(falls: readonly FallRecord[] | undefined, inverse: readonly RestoreEntry[], received: Shows): FallRecord[] {
+  if (!falls || falls.length === 0) return [];
+  const inStep = new Set(inverse.map((entry) => entry.key));
+  return falls.filter((record) => inStep.has(keys.token(record.tokenId)) && received(record.tokenId));
+}
+
+/**
+ * The records an undone or redone fall carries onto the opposite stack
+ * (4.5, D-261119-107): after an undo each holds the card it removed, so its
+ * redo writes back that card and no other, or none where the card had gone
+ * already (applied, dismissed or evicted), so damage applied is never asked
+ * for twice. After a redo none holds one: the undo removes a card by its id.
+ * `before` and `after` are the room around the restore.
+ */
+export function fallsRestored(falls: readonly FallRecord[] | undefined, from: HistoryDirection, before: RoomState, after: RoomState): FallRecord[] | undefined {
+  if (!falls || falls.length === 0) return undefined;
+  return falls.map(({ card: _card, ...record }) => {
+    const removed = from === "undo" ? ownEntry(before.falls, record.fallId) : undefined;
+    return removed && ownEntry(after.falls, record.fallId) === undefined ? { ...record, card: { ...removed } } : record;
+  });
+}
+
 /** The tokens an op names, the roots of its groups (docs/design/design-v1-attach.md 8.2): every other token it moves rides on one of them. */
 export function namedTokens(op: Op): string[] {
   if (op.t === "token.moveMany") return op.moves.map((m) => m.tokenId);
@@ -670,7 +720,8 @@ function stillUnder(state: RoomState, tokenId: string, restoring: ReadonlySet<st
  * or away and back included, or marked its move. It never puts a token
  * back on another scene, only in its place on this one, but for a climb's
  * (UndoEntry.climb), which takes the climber, what rode with it and their
- * areas back across the stairs between the climb's two floors.
+ * areas back across the stairs between the climb's two floors, and a
+ * fall's (UndoEntry.falls), which does the same between each record's.
  *
  * A token the player cannot see now answers as if it were gone, before its
  * position is looked at, so a refusal never tells a player that a creature
@@ -691,13 +742,14 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     if (parsed?.kind === "token") restoring.add(parsed.id);
   }
   const silent = new Set([...restoring].filter((id) => step.poses[id]?.silent === true));
-  const crosses = crossing(step.climb);
+  const crosses = crossing([...(step.climb ? [step.climb] : []), ...(step.falls ?? [])]);
+  const across = step.climb !== undefined || (step.falls?.length ?? 0) > 0;
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
     // An attach's rows and the turn's list stay as they are: the undo takes back the link and the seat only (docs/design/design-v1-attach.md 8.3).
     if (parsed?.kind === "encounter") continue;
-    // A climb's areas go back with the creatures they follow now, read from the room once those are known (below), not from the step.
-    if (step.climb && parsed?.kind === "template") continue;
+    // A climb's or a fall's areas go back with the creatures they follow now, read from the room once those are known (below), not from the step.
+    if (across && parsed?.kind === "template") continue;
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
     const before = entry.value as Token | null | undefined;
@@ -722,7 +774,7 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
   const moved = [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined, crosses), expectHash: guardHash(t.key, t.current) })), ...quiet];
   return {
     ok: true,
-    entries: [...moved, ...(step.climb ? areasAcross(state, moved) : [])],
+    entries: [...moved, ...(across ? areasAcross(state, moved) : [])],
     ...(quietIds.length > 0 ? { quiet: quietIds } : {}),
   };
 }
@@ -730,11 +782,12 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
 /**
  * Whether a climb's restore may take a creature from one floor to the
  * other (docs/design/design-v1-floors.md phase 2, 8): only between the two
- * floors it joined, either way, so an undo and a redo both cross. A step
- * that is no climb never changes a floor.
+ * floors it joined, either way, so an undo and a redo both cross. A fall's
+ * record crosses as a climb does, each between its own two floors (phase
+ * 4, 4.5). A step that is neither never changes a floor.
  */
-function crossing(climb: ClimbRecord | undefined): (now: string, back: string) => boolean {
-  return (now, back) => climb !== undefined && now !== back && ((now === climb.from && back === climb.to) || (now === climb.to && back === climb.from));
+function crossing(ways: readonly Pick<ClimbRecord, "from" | "to">[]): (now: string, back: string) => boolean {
+  return (now, back) => now !== back && ways.some((way) => (now === way.from && back === way.to) || (now === way.to && back === way.from));
 }
 
 /**
