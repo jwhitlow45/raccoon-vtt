@@ -8,6 +8,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { exactCopies, linesHeld, ownHeldBytes } from "./sizeGuard.ts";
+import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 
 /*
  * D-261116-015 and D-261119-021: a player's exact part counts only what
@@ -674,4 +675,109 @@ test("on a Per player scene with fog, the walk P1's exact part keeps past its tu
   // Past the turn, which a turn of another row's started, the exact part keeps it so.
   const later = { ...state, encounter: { ...state.encounter, activeEntryId: null, turnStart: undefined } } as RoomState;
   assert.equal(stableStringify(seatView(later, "p1").walk("hero")), stableStringify(held));
+});
+
+// ---------------------------------------------------------------------------
+// Floors phase 4 (docs/design/design-v1-floors.md phase 4, 4.7): openings, falls, cards and trapdoors
+
+/**
+ * A floors room: the tower's opening from Upper floor down to Ground floor
+ * and its stairs, hidden by the seed, a trapdoor upstairs, the DM's cards,
+ * and Thorn, P1's, upstairs with P1's area on it and, by the seed, a hidden
+ * owl on it bearing another area of P1's, a hidden goblin with an area of
+ * the DM's on the trapdoor, a hidden ogre beside the hole, a fall P1's
+ * Thorn already took, Thorn's turn and Upper floor reached or not.
+ */
+function floorsBase(seed: number): RoomState {
+  const r = rng(seed * 47 + 13);
+  let s = withStairs(withOpening(floorsTower()));
+  if (r() < 0.5) s = { ...s, floorLinks: Object.fromEntries(Object.entries(s.floorLinks!).map(([id, link]) => [id, link.kind === "stairs" ? { ...link, hidden: true as const } : link])) };
+  s.traps = { td1: trapdoor("td1", { zone: { cells: [{ x: 10, y: 6, w: 2, h: 2 }] } }) };
+  s.tokens.thorn = { ...s.tokens.thorn!, sceneId: UPPER, x: 4, y: 6, rev: 9 };
+  s.templates.aura = template("aura", { sceneId: UPPER, ownerId: "p1", attachedTo: "thorn", label: "Aura of Protection", rev: 9 });
+  if (r() < 0.6) {
+    s.tokens.owl = token("owl", { kind: "pc", size: "tiny", visibility: "dm", sceneId: UPPER, x: 4, y: 6, rev: 9, attached: { to: "thorn", kind: "perch" }, nudge: { x: 0.25, y: 0 } });
+    s.templates.mark = template("mark", { sceneId: UPPER, ownerId: "p1", attachedTo: "owl", casterId: "thorn", label: "Hunter's Mark", rev: 9 });
+  }
+  if (r() < 0.6) {
+    s.tokens.gob = token("gob", { visibility: "dm", sceneId: UPPER, x: 10, y: 6, rev: 99, path: { turn: 2, stops: [{ x: 9, y: 6, elevation: 0 }, { x: 10, y: 6, elevation: 0 }] } });
+    s.templates.gobaura = template("gobaura", { sceneId: UPPER, ownerId: "dm1", attachedTo: "gob", visibility: "dm", rev: 9 });
+  }
+  if (r() < 0.5) s.tokens.ogre = token("ogre", { visibility: "dm", sceneId: GROUND, x: 8, y: 8, rev: 9 });
+  if (r() < 0.6) s = withFalls(s, ...Array.from({ length: 1 + Math.floor(r() * 10) }, (_, i) => fallCard({ id: `${40 + i}:0`, made: 40 + i, tokenId: i % 2 ? "gob" : "thorn", riders: i % 3 ? ["owl"] : undefined })));
+  if (r() < 0.4) s.encounter = { rev: 9, round: 1, activeEntryId: "rthorn", entries: [entry("rthorn", { tokenId: "thorn" })], turnStart: { entryId: "rthorn", tokenId: "thorn", sceneId: UPPER, x: 4, y: 6, elevation: 0, seen: true, seq: 7 } };
+  s.openFloors = { [GROUND]: { sceneId: GROUND, rev: 1 }, ...(r() < 0.6 ? { [UPPER]: { sceneId: UPPER, rev: 1 } } : {}) };
+  // A fall Thorn already took, so its walk and its area hold what a fall writes.
+  if (r() < 0.5) {
+    const fell = applyOp(s, { t: "token.move", tokenId: "thorn", x: 6, y: 6 } as Op, { memberId: "p1", role: "player" }, env(6_100_000 + seed));
+    assert.ok(fell.ok, fell.ok ? "" : fell.message);
+    s = fell.state;
+  }
+  return s;
+}
+
+describe("floors phase 4: an op that leaves a player's copy as it was leaves what their exact part shows as it was", () => {
+  test("the DM's falls, drops, Dismiss, hidden stairs and a delete of a card's creature, on floors rooms", () => {
+    const found: string[] = [];
+    let compared = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const state = floorsBase(seed);
+      const ops: Op[] = [
+        { t: "token.move", tokenId: "ogre", x: 3, y: 3 },
+        { t: "token.move", tokenId: "gob", x: 6, y: 6 },
+        { t: "token.move", tokenId: "gob", x: 13, y: 6, route: [[10, 6, 0, 0], [13, 6, 0, 0]] } as Op,
+        { t: "fall.settle", fallId: "40:0" },
+        { t: "token.delete", tokenId: "gob" },
+        { t: "floorLink.update", linkId: "l1", patch: { hidden: true } } as Op,
+        { t: "trap.spring", trapId: "td1", tokenIds: ["gob"] } as Op,
+      ];
+      for (const op of ops) {
+        const { moved, unchanged } = moves(state, op);
+        compared += unchanged;
+        found.push(...moved.map((why) => `seed ${seed}, ${op.t}: ${why}`));
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(compared > 150, `${compared} copies unchanged and compared`);
+  });
+
+  test("twins apart in every field P1's copy leaves out of a floors room give equal exact parts", () => {
+    const found: string[] = [];
+    let compared = 0;
+    for (let seed = 1; seed <= 16; seed++) {
+      const base = floorsBase(seed);
+      const r = rng(seed * 53 + 1);
+      for (const memberId of ["p1", "p2"]) {
+        if (!base.members[memberId]) continue;
+        const candidates: Change[] = [];
+        for (const thing of storedThings(base, memberId)) omittedChanges(thing.stored, thing.copy, thing.path, candidates);
+        // A floor changes to another of the room's scenes, as a floor that is not one makes no room.
+        const changes = candidates.flatMap((c): Change[] => {
+          if (c.path.at(-1) !== "sceneId" || c.append) return [c];
+          const other = Object.keys(base.scenes).find((id) => `${id}zz` !== c.to && id !== (c.to as string).slice(0, -2));
+          return other === undefined ? [] : [{ ...c, to: other }];
+        });
+        const [copy, shown, asStored] = [knownBy(base, memberId), shownBy(base, memberId), heldAsStored(base, memberId)];
+        for (const change of changes.sort(() => r() - 0.5).slice(0, 60)) {
+          const twin = applied(base, change);
+          let twinCopy: string;
+          try {
+            twinCopy = knownBy(twin, memberId);
+          } catch {
+            continue;
+          }
+          if (twinCopy !== copy) continue;
+          compared++;
+          const where = change.path.join(".");
+          const after = shownBy(twin, memberId);
+          for (const key of new Set([...Object.keys(shown), ...Object.keys(after)])) {
+            if (shown[key] === after[key] || asStored.has(key) || (key.startsWith("template:") && areaMoved(where))) continue;
+            found.push(`seed ${seed}, ${memberId}, ${where}${change.append ? " one longer" : ""}: ${key} ${shown[key] ?? "none"} against ${after[key] ?? "none"}`);
+          }
+        }
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(compared > 300, `${compared} twins compared`);
+  });
 });

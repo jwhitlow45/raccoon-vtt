@@ -14,6 +14,8 @@ import { memberRing } from "#shared/logRings.ts";
 import { floorsOf, ownedBy } from "#shared/rules/floors.ts";
 import { actor, character, DM, effect, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { PLAYER_OPS as FIXED, playerTable as table, rolled } from "./playerOpsTesting.ts";
+import { UndoTable } from "./undoTesting.ts";
+import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import { exactCopies, farRoomBytes, farWidths, farWidthsByFloor, measuredStateBytes, ownHeldBytes, projectedSceneBytes, type ExactCopy } from "./sizeGuard.ts";
 
 /*
@@ -666,6 +668,74 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.equal(full.encounterHistory.length, 20, "the history keeps 20 steps");
     assert.ok(serializedBytes(full.encounterHistory) > 1_040_000, "near its bound");
     assert.deepEqual(Object.fromEntries(steppedParts(full)), Object.fromEntries(steppedParts(fight(false))));
+  });
+
+  /**
+   * A floors room (docs/design/design-v1-floors.md phase 4) for P1's own
+   * falls, drops, flights and climbs: the tower's opening from Upper floor
+   * down to Ground floor, its stairs, a trapdoor upstairs that stops a
+   * walker or lets it on, and by the seed P1's area and companion on Thorn,
+   * a hidden owl on Thorn, a hidden goblin on the trapdoor, the DM's cards,
+   * Thorn's turn, Players move any token, and Upper floor reached or not.
+   * One DM op settles the floors' marks, as every live room has them.
+   */
+  const floorsRoom = (r: () => number): RoomState => {
+    let s = withStairs(withOpening(floorsTower()));
+    s.traps = { td1: trapdoor("td1", { zone: { cells: [{ x: 10, y: 6, w: 2, h: 2 }] }, rig: { ...trapdoor().rig!, stops: r() < 0.5, foundOnSpring: false } }) };
+    s.tokens.thorn = { ...s.tokens.thorn!, sceneId: r() < 0.7 ? UPPER : GROUND, x: [4, 8, 3][Math.floor(r() * 3)]!, y: 6 };
+    const th = s.tokens.thorn;
+    if (r() < 0.5) s.templates.aura = template("aura", { sceneId: th.sceneId, ownerId: "p1", attachedTo: "thorn", label: "Aura of Protection", rev: 9 });
+    if (r() < 0.4) s.tokens.pet = token("pet", { name: "Hoot", size: "tiny", ownerIds: ["p1"], sceneId: th.sceneId, x: th.x, y: th.y, rev: 9, attached: { to: "thorn", kind: "perch" } });
+    if (r() < 0.5) s.tokens.owl = token("owl", { kind: "pc", size: "tiny", visibility: "dm", sceneId: th.sceneId, x: th.x, y: th.y, rev: 9, attached: { to: "thorn", kind: "perch" } });
+    if (r() < 0.5) s.tokens.gob = token("gob", { visibility: "dm", sceneId: UPPER, x: 11, y: 7, rev: 99 });
+    if (r() < 0.5) s = withFalls(s, ...Array.from({ length: Math.floor(r() * 11) }, (_, i) => fallCard({ id: `${40 + i}:0`, made: 40 + i, tokenId: `gone${i}` })));
+    if (r() < 0.3) s.meta = { ...s.meta, settings: { ...s.meta.settings, playersMoveAny: "all" } };
+    if (r() < 0.4) s.encounter = { rev: 9, round: 1, activeEntryId: "rthorn", entries: [entry("rthorn", { tokenId: "thorn" })], turnStart: { entryId: "rthorn", tokenId: "thorn", sceneId: th.sceneId, x: th.x, y: th.y, elevation: 0, seen: true, seq: 7 } };
+    const settled = applyOp(s, { t: "token.create", token: { id: "pad", sceneId: "s2", kind: "npc", layer: "token", name: "Pad", size: "medium", x: 1, y: 1, visibility: "dm", ownerIds: [], actor: { inline: actor() } } } as Op, DM, env(2_900_000));
+    assert.ok(settled.ok, settled.ok ? "" : settled.message);
+    return r() < 0.5 ? settled.state : { ...settled.state, openFloors: { [GROUND]: { sceneId: GROUND, rev: 1 } } };
+  };
+
+  test("floors rooms: P1's falls, drops, flights and climbs, with their undo and redo, move P1's stepped parts only by hidden things they took away", () => {
+    const apart: string[] = [];
+    const accepted: string[] = [];
+    const seen = { fall: 0, drop: 0, flight: 0, climb: 0, undo: 0, redo: 0 };
+    for (let seed = 1; seed <= 120; seed++) {
+      const r = rng(seed * 17 + 3);
+      const table = new UndoTable(floorsRoom(r));
+      table.seq = 3_000_000 + seed * 100;
+      let undone = false;
+      for (let k = 0; k < 8; k++) {
+        const before = table.state;
+        const th = before.tokens.thorn;
+        if (!th) break;
+        const ops: Op[] = [
+          { t: "token.move", tokenId: "thorn", x: 6, y: 6 },
+          { t: "token.move", tokenId: "thorn", x: 13, y: 6, route: [[th.x, th.y, 0, 0], [10, 6, 0, 0], [13, 6, 0, 0]] } as Op,
+          { t: "token.move", tokenId: "thorn", x: 10, y: 6 },
+          { t: "token.move", tokenId: "thorn", x: 6, y: 6, elevation: 10 },
+          { t: "token.climb", tokenId: "thorn", linkId: th.sceneId === UPPER ? "o1" : "o2" },
+          { t: "token.climb", tokenId: "thorn", linkId: th.sceneId === GROUND ? "l1" : "l2" },
+          { t: "token.move", tokenId: "thorn", x: 3, y: 3 },
+          { t: "log.chat", text: "Mind the hole" },
+        ];
+        const hovering = th.x === 6 && th.y === 6 && th.elevation > 0;
+        const roll = r();
+        // An undo now and then, and its redo often after it.
+        const step: "undo" | "redo" | Op = undone && roll < 0.5 ? "redo" : roll < 0.15 ? "undo" : hovering && r() < 0.7 ? ops[4]! : ops[Math.floor(r() * ops.length)]!;
+        const answer: string = step === "undo" ? table.undo(P1) : step === "redo" ? table.redo(P1) : table.play(P1, step);
+        undone = step === "undo" && answer === "ok";
+        if (answer !== "ok") continue;
+        const after = table.state;
+        const card = Object.keys(after.falls ?? {}).some((id) => before.falls?.[id] === undefined);
+        if (typeof step === "string") seen[step]++;
+        else if (step.t === "token.climb" && after.tokens.thorn?.sceneId !== th.sceneId) seen[step.linkId.startsWith("o") ? "flight" : "climb"]++;
+        else if (card) seen[after.tokens.thorn?.sceneId !== th.sceneId && step.t === "token.move" && step.x === 6 ? "fall" : "drop"]++;
+        for (const stray of strays(before, after, accepted)) apart.push(`${typeof step === "string" ? step : step.t} (seed ${seed}): ${stray}`);
+      }
+    }
+    assert.deepEqual(apart.slice(0, 10), [], `${apart.length} moved P1's stepped part`);
+    assert.ok(Object.values(seen).every((n) => n >= 5), JSON.stringify(seen));
   });
 
   /**
