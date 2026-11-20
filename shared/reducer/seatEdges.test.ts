@@ -290,6 +290,37 @@ describe("the spot beside her seat is found wherever her reach holds one, whatev
     ["hex rows", ROWS],
     ["hex columns", COLUMNS],
   ] as const) {
+    test(`${name}, 1 ft cells, so her 5 ft reach spans five: a Gargantuan creature at the far edge of her reach, her seat dropped across a Gargantuan mount, goes round to the nearest spot in her reach`, () => {
+      const s = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, scenes: { s1: scene("s1", { ...(isHex(g) ? { gridShape: g.orient === "rows" ? ("hexRows" as const) : ("hexColumns" as const) } : {}), bounds: { w: 40, h: 30 }, blockMovement: true, autoWalls: "off" }) } });
+      s.buildChunks = {};
+      s.meta.settings = { ...s.meta.settings, feetPerCell: 1 };
+      const ride = { name: "Bree", kind: "pc" as const, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" as const, steer: true as const } };
+      s.tokens.horse = isHex(g) ? onHex(g, "horse", "gargantuan", { col: 14, row: 12 }, { name: "Mount", kind: "npc", ownerIds: ["p1"] }) : token("horse", { size: "gargantuan", x: 14, y: 12, name: "Mount", kind: "npc", ownerIds: ["p1"] });
+      const seats = seatsOn(g, s.tokens.horse, "medium");
+      const place = (p: Point | { col: number; row: number }) => ("col" in p && isHex(g) ? onHex(g, "bree", "medium", p) : (p as Point));
+      // She rides the mount's westmost seat, and the creature stands the farthest west her reach allows by her row.
+      const west = seats.map(place).sort((a, b) => a.x - b.x || a.y - b.y)[0]!;
+      s.tokens.bree = { ...token("bree", { x: 0, y: 0, ...ride }), x: west.x, y: west.y };
+      const gob = placesOf(g, s, token("gob", { size: "gargantuan", x: 0, y: 0 }))
+        .map((p) => ({ ...token("gob", { size: "gargantuan", name: "Ogre", kind: "monster", visibility: "dm", attached: { to: "bree", kind: "drag" } }), x: p.x, y: p.y }))
+        .filter((t) => Math.abs(t.y - west.y) < 1.6 && t.x < west.x && !overlaps(g, t, s.tokens.horse!) && linkHolds(g, s.meta.settings, "drag", t, s.tokens.bree!))
+        .sort((a, b) => a.x - b.x)[0]!;
+      s.tokens.gob = gob;
+      const to = isHex(g) ? hexStandPlace(g, s.tokens.horse, { size: "gargantuan", ref: { col: 18, row: 12 }, squeezed: false }) : { x: 18, y: 12 };
+      const plain = applyOp(s, { t: "token.move", tokenId: "horse", ...to }, P1, env(1));
+      assert.ok(plain.ok && plain.state.tokens.gob!.attached?.to === "bree", "with no seat, still dragged");
+      const end = { x: plain.state.tokens.gob!.x, y: plain.state.tokens.gob!.y };
+      // Her seat dropped on the mount's eastmost seat there, across it from her own.
+      const east = seatsOn(g, { ...s.tokens.horse, ...to }, "medium").map(place).sort((a, b) => b.x - a.x || a.y - b.y)[0]!;
+      const after = twinned(s, { t: "token.move", tokenId: "horse", ...to, seat: { tokenId: "bree", x: east.x, y: east.y } }, name);
+      assert.deepEqual(at(after, "bree"), [east.x, east.y]);
+      const want = oracle(g, after, placesOf(g, after, after.tokens.gob!), end);
+      assert.ok(want && want !== end, `a spot in her reach away from where its walk ends, ${JSON.stringify(want)}`);
+      assert.ok(besideHer(g, after, name), "still dragged");
+      assert.deepEqual(at(after, "gob"), [want.x, want.y], "the nearest spot in her reach");
+      assert.ok(Math.abs(want.x - east.x) > 6, `more than six cells from her, past a fixed radius: ${want.x} from her ${east.x}`);
+    });
+
     test(`${name}: every Small to Gargantuan goblin, rider and mount, to every seat in the open and at the scene's edge, lands on the nearest spot in her reach the scene holds, or where its walk ends where it holds none`, () => {
       let checked = 0;
       let moved = 0;
@@ -398,6 +429,9 @@ describe("a walk that comes back to where it started counts as a walk from op 63
     const leg = (t: Token) => t.path?.stops.at(-1);
     assert.deepEqual([at(back.state, "horse"), leg(back.state.tokens.horse!)?.moved, leg(back.state.tokens.horse!)?.cost], [[2, 2], 60, 60], "back on its start");
     assert.deepEqual([leg(on.state.tokens.horse!)?.moved, leg(on.state.tokens.horse!)?.cost], [55, 55], "on 3, 2");
+    const down = applyOp(s, { t: "token.move", tokenId: "horse", x: 2, y: 2, route: [[2, 6, 0, 0], [2, 2, 0, 0]] }, P1, env(2));
+    assert.ok(down.ok);
+    assert.deepEqual([leg(down.state.tokens.horse!)?.moved, leg(down.state.tokens.horse!)?.cost], [40, 40], "out by 2, 6 and back");
     // Op 62 replays the loop as it ran: no path for the warhorse.
     const old = applyOp(s, { t: "token.move", tokenId: "horse", x: 2, y: 2, route: [[8, 2, 0, 0], [2, 2, 0, 0]] }, P1, { ...env(2), opVersion: 62 });
     assert.ok(old.ok);
@@ -420,6 +454,9 @@ describe("a walk that comes back to where it started counts as a walk from op 63
       [4, 3, 5, 15],
       [4, 3, 40, 40],
     ]);
+    const down = applyOp(s, { t: "token.move", tokenId: "bree", x: 3, y: 4, route: [[3, 7, 0, 0], [3, 4, 0, 0]] }, P1, env(2));
+    assert.ok(down.ok);
+    assert.deepEqual(stops(down.state.tokens.bree!).at(-1), [3, 4, 30, 30], "off by 3, 4, out to 3, 7 and back");
     const walker = ownWalk(s.tokens.bree!);
     const ruler = dismountCost(SQUARES, s, walker, s.tokens.horse!, routePoints(s.buildChunks, walker, route, 0), route, s.meta.settings, { h: 0, v: 0 }, 15, false);
     assert.deepEqual([ruler.moved, ruler.cost], [45, 55], "the ruler's feet");
