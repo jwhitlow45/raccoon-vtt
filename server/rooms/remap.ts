@@ -409,13 +409,16 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   }
   // Fall cards follow their floors (docs/design/design-v1-floors.md phase 4, 4.4), each naming its creature by its new id.
   // One whose creature did not come through names a new id nothing holds, so it reads as a creature no longer on the map,
-  // as a dismissed companion's does, and no creature the new room makes can take its place. A card keeps its id and
-  // `made`: the new room's ops count on past every card's (lastLineSeq), so no card it makes later takes that id.
+  // as a dismissed companion's does, and no creature the new room makes can take its place. A rider that did not come
+  // through leaves the card, as a rider deleted since reads. A card keeps its id and `made`: the new room's ops count on
+  // past every card's (lastLineSeq), so no card it makes later takes that id.
   if (state.falls) {
     const cards: Record<string, Fall> = {};
     for (const card of Object.values(state.falls)) {
       if (!scenes.has(card.sceneId) || !scenes.has(card.from)) continue;
-      cards[card.id] = { ...card, tokenId: tokens.has(card.tokenId) ? tokens.of(card.tokenId) : newId(), sceneId: scenes.of(card.sceneId), from: scenes.of(card.from) };
+      const { riders: was, ...rest } = card;
+      const riders = (was ?? []).filter((id) => tokens.has(id)).map((id) => tokens.of(id));
+      cards[card.id] = { ...rest, tokenId: tokens.has(card.tokenId) ? tokens.of(card.tokenId) : newId(), ...(riders.length > 0 ? { riders } : {}), sceneId: scenes.of(card.sceneId), from: scenes.of(card.from) };
     }
     if (Object.keys(cards).length > 0) out.falls = cards;
   }

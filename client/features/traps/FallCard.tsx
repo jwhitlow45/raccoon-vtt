@@ -17,19 +17,26 @@ import { cardStyle } from "../rolls/parts.tsx";
 import { Note } from "../tokens/ui.tsx";
 import { fallRead } from "./desk.ts";
 
-/** The group save a fall card's Apply starts (docs/design/design-v1-floors.md phase 4, 4.4): its one row the creature that fell, on the floor it stands on now, and Apply removes the card. */
-export function fallStart(card: Fall): StartInput {
-  return { source: { kind: "fall", fallId: card.id, tokenIds: [card.tokenId] }, ...fallFill(card), panel: "dice" };
+/**
+ * The group save a fall card's Apply starts (docs/design/design-v1-floors.md
+ * phase 4, 4.4): a row for each creature it names that the DM's copy holds
+ * (desk.ts fallers), the one that fell and the riders that fell with it
+ * (D-261120-007), on the floor the first stands on now, and Apply removes
+ * the card.
+ */
+export function fallStart(card: Fall, tokenIds: readonly string[]): StartInput {
+  return { source: { kind: "fall", fallId: card.id, tokenIds: [...tokenIds] }, ...fallFill(card), panel: "dice" };
 }
 
 /** The title every fall card carries. */
 export const FALL_TITLE = "Fall";
 
 /**
- * A creature that fell through an opening, waiting for the DM on the DM
- * desk (docs/design/design-v1-floors.md phase 4, 4.4): "Thorn fell 10 ft to
- * Ground floor: 1d6 Bludgeoning, Prone." Apply opens the group save filled
- * as the fall reads, whose Apply removes the card, and Dismiss removes it
+ * A creature that fell through an opening, with the riders that fell with
+ * it, waiting for the DM on the DM desk (docs/design/design-v1-floors.md
+ * phase 4, 4.4): "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning,
+ * Prone." Apply opens the group save filled as the fall reads, a row for
+ * each, whose Apply removes the card, and Dismiss removes it
  * unapplied. A fall under 10 ft deals no damage and offers Dismiss alone.
  * A card whose creature landed on another scene offers Show, which goes
  * there, since the DM's copy holds that creature only then, and one whose
@@ -121,7 +128,7 @@ export function FallCard(props: { card: Fall; open: boolean; onToggle(): void; t
       {props.open ? (
         <>
           <span style={{ fontSize: theme.font.small }}>{read.line}</span>
-          {saving ? <FallSaveStart card={card} onDone={() => setSaving(false)} /> : null}
+          {saving ? <FallSaveStart card={card} tokenIds={read.tokenIds} onDone={() => setSaving(false)} /> : null}
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
             {read.kind === "here" && read.dice > 0 ? (
               <Button size="sm" variant="primary" aria-label={`Apply ${read.whose}`} onClick={() => setSaving(true)}>
@@ -153,11 +160,11 @@ export function FallCard(props: { card: Fall; open: boolean; onToggle(): void; t
  * the open one holds rolls (ReplaceConfirm), as a trap's Save and damage
  * does. One group save at a time.
  */
-function FallSaveStart(props: { card: Fall; onDone(): void }) {
+function FallSaveStart(props: { card: Fall; tokenIds: readonly string[]; onDone(): void }) {
   const start = useStartGroupSave();
   const [pending, setPending] = useState<StartInput | null>(null);
   useEffect(() => {
-    const input = fallStart(props.card);
+    const input = fallStart(props.card, props.tokenIds);
     if (start(input)) props.onDone();
     else setPending(input);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

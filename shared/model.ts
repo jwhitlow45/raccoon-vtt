@@ -809,14 +809,25 @@ export const OPENING_SIDE = 8;
 export const FALLS_PER_ROOM = 10;
 
 /**
+ * Most riders a fall card names (D-261120-007): a group's most tokens
+ * (LIMITS.groupTokens) less the creature that fell, so a card's width has a
+ * bound. A hidden link can let a group pass that, and the creatures past
+ * it get no row of the card's Apply.
+ */
+export const FALL_RIDERS_MOST = 19;
+
+/**
  * A fall card (docs/design/design-v1-floors.md phase 4, 4.4), the DM's
  * alone: a creature fell `ft` feet through an opening from the floor
  * `from` to the floor `sceneId`, and waits on the DM's Apply, through the
- * group save page, or Dismiss. `made` is the seq of the op it fell in,
- * which orders the cards for eviction and the DM's toasts. No name is
- * stored: the desk reads the creature by `tokenId`.
+ * group save page, or Dismiss. `riders` are the other creatures that fell
+ * with it, in the order they landed: what rode on it and what they carried
+ * (D-261120-007), so one card a root asks the fall's damage and Prone of
+ * each. `made` is the seq of the op it fell in, which orders the cards for
+ * eviction and the DM's toasts. No name is stored: the desk reads each
+ * creature by its id.
  */
-export type Fall = { id: FallId; rev: number; tokenId: TokenId; sceneId: SceneId; from: SceneId; ft: number; made: number };
+export type Fall = { id: FallId; rev: number; tokenId: TokenId; riders?: TokenId[]; sceneId: SceneId; from: SceneId; ft: number; made: number };
 
 /**
  * One root's fall through an opening in one op (phase 4, 4.5), which the

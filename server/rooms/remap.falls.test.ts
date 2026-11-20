@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { UPPER, fallCard, thornToken, tower, withFalls, withOpening } from "#shared/floorLinksTestutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { AT, DM } from "#shared/testutil.ts";
+import { AT, DM, token } from "#shared/testutil.ts";
 import { lastLineSeq, remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -43,6 +43,17 @@ describe("fall cards in an import (4.4)", () => {
     assert.equal(out.tokens[named], undefined);
     assert.ok(!Object.keys(tower().tokens).includes(named));
     assert.ok(parseRoomState(out).ok);
+  });
+
+  test("a card's riders take their new ids, and one that did not come through leaves it (D-261120-007)", () => {
+    const horse = token("horse", { name: "Horse", size: "large" });
+    const both = fallCard({ tokenId: "horse", riders: ["thorn", "gone"] });
+    const out = imported(withFalls(withOpening(tower({ tokens: { thorn: thornToken(), horse } })), both));
+    const id = (name: string) => Object.values(out.tokens).find((t) => t.name === name)!.id;
+    assert.deepEqual([out.falls![both.id]!.tokenId, out.falls![both.id]!.riders], [id("Horse"), [id("Thorn")]]);
+    const none = imported(withFalls(tower({ tokens: {} }), fallCard({ riders: ["gone"] })));
+    assert.equal("riders" in Object.values(none.falls!)[0]!, false, "no rider came through");
+    assert.ok(parseRoomState(out).ok && parseRoomState(none).ok, "the rooms stored check");
   });
 
   test("a card naming a floor the file lacks goes, and a room without cards keeps no field", () => {

@@ -4,9 +4,9 @@ import { describeEvent, type LogNames } from "#shared/logText.ts";
 import { isPoseOp, type ClientOp } from "#shared/protocol.ts";
 import { ownsToken } from "../tokens/access.ts";
 import type { Labels } from "../../lib/labels.ts";
-import { displayName } from "../../lib/scene.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
+import { fallers, fallNames } from "./desk.ts";
 
 /*
  * What a trap going off tells each device (docs/design/design-v1-traps.md 4.3),
@@ -91,18 +91,19 @@ export type FallAlert = { text: string; show?: { sceneId: string } };
 
 /**
  * The DM's toasts for new fall cards (4.4): "Thorn fell 10 ft to Ground
- * floor.", with Show where that floor is not the one shown, and "A creature
- * fell 10 ft to Ground floor on Tower." with Show for another scene, whose
- * creatures the DM's copy does not hold. No name is stored on the card, so
- * it is read off the creature the copy holds.
+ * floor.", "Horse and Thorn fell 10 ft to Ground floor." with riders, with
+ * Show where that floor is not the one shown, and "A creature fell 10 ft to
+ * Ground floor on Tower." with Show for another scene, whose creatures the
+ * DM's copy does not hold. No name is stored on the card, so each is read
+ * off the creature the copy holds.
  */
 export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
   return cards.map((card) => {
     const scene = ownEntry(state.scenes, card.sceneId);
     const floor = scene?.floor?.name ?? scene?.name ?? "another floor";
-    const token = ownEntry(state.tokens, card.tokenId);
+    const ids = fallers(state, card);
     const show = scene && card.sceneId !== viewing ? { show: { sceneId: card.sceneId } } : {};
-    if (token) return { text: `${displayName(token, labels)} fell ${card.ft} ft to ${floor}.`, ...show };
+    if (ids.length > 0) return { text: `${fallNames(state, ids, labels)} fell ${card.ft} ft to ${floor}.`, ...show };
     // The copy holds every floor of the scene shown, so a creature missing from it is no longer on the map there.
     if (viewing !== null && sameScene(state, card.sceneId, viewing)) return { text: `A creature no longer on the map fell ${card.ft} ft to ${floor}.` };
     return { text: `A creature fell ${card.ft} ft to ${floor} ${scene?.name.trim() ? `on ${scene.name.trim()}` : "on another scene"}.`, ...show };

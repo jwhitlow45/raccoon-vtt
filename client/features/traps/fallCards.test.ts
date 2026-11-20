@@ -72,8 +72,28 @@ describe("fall cards on the DM desk", () => {
     assert.equal(fallRead(view(), card({ tokenId: "wolf" }), "crypt2", NO_LABELS).kind, "elsewhere", "from Crypt, Tower's creatures are not in the copy");
   });
 
+  test("riders that fell with it (D-261120-007): each named, Apply's rows each one the copy holds, the first still there leading", () => {
+    const withMount = view({
+      tokens: {
+        ...view().tokens,
+        horse: token("horse", { sceneId: "ground", name: "Horse" }),
+        bree: token("bree", { sceneId: "ground", name: "Bree" }),
+        pip: token("pip", { sceneId: "ground", name: "Pip" }),
+        ida: token("ida", { sceneId: "ground", name: "Ida" }),
+      },
+    });
+    const two = fallRead(withMount, card({ tokenId: "horse", riders: ["thorn"] }), "upper", NO_LABELS);
+    assert.deepEqual([two.kind, two.line, two.region, two.whose, two.tokenIds], ["here", "Horse and Thorn fell 10 ft to Ground floor: each 1d6 Bludgeoning, Prone.", "Fall: Horse and Thorn", "Horse and Thorn's fall", ["horse", "thorn"]]);
+    const many = fallRead(withMount, card({ tokenId: "horse", riders: ["thorn", "bree", "pip", "ida", "gone"] }), "upper", NO_LABELS);
+    assert.equal(many.line, "Horse, Thorn, Bree and 2 more fell 10 ft to Ground floor: each 1d6 Bludgeoning, Prone.");
+    assert.deepEqual(many.tokenIds, ["horse", "thorn", "bree", "pip", "ida"], "a rider no longer on the map has no row");
+    const mountGone = fallRead(view(), card({ tokenId: "horse", riders: ["thorn"] }), "upper", NO_LABELS);
+    assert.deepEqual([mountGone.kind, mountGone.line, mountGone.tokenIds], ["here", "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.", ["thorn"]], "a rider still takes the fall of a mount gone since");
+    assert.deepEqual(fallStart(card({ tokenId: "horse", riders: ["thorn"] }), two.tokenIds).source, { kind: "fall", fallId: "120:0", tokenIds: ["horse", "thorn"] });
+  });
+
   test("Apply's page: the creature that fell, by the card's id, in the Dice panel", () => {
-    const input = fallStart(card());
+    const input = fallStart(card(), ["thorn"]);
     assert.deepEqual(input.source, { kind: "fall", fallId: "120:0", tokenIds: ["thorn"] });
     assert.equal(input.panel, "dice");
     assert.deepEqual(input.test, { kind: "none" });

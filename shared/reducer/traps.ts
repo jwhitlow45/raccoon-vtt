@@ -11,7 +11,7 @@ import { sightPiecesCheck } from "../visionLimits.ts";
 import { buildHeight, heightsPainted } from "./heights.ts";
 import { doorSet } from "./map.ts";
 import { gone, invalid, Refuse, type Tx } from "./tx.ts";
-import { heldUp, leaveSeat, openingsOf, writeCard } from "./falls.ts";
+import { heldUp, leaveSeat, openingsOf, ridersSince, writeCard } from "./falls.ts";
 import { dropThrough } from "./floorLinks.ts";
 import { ownEntry } from "../records.ts";
 import { fallDrop, floorBelow, linkHeight } from "../rules/floorLinks.ts";
@@ -302,7 +302,8 @@ function openBelow(tx: Tx, trap: Trap): boolean {
  * A trapdoor's drop (4.6, D-261119-112): each victim (`dropVictims`) whose
  * space lies inside the floor below falls there onto the ground under its
  * full space (reducer/floorLinks.ts dropThrough), what sits on it riding
- * down, with a card, its drop measured from the ground it stood on. The
+ * down, with a card naming the creatures that rode down with it
+ * (D-261120-007), its drop measured from the ground it stood on. The
  * squares do not change. Victims seated on a holder that does not count
  * drop first, each leaving its seat as it lands, so a holder dropped
  * after never carries one twice. Read on the room as it stands when the
@@ -320,10 +321,11 @@ export function dropBelow(tx: Tx, sprung: Trap): void {
     // One an earlier drop carried along has landed already.
     if (!now || now.sceneId !== trap.sceneId) continue;
     if (!spaceInScene(below, now)) continue;
+    const first = openingsOf(tx)?.landings.length ?? 0;
     dropThrough(tx, now, below.id);
     leaveSeat(tx, now);
     const landed = ownEntry(tx.state.tokens, now.id)!;
-    writeCard(tx, { tokenId: now.id, sceneId: below.id, from: trap.sceneId, ft: fallDrop(rise, now.elevation, landed.elevation) });
+    writeCard(tx, { tokenId: now.id, sceneId: below.id, from: trap.sceneId, ft: fallDrop(rise, now.elevation, landed.elevation), riders: ridersSince(tx, now.id, first) });
   }
 }
 

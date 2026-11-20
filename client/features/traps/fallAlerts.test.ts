@@ -46,4 +46,11 @@ describe("the DM's toast for a new fall card", () => {
     assert.deepEqual(fallAlerts([card({ tokenId: "imp", sceneId: "crypt" })], view(), "upper", NO_LABELS), [{ text: "A creature fell 10 ft to Vault on Crypt.", show: { sceneId: "crypt" } }]);
     assert.deepEqual(fallAlerts([card({ tokenId: "wolf" })], view(), "upper", NO_LABELS), [{ text: "A creature no longer on the map fell 10 ft to Ground floor." }]);
   });
+
+  test("a card's riders are named with the creature that fell (D-261120-007)", () => {
+    const state = view();
+    state.tokens.horse = token("horse", { sceneId: "ground", name: "Horse" });
+    assert.deepEqual(fallAlerts([card({ tokenId: "horse", riders: ["thorn"] })], state, "ground", NO_LABELS), [{ text: "Horse and Thorn fell 10 ft to Ground floor." }]);
+    assert.deepEqual(fallAlerts([card({ tokenId: "wolf", riders: ["thorn"] })], state, "ground", NO_LABELS), [{ text: "Thorn fell 10 ft to Ground floor." }], "a rider whose mount went since");
+  });
 });

@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { FALLS_PER_ROOM, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
+import { FALL_RIDERS_MOST, FALLS_PER_ROOM, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
 import type { Op, OpOf } from "../protocol.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { ownEntry } from "../records.ts";
@@ -169,11 +169,27 @@ export function fallPass(tx: Tx, before: RoomState, candidates: ReadonlySet<Toke
     landThrough(tx, token, hole, "fall");
     for (const landing of landings.slice(first)) landed.add(landing.tokenId);
     leaveSeat(tx, token);
-    const card = writeCard(tx, { tokenId: id, sceneId: hole.to, from, ft });
+    const card = writeCard(tx, { tokenId: id, sceneId: hole.to, from, ft, riders: ridersSince(tx, id, first) });
     const stood = ownEntry(before.floorLinks, hole.id) ?? hole;
     records.push({ tokenId: id, linkId: hole.id, rev: stood.rev, made: stood.made, from, to: hole.to, fallId: card.id });
   }
   return records;
+}
+
+/**
+ * The creatures that landed with `root` since the op's landing `first`
+ * (D-261120-007): what rode on it and what they carried, in the order they
+ * landed, at most FALL_RIDERS_MOST. Its card names them, so its Apply asks
+ * each the fall's damage and Prone, as a rider whose holder does not count
+ * falls alone with a card of its own.
+ */
+export function ridersSince(tx: Tx, root: TokenId, first: number): TokenId[] {
+  const out: TokenId[] = [];
+  for (const { tokenId } of OPENINGS.get(tx)?.landings.slice(first) ?? []) {
+    const token = ownEntry(tx.state.tokens, tokenId);
+    if (tokenId !== root && token !== undefined && isCreature(token) && !out.includes(tokenId)) out.push(tokenId);
+  }
+  return out.slice(0, FALL_RIDERS_MOST);
 }
 
 /** A creature that fell or dropped alone off a holder still seats it on the holder it left behind: that seat goes (4.1). */
@@ -203,30 +219,34 @@ function evict(tx: Tx): void {
 
 /**
  * A new card (4.4): its id the op's seq and its place among the op's
- * cards, `made` the op's seq, written in the op's undo step, the oldest
- * dropped past FALLS_PER_ROOM. No name is stored.
+ * cards, `made` the op's seq, its riders where any fell with it, written
+ * in the op's undo step, the oldest dropped past FALLS_PER_ROOM. No name
+ * is stored.
  */
-export function writeCard(tx: Tx, fields: Pick<Fall, "tokenId" | "sceneId" | "from" | "ft">): Fall {
+export function writeCard(tx: Tx, fields: Pick<Fall, "tokenId" | "sceneId" | "from" | "ft"> & { riders: readonly TokenId[] }): Fall {
   const openings = OPENINGS.get(tx);
   const place = openings ? openings.cards++ : 0;
-  const card: Fall = { id: `${tx.env.seq}:${place}`, rev: 0, tokenId: fields.tokenId, sceneId: fields.sceneId, from: fields.from, ft: fields.ft, made: tx.env.seq };
+  const card: Fall = { id: `${tx.env.seq}:${place}`, rev: 0, tokenId: fields.tokenId, ...(fields.riders.length > 0 ? { riders: [...fields.riders] } : {}), sceneId: fields.sceneId, from: fields.from, ft: fields.ft, made: tx.env.seq };
   tx.write(keys.fall(card.id), card);
   evict(tx);
   return card;
 }
 
 /**
- * The cards whose creature a DM's op deleted (4.4): each goes in the op's
- * undo step, so the undo of the delete brings it back. A player's op
- * leaves every card, so a dismissed companion's card stays for the DM
- * (4.7).
+ * The cards whose creatures a DM's op deleted (4.4): a card goes once the
+ * op leaves none of the creatures it names, the one that fell and its
+ * riders, where one stood before, in the op's undo step, so the undo of
+ * the delete brings it back. While a rider stands, its card stays for it
+ * (D-261120-007). A player's op leaves every card, so a dismissed
+ * companion's card stays for the DM (4.7).
  */
 export function dropGoneCards(tx: Tx, before: RoomState): void {
   if (tx.actor.role !== "dm") return;
   const falls = tx.state.falls;
   if (falls === undefined) return;
   for (const card of Object.values(falls).sort(byAge)) {
-    if (ownEntry(before.tokens, card.tokenId) !== undefined && ownEntry(tx.state.tokens, card.tokenId) === undefined) tx.remove(keys.fall(card.id));
+    const named = [card.tokenId, ...(card.riders ?? [])];
+    if (named.some((id) => ownEntry(before.tokens, id) !== undefined) && named.every((id) => ownEntry(tx.state.tokens, id) === undefined)) tx.remove(keys.fall(card.id));
   }
 }
 

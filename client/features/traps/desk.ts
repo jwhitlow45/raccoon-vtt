@@ -150,6 +150,8 @@ export function deskFalls(falls: Readonly<Record<string, Fall | undefined>> | un
 export type FallRead = {
   kind: "here" | "elsewhere" | "gone";
   name: string | null;
+  /** The creatures it names that the copy holds, the one that fell first: Apply's rows. */
+  tokenIds: string[];
   dice: number;
   line: string;
   /** The card's name as a region: "Fall: Thorn". */
@@ -164,26 +166,45 @@ function landedOn(view: Pick<RoomState, "scenes">, card: Fall): string {
   return scene?.floor?.name ?? scene?.name ?? "another floor";
 }
 
+/** The most names a fall's words list before "and 2 more". */
+const FALL_NAMES_SHOWN = 3;
+
+/**
+ * The creatures a card names that the copy holds (D-261120-007): the one
+ * that fell, then the riders that fell with it, so a rider whose mount has
+ * gone since still takes the fall.
+ */
+export function fallers(view: Pick<RoomState, "tokens">, card: Fall): string[] {
+  return [card.tokenId, ...(card.riders ?? [])].filter((id) => ownEntry(view.tokens, id) !== undefined);
+}
+
+/** "Thorn", "Horse and Thorn", "Horse, Thorn, Bree and 2 more". */
+export function fallNames(view: Pick<RoomState, "tokens">, ids: readonly string[], labels: Labels): string {
+  return nameList(view, ids.slice(0, FALL_NAMES_SHOWN), labels, Math.max(0, ids.length - FALL_NAMES_SHOWN));
+}
+
 /**
  * The card's line (4.4): "Thorn fell 10 ft to Ground floor: 1d6
- * Bludgeoning, Prone.", under 10 ft "Thorn fell 5 ft to Ground floor: no
- * damage.", "A creature fell 10 ft to Ground floor on Tower." for another
- * scene, and "A creature no longer on the map fell 10 ft to Ground floor."
- * No name is stored on the card, so it is read off the creature.
+ * Bludgeoning, Prone.", with riders "Horse and Thorn fell 10 ft to Ground
+ * floor: each 1d6 Bludgeoning, Prone.", under 10 ft "Thorn fell 5 ft to
+ * Ground floor: no damage.", "A creature fell 10 ft to Ground floor on
+ * Tower." for another scene, and "A creature no longer on the map fell 10
+ * ft to Ground floor." No name is stored on the card, so each is read off
+ * its creature.
  */
 export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall, shown: string | null, labels: Labels): FallRead {
   const floor = landedOn(view, card);
-  const token = ownEntry(view.tokens, card.tokenId);
-  if (token) {
-    const name = displayName(token, labels);
+  const tokenIds = fallers(view, card);
+  if (tokenIds.length > 0) {
+    const name = fallNames(view, tokenIds, labels);
     const dice = fallDice(card.ft);
-    const hurt = dice > 0 ? `${dice}d6 Bludgeoning, Prone` : "no damage";
-    return { kind: "here", name, dice, line: `${name} fell ${card.ft} ft to ${floor}: ${hurt}.`, region: `Fall: ${name}`, whose: `${name}'s fall` };
+    const hurt = dice > 0 ? `${tokenIds.length > 1 ? "each " : ""}${dice}d6 Bludgeoning, Prone` : "no damage";
+    return { kind: "here", name, tokenIds, dice, line: `${name} fell ${card.ft} ft to ${floor}: ${hurt}.`, region: `Fall: ${name}`, whose: `${name}'s fall` };
   }
   const here = shown !== null && sameScene(view, card.sceneId, shown);
-  if (here) return { kind: "gone", name: null, dice: 0, line: `A creature no longer on the map fell ${card.ft} ft to ${floor}.`, region: "Fall: a creature", whose: "this fall" };
+  if (here) return { kind: "gone", name: null, tokenIds, dice: 0, line: `A creature no longer on the map fell ${card.ft} ft to ${floor}.`, region: "Fall: a creature", whose: "this fall" };
   const scene = ownEntry(view.scenes, card.sceneId)?.name.trim();
-  return { kind: "elsewhere", name: null, dice: 0, line: `A creature fell ${card.ft} ft to ${floor} ${scene ? `on ${scene}` : "on another scene"}.`, region: "Fall: a creature", whose: "this fall" };
+  return { kind: "elsewhere", name: null, tokenIds, dice: 0, line: `A creature fell ${card.ft} ft to ${floor} ${scene ? `on ${scene}` : "on another scene"}.`, region: "Fall: a creature", whose: "this fall" };
 }
 
 /** The desk's folded button with fall cards among what it folds, as with traps: "1 fall, Rolls 1/3", or "2 falls" alone. Its name starts with its text. */

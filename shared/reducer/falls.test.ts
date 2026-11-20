@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ANA, ATTIC, GROUND, UPPER, applied, fallCard, fallRecord, nextSeq, onThornsTurn, putOpeningOp, run, thornToken, tower, trapdoor, withFalls, withOpening, withStairs, withTrapdoor } from "../floorLinksTestutil.ts";
-import type { FallRecord, RoomState, Token } from "../model.ts";
+import { FALL_RIDERS_MOST, type FallRecord, type RoomState, type Token } from "../model.ts";
+import { LIMITS } from "../limits.ts";
 import { opSchema, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { DM, env, token } from "../testutil.ts";
@@ -145,7 +146,44 @@ describe("who falls (4.1)", () => {
     assert.equal(r.state.tokens.goblin!.sceneId, UPPER);
     assert.equal(r.state.tokens.goblin!.attached, undefined, "the drag lets go");
     assert.deepEqual(cards(r.state), [`horse ${UPPER}>${GROUND} 10`], "one card, the root's");
+    assert.deepEqual(Object.values(r.state.falls ?? {})[0]!.riders, ["thorn"], "naming Thorn, who fell with it, and not the goblin it dragged");
     assert.equal(r.falls?.length, 1);
+  });
+
+  test("a rider falls by either road (D-261120-007): named on its mount's card where the mount counts, on a card of its own where it falls alone", () => {
+    // One opening 4 by 4 at 6, 6. Pip walks onto it dragging the zebra, which Thorn rides. In id order Thorn is asked before the zebra.
+    const named = (state: RoomState) => Object.values(state.falls ?? {}).flatMap((c) => [c.tokenId, ...(c.riders ?? [])]).sort();
+    for (const visibility of ["all", "dm"] as const) {
+      const wide = withOpening(tower({ tokens: {} }), { rect: { x: 6, y: 6, w: 4, h: 4 } });
+      const state = withTokens(
+        wide,
+        thornToken({ sceneId: UPPER, x: 2, y: 6, attached: { to: "zebra", kind: "ride" } }),
+        up("pip", { kind: "pc", ownerIds: ["p1"], x: 4, y: 8 }),
+        up("zebra", { size: "large", x: 2, y: 6, visibility, attached: { to: "pip", kind: "drag" } }),
+      );
+      const r = applied(state, move("pip", 8, 8), ANA);
+      assert.deepEqual([r.state.tokens.thorn!.sceneId, r.state.tokens.zebra!.sceneId], [GROUND, GROUND], visibility);
+      assert.deepEqual(named(r.state), ["pip", "thorn", "zebra"], `${visibility}: each one that fell is on a card once`);
+      const zebra = Object.values(r.state.falls ?? {}).find((c) => c.tokenId === "zebra");
+      assert.deepEqual(zebra?.riders, visibility === "all" ? ["thorn"] : undefined, `${visibility}: Thorn rides down on the zebra's card, or falls alone off a zebra no player sees`);
+    }
+  });
+
+  test("a card names only creatures, and a trapdoor's drop names what rode down with its victim", () => {
+    const state = withTokens(
+      withTrapdoor(tower({ tokens: {} }), trapdoor("td1", { zone: { cells: [{ x: 10, y: 10, w: 2, h: 2 }] } })),
+      up("horse", { size: "large", x: 10, y: 10 }),
+      thornToken({ sceneId: UPPER, x: 10, y: 10, attached: { to: "horse", kind: "ride" } }),
+      up("lamp", { kind: "object", x: 11, y: 11, attached: { to: "horse", kind: "carry" } }),
+    );
+    const r = applied(state, { t: "trap.spring", trapId: "td1", tokenIds: ["horse"] });
+    assert.deepEqual([r.state.tokens.horse!.sceneId, r.state.tokens.thorn!.sceneId, r.state.tokens.lamp!.sceneId], [GROUND, GROUND, GROUND]);
+    const [card, ...more] = Object.values(r.state.falls ?? {});
+    assert.deepEqual([card?.tokenId, card?.riders, more.length], ["horse", ["thorn"], 0]);
+  });
+
+  test("the most riders a card names is a group's most tokens less the one that fell", () => {
+    assert.equal(FALL_RIDERS_MOST, LIMITS.groupTokens - 1);
   });
 
   test("two creatures through two openings in one group move make two cards and two records", () => {
@@ -222,6 +260,17 @@ describe("the cards (4.4)", () => {
     assert.ok(deleted.touched.some((k) => k.startsWith("fall:")) && deleted.inverse!.some((e) => e.key.startsWith("fall:") && e.value !== null), "in the delete's undo step");
     const dismissed = run(moved, { t: "token.delete", tokenId: "thorn" }, ANA);
     assert.equal(Object.keys(dismissed.falls ?? {}).length, 1, "a player's dismissal leaves it");
+  });
+
+  test("a DM's delete of the mount keeps its card while its rider stands, and the delete of both ends it (D-261120-007)", () => {
+    const state = withTokens(holed({}, { x: 3, y: 6, attached: { to: "horse", kind: "ride" } }), up("horse", { size: "large", x: 3, y: 6 }));
+    const fell = run(state, move("horse", 6, 6));
+    const [card] = Object.values(fell.falls ?? {});
+    assert.deepEqual([card?.tokenId, card?.riders], ["horse", ["thorn"]]);
+    const mountGone = run(fell, { t: "token.delete", tokenId: "horse" });
+    assert.deepEqual(Object.keys(mountGone.falls ?? {}), [card!.id], "Thorn's fall still waits");
+    const bothGone = run(mountGone, { t: "token.delete", tokenId: "thorn" });
+    assert.deepEqual(Object.keys(bothGone.falls ?? {}), [], "no creature it names is left");
   });
 
   test("eleven falls leave ten cards, the oldest gone", () => {
