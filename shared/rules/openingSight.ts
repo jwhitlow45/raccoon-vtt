@@ -56,20 +56,51 @@ function finished(state: RoomState): boolean {
 function joinsOf(state: RoomState, sceneId: SceneId): Join[] {
   const scene = ownEntry(state.scenes, sceneId);
   if (!scene || scene.vision?.on !== true || !playersSee(state, sceneId)) return NONE;
-  const ends = Object.values(state.floorLinks ?? {})
-    .filter((link) => link.sceneId === sceneId && link.kind === "opening" && link.hidden !== true)
+  const fitting = fittingJoins(state, scene);
+  if (fitting.length === 0) return NONE;
+  // Every join of a floor mostly leads to one floor, so each far floor's gate is asked once.
+  const seen = new Map<SceneId, boolean>();
+  const sees = (id: SceneId) => {
+    let known = seen.get(id);
+    if (known === undefined) seen.set(id, (known = playersSee(state, id)));
+    return known;
+  };
+  const out = fitting.filter((join) => sees(join.other));
+  return out.length > 0 ? out : NONE;
+}
+
+/*
+ * The joins of a floor whose ends and floors fit, in id order, before the
+ * players' gate: an opening not hidden, its pair crossing back, both floors
+ * with party vision on, one rect under one grid shape. Only the links and
+ * the scenes decide them, which a creature's move leaves as they were, so
+ * they are kept per scene while both stay the same objects, as linksProblem
+ * keeps its answers (D-261120-005). The gate reads the creatures and the
+ * room's view, so it is asked of each state.
+ */
+const fittingByLinks = new WeakMap<object, { scenes: RoomState["scenes"]; byScene: Map<SceneId, Join[]> }>();
+
+function fittingJoins(state: RoomState, scene: Scene): Join[] {
+  const links = state.floorLinks ?? {};
+  const keep = !isWritable(links) && !isWritable(state.scenes);
+  let kept = keep ? fittingByLinks.get(links) : undefined;
+  if (keep && kept?.scenes !== state.scenes) fittingByLinks.set(links, (kept = { scenes: state.scenes, byScene: new Map() }));
+  const hit = kept?.byScene.get(scene.id);
+  if (hit !== undefined) return hit;
+  const ends = Object.values(links)
+    .filter((link) => link.sceneId === scene.id && link.kind === "opening" && link.hidden !== true)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const out: Join[] = [];
   for (const link of ends) {
     const other = ownEntry(state.scenes, link.to);
-    const pair = ownEntry(state.floorLinks, link.pair);
-    if (!other || other.vision?.on !== true || !pair || pair.kind !== "opening" || pair.sceneId !== link.to || pair.to !== sceneId) continue;
+    const pair = ownEntry(links, link.pair);
+    if (!other || other.vision?.on !== true || !pair || pair.kind !== "opening" || pair.sceneId !== link.to || pair.to !== scene.id) continue;
     // Both floors' sub-cells must be one column: the same squares under the same grid.
     if (!sameRect(pair.rect, link.rect) || (other.gridShape ?? "squares") !== (scene.gridShape ?? "squares")) continue;
-    if (!playersSee(state, link.to)) continue;
     out.push({ linkId: link.id, rev: link.rev, rect: link.rect, other: link.to, subs: subsOf(scene, other, link) });
   }
-  return out.length > 0 ? out : NONE;
+  kept?.byScene.set(scene.id, out);
+  return out;
 }
 
 function sameRect(a: CellRect, b: CellRect): boolean {

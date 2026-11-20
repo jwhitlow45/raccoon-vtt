@@ -4,6 +4,7 @@ import { FLOOR_HEIGHT, STAIRS_SIDE_WORDS } from "../protocol.ts";
 import { OPENING_SIDE } from "../model.ts";
 import { parseKey, writeEntity, type EntityKey } from "../keys.ts";
 import { ownEntry } from "../records.ts";
+import { isWritable } from "../writable.ts";
 import { floorLinkRules, floorsOf, sameScene } from "./floors.ts";
 import { canSqueeze, footprintRect, isSqueezed, occupiedHexes, squeezedSize, type PlacedToken } from "./footprint.ts";
 import { inScene, isHex, sceneGrid, type Grid } from "./grid.ts";
@@ -649,6 +650,37 @@ export function brokenLinks(scene: string): string {
  * words of stairs that no longer fit.
  */
 export function linksProblem(state: RoomState, sceneId: SceneId): string | null {
+  const all = state.floorLinks;
+  if (all === undefined) return null;
+  const inputs = [all, state.scenes, state.buildChunks, state.traps] as const;
+  if (inputs.some(isWritable)) return freshLinksProblem(state, sceneId);
+  let kept = keptLinks.get(all);
+  if (!kept || kept.scenes !== state.scenes || kept.buildChunks !== state.buildChunks || kept.traps !== state.traps) {
+    keptLinks.set(all, (kept = { scenes: state.scenes, buildChunks: state.buildChunks, traps: state.traps, answers: new Map() }));
+  }
+  const known = kept.answers.get(sceneId);
+  if (known !== undefined) return known;
+  const answer = freshLinksProblem(state, sceneId);
+  kept.answers.set(sceneId, answer);
+  return answer;
+}
+
+/*
+ * linksProblem's answers, kept per scene (D-261120-005). The actor asks it
+ * of every floor an op wrote or moved a creature on, and it judges each end
+ * square by square, though only the room's links, scenes, build and traps
+ * decide it: a creature's move changes none of them. So the answers are
+ * kept with those four collections and given again while all four are the
+ * same objects. A finished op never writes into a collection again
+ * (writable.ts), so the same objects hold the same contents, and a
+ * collection a transaction may still write into is judged afresh.
+ */
+type KeptLinks = { scenes: RoomState["scenes"]; buildChunks: RoomState["buildChunks"]; traps: RoomState["traps"]; answers: Map<SceneId, string | null> };
+
+const keptLinks = new WeakMap<object, KeptLinks>();
+
+/** linksProblem judged from nothing, every end square by square. */
+export function freshLinksProblem(state: RoomState, sceneId: SceneId): string | null {
   const all = state.floorLinks;
   if (all === undefined) return null;
   const group = new Set([sceneId, ...floorsOf(state, sceneId).map((s) => s.id)]);

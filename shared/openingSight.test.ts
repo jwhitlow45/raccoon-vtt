@@ -8,6 +8,7 @@ import { coldSightFor, visionRules } from "./ruleHooks.ts";
 import { SQUARES } from "./rules/grid.ts";
 import { openingJoins } from "./rules/openingSight.ts";
 import { BRIGHT, NOT_SEEN } from "./rules/vision.ts";
+import { markFinished, markWritable } from "./writable.ts";
 
 /*
  * Sight and light through an opening (docs/design/design-v1-floors.md
@@ -40,6 +41,20 @@ describe("a dark upper floor over a lit hall, both open, whole party (7.1)", () 
       openingJoins(room, GROUND).map((j) => [j.linkId, j.other]),
       [["o2", UPPER]],
     );
+  });
+
+  test("links an op may still write into are read afresh each time, never from joins kept for them", () => {
+    const links = { ...room.floorLinks };
+    const open = { ...room, floorLinks: links };
+    markWritable(links);
+    try {
+      assert.deepEqual(openingJoins(open, UPPER).map((j) => j.linkId), ["o1"]);
+      delete links.o1;
+      delete links.o2;
+      assert.deepEqual(openingJoins(open, UPPER), []);
+    } finally {
+      markFinished(links);
+    }
   });
 
   test("the hall's light lights the hole upstairs, so Thorn sees it bright without darkvision", () => {

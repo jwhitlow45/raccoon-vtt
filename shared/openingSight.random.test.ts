@@ -148,8 +148,10 @@ function expected(s: RoomState, sceneId: SceneId, cls: SightClass): Uint8Array {
 function gateHolds(s: RoomState): void {
   for (const link of Object.values(s.floorLinks ?? {})) {
     const open = (id: SceneId) => s.scenes[id]!.vision?.on === true && playersSee(s, id);
-    const joined = openingJoins(s, link.sceneId).some((j) => j.linkId === link.id);
-    assert.equal(joined, open(link.sceneId) && open(link.to), `join of ${link.id}`);
+    const join = openingJoins(s, link.sceneId).find((j) => j.linkId === link.id);
+    assert.equal(join !== undefined, open(link.sceneId) && open(link.to), `join of ${link.id}`);
+    // A join kept while the links and scenes stayed the same objects is the link as it stands (openingSight.ts fittingJoins).
+    if (join) assert.deepEqual([join.rev, join.rect, join.other], [link.rev, link.rect, link.to], `${link.id}'s join as it stands`);
   }
 }
 
