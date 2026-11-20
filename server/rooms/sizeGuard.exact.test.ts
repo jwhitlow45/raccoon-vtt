@@ -556,6 +556,37 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.deepEqual(movedBy(a, played(a, [endTurn("rhero")])), movedBy(b, played(b, [endTurn("rhero")])));
   });
 
+  test("where players may apply damage, P1's hits on a goblin and on P2's hero, and the DM hiding both, move P1's stepped parts alike whatever P1 chose: the amount, a drop to 0 and the damage types (D-261120-061)", () => {
+    const hit = (amount: number, types: string[]) => {
+      const state = table();
+      state.meta.settings = { ...state.meta.settings, playersApplyDamage: true, monstersDieAtZero: false };
+      state.tokens.gob = token("gob", { x: 9, y: 9, actor: { inline: actor({ hp: { cur: 100, max: 100, temp: 50 }, dmNotes: "" }) } });
+      state.characters.c2 = character("c2", { ownerIds: ["p2"], actor: actor({ hp: { cur: 100, max: 100, temp: 50 }, notes: "", dmNotes: "" }) });
+      state.tokens.bree = token("bree", { kind: "pc", actor: { ref: "c2" }, ownerIds: ["p2"], x: 8, y: 8 });
+      const steps: Array<[Op, typeof P1]> = [
+        [{ t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount, types } } as Op, P1],
+        [{ t: "actor.hp", target: { tokenId: "bree" }, change: { kind: "damage", amount, types } } as Op, P1],
+        [{ t: "token.update", tokenId: "gob", patch: { visibility: "dm" } } as Op, DM],
+        [{ t: "token.update", tokenId: "bree", patch: { visibility: "dm" } } as Op, DM],
+      ];
+      const moves: Record<string, number>[] = [];
+      let before = state;
+      for (const [i, [op, who]] of steps.entries()) {
+        if (who === P1) assert.ok(canApply(op, P1, before, DEPS).ok, `P1 may send ${op.t}`);
+        const result = applyOp(before, op, who, env(2_500_000 + i));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        moves.push(movedBy(before, result.state));
+        before = result.state;
+      }
+      assert.ok(!exactCopies(before, "p1").has(keys.token("gob")) && !exactCopies(before, "p1").has(keys.character("c2")), "both left P1's exact part");
+      const gob = before.tokens.gob!.actor;
+      return { moves, life: ["inline" in gob ? gob.inline.life : undefined, before.characters.c2!.actor.life] };
+    };
+    const [light, heavy] = [hit(1, ["fire"]), hit(150, ["bludgeoning", "piercing", "lightning"])];
+    assert.deepEqual(heavy.life, ["dying", "dying"], "the heavy hits drop both to 0");
+    assert.deepEqual(heavy.moves, light.moves);
+  });
+
   /**
    * Kinds the room above stands for: a recharge roll or a turn prompt
    * writes the actor of the player's creature as a use does, a roll ask the
