@@ -15,19 +15,20 @@ import { exactCopies, ownHeldBytes } from "./sizeGuard.ts";
  * privately as residuals: a thing of theirs the op makes or removes
  * outright, which shows once, and the DM putting an area of theirs their
  * copy does not hold on a creature or taking it off one. One the DM hid
- * counts as a deleted one does (LP43-PRIV-1), so only what it follows
- * decides whether it is held then.
+ * counts as a deleted one does (LP43-PRIV-1, D-261120-012), where they see
+ * it or not, so the DM hiding it while unseen takes it out once, as a delete
+ * does, and showing it again while unseen is that residual's too.
  */
 
 const copyOf = (state: RoomState, memberId: string) => stableStringify(projectState(state, { memberId, role: "player" }, { sceneId: null }));
 
 const there = (state: RoomState, key: string) => (key.startsWith("row:") ? (state.encounter?.entries.some((e) => `row:${e.id}` === key) ?? false) : readEntity(state, key as EntityKey) != null);
 
-/** Whether the op put an area on a creature or took it off one. */
+/** Whether the op put an area on a creature or took it off one, or hid or showed it. */
 function reattached(before: RoomState, after: RoomState, key: string): boolean {
   if (!key.startsWith("template:")) return false;
-  const area = (state: RoomState) => readEntity(state, key as EntityKey) as { attachedTo?: string } | undefined;
-  return area(before)?.attachedTo !== area(after)?.attachedTo;
+  const area = (state: RoomState) => readEntity(state, key as EntityKey) as { attachedTo?: string; visibility?: string } | undefined;
+  return area(before)?.attachedTo !== area(after)?.attachedTo || area(before)?.visibility !== area(after)?.visibility;
 }
 
 /** What of `memberId`'s exact part shows otherwise, or counts in another scope, after the op, but for things it made or removed. */
@@ -133,12 +134,15 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
     assert.ok(mount - none[1] > 20_000, `the horse sharing the turn: ${mount} against ${none[1]}`);
   });
 
-  test("the DM hides P1's area, renames it or resizes it while its creature is out of P1's sight", () => {
-    for (const patch of [{ visibility: "dm" }, { label: "A much longer name for the area" }, { size: 60 }]) {
+  test("the DM renames or resizes P1's area while its creature is out of P1's sight, and hiding it takes it out as a delete does", () => {
+    for (const patch of [{ label: "A much longer name for the area" }, { size: 60 }]) {
       const { moved, unchanged } = moves(onHidden(), { t: "template.update", templateId: "a1", patch } as Op);
       assert.ok(unchanged > 0, `P1's copy is as it was after ${JSON.stringify(patch)}`);
       assert.deepEqual(moved, [], JSON.stringify(patch));
     }
+    const [hidden, deleted] = [{ t: "template.update", templateId: "a1", patch: { visibility: "dm" } }, { t: "template.delete", templateId: "a1" }].map((op) => moves(onHidden(), op as Op).next!) as [RoomState, RoomState];
+    assert.equal(copyOf(hidden, "p1"), copyOf(deleted, "p1"), "P1's copies are alike");
+    assert.deepEqual(shownBy(hidden, "p1"), shownBy(deleted, "p1"));
   });
 
   test("the DM deletes the hidden creature, which takes P1's area with it, or deletes P1's ruler: only that thing leaves, once (a residual)", () => {
@@ -421,7 +425,7 @@ function shownChanges(state: RoomState, memberId: string): Record<string, string
  */
 const heldAsStored = (state: RoomState, memberId: string) => {
   const view = seatView(state, memberId);
-  const drawings = Object.values(state.drawings).filter((d) => d.ownerId === memberId && view.copy("drawing", d.id) === null).map((d) => `drawing:${d.id}`);
+  const drawings = Object.values(state.drawings).filter((d) => d.ownerId === memberId && d.visibility === "all" && view.copy("drawing", d.id) === null).map((d) => `drawing:${d.id}`);
   const asks = Object.values(state.casts).filter((c) => c.by === memberId && view.copy("cast", c.id) === null).map((c) => `cast:${c.id}`);
   return new Set([...drawings, ...asks]);
 };
@@ -429,9 +433,10 @@ const heldAsStored = (state: RoomState, memberId: string) => {
 /**
  * Residual 7: an area of theirs their copy does not hold, put on or taken off
  * a creature or onto another floor, which only the DM does. Whose an area is
- * never changes once made.
+ * never changes once made. Its hide reads as a delete, residual 6's, and a
+ * show again residual 7's (D-261120-012).
  */
-const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId)$/.test(where);
+const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId|visibility)$/.test(where);
 
 /** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
 function namedBase(seed: number): RoomState {

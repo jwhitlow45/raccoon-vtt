@@ -1779,19 +1779,21 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
     return out;
   };
   // An area of theirs on a creature their copy does not hold, or on a floor they do not hold, stays held while their copy
-  // holds neither (D-261119-017, D-261120-010). Its floor, and how the DM shows it, which change while they cannot see
-  // it, are never read (D-261119-021). One the DM hid where they see it is not held, as a deleted one is not
-  // (LP43-PRIV-1). A drawing or an ask of theirs never changes once made, so one their copy does not hold stays held as
-  // stored, wherever it is. Behind a blackout their copy holds nothing.
+  // holds neither (D-261119-017, D-261120-010). Its floor, which changes while they cannot see it, is never read
+  // (D-261119-021). A drawing or an ask of theirs never changes once made, so one their copy does not hold stays held as
+  // stored, wherever it is. An area or a drawing is held only while it is stored shown to players, so one the DM hid
+  // reads as a deleted one does, where they see it or not (LP43-PRIV-1, D-261120-012). Behind a blackout their copy holds
+  // nothing.
   const blackout = state.meta.view?.blackout === true;
-  const onUnseen = (t: AreaTemplate) => !blackout && (!view.holds(t.sceneId) || (t.attachedTo !== undefined && !view.sees(t.attachedTo)));
+  const onUnseen = (t: AreaTemplate) => !blackout && t.visibility === "all" && (!view.holds(t.sceneId) || (t.attachedTo !== undefined && !view.sees(t.attachedTo)));
+  const shownDrawing = (d: Drawing) => !blackout && d.visibility === "all";
   const unchanging = () => !blackout;
   return {
     unseenAreas,
     // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
     token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownsSeatToken(state, memberId, t)),
     template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId, onUnseen),
-    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, unchanging),
+    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, shownDrawing),
     row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
     cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId, unchanging),
     companionBlock: copies("companionBlock", Object.values(state.companionBlocks), (b) => ownEntry(state.characters, b.characterId)?.ownerIds.includes(memberId) ?? false),
