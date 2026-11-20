@@ -557,6 +557,38 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.deepEqual(movedBy(a, played(a, [endTurn("rhero")])), movedBy(b, played(b, [endTurn("rhero")])));
   });
 
+  test("on a Per player scene with fog, P1's walk of Hero by a route of 1 bend or 19 through ground their fog hides, and their End Turn, move P1's stepped parts alike (D-261120-090)", () => {
+    const walked = (bends: number) => {
+      const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) } });
+      state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ speeds: { walk: 300 } }) });
+      state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+      state.tokens.gob = token("gob", { x: 25, y: 20 });
+      state.encounter = { rev: 0, round: 1, activeEntryId: "rhero", entries: [entry("rhero", { tokenId: "hero", value: 20 }), entry("rgob", { tokenId: "gob", value: 5 })], turnStart: { entryId: "rhero", tokenId: "hero", sceneId: "s1", x: 2, y: 2, elevation: 0, seq: 7 } };
+      const route = [...Array.from({ length: bends }, (_, i) => [2 + ((i + 1) * 20) / (bends + 1), i % 2 === 0 ? 6 : 2, 0, 0]), [22, 2, 0, 0]].map(([x, y, e, s]) => [Math.round(x! * 2) / 2, y, e, s]);
+      const move = { t: "token.move", tokenId: "hero", x: 22, y: 2, route } as Op;
+      assert.ok(canApply(move, P1, state, DEPS).ok, `P1 may walk Hero by ${bends} bends`);
+      const moved = played(state, [move], undefined, 2_800_000);
+      const ended = played(moved, [endTurn("rhero")], undefined, 2_800_001);
+      const bendsOf = (s: RoomState) => sum(s.tokens.hero!.path!.stops, (stop) => (stop.via?.length ?? 0) / 2);
+      return { stored: bendsOf(moved), held: (seatView(moved, "p1").copy("token", "hero") as Token).path!.stops.some((stop) => stop.via !== undefined), moves: [movedBy(state, moved), movedBy(moved, ended)] };
+    };
+    const [one, many] = [walked(1), walked(19)];
+    assert.ok(one.stored >= 1 && many.stored >= 19 && !many.held, `${one.stored} and ${many.stored} bends stored, none in P1's copy`);
+    assert.deepEqual(many.moves, one.moves);
+    // The same walk past its turn with 1 bend or 40 off P1's ground: P1's copies are equal, and so are both parts.
+    const kept = (corners: number) => {
+      const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) } });
+      state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor() });
+      const via = Array.from({ length: corners }, (_, i) => [3 + i * 0.5, 4]).flat();
+      state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 22, y: 2, path: { turn: 7, stops: [{ x: 2, y: 2, elevation: 0 }, { x: 22, y: 2, elevation: 0, via, moved: 100, cost: 100 }] } });
+      return state;
+    };
+    const [a, b] = [kept(1), kept(40)];
+    assert.equal(stableStringify(projectState(a, P1, { sceneId: null })), stableStringify(projectState(b, P1, { sceneId: null })), "P1's copies are equal");
+    assert.deepEqual(Object.fromEntries([...exactCopies(b, "p1")].map(([key, part]) => [key, part.shown])), Object.fromEntries([...exactCopies(a, "p1")].map(([key, part]) => [key, part.shown])));
+    assert.deepEqual(Object.fromEntries(steppedParts(b)), Object.fromEntries(steppedParts(a)));
+  });
+
   test("where players may apply damage, P1's hits on a goblin and on P2's hero, and the DM hiding both, move P1's stepped parts alike whatever P1 chose: the amount, a drop to 0 and the damage types (D-261120-061)", () => {
     const hit = (amount: number, types: string[]) => {
       const state = table();

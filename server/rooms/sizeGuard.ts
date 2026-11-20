@@ -1821,11 +1821,12 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
  * The room's facts a field's width may read: the player and the creatures
  * they own, whether they move any creature, the creatures whose turn their
  * copy shows under way, the clock their view holds, the roster's ids and a list of them at its widest,
- * the Per player scenes, which every player sees, and the characters the
- * player plays only through a creature of theirs. Each one moves only with
- * what their copy shows.
+ * the Per player scenes, which every player sees, the scenes whose fog
+ * cuts the bends of their own creatures' walks from their copy, and the
+ * characters the player plays only through a creature of theirs. Each one
+ * moves only with what their copy shows.
  */
-type WidthRoom = { readonly memberId: string; readonly movesAny: boolean; readonly turn: ReadonlySet<string>; readonly clockId: string | undefined; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly movesAny: boolean; readonly turn: ReadonlySet<string>; readonly clockId: string | undefined; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly cutsBends: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -2021,6 +2022,9 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
       ...field("path", "prior", (path, room, token) => (room.owns.has(token.id as string) ? memberBytes("prior", path.prior) : fieldBytes("prior") + PRIOR_MOST + 1)),
       most: (path) => storedOr("prior", path.prior, PRIOR_MOST),
     },
+    // A walk's bends on a scene whose fog cuts from the owners' copy those of legs off their ground, which their own
+    // moves and route change: every stop's at a whole walk's corners, wherever the copy cuts them or not (D-261120-090).
+    { ...field("path.stops[]", "via", (stop, _room, token) => viaWidth(stop, token)), applies: (_stop, room, token) => cutsBends(room, token), most: (stop, room, token) => (cutsBends(room, token) ? viaWidth(stop, token) : 0) },
     fixed("path.stops[]", "seen", 4),
     field("path.stops[]", "seenBy", (_stop, room, token) => (room.perPlayer.has(token.sceneId as string) ? fieldBytes("seenBy") + room.listWidth + 2 + 1 : 0)),
     fixed("path.stops[]", "joinedUnseen", 4),
@@ -2100,6 +2104,32 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   // A door's state and whether it was found, in the build's chunk, which a player sets on a door their creature reaches.
   chunk: [field("", "rev", (c) => (holdsDoor(c) ? fieldBytes("rev") + DIGITS.rev + 1 : 0)), doorField("edges.*", "state", serializedBytes("closed")), doorField("edges.*", "discovered", 5), doorField("walls[].f", "state", serializedBytes("closed")), doorField("walls[].f", "discovered", 5)],
 };
+
+/** A walk's bends at their widest: MAX_PATH_CORNERS corners at the widest numbers, with their commas. */
+const VIA_MOST = 2 * MAX_PATH_CORNERS * (NUMBER_MOST + 1);
+/** A stop's bends as an empty list, with its key and comma. */
+const VIA_EMPTY = fieldBytes("via") + 2 + 1;
+
+/** Whether a walk's bends count at their widest: a creature of theirs on a scene whose fog cuts bends (WidthRoom `cutsBends`). */
+const cutsBends = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => room.owns.has(token.id as string) && room.cutsBends.has(token.sceneId as string);
+
+/** The stored thing each copy in an exact reading stands for (exactBytes), for a width that reads the whole stored thing. */
+const storedOf = new WeakMap<object, unknown>();
+
+/**
+ * A stop's bends in the exact part: every stop at least an empty list, the
+ * first with a whole walk's corners less what the others' stored bends take
+ * past theirs, so the walk's bends count at one width, however many the
+ * player's route made and wherever they are, and none stay stepped.
+ */
+function viaWidth(stop: Readonly<Record<string, unknown>>, token: Readonly<Record<string, unknown>>): number {
+  const stored = (storedOf.get(token) ?? token) as { path?: { stops?: Array<{ via?: unknown }> } };
+  const stops = stored.path?.stops ?? [];
+  const at = ((token.path as { stops?: unknown[] } | undefined)?.stops ?? []).indexOf(stop);
+  const kept = (s: { via?: unknown } | undefined) => Math.max(VIA_EMPTY, memberBytes("via", s?.via));
+  if (at !== 0) return at < 0 ? VIA_EMPTY : kept(stops[at]);
+  return VIA_EMPTY + VIA_MOST - sum(stops.slice(1), (s) => kept(s) - VIA_EMPTY);
+}
 
 /** The readers of each roll of a dice line the player rolled, each list at every member of the roster. */
 const ownRolls = (line: Readonly<Record<string, unknown>>, room: WidthRoom) => {
@@ -2255,6 +2285,7 @@ function ownFields(copy: unknown, stored: unknown, path: string, index: FieldInd
 function exactBytes(kind: CopiedKind, stored: unknown, storedBytes: number, copy: unknown, copyBytes: number, room: WidthRoom): ExactBytes {
   const index = FIELD_INDEX.get(kind)!;
   const thing = isRecord(copy) ? copy : {};
+  storedOf.set(thing, stored);
   const fields = { stripped: 0, widths: 0, taken: 0 };
   ownFields(copy, stored, "", index, room, thing, fields);
   const hidden = hiddenOf(stored, copy, "", index, room, thing);
@@ -2611,6 +2642,8 @@ function exactRoom(state: RoomState, memberId: string, view?: SeatView): { room:
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),
     listWidth: widestListExtra(state.members),
     perPlayer: new Set(Object.values(state.scenes).filter(perPlayerScene).map((scene) => scene.id)),
+    // As shared/project.ts ownersStopsCtx: a scene with fog whose ground is the owner's live sight or, Per player, their fog.
+    cutsBends: new Set(Object.values(state.scenes).filter((scene) => scene.fogEnabled && (scene.vision?.on === true || perPlayerScene(scene))).map((scene) => scene.id)),
     playsOnly: new Set([...characters].filter((id) => !owned.has(id))),
   };
   return { room, characters };
