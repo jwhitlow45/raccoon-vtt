@@ -1,9 +1,8 @@
 import { CHUNK_CELLS, MIN_HEIGHT_FT, type CellRect, type RoomState, type SceneId } from "#shared/model.ts";
-import { ownEntry } from "#shared/records.ts";
-import { fallDrop, isHole, linkHeight, linksOn, rectGround, type LinkEnd } from "#shared/rules/floorLinks.ts";
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { chunkHeights } from "#shared/rules/heights.ts";
 import { seenGround, type Cell, type GroundSource } from "../features/builder/heights/ground.ts";
+import { holeDrop, holesOn } from "../features/floors/holes.ts";
 import { cameraOfStage, screenToView, type Camera, type Insets, type Point, type Rect, type Size } from "./camera.ts";
 import { cellAtPoint, cellId, cellPolygon, groundSurface, lineInterval, neighborsOf, polygonSide, sameCell, sceneExtent, type GroundCell, type GroundSurface } from "./groundCells.ts";
 import { NO_RUNS, stairCandidates, stairRuns, treadUnder, TREADS, type StairReader, type StairRuns, type StairStep } from "./stairRuns.ts";
@@ -401,34 +400,14 @@ type HoleCopy = Pick<RoomState, "scenes" | "floorLinks" | "buildChunks">;
 /**
  * The holes on a floor, by id, from the device's own copy, so a player's
  * reads only what they were sent: an end outside full fog, the floor below
- * once they hold it, and its height only as the end's `rise`. The drop is
- * fallDrop's, as the window's height chip reads it
- * (features/floors/openingView.ts holeDrop): the rise, plus the ground
- * under the hole, less the ground under the far end. Where the copy holds
- * the floor below but not the far end, or either ground is not one
- * height, it is BLIND_DROP_FT.
+ * once they hold it, and its height only as the end's `rise`. The holes and
+ * their drops are the window's own (features/floors/openingView.ts holesOn
+ * and holeDrop), so the relief's bottom and the height chip never tell two
+ * depths. Where the copy holds the floor below but cannot tell the drop, it
+ * is BLIND_DROP_FT.
  */
 export function floorHoles(view: HoleCopy, sceneId: SceneId): Hole[] {
-  const out: Hole[] = [];
-  for (const link of linksOn(view, sceneId) as LinkEnd[]) {
-    if (!isHole(view, link)) continue;
-    const far = link.to === undefined ? undefined : ownEntry(view.scenes, link.to);
-    out.push({ id: link.id, rect: link.rect, drop: far ? (holeDrop(view, link) ?? BLIND_DROP_FT) : BLIND_DROP_FT, below: far ? far.background : null });
-  }
-  return out;
-}
-
-/** A hole's drop as the copy reads it, or null where it holds no far end over the same squares or either ground is not one height there. */
-function holeDrop(view: HoleCopy, link: LinkEnd & { rise?: number }): number | null {
-  const to = link.to!;
-  const r = link.rect;
-  // A copy holds an end only on a floor it holds, and a player's names no pair: the far end is the opening on the floor below over the same squares.
-  const far = (linksOn(view, to) as LinkEnd[]).find((l) => l.kind === "opening" && l.rect.x === r.x && l.rect.y === r.y && l.rect.w === r.w && l.rect.h === r.h && (l.to === undefined || l.to === link.sceneId));
-  if (!far) return null;
-  const upper = rectGround(view.buildChunks, link.sceneId, r);
-  const lower = rectGround(view.buildChunks, to, far.rect);
-  if (upper === null || lower === null) return null;
-  return fallDrop(linkHeight(view, link), upper, lower);
+  return holesOn(view, sceneId).map(({ link, far }) => ({ id: link.id, rect: link.rect, drop: far ? (holeDrop(view, link) ?? BLIND_DROP_FT) : BLIND_DROP_FT, below: far ? far.background : null }));
 }
 
 /** The last answer `holesKey` gave, kept while the copy's links, floors and build are the same objects and the floor the same. */

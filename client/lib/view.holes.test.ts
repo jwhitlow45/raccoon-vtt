@@ -6,6 +6,7 @@ import { projectState } from "#shared/project.ts";
 import { gridOfShape, SQUARES } from "#shared/rules/grid.ts";
 import { reveal } from "#shared/testutil.ts";
 import { BLIND_DROP_FT, floorHoles, holeFloors, holesKey, holesOfKey, type DrawnSource, type Hole } from "./view.ts";
+import { holeDrop, holeDrops } from "../features/floors/holes.ts";
 
 /*
  * The holes Isometric draws as drops onto the floor below
@@ -94,6 +95,22 @@ describe("a floor's holes from the device's copy (9.1)", () => {
   test("squares not of one height there: 10 ft", () => {
     const s = run(holed(), { t: "build.height", sceneId: GROUND, cells: ["6,6"], height: 5 });
     assert.equal(floorHoles(s, UPPER)[0]!.drop, BLIND_DROP_FT);
+  });
+
+  test("the relief's bottom and the window's height chip read one drop, in the DM's copy and a player's", () => {
+    let s = holed(5, -5);
+    // A second hole over ground 5 ft up below, and a third whose ground below is not one height, so the copy cannot tell its drop.
+    s = run(s, { t: "build.height", sceneId: GROUND, cells: ["12,12", "13,12", "12,13", "13,13"], height: 5 });
+    s = run(s, putOpeningOp({ id: "a1", pairId: "a2", rect: { x: 12, y: 12, w: 2, h: 2 } }));
+    s = run(s, putOpeningOp({ id: "b1", pairId: "b2", rect: { x: 16, y: 16, w: 2, h: 2 } }));
+    s = run(s, { t: "build.height", sceneId: GROUND, cells: ["16,16"], height: 5 });
+    for (const [who, copy] of [["the DM", s], ["Ana", anaCopy(s)]] as const) {
+      const holes = floorHoles(copy, UPPER);
+      assert.deepEqual(Object.fromEntries(holes.map((h) => [h.id, h.drop])), { a1: 5, b1: BLIND_DROP_FT, o1: 20 }, who);
+      for (const h of holes) assert.equal(h.drop, holeDrop(copy, copy.floorLinks![h.id]!) ?? BLIND_DROP_FT, `${who}: ${h.id}`);
+      const chips = holes.filter((h) => holeDrop(copy, copy.floorLinks![h.id]!) !== null).map((h) => `${h.id}=${h.drop}`);
+      assert.equal(holeDrops(copy, UPPER), chips.join(" "), `${who}: the chip names each drop the relief draws, and none it cannot tell`);
+    }
   });
 
   test("the key is one string while nothing changes, empty for no hole, and names the holes back", () => {
