@@ -285,17 +285,26 @@ export class RoomManager {
    * A room's deletion (the gateway's): `remove` unloads it through
    * unloadForDelete and deletes its row. It is kept until the database
    * answers, so a shutdown meanwhile tells a deleted room from one left
-   * unsaved by a delete that failed or never ran (close()).
+   * unsaved by a delete that failed or never ran (close()). A delete that
+   * failed after its unload, which wrote no snapshot, stays kept: the room
+   * is out of memory and unsaved at its last commit, and a later stop must
+   * still find it, even one whose sockets' grace saw the failure
+   * (OPS-SOL-4). Once a later snapshot reaches that commit, the stop counts
+   * it saved.
    */
   async deleting<T>(roomId: string, remove: () => Promise<T>): Promise<T> {
     let settle!: () => void;
     const deletion: Deletion = { done: new Promise<void>((resolve) => (settle = resolve)), lastSeq: null };
     this.#deletions.set(roomId, deletion);
+    let unsaved = false;
     try {
       return await remove();
+    } catch (err) {
+      unsaved = deletion.lastSeq !== null;
+      throw err;
     } finally {
       settle();
-      if (this.#deletions.get(roomId) === deletion) this.#deletions.delete(roomId);
+      if (!unsaved && this.#deletions.get(roomId) === deletion) this.#deletions.delete(roomId);
     }
   }
 

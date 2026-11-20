@@ -398,6 +398,43 @@ test("a delete that unloaded its room and then fails while the server stops leav
   }
 });
 
+test("a delete that fails during the sockets' grace, before the rooms close, still leaves the room named unsaved (OPS-SOL-4)", async () => {
+  let doomed = "";
+  const held = deferred();
+  const deleteAnswer = deferred<never>();
+  const pool = poolWith((text, values) => {
+    if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
+    held.resolve();
+    return deleteAnswer.promise;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const lost = await roomWithChange(own, "Doomed");
+  const kept = await roomWithChange(own, "Kept");
+  try {
+    doomed = lost.roomId;
+    const asked = lost.dm.delete(`/api/rooms/${lost.roomId}`, { name: "Doomed" }).catch(() => undefined);
+    await held.promise;
+    // A phone slow to answer the close holds the sockets' grace open for its whole second.
+    (kept.socket.ws as unknown as { _socket: NetSocket })._socket.pause();
+    let roomsClosing = false;
+    const close = own.rooms.close.bind(own.rooms);
+    own.rooms.close = () => {
+      roomsClosing = true;
+      return close();
+    };
+    const stopping = closeServer(own, () => pool.end());
+    await new Promise((r) => setTimeout(r, 100));
+    deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
+    await asked;
+    assert.equal(roomsClosing, false, "the delete failed before the rooms began to close");
+    await losesOnly(stopping, [{ roomId: lost.roomId, why: "delete failed" }]);
+  } finally {
+    lost.socket.ws.terminate();
+    kept.socket.ws.terminate();
+  }
+});
+
 test("a delete that lands while the server stops a room leaves it deleted, and the stop exits 0 (LP44-OPS-1)", async () => {
   let watched = "";
   const deleted = deferred();
