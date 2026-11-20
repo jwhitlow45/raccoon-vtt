@@ -636,16 +636,23 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
       const image = await uploadImage(1920, 1120, { r: 60 + i * 30, g: 90, b: 120 - i * 20 });
       await ops.send({ t: "scene.setMap", sceneId: id, map: imageMap(image) });
     }
-    // Four holes a floor above Ground, each down to the floor below, clear of the first.
-    const spots = [
-      { x: 1, y: 1 },
-      { x: 13, y: 1 },
-      { x: 1, y: 10 },
-      { x: 13, y: 10 },
+    // Four holes a floor above Ground, each down to the floor below. No two ends on a floor overlap, so a floor's
+    // holes stand clear of the lower ends of the holes above it, and both clear of the first hole and the trapdoor.
+    const west = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 0, y: 10 },
+      { x: 4, y: 10 },
+    ];
+    const east = [
+      { x: 12, y: 0 },
+      { x: 20, y: 0 },
+      { x: 12, y: 10 },
+      { x: 20, y: 10 },
     ];
     for (const [i, id] of floors.entries()) {
       if (i === 0) continue;
-      for (const spot of spots) await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: id, to: floors[i - 1]!, rect: { ...spot, w: 3, h: 3 }, kind: "opening" } });
+      for (const spot of i % 2 === 1 ? west : east) await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: id, to: floors[i - 1]!, rect: { ...spot, w: 3, h: 3 }, kind: "opening" } });
     }
     for (const id of [attic, roof]) await ops.send({ t: "floor.open", sceneId: id, open: true });
     await waitFor("Ana holds 4 floors", () => (Object.values(anaSocket.state?.scenes ?? {}).filter((s) => s.floor !== undefined).length === 4 ? true : null), 20_000);
