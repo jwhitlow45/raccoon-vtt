@@ -86,6 +86,10 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
     // keep-alive makes it reuse sockets Node already closed, which shows up
     // as sporadic 502s on uploads (design section 10.7).
     keepAliveTimeout: 95_000,
+    // On close, every HTTP connection closes once the preClose hooks have run (the sockets' grace, design 15.4), a
+    // request in flight included: one still running as the server stops listening keeps its connection through that
+    // keep-alive, and the rooms save their snapshots only once the server has closed (LP44-OPS-1).
+    forceCloseConnections: true,
     bodyLimit: 64 * 1024,
   });
   app.server.headersTimeout = 96_000;
