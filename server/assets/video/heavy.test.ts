@@ -86,7 +86,12 @@ async function timedCheck(name: string, bytes: Buffer): Promise<number> {
  * then runs once at the caps under the backstop.
  */
 async function checksInNearLinearTime(name: string, whole: Buffer, eighth: Buffer): Promise<Buffer> {
-  await assertNearLinear("the check in memory", (scale) => cpuMs(() => checkVideoBytes(scale === 1 ? whole : eighth, { budget: roomy() })), BACKSTOP_MS);
+  await assertNearLinear("the check in memory", (scale) => cpuMs(() => checkVideoBytes(scale === 1 ? whole : eighth, { budget: roomy() })), BACKSTOP_MS, async (scale) => {
+    let ticks = 0;
+    // Budget reads its clock once as it starts and once per check.
+    await checkVideoBytes(scale === 1 ? whole : eighth, { budget: new Budget(ROOMY_MS, () => (ticks++, performance.now())) });
+    return ticks;
+  });
   const ms = await timedCheck(name, whole);
   assert.ok(ms < BACKSTOP_MS, `the check on disk took ${Math.round(ms)} ms of CPU, over the ${BACKSTOP_MS} ms backstop`);
   return readFile(join(dir, name));

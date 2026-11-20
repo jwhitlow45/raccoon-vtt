@@ -1075,24 +1075,49 @@ export function cpuBackstopMs(productionMs: number): number {
 }
 export const NEAR_LINEAR_GROWTH = 20;
 
+/** Rounds of timing a loaded runner gets to show the growth it really has before the test fails. */
+const NEAR_LINEAR_ROUNDS = 3;
+
 /**
  * Asserts that `cpuMsAt(scale)`, the CPU time of the work at 1/scale of the
  * caps, grows near linearly from an eighth to the whole, and that the whole
  * stays under `backstopMs`, a cap no runner comes near. One eighth runs first
  * and is dropped, so every timed run finds the code warm. Each side takes
- * the least of two runs, since noise only ever adds time: a runner's pause
- * or a collection landing in the whole's one run read 24.9 times in CI
- * where the work grows 8 (VIDEO-GROWTH-FLAKE). The eighth runs before the
- * whole, so it never pays for collecting the whole's garbage.
+ * the least of two runs, since noise only ever adds time. The eighth runs
+ * before the whole, so it never pays for collecting the whole's garbage.
+ *
+ * A loaded runner can still stretch the whole's runs alone, past the limit
+ * (1297 ms at the caps against 59 at an eighth, 21.9 times, in CI), because
+ * CPU time counts the cycles a busy neighbor steals through shared caches.
+ * Work that really grows quadratically reads 64 times in every round, so the
+ * timing gets `NEAR_LINEAR_ROUNDS` rounds and fails only when none of them
+ * reads near linear. `ticksAt`, when given, counts the work itself, the
+ * budget checks the check makes, which no load changes: its growth must
+ * hold in the first run, and it fails a test that read no ticks at all.
  */
-export async function assertNearLinear(what: string, cpuMsAt: (scale: number) => Promise<number>, backstopMs: number): Promise<void> {
+export async function assertNearLinear(what: string, cpuMsAt: (scale: number) => Promise<number>, backstopMs: number, ticksAt?: (scale: number) => Promise<number>): Promise<void> {
+  if (ticksAt) {
+    const [eighth, whole] = [await ticksAt(GROWTH_SCALE), await ticksAt(1)];
+    console.log(`growth: ${what} made ${whole} budget checks at the caps and ${eighth} at an eighth`);
+    assert.ok(eighth > 0 && whole > 0, `${what} made no budget checks to count`);
+    assert.ok(whole / eighth < NEAR_LINEAR_GROWTH, `${what} made ${whole} budget checks at the caps and ${eighth} at an eighth: not near linear`);
+  }
   await cpuMsAt(GROWTH_SCALE);
-  const eighth = Math.min(await cpuMsAt(GROWTH_SCALE), await cpuMsAt(GROWTH_SCALE));
-  const whole = Math.min(await cpuMsAt(1), await cpuMsAt(1));
-  const growth = whole / Math.max(eighth, 0.1);
-  const read = `${what} took ${whole.toFixed(1)} ms of CPU at the caps and ${eighth.toFixed(1)} ms at an eighth`;
-  // Logged on success too, so a creeping ratio shows in the run's output before it fails (CIFIX-F5).
-  console.log(`growth: ${read}, ${growth.toFixed(1)} times (limit ${NEAR_LINEAR_GROWTH}), backstop ${backstopMs} ms`);
-  assert.ok(growth < NEAR_LINEAR_GROWTH, `${read}, ${growth.toFixed(1)} times: not near linear`);
-  assert.ok(whole < backstopMs, `${read}, over the ${backstopMs} ms backstop`);
+  let leastWhole = Infinity;
+  const reads: string[] = [];
+  for (let round = 1; round <= NEAR_LINEAR_ROUNDS; round++) {
+    const eighth = Math.min(await cpuMsAt(GROWTH_SCALE), await cpuMsAt(GROWTH_SCALE));
+    const whole = Math.min(await cpuMsAt(1), await cpuMsAt(1));
+    leastWhole = Math.min(leastWhole, whole);
+    const growth = whole / Math.max(eighth, 0.1);
+    const read = `${what} took ${whole.toFixed(1)} ms of CPU at the caps and ${eighth.toFixed(1)} ms at an eighth, ${growth.toFixed(1)} times`;
+    // Logged on success too, so a creeping ratio shows in the run's output before it fails (CIFIX-F5).
+    console.log(`growth: ${read} (limit ${NEAR_LINEAR_GROWTH}, round ${round}), backstop ${backstopMs} ms`);
+    reads.push(read);
+    if (growth < NEAR_LINEAR_GROWTH) {
+      assert.ok(leastWhole < backstopMs, `${read}, over the ${backstopMs} ms backstop`);
+      return;
+    }
+  }
+  assert.fail(`not near linear in ${NEAR_LINEAR_ROUNDS} rounds: ${reads.join("; ")}`);
 }
