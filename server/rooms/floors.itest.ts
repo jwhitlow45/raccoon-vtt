@@ -4,7 +4,7 @@ import yauzl from "yauzl";
 import yazl from "yazl";
 import { uuidv7 } from "#shared/ids.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
@@ -743,5 +743,104 @@ describe("a scene's floors share one budget (docs/design/design-v1-floors.md 9, 
     );
     // The guard counts every floor: the refused add left the scene as it was.
     assert.equal(floorsOf(live(t, r.roomId), r.ground).length, held);
+  });
+});
+
+describe("openings, falls, hidden and moved stairs on the server (docs/design/design-v1-floors.md phase 4)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+  });
+  after(() => t.close());
+
+  /** The hole: 2 by 2 on Upper floor over the same squares on Ground floor. */
+  const HOLE = { x: 6, y: 6, w: 2, h: 2 };
+
+  /**
+   * Tower with Upper floor above Ground floor, an opening between them at
+   * HOLE (`hole` its upper end), stairs between them hidden and then moved
+   * to squares of their own upstairs, Thorn, Ana's, on Upper floor beside
+   * the hole, and a goblin of the DM's there too.
+   */
+  async function holedTower(name: string) {
+    const r = await tower(t, name);
+    const upper = await addFloor(r.dmSocket, r.ground, "above", "Upper floor");
+    const hole = uuidv7();
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: hole, pairId: uuidv7(), sceneId: upper, to: r.ground, rect: HOLE, kind: "opening" } } as Op);
+    const stairs = uuidv7();
+    await ok(r.dmSocket, { t: "floorLink.put", link: { id: stairs, pairId: uuidv7(), sceneId: r.ground, to: upper, rect: STAIRS, kind: "stairs" } } as Op);
+    await ok(r.dmSocket, { t: "floorLink.update", linkId: stairs, patch: { hidden: true } } as Op);
+    await ok(r.dmSocket, { t: "floorLink.update", linkId: stairs, patch: { rect: STAIRS, pairRect: { x: 12, y: 3, w: 2, h: 1 } } } as Op);
+    const thorn = await create(r.dmSocket, upper, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 4, y: 6 });
+    const goblin = await create(r.dmSocket, upper, { x: 10, y: 6 });
+    const anaSocket = await t.connect(r.roomId, r.ana);
+    await anaSocket.snapshot("ana");
+    return { ...r, upper, hole, stairs, thorn, goblin, anaSocket };
+  }
+
+  test("a tower's ops at change format 64 store and replay to the same room, a player's fall with its undo and redo and a DM's among them, and its snapshot loads the same", async () => {
+    const r = await holedTower("Openings replay");
+    await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 6, y: 6 });
+    await ok(r.anaSocket, { t: "undo", head: (await r.anaSocket.historyHead("play", "undo"))! } as Op);
+    await ok(r.anaSocket, { t: "redo", head: (await r.anaSocket.historyHead("play", "redo"))! } as Op);
+    await ok(r.dmSocket, { t: "token.move", tokenId: r.goblin, x: 7, y: 7 });
+    const before = live(t, r.roomId);
+    assert.deepEqual([before.tokens[r.thorn]!.sceneId, before.tokens[r.goblin]!.sceneId], [r.ground, r.ground]);
+    assert.equal(Object.keys(before.falls ?? {}).length, 2, "Thorn's card, written back by the redo, and the goblin's");
+    const links = Object.values(before.floorLinks ?? {});
+    assert.equal(links.filter((l) => l.hidden === true).length, 2);
+    assert.equal(links.filter((l) => l.kind === "opening").length, 2);
+    const { rows } = await t.pool.query<{ op_version: number; t: string; falls: number | null }>("select op_version, op->>'t' as t, jsonb_array_length(op->'falls') as falls from room_ops where room_id = $1 order by seq", [r.roomId]);
+    assert.ok(rows.every((row) => row.op_version === OP_VERSION), "every row at today's change format");
+    assert.deepEqual(rows.filter((row) => row.t === "sys.restore").map((row) => row.falls), [1, 1], "the undo and redo stored with their record");
+    r.anaSocket.close();
+    await r.anaSocket.waitClosed();
+    await t.manager.unload(r.roomId, 1011, false);
+    const replayed = await loadRoom(t.pool, r.roomId);
+    assert.ok(replayed && !replayed.replayFailed);
+    for (const field of ["tokens", "floorLinks", "falls", "openFloors"] as const) assert.equal(stableStringify(replayed.state[field] ?? null), stableStringify(before[field] ?? null), field);
+    const back = await t.connect(r.roomId, r.dm);
+    await back.snapshot("dm-again");
+    await ok(back, { t: "log.chat", text: "fence" });
+    back.close();
+    await back.waitClosed();
+    await t.manager.unload(r.roomId);
+    const reloaded = await loadRoom(t.pool, r.roomId);
+    assert.equal(reloaded!.snapshotVersion, SNAPSHOT_VERSION);
+    for (const field of ["tokens", "floorLinks", "falls"] as const) assert.equal(stableStringify(reloaded!.state[field] ?? null), stableStringify(before[field] ?? null), `${field} through the snapshot`);
+  });
+
+  test("a backup carries fall cards, an opening, and hidden stairs on their own squares under new ids, and the new room counts past every card", async () => {
+    const r = await holedTower("Openings backup");
+    await ok(r.anaSocket, { t: "token.move", tokenId: r.thorn, x: 6, y: 6 });
+    r.anaSocket.close();
+    await r.anaSocket.waitClosed();
+    const before = live(t, r.roomId);
+    const [card] = Object.values(before.falls ?? {});
+    assert.ok(card);
+    const res = await r.dm.get(`/api/rooms/${r.roomId}/export`);
+    assert.equal(res.statusCode, 200);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    assert.deepEqual(room.state.falls, before.falls, "the backup holds the card as stored");
+    const imported = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify(room) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const copyId = imported.json<{ roomId: string }>().roomId;
+    t.track(copyId);
+    const { rows } = await t.pool.query<{ state: RoomState; imported_seq: string }>("select s.state, r.imported_seq from room_snapshots s join rooms r on r.id = s.room_id where s.room_id = $1", [copyId]);
+    const state = rows[0]!.state;
+    assert.ok(Number(rows[0]!.imported_seq) >= card.made, "the room starts past the card's op");
+    const floorOf = (name: string) => Object.values(state.scenes).find((s) => s.floor?.name === name)!.id;
+    const thorn = Object.values(state.tokens).find((x) => x.name === "Thorn")!;
+    assert.notEqual(thorn.id, r.thorn);
+    assert.deepEqual(state.falls, { [card.id]: { ...card, tokenId: thorn.id, sceneId: floorOf("Ground floor"), from: floorOf("Upper floor") } });
+    const ends = Object.values(state.floorLinks ?? {});
+    assert.equal(ends.length, 4);
+    for (const end of ends) {
+      assert.ok(![r.hole, r.stairs].includes(end.id), "a new id");
+      assert.equal(state.floorLinks![end.pair]?.pair, end.id, "each names the other");
+    }
+    const stairs = ends.filter((end) => end.kind === "stairs");
+    assert.deepEqual(stairs.map((end) => [end.hidden, end.rect.x]).sort(), [[true, 12], [true, STAIRS.x]], "hidden on both ends, each on its own squares");
+    for (const id of Object.keys(state.scenes)) assert.equal(floorProblem(state, id), null);
   });
 });
