@@ -257,7 +257,7 @@ export type RoomState = {
   /**
    * DM only: the fall cards waiting for the DM (docs/design/design-v1-floors.md
    * phase 4, 4.4), `keys.fall(id)`, room level. Written in the undo step of
-   * the op a creature fell in, at most FALLS_PER_ROOM, the oldest `made`
+   * the op a creature fell in, at most LIMITS.fallsPerRoom, the oldest `made`
    * dropped. No player's projection holds one. Absent reads as none, so
    * rooms from before them need no migration.
    */
@@ -799,15 +799,6 @@ export type ProjectedFloorLink = Omit<FloorLink, "pair" | "to" | "ground" | "mad
  * hole in the upper floor onto the same squares of the floor just below.
  */
 export type FloorLinkKind = "stairs" | "ladder" | "opening";
-
-/**
- * Most squares a side of an opening (phase 4, 3), where stairs and ladders
- * keep to LIMITS.floorLinkSide.
- */
-export const OPENING_SIDE = 8;
-
-/** Most fall cards a room holds (phase 4, 4.4): a new one past it drops the oldest `made`. */
-export const FALLS_PER_ROOM = 10;
 
 /**
  * Most riders a fall card names (D-261120-007): a group's most tokens

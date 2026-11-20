@@ -20,7 +20,6 @@ import {
   CONDITION_KEYS,
   CR_VALUES,
   CRIT_RULES,
-  FALLS_PER_ROOM,
   FALL_RIDERS_MOST,
   FREE_WALL_ID_LENGTH,
   FREE_WALL_LATTICE,
@@ -28,7 +27,6 @@ import {
   MAX_HEIGHT_FT,
   MAX_LIGHT_FT,
   MIN_HEIGHT_FT,
-  OPENING_SIDE,
   ORDER_REVEALS,
   SCENE_PRESETS,
   SKILL_KEYS,
@@ -1877,15 +1875,15 @@ function rectCells(rects: readonly { x: number; y: number; w: number; h: number 
 }
 /**
  * An end's squares (docs/design/design-v1-floors.md phase 2, 2): 1 to
- * OPENING_SIDE a side, an opening's most (phase 4, 3). Stairs and ladders
+ * LIMITS.openingSide a side, an opening's most (phase 4, 3). Stairs and ladders
  * keep to LIMITS.floorLinkSide, which a put holds below and the reducer
  * holds for a change of squares.
  */
-const floorLinkRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(OPENING_SIDE), h: z.number().int().min(1).max(OPENING_SIDE) });
+const floorLinkRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(LIMITS.openingSide), h: z.number().int().min(1).max(LIMITS.openingSide) });
 const floorLinkKind = z.enum(["stairs", "ladder", "opening"]);
 /** The refusal of stairs or a ladder past their side (phase 4, 3). */
 export const STAIRS_SIDE_WORDS = `Stairs and ladders are at most ${LIMITS.floorLinkSide} squares a side.`;
-/** Whether stairs or a ladder keep to their side. An opening keeps to OPENING_SIDE, which floorLinkRect holds. */
+/** Whether stairs or a ladder keep to their side. An opening keeps to LIMITS.openingSide, which floorLinkRect holds. */
 function linkSideFits(kind: "stairs" | "ladder" | "opening", rect: { w: number; h: number }): boolean {
   return kind === "opening" || (rect.w <= LIMITS.floorLinkSide && rect.h <= LIMITS.floorLinkSide);
 }
@@ -3481,7 +3479,7 @@ export const clockSchemas = { calendar, calendarName, clockTime, clockStep, cloc
 /** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design/design-v1-traps.md 6.2). */
 export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
 /** Falls' shapes, so the stored-state schema holds a room's fall cards to the bounds a restore's are held to (docs/design/design-v1-floors.md phase 4, 4.4). */
-export const fallSchemas = { fallId, fallCard, fallsMost: FALLS_PER_ROOM };
+export const fallSchemas = { fallId, fallCard, fallsMost: LIMITS.fallsPerRoom };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

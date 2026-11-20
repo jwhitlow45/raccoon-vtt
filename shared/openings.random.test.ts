@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
 import { ANA, ATTIC, GROUND, UPPER, fallCard, onThornsTurn, thornToken, tower, trapdoor, withFalls, withOpening, withStairs, withTrapdoor } from "./floorLinksTestutil.ts";
-import { FALLS_PER_ROOM, type FallRecord, type RoomState, type Token, type Viewer } from "./model.ts";
+import { LIMITS } from "./limits.ts";
+import type { FallRecord, RoomState, Token, Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { inSightOfNonOwners, stableStringify } from "./project.ts";
 import { isPoseOp, opSchema, type Op, type RestoreEntry } from "./protocol.ts";
@@ -34,7 +35,7 @@ import { climbOf, type ClimbRecord } from "#server/rooms/undo.ts";
  *    upper end while nothing holds it up by 4.1's rule (no fall for a
  *    restore, which never falls).
  * 3. Every card's creature exists, or a player's op deleted it.
- * 4. At most FALLS_PER_ROOM cards, each id "<made>:<n>".
+ * 4. At most LIMITS.fallsPerRoom cards, each id "<made>:<n>".
  * 5. Each fall record names an opening's upper end as it stood before the
  *    op, at its rev and `made`, from its floor to the floor below, or one
  *    the op itself placed.
@@ -492,7 +493,7 @@ function noneLeftOverHoles(before: RoomState, r: Applied, op: Op, who: Viewer): 
 /** Invariants 3 to 5. */
 function cardsHold(w: World, before: RoomState, r: Applied, op: Op): void {
   const cards = Object.values(r.state.falls ?? {});
-  assert.ok(cards.length <= FALLS_PER_ROOM, `${cards.length} cards`);
+  assert.ok(cards.length <= LIMITS.fallsPerRoom, `${cards.length} cards`);
   for (const card of cards) {
     assert.match(card.id, /^\d+:\d+$/);
     assert.equal(card.id.slice(0, card.id.indexOf(":")), String(card.made), `${card.id} starts with its made`);
@@ -506,7 +507,7 @@ function cardsHold(w: World, before: RoomState, r: Applied, op: Op): void {
     } else {
       assert.ok(op.t === "floorLink.put" && (op.link.id === record.linkId || op.link.pairId === record.linkId), `${record.linkId} placed by the op`);
     }
-    assert.ok(r.state.falls?.[record.fallId] !== undefined || cards.length === FALLS_PER_ROOM, `${record.fallId} written`);
+    assert.ok(r.state.falls?.[record.fallId] !== undefined || cards.length === LIMITS.fallsPerRoom, `${record.fallId} written`);
   }
   // Each root's fall has a card of its own.
   const ids = (r.falls ?? []).map((f) => f.fallId);
@@ -515,7 +516,7 @@ function cardsHold(w: World, before: RoomState, r: Applied, op: Op): void {
   if (MAKES_CARDS.has(op.t)) {
     const had = Object.keys(before.falls ?? {}).length;
     const made = cards.filter((c) => before.falls?.[c.id] === undefined).length;
-    assert.equal(cards.length, Math.min(FALLS_PER_ROOM, had + made), `${op.t} keeps ${Math.min(FALLS_PER_ROOM, had + made)} cards`);
+    assert.equal(cards.length, Math.min(LIMITS.fallsPerRoom, had + made), `${op.t} keeps ${Math.min(LIMITS.fallsPerRoom, had + made)} cards`);
   }
 }
 
@@ -550,7 +551,7 @@ function playersAndRestores(before: RoomState, r: Applied, op: Op, who: Viewer):
   const left = Object.values(r.state.falls ?? {});
   for (const card of Object.values(before.falls ?? {})) {
     if (r.state.falls?.[card.id] !== undefined || undone.has(card.id)) continue;
-    const evicted = left.length === FALLS_PER_ROOM && left.every((c) => c.made > card.made || (c.made === card.made && c.id > card.id));
+    const evicted = left.length === LIMITS.fallsPerRoom && left.every((c) => c.made > card.made || (c.made === card.made && c.id > card.id));
     assert.ok(evicted, `a player's ${op.t} took ${card.id} away`);
   }
 }
@@ -657,7 +658,7 @@ function play(start: RoomState, acts: readonly Act[], counts: Counts): void {
         if (f.card) {
           counts.cardsBack++;
           const back = applied.state.falls?.[f.card.id];
-          const full = Object.keys(applied.state.falls ?? {}).length === FALLS_PER_ROOM;
+          const full = Object.keys(applied.state.falls ?? {}).length === LIMITS.fallsPerRoom;
           assert.ok(back !== undefined || full, `the redo writes back ${f.card.id}`);
         }
       }
@@ -696,7 +697,7 @@ test("openings, falls and trapdoors keep their invariants over random sequences"
   assert.ok(counts.overHeld > 0, `${counts.overHeld} creatures held up over a hole`);
 });
 
-test("a DM's undo of a delete that puts its creature's cards back keeps the room to FALLS_PER_ROOM", () => {
+test("a DM's undo of a delete that puts its creature's cards back keeps the room to LIMITS.fallsPerRoom", () => {
   // Found by the machine (seed 1): the goblin and the ogre fall, the DM deletes the goblin and its cards, Thorn falls, and the
   // DM's undo of the delete puts the goblin's cards back beside Thorn's.
   const acts: Act[] = [

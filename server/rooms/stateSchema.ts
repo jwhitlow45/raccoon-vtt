@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, OPENING_SIDE, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { FAR, LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
 import { namesPrototypeMember } from "#shared/records.ts";
@@ -1000,7 +1000,7 @@ export const MADE_MOST = 2 ** 48;
 
 /** A cell's key index on any scene, as an op's squares take it (grid.ts cellIndexMost). */
 const sceneCell = z.number().int().min(0).max(cellIndexMost(MAX_SCENE_CELLS));
-const linkSide = z.number().int().min(1).max(OPENING_SIDE);
+const linkSide = z.number().int().min(1).max(LIMITS.openingSide);
 
 /**
  * An end of stairs, a ladder or an opening as stored (docs/design/design-v1-floors.md

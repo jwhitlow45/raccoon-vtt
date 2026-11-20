@@ -2,7 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
-import { OPENING_SIDE, type FloorLink, type RoomState } from "#shared/model.ts";
+import type { FloorLink, RoomState } from "#shared/model.ts";
 import { GROUND, UPPER, run, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -122,7 +122,7 @@ describe("a drag of the corner handle", () => {
     const open = withOpening(tower(), { rect: { x: 2, y: 2, w: 2, h: 2 } });
     const o1 = end(open, "o1");
     const big = resizeChange(SQUARES, o1, end(open, "o2"), BOUNDS, farCenter(SQUARES, o1.rect), mid(0, 0), mid(15, 15));
-    assert.deepEqual(big, { rect: { x: 2, y: 2, w: OPENING_SIDE, h: OPENING_SIDE } });
+    assert.deepEqual(big, { rect: { x: 2, y: 2, w: LIMITS.openingSide, h: LIMITS.openingSide } });
     assert.equal(judgeChange(open, o1, big), null);
   });
 

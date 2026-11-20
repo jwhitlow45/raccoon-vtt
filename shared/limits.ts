@@ -187,10 +187,14 @@ export const LIMITS = {
    * Stairs, ladders and openings between a scene's floors
    * (docs/design/design-v1-floors.md phase 2, phase 4): pairs in one scene,
    * both ends of a pair counted as one, and the longest side of an end's
-   * squares for stairs and ladders (an opening keeps to OPENING_SIDE).
+   * squares for stairs and ladders (an opening keeps to openingSide).
    */
   floorLinksPerScene: 16,
   floorLinkSide: 4,
+  /** The longest side of an opening's squares between floors (docs/design/design-v1-floors.md phase 4, 3). Stairs and ladders keep to floorLinkSide. */
+  openingSide: 8,
+  /** Fall cards a room holds for the DM (docs/design/design-v1-floors.md phase 4, 4.4): a new one past it drops the oldest `made`. */
+  fallsPerRoom: 10,
   /** A scene thumbnail upload, and its stored long side (section 3.3). */
   thumbUploadBytes: 512 * 1024,
   thumbMaxPx: 320,

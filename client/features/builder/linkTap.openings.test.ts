@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
-import { OPENING_SIDE } from "#shared/model.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { draftRect } from "./linkTap.ts";
 
@@ -15,14 +14,14 @@ const BOUNDS = { w: 20, h: 20 };
 
 describe("an opening's draft", () => {
   test("a long drag holds an opening to its own side, longer than stairs'", () => {
-    assert.equal(OPENING_SIDE > LIMITS.floorLinkSide, true);
-    assert.deepEqual(draftRect(SQUARES, { x: 3.5, y: 3.5 }, { x: 15.5, y: 14.5 }, BOUNDS, "opening"), { x: 3, y: 3, w: OPENING_SIDE, h: OPENING_SIDE });
+    assert.equal(LIMITS.openingSide > LIMITS.floorLinkSide, true);
+    assert.deepEqual(draftRect(SQUARES, { x: 3.5, y: 3.5 }, { x: 15.5, y: 14.5 }, BOUNDS, "opening"), { x: 3, y: 3, w: LIMITS.openingSide, h: LIMITS.openingSide });
     assert.deepEqual(draftRect(SQUARES, { x: 3.5, y: 3.5 }, { x: 15.5, y: 14.5 }, BOUNDS, "stairs"), { x: 3, y: 3, w: LIMITS.floorLinkSide, h: LIMITS.floorLinkSide });
     assert.deepEqual(draftRect(SQUARES, { x: 3.5, y: 3.5 }, { x: 15.5, y: 14.5 }, BOUNDS, "ladder"), { x: 3, y: 3, w: LIMITS.floorLinkSide, h: LIMITS.floorLinkSide });
   });
 
   test("dragged back past its start, it keeps the square the drag began on", () => {
-    assert.deepEqual(draftRect(SQUARES, { x: 15.5, y: 12.5 }, { x: 1.5, y: 1.5 }, BOUNDS, "opening"), { x: 8, y: 5, w: OPENING_SIDE, h: OPENING_SIDE });
+    assert.deepEqual(draftRect(SQUARES, { x: 15.5, y: 12.5 }, { x: 1.5, y: 1.5 }, BOUNDS, "opening"), { x: 8, y: 5, w: LIMITS.openingSide, h: LIMITS.openingSide });
   });
 
   test("an 8 by 8 drag stays whole for an opening, and stairs by default", () => {

@@ -1,4 +1,4 @@
-import { OPENING_SIDE, type CellRect, type FloorLink, type RoomState, type SceneId } from "#shared/model.ts";
+import type { CellRect, FloorLink, RoomState, SceneId } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
@@ -66,7 +66,7 @@ export function chosenTarget(targets: readonly LinkTarget[], picked: SceneId | n
 export function draftRect(g: Grid, from: Point, to: Point, bounds: Bounds, kind: Kind = "stairs"): CellRect {
   const rect = rectBetween(g, from, to, bounds);
   const start = rectBetween(g, from, from, bounds);
-  const side = kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
+  const side = kind === "opening" ? LIMITS.openingSide : LIMITS.floorLinkSide;
   const clip = (at: number, length: number, begin: number) => {
     if (length <= side) return { at, length };
     return at < begin ? { at: at + length - side, length: side } : { at, length: side };
@@ -124,7 +124,7 @@ export function moveChange(g: Grid, link: FloorLink, bounds: Bounds, from: Point
 
 /** The longest side an end of this kind may take. */
 function sideOf(kind: Kind): number {
-  return kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
+  return kind === "opening" ? LIMITS.openingSide : LIMITS.floorLinkSide;
 }
 
 /** The center of an end's far square (bottom right), which a resize drags from. */

@@ -1,5 +1,6 @@
 import { keys } from "../keys.ts";
-import { FALL_RIDERS_MOST, FALLS_PER_ROOM, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
+import { LIMITS } from "../limits.ts";
+import { FALL_RIDERS_MOST, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
 import type { Op, OpOf } from "../protocol.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { ownEntry } from "../records.ts";
@@ -201,18 +202,18 @@ export function leaveSeat(tx: Tx, was: Token): void {
   tx.write(keys.token(now.id), loose);
 }
 
-/** Drops the oldest cards past FALLS_PER_ROOM (4.4). */
+/** Drops the oldest cards past LIMITS.fallsPerRoom (4.4). */
 function evict(tx: Tx): void {
   const all = Object.values(tx.state.falls ?? {});
-  if (all.length <= FALLS_PER_ROOM) return;
+  if (all.length <= LIMITS.fallsPerRoom) return;
   all.sort(byFallAge);
-  for (const old of all.slice(0, all.length - FALLS_PER_ROOM)) tx.remove(keys.fall(old.id));
+  for (const old of all.slice(0, all.length - LIMITS.fallsPerRoom)) tx.remove(keys.fall(old.id));
 }
 
 /**
  * A new card (4.4): its id the op's seq and its place among the op's
  * cards, `made` the op's seq, its riders where any fell with it, written
- * in the op's undo step, the oldest dropped past FALLS_PER_ROOM. No name
+ * in the op's undo step, the oldest dropped past LIMITS.fallsPerRoom. No name
  * is stored.
  */
 export function writeCard(tx: Tx, fields: Pick<Fall, "tokenId" | "sceneId" | "from" | "ft"> & { riders: readonly TokenId[] }): Fall {
@@ -249,7 +250,7 @@ export function dropGoneCards(tx: Tx, before: RoomState): void {
  * its undo removed. So damage already applied is never asked for twice.
  * Any restore then evicts as a new card does, since a DM's undo of a
  * delete or a Dismiss puts back cards the room may since have filled the
- * place of, and no room holds more than FALLS_PER_ROOM.
+ * place of, and no room holds more than LIMITS.fallsPerRoom.
  */
 export function restoreFallCards(tx: Tx, op: OpOf<"sys.restore">): void {
   for (const record of op.falls ?? []) {

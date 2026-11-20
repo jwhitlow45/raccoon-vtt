@@ -1,7 +1,6 @@
 import { LIMITS } from "../limits.ts";
 import type { CellRect, FloorLink, FloorLinkId, RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
 import { FLOOR_HEIGHT, STAIRS_SIDE_WORDS } from "../protocol.ts";
-import { OPENING_SIDE } from "../model.ts";
 import { parseKey, writeEntity, type EntityKey } from "../keys.ts";
 import { ownEntry } from "../records.ts";
 import { isWritable } from "../writable.ts";
@@ -83,9 +82,9 @@ export const LINK_WORDS = {
   notNext: "Stairs join a floor and the floor just above or below it.",
   /** notNext for any kind (phase 4, 3): "An opening joins a floor and the floor just above or below it." */
   notNextFor: (kind: Kind) => `${KIND_WORDS[kind].joins} a floor and the floor just above or below it.`,
-  /** Stairs and ladders past their side (phase 4, 3), the put schema's words. Openings keep to OPENING_SIDE, which the schema holds. */
+  /** Stairs and ladders past their side (phase 4, 3), the put schema's words. Openings keep to LIMITS.openingSide, which the schema holds. */
   stairsSide: STAIRS_SIDE_WORDS,
-  openingSide: `Openings are at most ${OPENING_SIDE} squares a side.`,
+  openingSide: `Openings are at most ${LIMITS.openingSide} squares a side.`,
   /** An opening's lock and hiding (phase 4, 3). */
   openingLocked: "Openings can't be locked.",
   openingHidden: "Openings can't be hidden. A pit trap can open to the floor below.",
@@ -254,9 +253,9 @@ export function floorBelow(state: Pick<RoomState, "scenes">, sceneId: SceneId): 
   return floorsOf(state, sceneId).find((s) => s.floor !== undefined && s.floor.level === here.level - 1);
 }
 
-/** The most squares a side of an end of this kind (phase 4, 3): OPENING_SIDE for an opening, LIMITS.floorLinkSide for stairs and ladders. */
+/** The most squares a side of an end of this kind (phase 4, 3): LIMITS.openingSide for an opening, LIMITS.floorLinkSide for stairs and ladders. */
 export function linkSideOf(kind: Kind): number {
-  return kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
+  return kind === "opening" ? LIMITS.openingSide : LIMITS.floorLinkSide;
 }
 
 /** Whether an end is an opening's upper end, the hole: an opening whose far floor lies below its own (phase 4, 3). */
