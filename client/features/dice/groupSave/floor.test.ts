@@ -10,8 +10,6 @@ import { applyWaits, buildPlan, OFF_SCENE_WORDS } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 import { sourceScene } from "./start.ts";
 
-/** A trap card from another floor than the one on screen (the DM holds every floor of the scene on screen). */
-
 /** The plan's ids: the plan's own and the next one a condition takes. */
 const IDS = { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000a", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000b" };
 
