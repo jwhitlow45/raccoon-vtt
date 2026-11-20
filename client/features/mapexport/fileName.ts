@@ -28,6 +28,32 @@ export function exportFileName(g: Grid, sceneName: string, bounds: { w: number; 
   return `${slug || "map"}${floor ? `-${floor}` : ""}-${cells}-${pxPerCell}px${view === "dm" ? "-dm" : ""}.png`;
 }
 
+/**
+ * Export every floor's file (docs/design/design-v1-floors.md phase 4, 9.3),
+ * such as `tower-30x20-70px.zip`: the scene's name, its size where every
+ * floor in the file shares one, and the scale, as one floor's image is
+ * named. The pictures inside are named by `floorEntryName`.
+ */
+export function everyFloorFileName(g: Grid, sceneName: string, bounds: { w: number; h: number } | null, pxPerCell: number, view: "player" | "dm"): string {
+  // Floors made from files keep each file's size, and a size that holds for one floor only would set the wrong scale on the others.
+  const cells = g.shape === "hex" ? "hex-" : bounds ? `${bounds.w}x${bounds.h}-` : "";
+  return `${slugOf(sceneName) || "map"}-${cells}${pxPerCell}px${view === "dm" ? "-dm" : ""}.zip`;
+}
+
+/**
+ * A floor's picture in Export every floor's zip, such as
+ * `01-ground-floor.png`: its number among the floors in the file, lowest
+ * first, then its name's slug, or `floor` where nothing of the name is left
+ * (D-261119-095, D-261119-116). The number alone keeps names apart, where
+ * "Café" and "Cafe", or two names in another script, share a slug. It
+ * counts only the floors in the file, so a player view's file shows no gap
+ * where a floor players have not reached sits, as their own floors are
+ * numbered.
+ */
+export function floorEntryName(ordinal: number, floorName: string): string {
+  return `${String(ordinal).padStart(2, "0")}-${slugOf(floorName) || "floor"}.png`;
+}
+
 function slugOf(name: string): string {
   return name
     .normalize("NFKD")
