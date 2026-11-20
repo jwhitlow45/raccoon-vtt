@@ -86,8 +86,9 @@ export function quickRollNow(taken: Pick<Taken, "sources" | "secret">, baseline:
  * every floor of the scene on screen and a trap card, an area or a player's
  * ask can belong to a floor that is not the one shown. A page stamped with
  * the floor shown would drop every row of a creature on the source's floor
- * (buildPlan) yet still settle a trap. A selection's creatures are on the
- * floor shown, which is the answer when the source names none.
+ * (buildPlan) yet still settle a trap. A selection takes its first
+ * creature's floor, else the floor shown. The plan reaches creatures on any
+ * floor of the page's scene (plan.ts), so a selection across floors loses none.
  */
 export function sourceScene(input: Pick<StartInput, "source" | "cast">, view: Pick<RoomState, "traps" | "templates" | "tokens"> | null | undefined, shown: string | null): string {
   const source = input.source;

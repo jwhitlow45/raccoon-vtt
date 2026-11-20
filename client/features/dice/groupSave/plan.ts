@@ -13,6 +13,7 @@ import { conditionSkip, damageWords, dealtTypes, parseParts, partAmounts, planTa
 import { rowResult, type Mark, type RowBase } from "./rows.ts";
 import { parseDamageOverride } from "./damageInput.ts";
 import { holderOf } from "../targets.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 
 /**
  * What the outcome does to each row (docs/design/design-v1-roll-options.md 5.4)
@@ -222,22 +223,35 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
   );
 }
 
-/** Why a page whose creatures all stand on another floor than its own cannot apply, so a trap is never settled with no one hit. */
-export const OFF_FLOOR_WORDS = "Its creatures are on another floor now. Discard this page and start it again from its card.";
+/**
+ * Whether a creature is where the page applies. A trap's or an area's page is
+ * on its source's floor, and a creature that moved off it leaves its plan. A
+ * selection holds the creatures the DM picked, which a tracker row can take from
+ * several floors of one scene, and the server takes targets on any floor, so
+ * only another scene drops one.
+ */
+function onPageScene(page: Page, token: { sceneId: string }, dice: DiceView): boolean {
+  return page.source.kind === "selection" ? sameScene(dice.view, token.sceneId, page.sceneId) : token.sceneId === page.sceneId;
+}
+
+/** Why a page whose creatures all moved off its floor cannot apply, so a trap is never settled with no one hit. */
+export const OFF_FLOOR_WORDS = "Its creatures have moved off this page's floor. Discard this page and start it again from its source.";
 
 /**
- * Words when every row still in play has its creature on a scene other than the
- * page's. buildPlan leaves such rows out, so the plan would be empty, and a
+ * Words when every row still in play has its creature off the page's floor
+ * (onPageScene). buildPlan leaves such rows out, so the plan would be empty, and a
  * trap's springing would still be settled with no damage and no saves. A page
  * restored from a draft started before pages took their source's floor reads this way.
  */
 export function offFloorWords(page: Page, dice: DiceView): string | null {
+  // A player's ask closes without a plan (Close the ask), so words that stop Apply would strand it.
+  if (page.cast) return null;
   const live = page.rows.filter((r) => !stateOf(page, r).gone && stateOf(page, r).mark !== "skip");
   let elsewhere = false;
   for (const row of live) {
     const token = dice.view.tokens[row.tokenId];
     if (!token || holderOf(token) !== row.holder) continue;
-    if (token.sceneId === page.sceneId) return null;
+    if (onPageScene(page, token, dice)) return null;
     elsewhere = true;
   }
   return elsewhere ? OFF_FLOOR_WORDS : null;
@@ -320,7 +334,7 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     // token. Deleted or moved creatures are excluded from the new plan.
     const token = dice.view.tokens[row.tokenId];
     const holder = token && holderOf(token);
-    if (!token || token.sceneId !== page.sceneId || holder !== row.holder) continue;
+    if (!token || !onPageScene(page, token, dice) || holder !== row.holder) continue;
     const state = stateOf(page, row);
     if (state.gone || state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);

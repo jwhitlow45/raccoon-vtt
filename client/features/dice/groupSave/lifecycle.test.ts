@@ -6,8 +6,9 @@ import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
-import { DM, room as testRoom, token } from "#shared/testutil.ts";
+import { DM, room as testRoom, scene, token } from "#shared/testutil.ts";
 import { createRoomStore } from "../../../state/store.ts";
+import type { RoomView } from "../../../state/types.ts";
 import { FakeClock } from "../../../state/testing.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
 import { askAnswered, newPage, type Page } from "./chain.ts";
@@ -84,6 +85,11 @@ test("authority reads only confirmed state and requires the current connection's
   assert.equal(current.seq, 10);
   assert.equal(current.sceneAvailable, true);
   assert.equal(authorityOf({ ...f.room.store.getState(), sceneId: "elsewhere" }, page()).sceneAvailable, false);
+  // Another floor of the page's scene holds its creatures, so the page stays reachable from there.
+  const floors = { s1: scene("s1", { floor: { of: "s1", level: 0, name: "Cellar" } }), s2: scene("s2", { order: 1, floor: { of: "s1", level: 1, name: "Hall" } }) };
+  const room = f.room.store.getState();
+  assert.equal(authorityOf({ ...room, sceneId: "s2", confirmed: { ...confirmed, scenes: floors } as unknown as RoomView["confirmed"] }, page()).sceneAvailable, true);
+  assert.equal(authorityOf({ ...room, sceneId: "s2", confirmed: { ...confirmed, scenes: { ...floors, s2: scene("s2", { order: 1 }) } } as unknown as RoomView["confirmed"] }, page()).sceneAvailable, false);
   assert.equal(authorityOf({ ...f.room.store.getState(), confirmedReady: false }, page()).ready, false);
   assert.equal(authorityOf({ ...f.room.store.getState(), connection: "offline" }, page()).ready, false);
   f.room.dispose();

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Trap } from "#shared/model.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
-import { actor, castAsk, character, customMonster, room, scene, token, trap as trapOf } from "#shared/testutil.ts";
+import { actor, castAsk, character, customMonster, room, scene, template, token, trap as trapOf } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { holdsPageScene, mark, newPage, sourceIds, type Page, type Source } from "./chain.ts";
+import { holdsPageScene, mark, markGone, stateOf, newPage, sourceIds, type Page, type Source } from "./chain.ts";
 import { trapFill } from "./fills.ts";
 import { applyWaits, buildPlan, OFF_FLOOR_WORDS } from "./plan.ts";
 import { groupRows } from "./rows.ts";
@@ -12,6 +12,7 @@ import { sourceScene } from "./start.ts";
 
 /** A trap card from another floor than the one on screen (the DM holds every floor of the scene on screen). */
 
+/** The plan's ids: the plan's own and the next one a condition takes. */
 const IDS = { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000a", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000b" };
 
 /** A scene of two floors, the DM looking at "up" while the trap and its creatures are on "cellar". */
@@ -54,7 +55,7 @@ describe("the scene a group save page takes", () => {
   });
 
   test("an area's page takes the area's floor", () => {
-    const withArea: RoomState = { ...view, templates: { a1: { ...Object.values(view.templates)[0], id: "a1", sceneId: "cellar" } as RoomState["templates"][string] } };
+    const withArea: RoomState = { ...view, templates: { a1: template("a1", { sceneId: "cellar" }) } };
     assert.equal(sourceScene({ source: { kind: "area", templateId: "a1" } }, withArea, "up"), "cellar");
   });
 
@@ -90,23 +91,64 @@ describe("a trap card from another floor applies", () => {
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
   });
 
-  test("a page stamped with the floor on screen is refused with words, never settled with no one hit", () => {
-    const { page, dice } = rolledPage("up", view, trap);
-    assert.equal(buildPlan(page, dice, [{ amount: 4 }], IDS), null);
-    assert.equal(buildPlan(page, dice, null, IDS), null);
-    assert.equal(applyWaits(page, dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
-  });
-
-  test("one creature that left the floor is left out and the other still takes it, so only a page with every creature elsewhere is refused", () => {
+  test("a trap page drops a creature that left its floor, and refuses when none is left, never settling with no one hit", () => {
     const moved: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "up" } } };
     const { page, dice } = rolledPage("cellar", moved, trap);
-    const plan = buildPlan(page, dice, [{ amount: 4 }], IDS);
-    assert.deepEqual(plan?.targets.map((t) => t.damage?.parts[0]?.amount), [4]);
+    assert.deepEqual(buildPlan(page, dice, [{ amount: 4 }], IDS)?.targets.map((t) => t.damage?.parts[0]?.amount), [4]);
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
+    const stamped = rolledPage("up", view, trap);
+    assert.equal(buildPlan(stamped.page, stamped.dice, [{ amount: 4 }], IDS), null);
+    assert.equal(buildPlan(stamped.page, stamped.dice, null, IDS), null);
+    assert.equal(applyWaits(stamped.page, stamped.dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
+  });
+
+  test("a player's ask page is never stopped by the words, so Close the ask stays reachable", () => {
+    const stamped = rolledPage("up", view, trap);
+    const asking: Page = { ...stamped.page, cast: { ask: castAsk("ask1", { sceneId: "up" }), who: "Thorn" } };
+    assert.equal(applyWaits(asking, stamped.dice, [{ amount: 4 }]), null);
+    assert.equal(buildPlan(asking, stamped.dice, [{ amount: 4 }], IDS)?.targets.length ?? 0, 0);
   });
 
   test("a creature deleted from every floor reads as gone, not as elsewhere", () => {
     const { page, dice } = rolledPage("up", { ...view, tokens: {} }, trap);
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
+  });
+});
+
+describe("a selection across the floors of one scene", () => {
+  const { view, trap } = tower();
+  const spread: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "up" } } };
+  const selected = (sceneId: string, state: RoomState) => {
+    const { page, dice } = rolledPage(sceneId, state, trap);
+    return { page: { ...page, source: { kind: "selection" as const, tokenIds: ["thorn", "gob"] } }, dice };
+  };
+
+  test("takes every creature, whichever floor the first one stands on", () => {
+    for (const first of ["cellar", "up"]) {
+      const { page, dice } = selected(first, spread);
+      assert.deepEqual(buildPlan(page, dice, [{ amount: 4 }], IDS)?.targets.map((t) => t.damage?.parts[0]?.amount), [4, 4], `page on ${first}`);
+    }
+  });
+
+  test("drops only a creature on another scene, and refuses when all are", () => {
+    const apart: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "far" } } };
+    const some = selected("cellar", apart);
+    assert.equal(buildPlan(some.page, some.dice, [{ amount: 4 }], IDS)?.targets.length, 1);
+    const none = selected("far", view);
+    assert.equal(applyWaits(none.page, none.dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
+    assert.equal(buildPlan(none.page, none.dice, [{ amount: 4 }], IDS), null);
+  });
+});
+
+describe("a page on another floor of the shown scene", () => {
+  const { view, trap } = tower();
+
+  test("keeps its rows while the creatures are held, and marks a deleted one gone", () => {
+    const { page } = rolledPage("cellar", view, trap);
+    const row = page.rows[0]!;
+    const held = holdsPageScene(view, "up", page);
+    assert.equal(stateOf(markGone(page, held, () => true), row).gone ?? false, false);
+    assert.equal(stateOf(markGone(page, held, () => false), row).gone, true, "held floor: a missing creature was deleted");
+    assert.equal(stateOf(markGone(page, holdsPageScene(view, "far", page), () => false), row).gone ?? false, false, "another scene: nothing is known");
   });
 });
