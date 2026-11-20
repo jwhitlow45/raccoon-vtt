@@ -3115,9 +3115,11 @@ export const serverOnlyOps = [
      * passengers and their areas between the record's two floors, and an
      * undo removes the record's card while it is there, a redo writing back
      * the `card` it carries. Only the server builds a restore, from its own
-     * history.
+     * history. Bounded as the entries are, since a record's root keeps its
+     * key in them (fallsKept), and one step drags, carries and drops more
+     * creatures than it names (FLR4-SOL-02).
      */
-    falls: z.array(fallRecord).min(1).max(MAX_MOVES).optional(),
+    falls: z.array(fallRecord).min(1).max(MAX_RESTORE_ENTRIES).optional(),
   }).refine((o) => o.entries.length > 0 || o.saveOutcome !== undefined, { message: "an empty restore requires a save outcome transition" }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
