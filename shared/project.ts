@@ -1220,6 +1220,12 @@ export function seatView(state: RoomState, memberId: string, env: Pick<Env, "opV
         const parsed = parseKey(`chunk:${id}`);
         return parsed?.kind === "chunk" ? projectEntityCtx(ctx, keys.chunk(parsed.sceneId, parsed.cx, parsed.cy)) : null;
       }
+      if (kind === "log") {
+        // A line by its own rules, not by where their live log starts: a line before that still reaches them through
+        // the archive pages by the same rules (projectArchivedLog).
+        const line = readEntity(state, keys.log(id)) as LogEntry | undefined;
+        return line ? projectLogEntryCtx(ctx, line) : null;
+      }
       if (kind !== "row") return projectEntityCtx(ctx, keys[kind](id));
       if (encounter === undefined) encounter = projectEntityCtx(ctx, keys.encounter) as ProjectedEncounter | null;
       return encounter?.entries.find((e) => e.id === id) ?? null;
