@@ -58,4 +58,28 @@ describe("the writes of closing sockets (LP5-OPS-3)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(reported, ["refused while waiting"]);
   });
+
+  test("close counts the writes it left running and the stop's own that failed, not one from before the stop (LP44-OPS-1)", async () => {
+    const writes = new CloseWrites();
+    const before = deferred();
+    const failing = deferred();
+    const stuck = deferred();
+    writes.run(
+      () => before.promise,
+      () => undefined,
+    );
+    writes.stopping();
+    writes.run(
+      () => failing.promise,
+      () => undefined,
+    );
+    writes.run(
+      () => stuck.promise,
+      () => undefined,
+    );
+    before.reject(new Error("a last sight from before the stop"));
+    failing.reject(new Error("the stop's own last sight"));
+    assert.deepEqual(await writes.close(50), { left: 1, failed: 1 });
+    stuck.resolve();
+  });
 });

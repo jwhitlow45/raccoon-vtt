@@ -27,6 +27,45 @@ import { closeServer } from "./shutdown.ts";
  * its own, as a deploy does, so its exit code and time are the real ones.
  */
 
+/** A pool whose queries go to `answer` first: one it answers, failed or held, never reaches the database. */
+function poolWith(answer: (text: string, values: unknown[] | undefined) => Promise<never> | null): pg.Pool {
+  const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 5 });
+  const query = pool.query.bind(pool) as (text: string, values?: unknown[]) => Promise<unknown>;
+  pool.query = ((text: string, values?: unknown[]) => answer(text, values) ?? query(text, values)) as typeof pool.query;
+  return pool;
+}
+
+/** Whether a pool query writes the snapshot of `roomId`. */
+const snapshotOf = (roomId: string, text: string, values: unknown[] | undefined): boolean =>
+  text.trimStart().startsWith("insert into room_snapshots") && values?.[0] === roomId;
+
+/** Two rooms on `on`, each with a DM socket open and a change since its snapshot, ready for a stop. */
+async function twoRooms(on: FastifyInstance): Promise<{ ids: [string, string]; sockets: Socket[]; lastSeq(roomId: string): Promise<number>; snapshotSeq(roomId: string): Promise<number | null> }> {
+  const seqOf = async (sql: string, roomId: string): Promise<number | null> => (await check.query<{ seq: number | null }>(sql, [roomId])).rows[0]?.seq ?? null;
+  const lastSeq = async (roomId: string) => (await seqOf("select max(seq)::int as seq from room_ops where room_id = $1", roomId)) ?? 0;
+  const snapshotSeq = (roomId: string) => seqOf("select seq::int from room_snapshots where room_id = $1", roomId);
+  const sockets: Socket[] = [];
+  const ids: string[] = [];
+  for (const name of ["Lost", "Kept"]) {
+    const dm = client(() => on);
+    const { roomId } = await dm.createRoom(name);
+    const socket = await connect(roomId, dm, on);
+    sockets.push(socket);
+    await socket.apply({ t: "log.chat", text: `${name} before the stop` });
+    assert.ok(((await snapshotSeq(roomId)) ?? -1) < (await lastSeq(roomId)), "the room's snapshot is behind its last op before the stop");
+    ids.push(roomId);
+  }
+  return { ids: ids as [string, string], sockets, lastSeq, snapshotSeq };
+}
+
+/** Asserts `closing` fails naming only `rooms` as lost. */
+async function losesOnly(closing: Promise<void>, rooms: Array<{ roomId: string; why: string }>): Promise<void> {
+  await assert.rejects(closing, (err: { failures?: unknown }) => {
+    assert.deepEqual(err.failures, [{ step: "rooms", reason: `${rooms.length} not saved`, rooms }]);
+    return true;
+  });
+}
+
 const config = testConfig({ TRUST_CF_CONNECTING_IP: "1" });
 const userAgent = `raccoon-shutdown-itest/${randomBytes(6).toString("hex")}`;
 let assetDir: string;
@@ -57,14 +96,14 @@ after(async () => {
   await rm(assetDir, { recursive: true, force: true });
 });
 
-function client(): TestClient {
+function client(on: () => FastifyInstance = () => app): TestClient {
   const ip = randomIp();
   ips.push(ip);
-  return new TestClient(() => app, ip, userAgent, (roomId) => rooms.push(roomId));
+  return new TestClient(on, ip, userAgent, (roomId) => rooms.push(roomId));
 }
 
-async function connect(roomId: string, who: TestClient): Promise<Socket> {
-  const address = app.server.address();
+async function connect(roomId: string, who: TestClient, on: FastifyInstance = app): Promise<Socket> {
+  const address = on.server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   const socket = await Socket.open(`ws://127.0.0.1:${port}/ws?room=${roomId}`, {
     origin: config.publicOrigin,
@@ -184,6 +223,83 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
   assert.equal(nulls.rows[0]!.n, 61, "the cut batch completed nothing");
 });
 
+test("a stop whose snapshot write fails for one room still saves the other, then fails naming the room it lost (LP44-OPS-1)", async () => {
+  let failing = "";
+  const pool = poolWith((text, values) => (snapshotOf(failing, text, values) ? Promise.reject(new Error("could not extend file: No space left on device")) : null));
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
+  try {
+    const [lost, kept] = ids;
+    failing = lost;
+    await losesOnly(
+      closeServer(own, () => pool.end()),
+      [{ roomId: lost, why: "snapshot not written" }],
+    );
+    assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
+  } finally {
+    for (const socket of sockets) socket.ws.terminate();
+  }
+});
+
+test("a stop whose snapshot write for one room never ends still saves the other, then fails at the rooms' deadline naming the room it lost (LP44-OPS-1)", async () => {
+  let stuck = "";
+  const pool = poolWith((text, values) => (snapshotOf(stuck, text, values) ? new Promise<never>(() => undefined) : null));
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { closeTimeoutMs: 500 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
+  try {
+    const [lost, kept] = ids;
+    stuck = lost;
+    const started = Date.now();
+    await losesOnly(
+      closeServer(own, () => pool.end()),
+      [{ roomId: lost, why: "timed out" }],
+    );
+    assert.ok(Date.now() - started < 5_000, "bounded by the rooms' deadline");
+    assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
+  } finally {
+    for (const socket of sockets) socket.ws.terminate();
+  }
+});
+
+test("a stop whose room's unload throws still saves the other room, then fails naming the room it lost (LP44-OPS-1)", async () => {
+  const pool = poolWith(() => null);
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
+  try {
+    const [lost, kept] = ids;
+    const actor = await own.rooms.acquire(lost);
+    actor.shutdown = () => Promise.reject(new Error("the room's state would not serialize"));
+    await losesOnly(
+      closeServer(own, () => pool.end()),
+      [{ roomId: lost, why: "unload failed" }],
+    );
+    assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
+  } finally {
+    for (const socket of sockets) socket.ws.terminate();
+  }
+});
+
+test("a stop whose sockets' last-sight writes fail saves both rooms, then fails naming the writes (LP44-OPS-1)", async () => {
+  let failing = false;
+  const pool = poolWith((text) => (failing && text.startsWith("update sessions set last_seen_at") ? Promise.reject(new Error("the sessions table is locked")) : null));
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
+  try {
+    failing = true;
+    await assert.rejects(closeServer(own, () => pool.end()), (err: { failures?: unknown }) => {
+      assert.deepEqual(err.failures, [{ step: "socket writes", reason: "0 left running, 2 failed" }]);
+      return true;
+    });
+    for (const roomId of ids) assert.equal(await snapshotSeq(roomId), await lastSeq(roomId), "each room saved at its last op");
+  } finally {
+    for (const socket of sockets) socket.ws.terminate();
+  }
+});
+
 /** A port that was free a moment ago, for a server in a process of its own. */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -222,6 +338,8 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
   child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
   child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
   const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  // Ended in the finally, so a failed assertion never keeps the test file running.
+  const ends: Array<{ terminate?(): void; destroy?(): void }> = [];
   try {
     for (const deadline = Date.now() + 20_000; !/listening/i.test(output); await sleep(50)) {
       if (Date.now() > deadline || child.exitCode !== null) assert.fail(`the server did not start:\n${output}`);
@@ -260,8 +378,10 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
 
     const wsUrl = `ws://127.0.0.1:${port}/ws?room=${roomId}`;
     const dmSocket = await Socket.open(wsUrl, dm.headers());
+    ends.push(dmSocket.ws);
     await dmSocket.snapshot(randomBytes(8).toString("hex"));
     const playerSocket = await Socket.open(wsUrl, player.headers());
+    ends.push(playerSocket.ws);
     await playerSocket.snapshot(randomBytes(8).toString("hex"));
     for (const text of ["The door creaks.", "Roll initiative.", "Pip goes first."]) {
       const ev = await dmSocket.apply({ t: "log.chat", text });
@@ -274,6 +394,7 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
     // The player's phone is slow: it reads nothing until the server cuts it off, and it is part way through sending a token picture.
     (playerSocket.ws as unknown as { _socket: NetSocket })._socket.pause();
     const upload = createConnection(port, "127.0.0.1");
+    ends.push(upload);
     upload.on("error", () => undefined);
     const uploadClosed = new Promise<void>((resolve) => upload.once("close", () => resolve()));
     await new Promise<void>((resolve) => upload.once("connect", () => resolve()));
@@ -340,14 +461,14 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
     assert.equal(await seqOf("select seq::int from room_snapshots where room_id = $1"), lastSeq, "the stop saved the room at its last op");
     assert.deepEqual(steps, [
       "shutting down",
-      "shutdown: sockets and connections closed",
+      "shutdown: sockets closed",
       "shutdown: server closed",
       "shutdown: rooms closed",
       "shutdown: socket writes settled",
       "shutdown: pool closed",
       "shut down",
     ]);
-    const sockets = lines.find((line) => line.msg === "shutdown: sockets and connections closed");
+    const sockets = lines.find((line) => line.msg === "shutdown: sockets closed");
     assert.deepEqual({ sockets: sockets?.sockets, cutOff: sockets?.cutOff }, { sockets: 2, cutOff: 1 }, "both sockets closed, the slow phone's cut off");
     // What the stop met: the DM's page tried again while the player's phone held up the close and was refused, and the upload was cut off.
     assert.ok(reconnects.includes("Unexpected server response: 503"), `the DM's page reconnected during the close: ${reconnects.join(", ")}`);
@@ -355,9 +476,11 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
     assert.ok(fetched.includes(200), `the DM's fetches before the stop: ${fetched.join(", ")}`);
     await uploadClosed;
     assert.equal(uploadAnswer, "", "the upload was cut off unanswered");
-    dmSocket.ws.terminate();
-    playerSocket.ws.terminate();
   } finally {
+    for (const end of ends) {
+      end.terminate?.();
+      end.destroy?.();
+    }
     if (child.exitCode === null) child.kill("SIGKILL");
     await exited;
   }
