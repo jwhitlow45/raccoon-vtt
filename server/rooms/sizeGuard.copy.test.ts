@@ -102,6 +102,37 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
     assert.ok(mover.shown - after.shown > 20_000, `${mover.shown} against ${after.shown} once the turn passed`);
   });
 
+  test("the turn P1's copy shows is its active row's, where it began when the row names no creature, and the mounts sharing it", () => {
+    const width = (turn: (state: RoomState) => void) => {
+      const state = room();
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: "all" } };
+      const path = { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true as const }, { x: 5, y: 3, elevation: 0, seen: true as const }] };
+      state.tokens.wolf = token("wolf", { x: 5, y: 3, path });
+      state.tokens.horse = token("horse", { x: 8, y: 8, size: "large", path: { ...path, stops: path.stops.map((stop) => ({ ...stop, y: 8 })) } });
+      turn(state);
+      const held = exactCopies(state, "p1");
+      return [held.get(keys.token("wolf"))!.shown, held.get(keys.token("horse"))!.shown] as const;
+    };
+    const start = { sceneId: "s1", x: 3, y: 3, elevation: 0, seq: 7 };
+    const none = width(() => {});
+    // The wolf's row, where its turn began unseen by players, so the copy shows only the row.
+    const [unseenStart] = width((s) => (s.encounter = { rev: 0, round: 1, activeEntryId: "rwolf", entries: [entry("rwolf", { tokenId: "wolf" })], turnStart: { ...start, entryId: "rwolf", tokenId: "wolf" } }));
+    // A row by character alone, played by the wolf, where the turn began in sight.
+    const [byCharacter] = width((s) => {
+      s.characters.c2 = character("c2", { ownerIds: ["p2"] });
+      s.tokens.wolf = { ...s.tokens.wolf!, actor: { ref: "c2" } };
+      s.encounter = { rev: 0, round: 1, activeEntryId: "rc2", entries: [entry("rc2", { characterId: "c2" })], turnStart: { ...start, entryId: "rc2", tokenId: "wolf", seen: true } };
+    });
+    // The wolf's turn, riding the horse it steers, which shares the turn.
+    const [, mount] = width((s) => {
+      s.tokens.wolf = { ...s.tokens.wolf!, x: 8, y: 8, attached: { to: "horse", kind: "ride", steer: true } };
+      s.encounter = { rev: 0, round: 1, activeEntryId: "rwolf", entries: [entry("rwolf", { tokenId: "wolf" })], turnStart: { ...start, entryId: "rwolf", tokenId: "wolf", seen: true, mounts: ["horse"] } };
+    });
+    assert.ok(unseenStart - none[0] > 20_000, `the wolf's row: ${unseenStart} against ${none[0]}`);
+    assert.ok(byCharacter - none[0] > 20_000, `a row by character: ${byCharacter} against ${none[0]}`);
+    assert.ok(mount - none[1] > 20_000, `the horse sharing the turn: ${mount} against ${none[1]}`);
+  });
+
   test("the DM hides P1's area, renames it or resizes it while its creature is out of P1's sight", () => {
     for (const patch of [{ visibility: "dm" }, { label: "A much longer name for the area" }, { size: 60 }]) {
       const { moved, unchanged } = moves(onHidden(), { t: "template.update", templateId: "a1", patch } as Op);
