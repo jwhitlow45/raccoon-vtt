@@ -26,11 +26,11 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   within 1 px, and a press on a phone closes the sheet and shows the floor.
  * - fl4l-4: no page logged an error.
  *
- * It runs with `pnpm test:e2e` on E2E_PORT plus forty, one file after another.
+ * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-six, one file after another.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
  */
 
-const PORT = Number(process.env.E2E_PORT ?? 3100) + 40;
+const PORT = Number(process.env.E2E_PORT ?? 3100) + 76;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 

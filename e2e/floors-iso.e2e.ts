@@ -31,12 +31,12 @@ import { depth, K, type Turn } from "../client/lib/view.ts";
  *   and copies the ground stage.
  * - fl4i-4: no page logged an error.
  *
- * It runs with `pnpm test:e2e` on E2E_PORT plus thirty-four, one file
+ * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-four, one file
  * after another. The other environment variables are the smoke run's
  * (smoke.e2e.ts).
  */
 
-const PORT = Number(process.env.E2E_PORT ?? 3100) + 34;
+const PORT = Number(process.env.E2E_PORT ?? 3100) + 74;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 
