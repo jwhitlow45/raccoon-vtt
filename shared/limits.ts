@@ -1743,12 +1743,10 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
 
 /**
  * A player's own things that their copy holds (ownHeld), by id, each as the
- * copy holds it, and in `unseen` the areas and the rulers on creatures held
- * while their copy does not hold them, as stored.
+ * copy holds it, and in `unseenAreas` the areas on creatures held while
+ * their copy holds neither, as stored.
  */
-export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" | "companionBlock", ReadonlyMap<string, unknown>> & {
-  readonly unseen: { readonly template: ReadonlySet<string>; readonly drawing: ReadonlySet<string> };
-};
+export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" | "companionBlock", ReadonlyMap<string, unknown>> & { readonly unseenAreas: ReadonlySet<string> };
 
 /**
  * What a player's own copy holds of their own seat things on `floors`, and
@@ -1764,7 +1762,7 @@ export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" |
  * holds every player's stored things, so it would.
  */
 export function ownHeld(state: RoomState, memberId: string, view: SeatView, floors: ReadonlySet<string>): OwnHeld {
-  const unseen = { template: new Set<string>(), drawing: new Set<string>() };
+  const unseenAreas = new Set<string>();
   const copies = <T extends { id: string }>(kind: CopiedKind, things: Iterable<T>, own: (thing: T) => boolean, follows?: (thing: T) => boolean): Map<string, unknown> => {
     const out = new Map<string, unknown>();
     for (const thing of things) {
@@ -1773,7 +1771,7 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
       if (copy !== null) out.set(thing.id, copy);
       else if (follows?.(thing)) {
         out.set(thing.id, thing);
-        (kind === "template" ? unseen.template : unseen.drawing).add(thing.id);
+        if (kind === "template") unseenAreas.add(thing.id);
       }
     }
     return out;
@@ -1786,7 +1784,7 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
   const onUnseen = (t: AreaTemplate) => !blackout && t.attachedTo !== undefined && !view.sees(t.attachedTo);
   const onCreatures = (d: Drawing) => !blackout && (d.anchors?.some((id) => id !== null && !view.sees(id)) ?? false);
   return {
-    unseen,
+    unseenAreas,
     // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
     token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownsSeatToken(state, memberId, t)),
     template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId, onUnseen),

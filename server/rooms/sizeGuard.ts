@@ -2503,20 +2503,17 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
       if (state.meta.settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
     }
   }
-  // An area or a ruler on a creature out of their sight counts in every scene's reading, wherever it is stored, and an
-  // area at its widest, so neither a floor it moves to nor the DM's edit unseen moves the exact part (D-261119-021).
+  // An area on a creature out of their sight counts at its widest in every scene's reading, wherever it is stored, so
+  // neither a floor it moves to nor the DM's edit unseen moves the exact part (D-261119-021). A ruler never changes.
   for (const [id, copy] of own.template) {
     const area = state.templates[id]!;
-    if (!own.unseen.template.has(id)) out.set(keys.template(id), entity("template", id, area, copy, area.sceneId));
+    if (!own.unseenAreas.has(id)) out.set(keys.template(id), entity("template", id, area, copy, area.sceneId));
     else {
       const shown = fieldBytes(id) + AREA_MOST + 1;
       out.set(keys.template(id), { on: area.sceneId, shownOn: "room", sub: Math.min(measured("template", id, area), shown), shown, hidden: 0 });
     }
   }
-  for (const [id, copy] of own.drawing) {
-    const ruler = state.drawings[id]!;
-    out.set(keys.drawing(id), { ...entity("drawing", id, ruler, copy, ruler.sceneId), ...(own.unseen.drawing.has(id) ? { shownOn: "room" as const } : {}) });
-  }
+  for (const [id, copy] of own.drawing) out.set(keys.drawing(id), entity("drawing", id, state.drawings[id], copy, state.drawings[id]!.sceneId));
   // A row is an entry of the fight's list, with its comma, and has no key of its own: it goes by `row:` and its id.
   const rows = new Map((state.encounter?.entries ?? []).map((e) => [e.id, e]));
   for (const [id, copy] of own.row) out.set(`row:${id}`, { on: "room", ...exactBytes("row", rows.get(id), valueBytes(rows.get(id)) + 1, copy, valueBytes(copy) + 1, room) });
@@ -2667,17 +2664,13 @@ export function exactPastMost(state: RoomState, memberId: string, each?: (key: E
     if (anyToken || ownsSeatToken(state, memberId, token)) onFloor(token.sceneId, most("token", keys.token(token.id), token));
     if (settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
   }
-  // An area or a ruler on a creature may count in every scene's reading, an area at its widest (exactCopies).
+  // An area on a creature may count at its widest in every scene's reading (exactCopies).
   for (const t of Object.values(state.templates)) {
     if (t.ownerId !== memberId) continue;
     if (t.attachedTo === undefined) onFloor(t.sceneId, most("template", keys.template(t.id), t));
     else roomLevel += most("template", keys.template(t.id), t, fieldBytes(t.id) + AREA_MOST + 1);
   }
-  for (const d of Object.values(state.drawings)) {
-    if (d.ownerId !== memberId) continue;
-    if (d.anchors?.some((id) => id !== null)) roomLevel += most("drawing", keys.drawing(d.id), d);
-    else onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
-  }
+  for (const d of Object.values(state.drawings)) if (d.ownerId === memberId) onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
   for (const chunk of Object.values(state.buildChunks)) onFloor(chunk.sceneId, most("chunk", keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), chunk));
   for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry)) roomLevel += most("row", `row:${entry.id}` as EntityKey, entry);
   for (const cast of Object.values(state.casts)) if (cast.by === memberId) roomLevel += most("cast", keys.cast(cast.id), cast);
