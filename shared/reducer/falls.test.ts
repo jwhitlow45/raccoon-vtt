@@ -288,11 +288,27 @@ describe("the cards (4.4)", () => {
     assert.equal(dismissed.state.falls?.["120:0"], undefined);
     const again = applyOp(dismissed.state, opSchema.parse({ t: "fall.settle", fallId: "120:0" }), DM, env(nextSeq()));
     assert.deepEqual(again.ok ? null : again.message, FALL_SETTLED);
-    const outcome: Op = { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0" }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] };
+    const outcome: Op = { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0", tokenIds: ["thorn"] }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] };
     const applied1 = applied(state, outcome);
     assert.equal(applied1.state.falls?.["120:0"], undefined);
     const twice = applyOp(applied1.state, opSchema.parse(outcome), DM, env(nextSeq()));
     assert.deepEqual(twice.ok ? null : twice.message, FALL_SETTLED);
+  });
+
+  test("an outcome takes off its card only the creatures it settles, and the card stays for one still in the room (FLR4INT-ASTRA-05)", () => {
+    const ridden = withTokens(holed({}, { sceneId: GROUND, x: 6, y: 6 }), token("horse", { sceneId: GROUND, name: "Horse", x: 6, y: 6 }), token("bree", { sceneId: "s2", name: "Bree" }));
+    const state = withFalls(ridden, fallCard({ tokenId: "horse", riders: ["thorn", "bree"] }));
+    const outcome = (tokenIds: string[]): Op => ({ t: "actor.outcome", plan: "p1", fall: { fallId: "120:0", tokenIds }, targets: [{ target: { tokenId: "horse" }, amount: 3 }] });
+    const part = applied(state, outcome(["horse", "thorn"]));
+    assert.deepEqual([part.state.falls?.["120:0"]?.tokenId, part.state.falls?.["120:0"]?.riders], ["bree", undefined], "Bree, on another scene, keeps her fall");
+    assert.ok(part.inverse!.some((e) => e.key === "fall:120:0" && (e.value as { riders?: string[] }).riders?.length === 2), "the DM's undo puts the whole card back");
+    const twice = applyOp(part.state, opSchema.parse(outcome(["horse", "thorn"])), DM, env(nextSeq()));
+    assert.deepEqual(twice.ok ? null : twice.message, FALL_SETTLED, "a creature already settled is never applied again");
+    assert.equal(applied(part.state, outcome(["bree"])).state.falls?.["120:0"], undefined, "the last creature settled ends it");
+    const breeGone = { ...state, tokens: Object.fromEntries(Object.entries(state.tokens).filter(([id]) => id !== "bree")) };
+    assert.equal(applied(breeGone, outcome(["horse", "thorn"])).state.falls?.["120:0"], undefined, "one no longer in the room holds nothing to apply");
+    const none = applied(state, outcome([]));
+    assert.deepEqual(none.state.falls?.["120:0"], state.falls!["120:0"], "an outcome that settles no one leaves the card as it was");
   });
 
   test("a fall made under fall cards at the cap evicts within the op's undo, so the DM's undo puts the evicted card back", () => {

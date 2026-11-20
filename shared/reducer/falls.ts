@@ -263,13 +263,32 @@ export function restoreFallCards(tx: Tx, op: OpOf<"sys.restore">): void {
   evict(tx);
 }
 
-/** `fall.settle` (4.4): the DM's Dismiss of a fall card. */
+/** `fall.settle` (4.4): the DM's Dismiss of a fall card, the whole card, refused once it went. */
 export function fallSettle(tx: Tx, op: OpOf<"fall.settle">): void {
-  settleFallCard(tx, op.fallId);
+  if (ownEntry(tx.state.falls, op.fallId) === undefined) throw invalid(FALL_SETTLED);
+  tx.remove(keys.fall(op.fallId));
 }
 
-/** The card a group save's outcome settles (`actor.outcome`'s `fall`, 4.4), removed in the same op, refused once it went. */
-export function settleFallCard(tx: Tx, fallId: FallId): void {
-  if (ownEntry(tx.state.falls, fallId) === undefined) throw invalid(FALL_SETTLED);
-  tx.remove(keys.fall(fallId));
+/**
+ * What a group save's outcome settles of a card (`actor.outcome`'s `fall`,
+ * 4.4, FLR4INT-ASTRA-05): the creatures it names, applied or skipped,
+ * leave the card in the same op. One the card still names and the room
+ * still holds stays on it, such as a rider the DM's page could not reach
+ * on another scene, so no damage the card holds is lost. The card goes
+ * once none is left. An outcome naming a creature the card no longer
+ * names is refused, so another device's Apply never applies it twice.
+ */
+export function settleFallOutcome(tx: Tx, fall: { fallId: FallId; tokenIds: readonly TokenId[] }): void {
+  const card = ownEntry(tx.state.falls, fall.fallId);
+  const named = card ? [card.tokenId, ...(card.riders ?? [])] : [];
+  if (!card || fall.tokenIds.some((id) => !named.includes(id))) throw invalid(FALL_SETTLED);
+  const left = named.filter((id) => !fall.tokenIds.includes(id) && ownEntry(tx.state.tokens, id) !== undefined);
+  if (left.length === named.length) return;
+  const [first, ...riders] = left;
+  if (first === undefined) {
+    tx.remove(keys.fall(card.id));
+    return;
+  }
+  const { riders: _riders, ...rest } = card;
+  tx.write(keys.fall(card.id), { ...rest, tokenId: first, ...(riders.length > 0 ? { riders } : {}) });
 }

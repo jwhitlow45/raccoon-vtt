@@ -467,3 +467,17 @@ describe("a climb's reads (docs/design/design-v1-floors.md phase 2, 6.4)", () =>
     assert.ok(!satisfies(reads({ t: "floorLink.put", link: { id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, rect: { x: 8, y: 8, w: 1, h: 1 }, kind: "ladder" } }, copy as unknown as RoomState), copy, DM, { sceneId: "s2" }));
   });
 });
+
+describe("a fall card's outcome (FLR4INT-ASTRA-05)", () => {
+  test("reads every creature the card names, so a DM's copy without a rider on another scene waits for the server", () => {
+    const state = setup();
+    state.falls = { "120:0": { id: "120:0", rev: 0, tokenId: "gob", riders: ["far"], sceneId: "s1", from: "s1", ft: 10, made: 120 } };
+    const op = { t: "actor.outcome" as const, plan: "p1", fall: { fallId: "120:0", tokenIds: ["gob"] }, targets: [{ target: { tokenId: "gob" }, amount: 3 }] };
+    const r = reads(op, state);
+    assert.ok(!("never" in r));
+    assert.deepEqual(r.keys.map((k) => k.key).filter((k) => k.startsWith("fall:") || k === "token:far"), ["fall:120:0", "token:far"]);
+    const onS1 = projectState(state, DM, { sceneId: "s1" });
+    assert.equal(onS1.tokens.far, undefined, "the copy of s1 lacks the rider on s2");
+    assert.equal(satisfies(r, onS1, DM, { sceneId: "s1" }), false);
+  });
+});

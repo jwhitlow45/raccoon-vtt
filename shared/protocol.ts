@@ -2584,8 +2584,12 @@ const stateClientOps = [
     cast: id.optional(),
     /** The trap occurrence this outcome settles, in the same op (docs/design/design-v1-traps.md 6.2). */
     trap: z.strictObject({ trapId: id, due: trapDue }).optional(),
-    /** The fall card this outcome settles, removed in the same op (docs/design/design-v1-floors.md phase 4, 4.4). */
-    fall: z.strictObject({ fallId }).optional(),
+    /**
+     * The fall card this outcome settles (docs/design/design-v1-floors.md phase 4, 4.4) and the creatures it names that
+     * this outcome settles, applied or skipped. The card keeps every other creature it names that is still in the room,
+     * such as a rider on another scene, and goes once none is left (FLR4INT-ASTRA-05).
+     */
+    fall: z.strictObject({ fallId, tokenIds: z.array(id).max(FALL_RIDERS_MOST + 1) }).optional(),
     targets: z
       .array(
         z.strictObject({

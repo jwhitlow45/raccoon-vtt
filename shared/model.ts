@@ -815,7 +815,10 @@ export const FALL_RIDERS_MOST = 19;
  * group save page, or Dismiss. `riders` are the other creatures that fell
  * with it, in the order they landed: what rode on it and what they carried
  * (D-261120-007), so one card a root asks the fall's damage and Prone of
- * each. `made` is the seq of the op it fell in, which orders the cards for
+ * each. An Apply takes off the card the creatures it settles, and the
+ * card stays for any other it names that the room still holds, its first
+ * left standing in `tokenId` (FLR4INT-ASTRA-05). `made` is the seq of the
+ * op it fell in, which orders the cards for
  * eviction and the DM's toasts. No name is stored: the desk reads each
  * creature by its id.
  */

@@ -108,7 +108,7 @@ describe("a player's fall's step (4.5)", () => {
       const t = new UndoTable(holed());
       assert.equal(t.play(ANA, move("thorn", 6, 6)), "ok");
       const fallId = cardIds(t)[0]!;
-      const op: Op = settle === "apply" ? { t: "actor.outcome", plan: "plan1", fall: { fallId }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] } : { t: "fall.settle", fallId };
+      const op: Op = settle === "apply" ? { t: "actor.outcome", plan: "plan1", fall: { fallId, tokenIds: ["thorn"] }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] } : { t: "fall.settle", fallId };
       assert.equal(t.play(DM, op), "ok", settle);
       const hp = t.state.characters.thorn!.actor.hp.cur;
       assert.equal(t.undo(ANA), "ok", settle);

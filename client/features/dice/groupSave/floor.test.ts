@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, Trap } from "#shared/model.ts";
+import type { Fall, RoomState, Trap } from "#shared/model.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { actor, castAsk, character, customMonster, room, scene, template, token, trap as trapOf } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { holdsPageScene, mark, markGone, stateOf, newPage, sourceIds, type Page, type Source } from "./chain.ts";
-import { trapFill } from "./fills.ts";
+import { fallFill, trapFill } from "./fills.ts";
 import { applyWaits, buildPlan, OFF_FLOOR_WORDS } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 import { sourceScene } from "./start.ts";
@@ -91,19 +91,27 @@ describe("a trap card from another floor applies", () => {
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
   });
 
-  test("a trap page drops a creature that left its floor, and refuses when none is left, never settling with no one hit", () => {
-    const moved: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "up" } } };
-    const { page, dice } = rolledPage("cellar", moved, trap);
-    assert.deepEqual(buildPlan(page, dice, [{ amount: 4 }], IDS)?.targets.map((t) => t.damage?.parts[0]?.amount), [4]);
+  test("a creature the trap hit that climbed to another floor of the scene still takes it, and one on another scene drops (FLR4INT-ASTRA-05)", () => {
+    const climbed: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "up" } } };
+    const { page, dice } = rolledPage("cellar", climbed, trap);
+    assert.deepEqual(buildPlan(page, dice, [{ amount: 4 }], IDS)?.targets.map((t) => t.damage?.parts[0]?.amount), [4, 4]);
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
-    const stamped = rolledPage("up", view, trap);
+    const away: RoomState = { ...view, tokens: { ...view.tokens, gob: { ...view.tokens.gob!, sceneId: "far" } } };
+    const apart = rolledPage("cellar", away, trap);
+    assert.deepEqual(buildPlan(apart.page, apart.dice, [{ amount: 4 }], IDS)?.targets.map((t) => t.target), [{ tokenId: "thorn" }]);
+  });
+
+  test("a trap page whose creatures are all on another scene refuses, never settling with no one hit", () => {
+    const gone: RoomState = { ...view, tokens: Object.fromEntries(Object.entries(view.tokens).map(([id, t]) => [id, { ...t, sceneId: "far" }])) };
+    const stamped = rolledPage("cellar", gone, trap);
     assert.equal(buildPlan(stamped.page, stamped.dice, [{ amount: 4 }], IDS), null);
     assert.equal(buildPlan(stamped.page, stamped.dice, null, IDS), null);
     assert.equal(applyWaits(stamped.page, stamped.dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
   });
 
   test("a player's ask page is never stopped by the words, so Close the ask stays reachable", () => {
-    const stamped = rolledPage("up", view, trap);
+    const away: RoomState = { ...view, tokens: Object.fromEntries(Object.entries(view.tokens).map(([id, t]) => [id, { ...t, sceneId: "far" }])) };
+    const stamped = rolledPage("up", away, trap);
     const asking: Page = { ...stamped.page, cast: { ask: castAsk("ask1", { sceneId: "up" }), who: "Thorn" } };
     assert.equal(applyWaits(asking, stamped.dice, [{ amount: 4 }]), null);
     assert.equal(buildPlan(asking, stamped.dice, [{ amount: 4 }], IDS)?.targets.length ?? 0, 0);
@@ -150,5 +158,38 @@ describe("a page on another floor of the shown scene", () => {
     assert.equal(stateOf(markGone(page, held, () => true), row).gone ?? false, false);
     assert.equal(stateOf(markGone(page, held, () => false), row).gone, true, "held floor: a missing creature was deleted");
     assert.equal(stateOf(markGone(page, holdsPageScene(view, "far", page), () => false), row).gone ?? false, false, "another scene: nothing is known");
+  });
+});
+
+describe("a fall card's page with riders (D-261120-007, FLR4INT-ASTRA-05)", () => {
+  const { view } = tower();
+  const card: Fall = { id: "30:0", rev: 0, tokenId: "gob", riders: ["thorn"], sceneId: "cellar", from: "up", ft: 10, made: 30 };
+
+  function fallPage(state: RoomState, tokenIds: string[]): { page: Page; dice: DiceView } {
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: state, srd: { monsters: [], rolls: {} } };
+    const filled = fallFill(card);
+    const source: Source = { kind: "fall", fallId: card.id, tokenIds };
+    const rows = groupRows(dice, sourceIds(source, []), filled.test, false, new Map());
+    let page: Page = { ...newPage({ id: "p", sceneId: sourceScene({ source }, state, "cellar"), source, test: filled.test, dc: filled.dc, secret: true, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: filled.outcome }), phase: "rolled", rows };
+    for (const r of rows) page = mark(page, r.holder, "fail");
+    return { page, dice };
+  }
+
+  test("a rider who climbed to another floor of the scene takes the fall with the mount, and both leave the card", () => {
+    const climbed: RoomState = { ...view, tokens: { ...view.tokens, thorn: { ...view.tokens.thorn!, sceneId: "up" } } };
+    const { page, dice } = fallPage(climbed, ["gob", "thorn"]);
+    const plan = buildPlan(page, dice, [{ amount: 6 }], IDS);
+    assert.deepEqual(plan?.targets.map((t) => [t.target, t.damage?.parts[0]?.amount]), [[{ tokenId: "gob" }, 6], [{ tokenId: "thorn" }, 6]]);
+    assert.deepEqual(plan?.fall, { fallId: "30:0", tokenIds: ["gob", "thorn"] });
+  });
+
+  test("a rider the page no longer reaches stays on the card, and a skipped one leaves it", () => {
+    const { page, dice } = fallPage(view, ["gob", "thorn"]);
+    const gone = markGone(page, true, (row) => row.tokenId !== "thorn");
+    assert.deepEqual(buildPlan(gone, dice, [{ amount: 6 }], IDS)?.fall, { fallId: "30:0", tokenIds: ["gob"] }, "Thorn's fall stays for him");
+    const thorn = page.rows.find((r) => r.tokenId === "thorn")!;
+    const skipped = mark(page, thorn.holder, "skip");
+    const plan = buildPlan(skipped, dice, [{ amount: 6 }], IDS);
+    assert.deepEqual([plan?.targets.length, plan?.fall], [1, { fallId: "30:0", tokenIds: ["gob", "thorn"] }], "the DM chose no fall for Thorn");
   });
 });

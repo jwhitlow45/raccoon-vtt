@@ -315,6 +315,11 @@ export function opReads(op: Op, state: RoomState): Reads {
       }
       if (op.cast !== undefined) r.push({ key: keys.cast(op.cast) });
       if (op.trap !== undefined) r.push({ key: keys.trap(op.trap.trapId) });
+      // What stays on a fall card reads every creature it names, so a copy without one, on another scene, waits for the server.
+      if (op.fall !== undefined) {
+        const card = ownEntry(state.falls, op.fall.fallId);
+        r.push({ key: keys.fall(op.fall.fallId) }, ...[card?.tokenId, ...(card?.riders ?? [])].flatMap((id) => (id === undefined ? [] : [{ key: keys.token(id) }])));
+      }
       return of(r);
     }
     case "actor.deathSave":

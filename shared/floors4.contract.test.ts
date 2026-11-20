@@ -5,7 +5,7 @@ import { FAR_TREATMENT } from "./farLine.ts";
 import { ANA, BREE, UPPER, fallCard, fallRecord, putOp, putOpeningOp, tower, trapdoor, withFalls, withStairs } from "./floorLinksTestutil.ts";
 import { allKeys } from "./project.ts";
 import { collectionOf, keys, parseKey, readEntity, writeEntity } from "./keys.ts";
-import type { RoomState, Viewer } from "./model.ts";
+import { FALL_RIDERS_MOST, type RoomState, type Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { projectEntity, projectState } from "./project.ts";
 import { ID_RULES, STAIRS_SIDE_WORDS, opSchema, clientOpSchema, PIT_OR_BELOW, type Op } from "./protocol.ts";
@@ -67,8 +67,14 @@ describe("the ops (11)", () => {
     assert.ok(clientOpSchema.safeParse({ t: "fall.settle", fallId: "120:0" }).success);
     for (const fallId of ["120", "a:0", "120:0:1", ""]) assert.ok(!parses({ t: "fall.settle", fallId }), fallId);
     const outcome = (more: object) => ({ t: "actor.outcome", plan: "p1", targets: [{ target: { tokenId: "thorn" }, amount: 3 }], ...more });
-    assert.ok(parses(outcome({ fall: { fallId: "120:0" } })));
-    for (const more of [{ fall: { fallId: "120:0" }, trap: { trapId: "t1", due: "5:0" } }, { fall: { fallId: "120:0" }, cast: "k1" }, { cast: "k1", trap: { trapId: "t1", due: "5:0" } }]) {
+    assert.ok(parses(outcome({ fall: { fallId: "120:0", tokenIds: ["thorn"] } })));
+    // The creatures it settles are those a card names: the one that fell and at most FALL_RIDERS_MOST riders (FLR4INT-ASTRA-05).
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+    assert.ok(parses(outcome({ fall: { fallId: "120:0", tokenIds: ids(FALL_RIDERS_MOST + 1) } })));
+    assert.ok(!parses(outcome({ fall: { fallId: "120:0", tokenIds: ids(FALL_RIDERS_MOST + 2) } })));
+    assert.ok(!parses(outcome({ fall: { fallId: "120:0" } })), "it names what it settles");
+    const fall = { fallId: "120:0", tokenIds: ["thorn"] };
+    for (const more of [{ fall, trap: { trapId: "t1", due: "5:0" } }, { fall, cast: "k1" }, { cast: "k1", trap: { trapId: "t1", due: "5:0" } }]) {
       assert.equal(issue(outcome(more)), "an outcome settles one thing", JSON.stringify(more));
     }
   });
@@ -153,7 +159,7 @@ describe("the shapes built", () => {
     applies(tower(), { t: "trap.create", trap: { id, sceneId, name, zone, rig: rig! } });
     applies({ ...tower(), traps: { t1: trap("t1", { sceneId: UPPER }) } }, { t: "trap.update", trapId: "t1", patch: { rig: { below: true } } });
     applies(withFalls(tower(), fallCard()), { t: "fall.settle", fallId: "120:0" });
-    applies(withFalls(tower(), fallCard()), { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0" }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] });
+    applies(withFalls(tower(), fallCard()), { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0", tokenIds: ["thorn"] }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] });
   });
 
   test("stairs and ladders, their lock and kind, and a pit still apply as before", () => {

@@ -180,9 +180,14 @@ function incomingDamage(page: Page, state: ReturnType<typeof stateOf>, parts: Pa
 export const UNHURT_FALL = "No damage from the fall, so not Prone";
 
 /** The bound and the sent plan include the same ask, trap or fall card that Apply settles. */
-function closingOf(page: Page): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
+/**
+ * What the outcome settles beside its targets. A fall card's names the
+ * creatures `settled` takes off it (FLR4INT-ASTRA-05), every row by
+ * default, which is the widest the op can be.
+ */
+function closingOf(page: Page, settled: readonly string[] = page.rows.map((r) => r.tokenId)): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
   if (page.cast) return { cast: page.cast.ask.id };
-  if (page.source.kind === "fall") return { fall: { fallId: page.source.fallId } };
+  if (page.source.kind === "fall") return { fall: { fallId: page.source.fallId, tokenIds: [...settled] } };
   return page.source.kind === "trap" ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
 }
 
@@ -234,18 +239,21 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
 }
 
 /**
- * Whether a creature is where the page applies. A trap's or an area's page is
- * on its source's floor, and a creature that moved off it leaves its plan. An
- * area's page also holds each floor an opening joined to it as it started
+ * Whether a creature is where the page applies. An area's page is on its
+ * source's floor and each floor an opening joined to it as it started
  * (start.ts pageSource, docs/design/design-v1-floors.md phase 4, 9.2), where
- * the area reaches. A selection holds the creatures the DM picked, which a
- * tracker row can take from several floors of one scene, and the server takes
- * targets on any floor, so only another scene drops one.
+ * the area reaches, and a creature that moved off them leaves its plan. A
+ * selection holds the creatures the DM picked, which a tracker row can take
+ * from several floors of one scene. A trap's and a fall card's rows are the
+ * creatures it hit or that fell, fixed when it went off, so one that has
+ * climbed to another floor since still takes it (FLR4INT-ASTRA-05). The
+ * server takes targets on any floor, so for these only another scene drops
+ * one.
  */
 function onPageScene(page: Page, token: { sceneId: string }, dice: DiceView): boolean {
   const source = page.source;
-  if (source.kind === "selection") return sameScene(dice.view, token.sceneId, page.sceneId);
-  return token.sceneId === page.sceneId || (source.kind === "area" && source.floors !== undefined && source.floors.includes(token.sceneId));
+  if (source.kind !== "area") return sameScene(dice.view, token.sceneId, page.sceneId);
+  return token.sceneId === page.sceneId || (source.floors !== undefined && source.floors.includes(token.sceneId));
 }
 
 /** Why a page whose creatures all moved off its floor cannot apply, so a trap is never settled with no one hit. */
@@ -342,6 +350,8 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   if (offFloorWords(page, dice) !== null) return null;
   const rows: PlanRow[] = [];
   const seen = new Set<string>();
+  // The creatures a fall card's outcome takes off it: each row it reached, skipped ones too, since the DM chose that.
+  const settled: string[] = [];
   for (const row of page.rows) {
     if (seen.has(row.holder)) continue;
     seen.add(row.holder);
@@ -351,7 +361,9 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     const holder = token && holderOf(token);
     if (!token || !onPageScene(page, token, dice) || holder !== row.holder) continue;
     const state = stateOf(page, row);
-    if (state.gone || state.mark === "skip") continue;
+    if (state.gone) continue;
+    settled.push(row.tokenId);
+    if (state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);
     if (outcome.error) return null;
     if (outcome.result === null || outcome.result === "skip") continue;
@@ -360,9 +372,10 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   const targets = planTargets(rows, ids.newId);
   // The outcome closes the player's ask it answers in the same op (docs/design/design-v1-player-save-spell.md 3.3).
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design/design-v1-traps.md 4.4).
-  const closing = closingOf(page);
-  // A fall card is settled as a springing is, even where no one is hurt (docs/design/design-v1-floors.md phase 4, 4.4).
-  if (targets.length === 0 && closing.trap === undefined && closing.fall === undefined) return null;
+  const closing = closingOf(page, settled);
+  // A fall card is settled as a springing is, even where no one is hurt (docs/design/design-v1-floors.md phase 4, 4.4), but
+  // only for a creature the page reached: one it no longer reaches stays on the card.
+  if (targets.length === 0 && closing.trap === undefined && (closing.fall === undefined || settled.length === 0)) return null;
   // Saves rolled in secret keep a Legendary Resistance's use line from players (docs/design/design-v1-combat-controls.md 8).
   return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...closing, targets, ...(page.secret ? { quiet: true as const } : {}) };
 }

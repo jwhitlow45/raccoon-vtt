@@ -14,7 +14,8 @@ import { sourceScene } from "./start.ts";
 /*
  * A fall card's group save (docs/design/design-v1-floors.md phase 4, 4.4):
  * no save, 1d6 Bludgeoning a full 10 ft, Prone unless the fall did no
- * damage, on the creature's floor now, and Apply removes the card.
+ * damage, on the creature's floor now, and Apply takes the creatures it
+ * reaches off the card.
  */
 
 const IDS = { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000a", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000b" };
@@ -83,10 +84,10 @@ describe("a fall card's group save", () => {
     assert.equal(fallFill({ ft: 300 }).outcome.damage, "20d6 Bludgeoning");
   });
 
-  test("Apply removes the card in the same op, and the server's schema takes it", () => {
+  test("Apply settles the card in the same op, and the server's schema takes it", () => {
     const { page, dice } = fallPage(tower(), "thorn");
     const plan = buildPlan(page, dice, [{ amount: 4, type: "bludgeoning" }], IDS)!;
-    assert.deepEqual(plan.fall, { fallId: "120:0" });
+    assert.deepEqual(plan.fall, { fallId: "120:0", tokenIds: ["thorn"] });
     assert.equal(plan.trap, undefined);
     assert.equal(plan.targets.length, 1);
     assert.deepEqual(plan.targets[0]!.effects?.map((e) => e.key), ["prone"], "hurt, so Prone");
@@ -103,12 +104,12 @@ describe("a fall card's group save", () => {
     assert.ok(outcome.skips.includes(UNHURT_FALL));
     const plan = buildPlan(page, dice, [{ amount: 1, type: "bludgeoning" }], IDS)!;
     assert.deepEqual(plan.targets.map((t) => t.effects), [undefined], "its damage goes, worked out to 0 by the server, with no Prone");
-    assert.deepEqual(plan.fall, { fallId: "120:0" });
-    // The DM skips the row: the plan names no creature and still removes the card, as a trap's settles its springing.
+    assert.deepEqual(plan.fall, { fallId: "120:0", tokenIds: ["rock"] });
+    // The DM skips the row: the plan names no creature and still settles the card, as a trap's settles its springing.
     const skipped = mark(page, row.holder, "skip");
     const settle = buildPlan(skipped, dice, [{ amount: 4, type: "bludgeoning" }], IDS);
     assert.ok(settle, "a fall card is settled even where the plan changes no one");
-    assert.deepEqual([settle.targets, settle.fall], [[], { fallId: "120:0" }]);
+    assert.deepEqual([settle.targets, settle.fall], [[], { fallId: "120:0", tokenIds: ["rock"] }]);
     assert.ok(opSchema.safeParse(settle).success, "an outcome that only removes a card");
     // Hurt, the same rock is Prone.
     assert.deepEqual(rowOutcome(page, row, dice, [{ amount: 6, type: "bludgeoning" }]).conditions.map((c) => c.key), ["prone"]);
@@ -121,11 +122,19 @@ describe("a fall card's group save", () => {
     assert.deepEqual(rowOutcome(trapPage, trapPage.rows[0]!, dice, [{ amount: 1, type: "bludgeoning" }]).conditions.map((c) => c.key), ["prone"]);
   });
 
-  test("a page whose creature left the floor it was started on refuses, rather than removing the card unapplied", () => {
+  test("a creature that climbed to another floor of the scene since the page started still takes the fall (FLR4INT-ASTRA-05)", () => {
     const { page } = fallPage(tower(), "thorn");
-    const moved = tower({ thornOn: "upper" });
-    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: moved, srd: { monsters: [], rolls: {} } };
-    assert.notEqual(applyWaits(page, dice, [{ amount: 4, type: "bludgeoning" }]), null);
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: tower({ thornOn: "upper" }), srd: { monsters: [], rolls: {} } };
+    assert.equal(applyWaits(page, dice, [{ amount: 4, type: "bludgeoning" }]), null);
+    const plan = buildPlan(page, dice, [{ amount: 4, type: "bludgeoning" }], IDS);
+    assert.deepEqual([plan?.targets.map((t) => t.target), plan?.fall], [[{ tokenId: "thorn" }], { fallId: "120:0", tokenIds: ["thorn"] }]);
+  });
+
+  test("a page that reaches none of its creatures, all on another scene or gone, sends nothing, so the card stays for them", () => {
+    const { page } = fallPage(tower(), "thorn");
+    const away = tower();
+    delete away.tokens.thorn;
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: away, srd: { monsters: [], rolls: {} } };
     assert.equal(buildPlan(page, dice, [{ amount: 4, type: "bludgeoning" }], IDS), null);
   });
 
