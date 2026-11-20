@@ -33,6 +33,10 @@
  *   pans at 40 px and 12 px are counted too, on an untimed pan of their
  *   own: the canvas's fills, clips, image copies and patterns and the
  *   ground stage's draws, each a frame.
+ * - openings: row OPEN-ISO (docs/design/design-v1-floors.md phase 4, 13),
+ *   16 openings of 8 by 8 over a 40 by 40 mapped floor down to a mapped
+ *   floor below, each a drop in Isometric: a pan at 40 px, a warm turn,
+ *   and the page's live heap after them.
  * - dungeon: a 50 by 50 generated dungeon with rooms raised and sunk and
  *   the runs of stairs to them (docs/design/design-v1-iso-depth.md 7), with
  *   a pan, a drag up a run and a turn at 40 and 24 px, and in Low power at
@@ -164,7 +168,7 @@ function chunked<T>(list: readonly T[], size: number): T[][] {
 }
 
 /** What each scene holds: the ops that build it, the tokens the rows press, and where the camera stands for each zoom. */
-type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; aura?: string; group?: string[]; horse?: string; rider?: string; bounds: { w: number; h: number }; at40: { x: number; y: number } };
+type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; aura?: string; group?: string[]; horse?: string; rider?: string; below?: string; bounds: { w: number; h: number }; at40: { x: number; y: number } };
 
 function typical(sceneId: string, dmId: string): Built {
   const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds: { w: 40, h: 30 }, fogEnabled: true, autoWalls: "all" } }];
@@ -344,6 +348,30 @@ function pits(sceneId: string): Built {
   return { ops, walker: walker.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 100 } };
 }
 const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
+
+/**
+ * Row OPEN-ISO (docs/design/design-v1-floors.md phase 4, 13): 16 openings of
+ * 8 by 8 down to the floor below, the most a scene holds, over a 40 by 40
+ * floor the bench maps once built, each drawn in Isometric as a drop to the
+ * floor below. The floor below is added beside the room's own scene, which
+ * stays the floor a DM's page shows.
+ */
+function openings(sceneId: string): Built {
+  const below = benchId("floor");
+  const ops: Op[] = [
+    { t: "scene.update", sceneId, patch: { bounds: { w: 40, h: 40 }, fogEnabled: false } },
+    { t: "scene.create", scene: { id: below, name: "Tower", bounds: { w: 40, h: 40 } }, floor: { beside: sceneId, side: "below", besideName: "Upper floor", name: "Ground floor" } },
+    { t: "scene.update", sceneId: below, patch: { fogEnabled: false } },
+  ];
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      ops.push({ t: "floorLink.put", link: { id: benchId("hole"), pairId: benchId("hole"), sceneId, to: below, rect: { x: 1 + i * 10, y: 1 + j * 10, w: 8, h: 8 }, kind: "opening" } });
+    }
+  }
+  const walker = token(sceneId, "Walker", 20, 20);
+  ops.push({ t: "token.create", token: walker });
+  return { ops, walker: walker.id as string, below, bounds: { w: 40, h: 40 }, at40: { x: 20, y: 20 } };
+}
 
 /** A fixed seed whose 50 by 50 dungeon, with Many heights, has rooms raised 10 ft and sunk 5 and 10 ft, each reached by a run of stairs. */
 export const DUNGEON_SEED = "TAJT2AJT2AJT2AJ0";
@@ -1016,6 +1044,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["squares", hexRelief("squares")],
       ["pits", pits],
       ["dungeon", dungeon.make],
+      ["openings", openings],
     ] as const) {
       // A room costs the session two snapshots, the page's and the DM socket's. Past 20 a minute the server holds the next back and closes a session that keeps asking (server/rooms/budgets.ts DEFAULT_SNAPSHOT_BUDGET), so the eleventh room waits out the first's minute.
       const recent = roomTimes.filter((t) => Date.now() - t < SNAPSHOT_WINDOW_MS);
@@ -1490,6 +1519,30 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       }
     }
 
+    // Row OPEN-ISO: 16 openings over a mapped floor, a pan and a turn, and the page's heap after them (docs/design/design-v1-floors.md phase 4, 13).
+    if (!opts.only || opts.only.some((o) => OPEN_ROWS.some((r) => r.includes(o)))) {
+      const { room, scene } = built.openings!;
+      const dm = await dmOf("openings");
+      const map = await uploadMap(context, server.origin, room.roomId);
+      for (const sceneId of [dm.sceneId, scene.below!]) await dm.op({ t: "scene.setMap", sceneId, map });
+      await open("openings", 40);
+      await page.waitForTimeout(1000);
+      await frames(page, 30);
+      await addPan(OPEN_PAN_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      if (view === "isometric") {
+        const hook = (call: "turn", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
+        for (const t of [1, 2, 3, 0] as const) {
+          await hook("turn", t);
+          await frames(page, 6);
+        }
+        await add(OPEN_TURN_ROW, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+      }
+      await cdp.send("HeapProfiler.collectGarbage");
+      const heap = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number };
+      const mb = Math.round(heap.usedSize / 1e5) / 10;
+      rows.push({ row: OPEN_HEAP_ROW, view, ms: { median: mb, max: mb, n: 1 } });
+    }
+
     /*
      * 30 pin labels round the camera with the four area names: the pills the
      * drag and overlay layers slide through a pan (5.8). At 40 px, since a
@@ -1721,6 +1774,10 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+const OPEN_PAN_ROW = "pan, 40 px, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO)";
+const OPEN_TURN_ROW = "turn, 40 px, 16 openings of 8 by 8 over a mapped floor, each turn visited before (OPEN-ISO)";
+const OPEN_HEAP_ROW = "live heap after a forced collection, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO) (MB, not ms)";
+const OPEN_ROWS = [OPEN_PAN_ROW, OPEN_TURN_ROW, OPEN_HEAP_ROW];
 const PITS_ROW = "pan, 12 px, a 200 by 200 square scene sunk 100 ft";
 const PILLS_ROW = hexRow("rows", "pan, 40 px, with 30 pin labels and the four area names");
 const HIDDEN_PILLS_ROW = hexRow("rows", "pill board views rendered a move, a Top-down pan at 40 px with the isometric tree hidden, 30 pin labels (calls, not ms)");
