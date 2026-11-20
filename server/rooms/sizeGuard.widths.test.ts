@@ -337,6 +337,16 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
     assertTwinsAlike([hiddenRider(tower()), hiddenRider(tower(), { nudge: { x: 0.25, y: 0.25 }, squeeze: true })], climb);
   });
 
+  test("P1's area on a hidden creature, which rides Thorn up onto a floor whose id is longer or stands where it was", () => {
+    const owlWith = (riding: boolean) => {
+      const s = riding ? hiddenRider(tower()) : hiddenRider(tower(), { x: 3, y: 3, attached: undefined });
+      s.templates.mine = template("mine", { sceneId: GROUND, ownerId: "p1", attachedTo: "owl", label: "Faerie Fire", rev: 9 });
+      return s;
+    };
+    assertTwinsAlike([owlWith(false), owlWith(true)], climb);
+    assert.equal(run(owlWith(true), climb, P1).templates.mine!.sceneId, UPPER, "the area went up with the creature");
+  });
+
   test("a hidden creature Thorn drags, its link let go by the climb, or the same creature on no link", () => {
     const dragged = (link: boolean) => {
       const s = tower();

@@ -765,9 +765,9 @@ describe("LP44-PRIV-1: the far check's bound on a player's exact part, read from
 describe("D-261119-017: a player's things that follow a creature stay in their exact part, in sight of it or not", () => {
   /**
    * P1's things that follow a wolf of the DM's: a kept ruler from Hero to
-   * it, an area on it, a companion riding it and an ask naming it, the wolf
-   * in P1's sight or out of it, its name one character longer out of sight
-   * so both rooms store the same bytes.
+   * it, an area on it, a companion riding it, an ask naming it and one on
+   * the area, the wolf in P1's sight or out of it, its name one character
+   * longer out of sight so both rooms store the same bytes.
    */
   function onTheWolf(seen: boolean): RoomState {
     const state = room();
@@ -778,6 +778,7 @@ describe("D-261119-017: a player's things that follow a creature stay in their e
     state.drawings.r1 = drawing("r1", { kind: "ruler", ownerId: "p1", anchors: ["hero", "wolf"], points: [2.5, 2.5, 6.5, 6.5] });
     state.templates.a1 = template("a1", { ownerId: "p1", attachedTo: "wolf", casterId: "wolf", label: "Faerie Fire" });
     state.casts.k1 = castAsk("k1", { by: "p1", caster: "hero", area: undefined, targets: ["hero", "wolf"] });
+    state.casts.k2 = castAsk("k2", { by: "p1", caster: "hero", area: "a1" });
     return state;
   }
 
@@ -790,5 +791,25 @@ describe("D-261119-017: a player's things that follow a creature stay in their e
     assert.deepEqual(ownHeldBytes(unseen, "p1", ["s1"]), ownHeldBytes(seen, "p1", ["s1"]), "the scene's exact part");
     assert.equal(steppedOf(unseen), steppedOf(seen), "the room's stepped part");
     assert.equal(steppedOf(unseen, ["s1"]), steppedOf(seen, ["s1"]), "the scene's stepped part");
+  });
+  test("a kept ruler, an area, a ride and asks on a creature P1 does not see count alike in P1's exact part, whatever its id and place", () => {
+    /** P1's things on a hidden creature `id` at `at`, their companion riding it where P1 last saw it, and an ask on a hidden area of the same id. */
+    const onHidden = (id: string, at: number): RoomState => {
+      const state = room();
+      state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+      state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+      state.tokens[id] = token(id, { x: at, y: at, visibility: "dm" });
+      state.templates[id] = template(id, { x: at, visibility: "dm" } as never);
+      state.tokens.pet = token("pet", { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 5, y: 5, size: "tiny", attached: { to: id, kind: "ride" }, actor: { inline: actor({ dmNotes: "" }) } });
+      state.drawings.r1 = drawing("r1", { kind: "ruler", ownerId: "p1", anchors: ["hero", id], points: [2.5, 2.5, at + 0.5, at + 0.5] });
+      state.templates.a1 = template("a1", { ownerId: "p1", attachedTo: id, casterId: "hero", label: "Faerie Fire" });
+      state.casts.k1 = castAsk("k1", { by: "p1", caster: "hero", area: undefined, targets: ["hero", id] });
+      state.casts.k2 = castAsk("k2", { by: "p1", caster: "hero", area: id });
+      return state;
+    };
+    const [near, far] = [onHidden("w", 7), onHidden("w".repeat(40), 12)];
+    assert.equal(copyOf(near), copyOf(far), "P1's copies are equal");
+    assert.deepEqual(ownHeldBytes(far, "p1").shown, ownHeldBytes(near, "p1").shown, "the room's exact part");
+    assert.deepEqual(ownHeldBytes(far, "p1", ["s1"]).shown, ownHeldBytes(near, "p1", ["s1"]).shown, "the scene's exact part");
   });
 });
