@@ -183,7 +183,8 @@ function holdCommits(ms: number): () => void {
   const pool = t.pool as unknown as { connect: Connect };
   const original = pool.connect.bind(pool);
   pool.connect = (cb?: unknown) => {
-    // pg's own `pool.query`, which the test's reads use, takes the callback form. Only a client taken for a transaction holds its commit.
+    // pg's own `pool.query`, which the test's reads use, calls `connect` with a callback (a pg internal this relies on:
+    // if a pg upgrade changed that, the reads would hold their commits too). Only a client taken for a transaction holds its commit.
     if (typeof cb === "function") return original(cb);
     return (original() as Promise<pg.PoolClient>).then((client) => {
       const query = client.query.bind(client) as (...args: unknown[]) => Promise<pg.QueryResult>;

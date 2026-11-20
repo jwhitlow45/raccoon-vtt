@@ -618,7 +618,8 @@ async function refusedUndo(page: Page, mine: OpSocket, theirs: OpSocket): Promis
     await page.keyboard.press("Control+z");
     // toastScreen says it if neither shows.
     if (!(await shows(toasts(page, /^Could not undo/).or(behind).first())) || !(await visible(behind))) return;
-    await dismissToasts(page);
+    // The last pass leaves its toast up: dismissing it would make toastScreen report "no toast read" and hide why none showed.
+    if (i === 0) await dismissToasts(page);
   }
 }
 

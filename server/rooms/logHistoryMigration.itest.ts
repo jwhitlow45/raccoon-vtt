@@ -193,7 +193,8 @@ function worker(opts: Partial<MigrationOptions> = {}, budget = new LogScanBudget
  * room's next read asks for it on a server.
  */
 async function completeRoom(w: Worker, roomId: string): Promise<void> {
-  for (;;) {
+  // A stale lock lets go within a pass or two, so a job still locked after this many is stuck, not slow.
+  for (let attempt = 0; attempt < 20; attempt++) {
     const done = w.outcome(roomId);
     w.m.want(roomId);
     const outcome = await done;
@@ -201,6 +202,7 @@ async function completeRoom(w: Worker, roomId: string): Promise<void> {
     assert.equal(outcome, "locked", `room ${roomId}: the job's outcome`);
     await until(async () => (await leftovers()).locks === 0, `room ${roomId}: the stale lock let go`);
   }
+  assert.fail(`room ${roomId}: not complete within 20 attempts`);
 }
 
 /** Holds a step until its job is cancelled, as a statement does that the cancel stops. */

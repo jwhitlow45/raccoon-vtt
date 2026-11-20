@@ -181,6 +181,8 @@ type WingAsks = { asked: number[]; answered: Record<number, boolean> };
  * Keeps, from now on, the ids of the wing plans each of the page's workers is asked for and whether each answer
  * planned, in the worker itself. A step then waits for the answer to the plan its own change asked for, where the
  * pane's status line can still read an older plan's words, or the same words, until it takes the answer.
+ * The planning worker is created lazily (client/features/dungeon/client.ts), so call this only once the page has
+ * run a dungeon preview and its worker exists: it watches the workers the page has now and waits for one to appear.
  */
 async function watchWingAsks(page: Page): Promise<() => Promise<WingAsks>> {
   const workers = await waitFor("the page's workers", () => (page.workers().length > 0 ? page.workers() : null), PLAN_MS);
