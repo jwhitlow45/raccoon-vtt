@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsLandNamed, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize } from "../migrate.ts";
+import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsLandNamed, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize, stopsStepApartInReach } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -2055,6 +2055,16 @@ function stopIndex(walk: Walk, stop: Stop): number {
  * (`keepsOwn`), and the hidden holders under it stop at the same progress,
  * where `seatingWalk` holds its seat as at any stop.
  *
+ * From op version 63 (HEXFILE-OPUS-6, migrate.ts stopsStepApartInReach)
+ * that fallback is not the end of it: each of the class that still shares
+ * a hex with the holder or another, holders first, steps back to the
+ * latest spot it may stop at clear of every box as they then stand, its
+ * own drag and the class's drags on it still in reach, and keeps its spot
+ * with none. Nothing steps onto a box another stands on, so a stop at a
+ * corner of a warhorse's walk, where the file stands on the warhorse's own
+ * hex, no longer leaves every goblin under it when one of them could stand
+ * behind it in reach.
+ *
  * The moments after the stop, the cut and the landing read these spots,
  * and the private pass walks the cut, so it finds a hidden one there too.
  * What one met on the way up to the stop still counts, since it walked
@@ -2110,6 +2120,45 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
   const g = lead.grid;
   const boxAt = (walk: Walk, j: number): Rect | ReadonlySet<string> => (isHex(g) ? new Set(occupiedHexes(g, placedAt(walk, j)).map(hexKey)) : footprintRect(walk.grid, poseAt(walk, j)));
   const ahead: (Rect | ReadonlySet<string>)[] = [boxAt(lead, latest(lead))];
+  // The boxes of a class after the fallback, each that shares one stepped back where it can (op version 63): `ahead` holds those
+  // already decided, the lead first, and a class's own read only each other.
+  const apartInReach = (order: readonly Walk[]): (Rect | ReadonlySet<string>)[] => {
+    const fixed = [...ahead];
+    const boxes = new Map(order.map((w) => [w, boxAt(w, indexOf(w))]));
+    const clear = (w: Walk, box: Rect | ReadonlySet<string>) => fixed.every((a) => !boxesOverlap(a, box)) && [...boxes].every(([o, b]) => o === w || !boxesOverlap(b, box));
+    // The one of the class a walk hangs from, through what rides on it: a rat an owl drags, and the owl rides a goblin of the file,
+    // stands where the goblin's step takes the owl (`rides`).
+    const upFile = (w: Walk): Walk | undefined => {
+      for (let h = w.holder, depth = 0; h && depth <= order.length + 64; h = h.holder, depth++) {
+        if (order.includes(h)) return h;
+        if (!rides(h)) return undefined;
+      }
+      return undefined;
+    };
+    const done = new Set<Walk>();
+    const settle = (w: Walk): void => {
+      if (done.has(w)) return;
+      done.add(w);
+      const up = upFile(w);
+      if (up) settle(up);
+      if (following.has(w) || clear(w, boxes.get(w)!)) return;
+      const stands = standSpots(walks, w, before, seen);
+      const kept = back.get(w);
+      const on = order.filter((o) => upFile(o) === w);
+      for (let i = indexOf(w) - 1; i >= 0; i--) {
+        back.set(w, i);
+        const box = boxAt(w, i);
+        if (standsAt(stands, w.spots[i]!.progress) && clear(w, box) && drags(w) && on.every(drags)) {
+          boxes.set(w, box);
+          return;
+        }
+      }
+      if (kept === undefined) back.delete(w);
+      else back.set(w, kept);
+    };
+    for (const w of order) settle(w);
+    return order.map((w) => boxes.get(w)!);
+  };
   // A class at a time, those every player sees first, so a hidden one never decides where a public one stands.
   for (const order of classes) {
     const was = ahead.length;
@@ -2139,6 +2188,10 @@ function fileApart(walks: Walks, group: Group, s: Progress, before: RoomState, s
         ahead.push(boxAt(w, indexOf(w)));
       }
       if (order === classes[1]) for (const w of walks.all) if (order.includes(w) && !following.has(w)) inReach(w);
+      if (stopsStepApartInReach(walks.opVersion)) {
+        ahead.length = was;
+        ahead.push(...apartInReach(order));
+      }
     }
     // Each hidden holder under one every player sees that stepped back stops at the same progress of its walk, up to the file.
     for (const p of order) {

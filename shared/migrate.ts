@@ -1488,7 +1488,9 @@ export const opMigrations: MigrationStep[] = [
     // Hex walks in single file that settle (DROP_SEAT_OP_VERSION): no stored op changes shape, so the step is the identity.
     // From this version a walk in single file on hexes that reaches its last hex before its holder ends holds that hex to the
     // holder's end (`fileEndsWithHolder`), and one whose way by the one ahead ends out of a hex step of its holder goes straight
-    // onto the holder's start where that ends within one (`fileGoesDirectWhereFar`). Ops stored before replay as they ran.
+    // onto the holder's start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that keeps the file on its
+    // spots for reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops stored before replay as
+    // they ran.
     // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
     // version 63 ops after its last snapshot, which an older build refuses.
     from: 62,
@@ -2150,6 +2152,19 @@ export function fileGoesDirectWhereFar(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
 }
 
+/**
+ * Whether a trap's stop whose class in single file goes back to the stop's
+ * spots, since a step back would leave a drag out of reach (traps.ts
+ * fileApart), then steps each of it that still shares a hex or a square
+ * with the holder or another back to the latest spot it may stop at clear
+ * of them all, in reach (HEXFILE-OPUS-6). Ops stored before version 63
+ * kept every one of them on the stop's spot, under the holder at a corner
+ * of its walk, and replay so. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function stopsStepApartInReach(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
 
 /**
  * Whether, on hexes, what sits on a holder takes hexes of its own at every
