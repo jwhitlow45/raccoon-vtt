@@ -12,7 +12,7 @@ import { markedRoom } from "./limitsTesting.ts";
 import { answer, joinOp, Mint, type Answer } from "./limitsTwinTesting.ts";
 import type { Who } from "./numberingTesting.ts";
 import { Room } from "./numberingTesting.ts";
-import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, MEMORY_FULL, ownHeldBytes, PER_PLAYER_FULL, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
+import { farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, MEMORY_FULL, ownHeldBytes, PER_PLAYER_FULL, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 
 /**
@@ -243,13 +243,13 @@ describe("the players' scene can be deleted with the DM's yes", () => {
 /** The players' scene as its far line reads it: the DM's part, which the line rounds up to its step, and what seats hold. */
 function farScene(state: RoomState): { dm: number; held: number } {
   const held = heldBytes(state, ["s1"]);
-  return { dm: projectedSceneBytes(state, "s1") - held, held };
+  return { dm: projectedSceneBytes(state, "s1") + farWidths(state, new Set(["s1"])) - held, held };
 }
 
 /** The players' scene as a player's far line reads it: all but their own copy's own things by its step, those exactly. */
 function playerScene(state: RoomState, memberId: string): number {
   const own = ownHeldBytes(state, memberId, ["s1"]);
-  return roundUp(projectedSceneBytes(state, "s1") - own.sub, FAR.byteStep) + own.shown;
+  return roundUp(projectedSceneBytes(state, "s1") + farWidths(state, new Set(["s1"])) - own.sub, FAR.byteStep) + own.shown;
 }
 
 /**

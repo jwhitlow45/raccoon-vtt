@@ -11,7 +11,7 @@ import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { actor, character, drawing, entry, env, P1, randomOp, randomState, rng, room, template, token } from "#shared/testutil.ts";
-import { exactCopies, measuredStateBytes, ownHeldBytes, projectedSceneBytes } from "./sizeGuard.ts";
+import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
  * LP44-PRIV-1 (D-261116-026, D-261119-003): a player's own op never moves
@@ -30,12 +30,17 @@ import { exactCopies, measuredStateBytes, ownHeldBytes, projectedSceneBytes } fr
 
 const DEPS = { canUseAsset: () => true, canRestoreAsset: () => true } as never;
 
-/** P1's stepped part of the room and of each scene before rounding and reserves: the measure less what P1's exact part takes out of it. */
+/**
+ * P1's stepped part of the room and of each scene before rounding and the
+ * other reserves: the measure with the far line's widths (farWidths) less
+ * what P1's exact part takes out of it.
+ */
 function steppedParts(state: RoomState): Map<string, number> {
-  const out = new Map<string, number>([["room", measuredStateBytes(state) - ownHeldBytes(state, "p1").sub]]);
+  const out = new Map<string, number>([["room", measuredStateBytes(state) + farWidths(state) - ownHeldBytes(state, "p1").sub]]);
   for (const scene of Object.values(state.scenes)) {
     if (scene.floor && scene.floor.of !== scene.id) continue;
-    out.set(scene.id, projectedSceneBytes(state, scene.id) - ownHeldBytes(state, "p1", [scene.id]).sub);
+    const floors = new Set(floorsOf(state, scene.id).map((floor) => floor.id));
+    out.set(scene.id, projectedSceneBytes(state, scene.id) + farWidths(state, floors) - ownHeldBytes(state, "p1", [scene.id]).sub);
   }
   return out;
 }

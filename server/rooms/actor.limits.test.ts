@@ -11,7 +11,9 @@ import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTe
 /*
  * How the room's ops meet the byte lines under player limits (actor.ts
  * #bytesMeet): past the far line, deletions and ops that add nothing are
- * taken and every growing op refused, a move too, a player's alike; inside
+ * taken and every growing op refused, a player's alike, while a move off
+ * the turn adds nothing the far line counts, which holds a creature's place
+ * at its widest (D-261119-011). Inside
  * the bookkeeping reserve a growing move is taken where a create is
  * refused; at the near line, moving the players to a scene that reserves no
  * more is taken, and to one that reserves more is refused as before.
@@ -37,7 +39,7 @@ const answer = (event: { rejects?: { n: number; code: string; message: string }[
 };
 
 describe("ops past the far line", () => {
-  test("a deletion and a move or edit that adds nothing are taken, and creates, growing edits and growing moves refused, a player's and the DM's alike", async (t) => {
+  test("a deletion, a move and an edit that adds nothing are taken, and creates and growing edits refused, a player's and the DM's alike", async (t) => {
     const f = filled(FAR.roomBytes + MIB);
     // A fight already running, its first row's turn on.
     const rows = [uuidv7(), uuidv7()];
@@ -52,9 +54,9 @@ describe("ops past the far line", () => {
     const dm = await h.connect(f.dm);
     const player = await h.connect(f.player, "player");
     const full = `quota: the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit`;
-    // Moves to two-digit cells grow the room by a byte, and past the line every growing op is refused, bookkeeping too.
-    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 })), full, "a player's growing move");
-    assert.equal(answer(await dm.send({ t: "token.move", tokenId: f.goblin, x: 11, y: 4 })), full, "the DM's growing move");
+    // Moves to two-digit cells store a byte more, which the far line already counts at every creature's widest place.
+    assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 12, y: 3 })), "taken", "a player's move to a wider place");
+    assert.equal(answer(await dm.send({ t: "token.move", tokenId: f.goblin, x: 11, y: 4 })), "taken", "the DM's move to a wider place");
     assert.equal(answer(await player.send({ t: "token.move", tokenId: f.pc, x: 7, y: 3 })), "taken", "a player's move that adds nothing");
     const line = (id: string, ownerId: string) => ({ t: "drawing.create", drawing: { id, sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } });
     assert.equal(answer(await player.send(line(uuidv7(), f.player.id))), full, "a player's create");

@@ -5,8 +5,9 @@ import type { Actor, LogEntry, Member, PcStats, RoomState, Viewer } from "#share
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
 import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, room, scene, template, token } from "#shared/testutil.ts";
-import { farRoomBytes, growthBound, heldBytes, measuredStateBytes, overFarLine, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
+import { farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, overFarLine, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
  * The byte lines under player limits: the near lines (the guard's state and
@@ -113,7 +114,8 @@ describe("the far line", () => {
     guard.stateMeasured(measuredStateBytes(over), over);
     assert.ok(farRoomBytes(over, true) > FAR.roomBytes);
     assert.deepEqual(judged(over, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit` });
-    const under = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * MIB);
+    // Under by more than the far widths every creature counts at (farWidths).
+    const under = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 3 * MIB);
     const free = new SizeGuard();
     free.stateMeasured(measuredStateBytes(under), under);
     assert.deepEqual(judged(under, line("d1"), P1, free, "widest"), { ok: true });
@@ -137,7 +139,7 @@ describe("the far line", () => {
 
   test("an op that meets the line stops the bookkeeping reserve short of it, and an exempt kind goes on to the line itself", () => {
     // A room whose far reading with today's reserves sits inside the reserve: past the line less it, short of the line.
-    const inside = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - MIB);
+    const inside = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 2 * MIB);
     for (let pad = 64 * 1024; farRoomBytes(inside, false) <= FAR.roomBytes - BOOKKEEPING_RESERVE.room; pad += 64 * 1024) inside.tokens.fill0 = { ...inside.tokens.fill0!, notes: "p".repeat(pad) };
     const reading = farRoomBytes(inside, false);
     assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room && reading <= FAR.roomBytes, `${reading} inside the reserve`);
@@ -325,7 +327,8 @@ const UNSHOWN: Record<string, (state: RoomState) => void> = {
 
 /** P1's stepped part before its rounding and reserves: the measure less what P1's exact part takes out of it. */
 function steppedOf(state: RoomState, sceneIds?: readonly string[]): number {
-  return (sceneIds ? projectedSceneBytes(state, sceneIds[0]!) : measuredStateBytes(state)) - ownHeldBytes(state, "p1", sceneIds).sub;
+  const widths = farWidths(state, sceneIds ? new Set(floorsOf(state, sceneIds[0]!).map((floor) => floor.id)) : undefined);
+  return (sceneIds ? projectedSceneBytes(state, sceneIds[0]!) : measuredStateBytes(state)) + widths - ownHeldBytes(state, "p1", sceneIds).sub;
 }
 
 /**
@@ -560,7 +563,7 @@ describe("LP44-PRIV-1: a player's own adds off the floors never move their stepp
     const players = FAR.sceneBytes - BOOKKEEPING_RESERVE.scene;
     const edge = players - FAR.byteStep;
     const base = table();
-    const stepped = (state: RoomState) => roundUp(projectedSceneBytes(state, "s1") - ownHeldBytes(state, "p1", ["s1"]).sub, FAR.byteStep);
+    const stepped = (state: RoomState) => roundUp(steppedOf(state, ["s1"]), FAR.byteStep);
     const onScene = (bytes: number): RoomState => {
       const out = { ...base, tokens: { ...base.tokens } };
       for (let i = 0; i * MAX_NOTES < bytes; i++) out.tokens[`sf${String(i).padStart(5, "0")}`] = token(`sf${String(i).padStart(5, "0")}`, { x: 20, y: 20, notes: "n".repeat(Math.min(MAX_NOTES, bytes - i * MAX_NOTES)) });
@@ -633,5 +636,64 @@ describe("LP44-PRIV-1: what a player's own op writes past their copy counts at i
     assert.equal(copyOf(passed), copyOf(open), "P1's copies are equal");
     assert.ok(measuredStateBytes(passed) > measuredStateBytes(open), "the second room stores more");
     assert.equal(reading(passed), reading(open));
+  });
+});
+
+describe("LP44-PRIV-1: the far line's quick bound holds a player's widths, so every answer is the exact reading's", () => {
+  test("a player's create where the quick bound sits a step under the line and their reading past it is refused, as the exact reading says", () => {
+    const players = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+    const create = line("d1");
+    const applied = (state: RoomState) => {
+      const r = applyOp(state, create, P1, env(9));
+      assert.ok(r.ok);
+      return r;
+    };
+    // The room's total with the far line's reserves as the guard bounds it without reading, from the measure before the
+    // create and its growth's bound, and what P1's exact part takes out of the room after it.
+    const bound = (state: RoomState) => {
+      const r = applied(state);
+      return measuredStateBytes(state) + growthBound(state, r.state, r.touched) + farWidths(r.state);
+    };
+    const total = (state: RoomState) => measuredStateBytes(applied(state).state) + farWidths(applied(state).state);
+    const sub = (state: RoomState) => ownHeldBytes(applied(state).state, "p1").sub;
+    // P1's own notes across characters of theirs, `full` of them whole and two that share `extra`, which move the total and
+    // what P1's part takes out alike.
+    const at = (full: number, extra: number, pad: number): RoomState => {
+      const state = filled(room(), 8 * MIB);
+      for (let i = 0; i < full + 2; i++) {
+        const length = i < full ? MAX_NOTES : Math.min(MAX_NOTES, Math.max(0, extra - (i - full) * MAX_NOTES));
+        state.characters[`c${i}`] = character(`c${i}`, { ownerIds: ["p1"], actor: actor({ notes: "n".repeat(length) }) });
+      }
+      state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c0" }, ownerIds: ["p1"], x: 2, y: 2 });
+      state.tokens.pad = token("pad", { sceneId: "s2", notes: "p".repeat(pad) });
+      return state;
+    };
+    // What the bound counts past the total.
+    const slack = bound(at(40, 0, 0)) - total(at(40, 0, 0));
+    // P1's part placed so their stepped part ends a byte past a step's edge once the bound sits a step under the line.
+    const want = (FAR.byteStep - 1 - slack) % FAR.byteStep;
+    const need = (full: number) => (want - (sub(at(full, 0, 0)) % FAR.byteStep) + FAR.byteStep) % FAR.byteStep;
+    let full = 40;
+    while (need(full) > 2 * MAX_NOTES) full++;
+    const extra = need(full);
+    assert.equal(sub(at(full, extra, 0)) % FAR.byteStep, want);
+    // The DM's pad, which moves the bound, the total and P1's stepped part alike, puts the bound a step under the line.
+    const pad = players - FAR.byteStep - bound(at(full, extra, 0));
+    assert.ok(pad > 0, `a pad of ${pad} bytes`);
+    const state = at(full, extra, pad);
+    assert.equal(bound(state), players - FAR.byteStep);
+    const next = applied(state).state;
+    const held = ownHeldBytes(next, "p1");
+    assert.ok(held.shown - held.sub > slack + 1, "P1's widths count past what the exact part takes out by more than the bound's slack");
+    assert.ok(farRoomBytes(next, true, measuredStateBytes(next), held) > players, "P1's reading after the create is past the line");
+    const answer = (measured: boolean) => {
+      const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+      // A guard that never measured reads exactly every time.
+      if (measured) guard.stateMeasured(measuredStateBytes(state), state);
+      const r = applied(state);
+      return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, "player", "widest", false, "p1");
+    };
+    assert.deepEqual(answer(true), answer(false));
+    assert.equal(answer(true).ok, false);
   });
 });

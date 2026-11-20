@@ -3,7 +3,7 @@ import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
-import { MAX_NAME, type OpOf } from "#shared/protocol.ts";
+import { MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { movesAnyToken } from "#shared/permissions.ts";
@@ -417,10 +417,17 @@ export class SizeGuard {
       const held = heldBytes(state, sceneIds);
       return { sub: held, shown: held };
     };
+    // A player's reading counts what their exact part shows past what it takes out, its widths, so the bounds that skip
+    // reading exactly hold that too, and every answer is the exact reading's.
+    const past = (sceneIds?: readonly string[]) => {
+      if (player === undefined) return 0;
+      const held = heldOf(next, sceneIds);
+      return Math.max(0, held.shown - held.sub);
+    };
     const state = this.#state;
     const reserves = farReserves(next, widest);
     const roomLine = farByteLine(kind, "room", line)!;
-    if (!state || state.bytes + state.growth + reserves + FAR.byteStep > roomLine) {
+    if (!state || state.bytes + state.growth + reserves + FAR.byteStep + past() > roomLine) {
       const bytes = measuredStateBytes(next);
       const held = heldOf(next);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
@@ -443,10 +450,12 @@ export class SizeGuard {
       const maps = sum(floors, (scene) => discoveryReserve(next, scene, MEMORY_CAP));
       const measures = floors.map((scene) => scenes.get(scene.id));
       const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
-      if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + sight + explored + maps + FAR.byteStep <= sceneLine) continue;
-      const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps;
+      const widths = farWidths(next, new Set(floors.map((scene) => scene.id)));
+      if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + sight + explored + maps + widths + FAR.byteStep + past([main]) <= sceneLine) continue;
+      const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps + widths;
       const held = heldOf(next, [main]);
-      const grew = before === undefined || need > neededBefore(before, main, MEMORY_CAP, "dm");
+      const widthsBefore = before?.scenes[main] ? farWidths(before, new Set(floorsOf(before, main).map((scene) => scene.id))) : 0;
+      const grew = before === undefined || need > neededBefore(before, main, MEMORY_CAP, "dm") + widthsBefore;
       if (!farBytesOver("scene", kind, line, need - held.sub, held.shown, grew)) continue;
       this.#refusedScene = main;
       return far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : sceneFull(FAR.sceneBytes);
@@ -1823,6 +1832,8 @@ type OwnField = {
 
 /** A number's widest digits: a rev (WIDEST_REV), a clock tick, an HP value. */
 const DIGITS = { rev: String(WIDEST_REV).length, hp: 6, tick: String(Number.MAX_SAFE_INTEGER).length } as const;
+/** A row's place among ties at its widest: the most rows the far line counts. */
+const TIE_ORDER_MOST = String(FAR.rows).length;
 /** A coordinate's widest JSON, such as -1.2345678901234567e-300. */
 const NUMBER_MOST = 24;
 const VITALS_MOST = serializedBytes({ hp: { cur: 100_000, max: 100_000, temp: 100_000 }, life: "stable", deathSaves: { ok: 3, fail: 3 } });
@@ -1906,8 +1917,9 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     fixed("", "rev", DIGITS.rev),
     field("", "points", (d) => memberBytes("points", d.points) + 2 * NUMBER_MOST * ((d.anchors as unknown[] | undefined) ?? []).filter((a) => a !== null).length),
   ],
-  // A row's group, which an add writes from its creature and the DM may change.
-  row: [fixed("", "groupKey", textMost(MAX_NAME))],
+  // A row's group, which an add writes from its creature and the DM may change, and its place among ties, which every
+  // row's add or new value moves on.
+  row: [fixed("", "groupKey", textMost(MAX_NAME)), fixed("", "tieOrder", TIE_ORDER_MOST)],
   cast: [fixed("", "rev", DIGITS.rev)],
   companionBlock: [fixed("", "rev", DIGITS.rev)],
   member: [fixed("", "rev", DIGITS.rev)],
@@ -2091,6 +2103,177 @@ function fieldsOnly(kind: CopiedKind, stored: unknown, copy: unknown, room: Widt
   return { sub: fields.taken, shown: fields.widths, hidden: 0 };
 }
 
+// ---------------------------------------------------------------------------
+// Fields every op may write on what a player does not receive, at fixed widths (D-261119-011)
+
+/**
+ * The room's facts the widths of FAR_WIDTHS read, none of which a player's
+ * op changes: the longest scene id, a list of the roster at its widest, and
+ * the creatures whose path the turn under way writes.
+ */
+type WidthsRoom = { readonly sceneIdMost: number; readonly listWidth: number; readonly turn: ReadonlySet<string> };
+
+/**
+ * A field the far line counts at a fixed width: `width` its bytes there,
+ * key and comma included, as if present. `measured` is what the measure
+ * counts of it now, its stored bytes unless given, and `on` the things whose
+ * field counts so. `byRoom` marks a width or a choice that reads the room,
+ * the rest kept per thing. A stored field longer than its width counts at
+ * its bytes.
+ */
+type WidthField = {
+  readonly key: string;
+  readonly width: (room: WidthsRoom) => number;
+  readonly measured?: (thing: Readonly<Record<string, unknown>>, room: WidthsRoom) => number;
+  readonly on?: (thing: Readonly<Record<string, unknown>>, room: WidthsRoom) => boolean;
+  readonly byRoom?: true;
+};
+
+/** A number's widest JSON, NUMBER_MOST bytes. */
+const WIDEST_NUMBER = -1.2345678901234567e-300;
+/** A link to a holder at its widest, its id at 64 single-byte characters. A longer id counts at its bytes. */
+const ATTACHED_MOST = serializedBytes({ to: "x".repeat(64), kind: "perch", steer: true });
+/** One stop of a walk at its widest, without its list of who saw it and its corners. */
+const STOP_MOST = serializedBytes({
+  x: WIDEST_NUMBER,
+  y: WIDEST_NUMBER,
+  elevation: WIDEST_NUMBER,
+  uncounted: true,
+  seen: true,
+  joinedUnseen: true,
+  footprint: { w: WIDEST_NUMBER, h: WIDEST_NUMBER, squeeze: true },
+  moved: 100_000,
+  cost: 100_000,
+  diag: [100_000, 100_000],
+  routeSeen: true,
+  carried: true,
+});
+/**
+ * A turn's walk at its widest: MAX_PATH_STOPS stops, each with a list of
+ * who saw it at the roster's widest, MAX_PATH_CORNERS corners among them,
+ * and what the turn took on floors it left.
+ */
+const pathMost = (listWidth: number) =>
+  serializedBytes({ turn: WIDEST_REV, prior: { moved: 100_000, cost: 100_000, diag: [100_000, 100_000], seenDiag: [100_000, 100_000] }, stops: [] }) +
+  MAX_PATH_STOPS * (STOP_MOST + fieldBytes("seenBy") + 2 + listWidth + 1 + fieldBytes("via") + 2 + 1 + 1) +
+  2 * MAX_PATH_CORNERS * (NUMBER_MOST + 1);
+const atWidth = (key: string, value: () => number): WidthField => ({ key, width: () => fieldBytes(key) + value() + 1 });
+const sceneIdAtWidth: WidthField = { key: "sceneId", width: (room) => fieldBytes("sceneId") + room.sceneIdMost + 1, byRoom: true };
+
+/**
+ * Every field a player's op may write on a creature or an area they do not
+ * receive (D-261119-011): on a passenger a walk or a climb takes along, a
+ * creature a pit, a fall or a trapdoor drops, a link the link pass lets go.
+ * That is where a creature stands and on which floor, its squeeze and its
+ * placement between squares, its link to a holder, its rev, the walk of the
+ * turn's creature and of the mounts sharing its turn, and an area's floor
+ * and rev. The far line counts each at its width for every creature and
+ * area (farWidths), so such a write never moves a player's stepped part,
+ * and the DM's line leaves players the same room.
+ */
+export const FAR_WIDTHS: Readonly<{ token: readonly WidthField[]; template: readonly WidthField[] }> = {
+  token: [
+    sceneIdAtWidth,
+    atWidth("x", () => NUMBER_MOST),
+    atWidth("y", () => NUMBER_MOST),
+    atWidth("elevation", () => NUMBER_MOST),
+    atWidth("squeeze", () => serializedBytes(true)),
+    atWidth("nudge", () => serializedBytes({ x: WIDEST_NUMBER, y: WIDEST_NUMBER })),
+    atWidth("attached", () => ATTACHED_MOST),
+    // Every write moves a rev on. The measure already counts a monster's and an NPC's at its widest (tokenNumbering).
+    { ...atWidth("rev", () => DIGITS.rev), on: (token) => token.kind !== "monster" && token.kind !== "npc" },
+    {
+      key: "path",
+      width: (room) => fieldBytes("path") + pathMost(room.listWidth) + 1,
+      // The measure counts each list of who saw a stop at the roster's widest.
+      measured: (token, room) => {
+        if (token.path === undefined) return 0;
+        const lists = tokenLists(token as unknown as Token);
+        return memberBytes("path", token.path) - lists.extra + lists.count * room.listWidth;
+      },
+      on: (token, room) => room.turn.has(token.id as string),
+      byRoom: true,
+    },
+  ],
+  template: [sceneIdAtWidth, atWidth("rev", () => DIGITS.rev)],
+};
+
+function widthsRoom(state: RoomState): WidthsRoom {
+  const start = state.encounter?.turnStart;
+  const active = state.encounter?.entries.find((e) => e.id === state.encounter?.activeEntryId)?.tokenId;
+  return {
+    sceneIdMost: Math.max(0, ...Object.keys(state.scenes).map((id) => utf8Bytes(JSON.stringify(id)))),
+    listWidth: widestListExtra(state.members),
+    turn: new Set([start?.tokenId, active, ...(start?.mounts ?? [])].filter((id): id is string => id !== undefined)),
+  };
+}
+
+const widthsKept = new WeakMap<object, number>();
+
+/** What the far line counts of a thing's FAR_WIDTHS fields beyond the measure. */
+function widthsOf(fields: readonly WidthField[], thing: Readonly<Record<string, unknown>>, room: WidthsRoom): number {
+  const extra = (f: WidthField) => (f.on && !f.on(thing, room) ? 0 : Math.max(0, f.width(room) - (f.measured ? f.measured(thing, room) : memberBytes(f.key, thing[f.key]))));
+  let kept = widthsKept.get(thing);
+  if (kept === undefined) {
+    kept = sum(fields, (f) => (f.byRoom ? 0 : extra(f)));
+    if (!isWritable(thing)) widthsKept.set(thing, kept);
+  }
+  return kept + sum(fields, (f) => (f.byRoom ? extra(f) : 0));
+}
+
+/** Each floor's FAR_WIDTHS bytes, kept per tokens collection, which is replaced and never changed, with what else they read. */
+const byFloorKept = new WeakMap<object, { templates: object; room: string; out: Map<string, number> }>();
+
+/** The FAR_WIDTHS bytes of the creatures and areas on each floor, of those `only` takes when given. */
+export function farWidthsByFloor(state: RoomState, only?: (key: EntityKey) => boolean): Map<string, number> {
+  const room = widthsRoom(state);
+  const sign = `${room.sceneIdMost}:${room.listWidth}:${[...room.turn].join(",")}`;
+  const hit = only ? undefined : byFloorKept.get(state.tokens);
+  if (hit && hit.templates === state.templates && hit.room === sign) return hit.out;
+  const out = new Map<string, number>();
+  const add = (fields: readonly WidthField[], key: EntityKey, thing: { sceneId: string }) => {
+    if (only && !only(key)) return;
+    const extra = widthsOf(fields, thing as unknown as Record<string, unknown>, room);
+    if (extra > 0) out.set(thing.sceneId, (out.get(thing.sceneId) ?? 0) + extra);
+  };
+  for (const token of Object.values(state.tokens)) add(FAR_WIDTHS.token, keys.token(token.id), token);
+  for (const template of Object.values(state.templates)) add(FAR_WIDTHS.template, keys.template(template.id), template);
+  if (!only && !isWritable(state.tokens) && !isWritable(state.templates)) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
+  return out;
+}
+
+/**
+ * What the far line counts beyond the measure in the room-level part, of
+ * the rows `only` takes when given: the fight's rev and each row's place
+ * among ties (`tieOrder`), which a player's row moves on for rows they do
+ * not receive, at their widths (D-261119-011).
+ */
+export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => boolean): number {
+  const encounter = state.encounter;
+  if (!encounter) return 0;
+  let bytes = only ? 0 : Math.max(0, fieldBytes("rev") + DIGITS.rev + 1 - memberBytes("rev", encounter.rev));
+  for (const row of encounter.entries) {
+    if (only && !only(`row:${row.id}` as EntityKey)) continue;
+    bytes += Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder));
+  }
+  return bytes;
+}
+
+/**
+ * What the far line counts beyond the measure on the floors given, or the
+ * room's: every creature's and area's FAR_WIDTHS fields at their widths
+ * (D-261119-011) and the room-level part's (farWidthsRoomLevel), which
+ * every scene's measure holds, less each pit floor's reserve for the
+ * creatures its pits move (PIT_TOKENS_RESERVE), which those widths already
+ * hold. Falls and trapdoors count by the same widths.
+ */
+export function farWidths(state: RoomState, floors?: ReadonlySet<string>): number {
+  let bytes = farWidthsRoomLevel(state);
+  for (const [floor, extra] of farWidthsByFloor(state)) if (!floors || floors.has(floor)) bytes += extra;
+  const pits = new Set(Object.values(state.traps ?? {}).filter((trap) => trap.rig?.pit && (!floors || floors.has(trap.sceneId))).map((trap) => trap.sceneId));
+  return bytes - pits.size * PIT_TOKENS_RESERVE;
+}
+
 /**
  * The exact part of a player's far reading: everything their own ops can
  * grow, each as their copy holds it (SeatView `copy`). That is their own
@@ -2114,15 +2297,21 @@ export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView 
     to.sub += part.sub;
     to.shown += part.shown;
   };
-  for (const { on, sub, shown } of exactCopies(state, memberId, view).values()) {
+  const floor = (id: string) => {
+    const part = floors.get(id) ?? { sub: 0, shown: 0 };
+    floors.set(id, part);
+    return part;
+  };
+  const exact = exactCopies(state, memberId, view);
+  for (const { on, sub, shown } of exact.values()) {
     if (on === "room") add(roomLevel, { sub, shown });
     else if (on === "blocks") add(blocks, { sub, shown });
-    else {
-      const floor = floors.get(on) ?? { sub: 0, shown: 0 };
-      add(floor, { sub, shown });
-      floors.set(on, floor);
-    }
+    else add(floor(on), { sub, shown });
   }
+  // The far line counts every creature's and area's FAR_WIDTHS fields at their widths (farWidths). The exact part counts
+  // its own as the copy holds them, so it takes those widths out of the stepped part with the rest.
+  for (const [on, extra] of farWidthsByFloor(state, (key) => exact.has(key))) floor(on).sub += extra;
+  roomLevel.sub += farWidthsRoomLevel(state, (key) => exact.has(key));
   return { floors, roomLevel, blocks };
 }
 
@@ -2264,7 +2453,7 @@ export function farRoomBytes(state: RoomState, widest: boolean, measured: number
 }
 
 function farReserves(state: RoomState, widest: boolean): number {
-  return exploredReserve(state) + memoryReserves(state).whole + (marked(state) ? MARKED_POOL : 0) + (widest ? Math.max(0, widestPerPlayerReserve(state) - perPlayerStoredReserve(state)) : 0);
+  return farWidths(state) + exploredReserve(state) + memoryReserves(state).whole + (marked(state) ? MARKED_POOL : 0) + (widest ? Math.max(0, widestPerPlayerReserve(state) - perPlayerStoredReserve(state)) : 0);
 }
 
 /** By how many bytes a state is past the room far line at its widest, or 0 under it: the DM's snapshot's `over`. */
