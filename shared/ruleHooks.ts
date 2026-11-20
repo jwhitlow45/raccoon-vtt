@@ -3,7 +3,7 @@ import type { DoorRef } from "./protocol.ts";
 import { legBlocker, lineClear, squeezeFits, type WalkEnd, type Walker } from "./rules/movement.ts";
 import type { Point } from "./rules/geom.ts";
 import type { Grid } from "./rules/grid.ts";
-import { holderSight, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
+import { coldHolderSight, coldJoinedSight, coldPartySight, holderSight, joinedSight, partySight, sightFromTiles, type JoinedPart, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
 import { openingJoins } from "./rules/openingSight.ts";
 import { ownEntry } from "./records.ts";
@@ -143,14 +143,73 @@ export const visionRules: VisionRules = {
   partySight: (state, sceneId) => partySight(state, sceneId, VISION_WORLD),
   holderSight: (state, sceneId, memberId) => holderSight(state, sceneId, memberId, VISION_WORLD),
   sightFromTiles,
-  // Each floor's own answer, through the two rules above so a test's stand-in sight answers here too. No opening joins a
-  // floor until joins are built.
-  sightFor: (state, sceneId, cls) => {
+  // Each floor's own answer reads the two rules above, so a test's stand-in sight answers here too.
+  sightFor: (state, sceneId, cls, pending) => sightOfClass(state, sceneId, cls, pending, WARM),
+};
+
+/** Where a class's answers come from: each floor's own answer, and its join with the other floors'. */
+type Answers = {
+  own(state: RoomState, sceneId: SceneId, cls: SightClass): PartySight;
+  join(state: RoomState, sceneId: SceneId, own: PartySight, parts: readonly JoinedPart[]): PartySight;
+};
+
+const WARM: Answers = {
+  own: (state, sceneId, cls) => {
     if (cls === "union") return visionRules.partySight(state, sceneId);
     if (cls !== "shared") return visionRules.holderSight(state, sceneId, cls.holder);
-    return ownEntry(state.scenes, sceneId)?.vision?.perPlayer === true ? visionRules.holderSight(state, sceneId, null) : visionRules.partySight(state, sceneId);
+    return perPlayerFloor(state, sceneId) ? visionRules.holderSight(state, sceneId, null) : visionRules.partySight(state, sceneId);
   },
+  join: joinedSight,
 };
+
+const COLD: Answers = {
+  own: (state, sceneId, cls) => {
+    if (cls === "union") return coldPartySight(state, sceneId, VISION_WORLD);
+    if (cls !== "shared") return coldHolderSight(state, sceneId, cls.holder, VISION_WORLD);
+    return perPlayerFloor(state, sceneId) ? coldHolderSight(state, sceneId, null, VISION_WORLD) : coldPartySight(state, sceneId, VISION_WORLD);
+  },
+  join: (_state, _sceneId, own, parts) => coldJoinedSight(own, parts),
+};
+
+/** `sightFor` computed from nothing, joins included, ignoring and leaving the vision cache. For tests, which hold the warm answer to it. */
+export function coldSightFor(state: RoomState, sceneId: SceneId, cls: SightClass, pending?: PendingJoins): PartySight {
+  return sightOfClass(state, sceneId, cls, pending, COLD);
+}
+
+/*
+ * 7.2's rule: the floor's own answer for the class, raised through each
+ * join to the other floor's answer for the class matching it there. Class
+ * meets class only, so an answer never borrows what its class may not
+ * see: the shared class never reads a per-player floor's union or a
+ * holder's own view.
+ */
+function sightOfClass(state: RoomState, sceneId: SceneId, cls: SightClass, pending: PendingJoins | undefined, answers: Answers): PartySight {
+  const own = answers.own(state, sceneId, cls);
+  const joins = VISION_WORLD.openings!(state, sceneId);
+  if (joins.length === 0) return own;
+  const parts = joins.map((join) => ({ join, other: answers.own(state, join.other, acrossClass(state, join.other, cls, pending)) }));
+  return answers.join(state, sceneId, own, parts);
+}
+
+/**
+ * The class a viewer's class matches on the other floor (7.2, D-261119-100
+ * and 121): the union the union, the shared class the shared one, and a
+ * holder their own view only where that floor is per-player and they hold
+ * an enabled entry there, or one this exploration joins with `on`. A
+ * registration stored off, as the cap makes one, lends nothing, so they
+ * read that floor's shared answer.
+ */
+function acrossClass(state: RoomState, sceneId: SceneId, cls: SightClass, pending: PendingJoins | undefined): SightClass {
+  if (typeof cls === "string") return cls;
+  if (!perPlayerFloor(state, sceneId) || ownEntry(state.members, cls.holder)?.kind !== "player") return "shared";
+  const listed = ownEntry(state.holders, sceneId)?.entries.some((e) => e.on && e.memberId === cls.holder) === true;
+  const joining = pending !== undefined && Object.hasOwn(pending, sceneId) && pending[sceneId]!.some((e) => e.on && e.memberId === cls.holder);
+  return listed || joining ? cls : "shared";
+}
+
+function perPlayerFloor(state: RoomState, sceneId: SceneId): boolean {
+  return ownEntry(state.scenes, sceneId)?.vision?.perPlayer === true;
+}
 
 /** Stand-in vision rules a test swaps in, whose `sightFor` stays the real one and reads them (VisionRules.sightFor). */
 export type StandInVision = Omit<VisionRules, "sightFor">;

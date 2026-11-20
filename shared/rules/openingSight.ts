@@ -1,4 +1,9 @@
-import type { RoomState, SceneId } from "../model.ts";
+import { FOG_SUBCELLS, type CellRect, type FloorLink, type RoomState, type Scene, type SceneId } from "../model.ts";
+import { ownEntry } from "../records.ts";
+import { isWritable } from "../writable.ts";
+import { playersSee } from "./floors.ts";
+import { sceneGrid } from "./grid.ts";
+import { hexSubcells } from "./hex.ts";
 import type { Join } from "./vision.ts";
 
 /*
@@ -8,12 +13,107 @@ import type { Join } from "./vision.ts";
  * the stairs' rules.
  */
 
+const NONE: Join[] = [];
+
 /**
  * The joins of a floor (7.1): each opening on it whose two floors both have
  * party vision on and that players both see (rules/floors.ts playersSee),
  * in id order. A blackout, a floor not reached, or a floor held only
- * through a creature the DM hid makes none. Until joins are built, none.
+ * through a creature the DM hid makes none. Every input is public to
+ * players, as the gate must be: whether a join exists changes what every
+ * class sees, so it may turn on nothing a player could not know.
  */
-export function openingJoins(_state: RoomState, _sceneId: SceneId): Join[] {
-  return [];
+export function openingJoins(state: RoomState, sceneId: SceneId): Join[] {
+  // Most rooms hold no link at all, and every sight read asks.
+  if (state.floorLinks === undefined) return NONE;
+  const keep = finished(state);
+  let byScene = keep ? joinsByState.get(state) : undefined;
+  const hit = byScene?.get(sceneId);
+  if (hit !== undefined) return hit;
+  const joins = joinsOf(state, sceneId);
+  if (keep) {
+    if (!byScene) joinsByState.set(state, (byScene = new Map()));
+    byScene.set(sceneId, joins);
+  }
+  return joins;
+}
+
+const joinsByState = new WeakMap<RoomState, Map<SceneId, Join[]>>();
+
+/** Whether no op writes into the state or a collection the gate reads any more (writable.ts), so an answer kept for it holds. */
+function finished(state: RoomState): boolean {
+  return (
+    !isWritable(state) &&
+    !isWritable(state.floorLinks ?? {}) &&
+    !isWritable(state.scenes) &&
+    !isWritable(state.tokens) &&
+    !isWritable(state.characters) &&
+    !isWritable(state.openFloors ?? {}) &&
+    !isWritable(state.meta)
+  );
+}
+
+function joinsOf(state: RoomState, sceneId: SceneId): Join[] {
+  const scene = ownEntry(state.scenes, sceneId);
+  if (!scene || scene.vision?.on !== true || !playersSee(state, sceneId)) return NONE;
+  const ends = Object.values(state.floorLinks ?? {})
+    .filter((link) => link.sceneId === sceneId && link.kind === "opening" && link.hidden !== true)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const out: Join[] = [];
+  for (const link of ends) {
+    const other = ownEntry(state.scenes, link.to);
+    const pair = ownEntry(state.floorLinks, link.pair);
+    if (!other || other.vision?.on !== true || !pair || pair.kind !== "opening" || pair.sceneId !== link.to || pair.to !== sceneId) continue;
+    // Both floors' sub-cells must be one column: the same squares under the same grid.
+    if (!sameRect(pair.rect, link.rect) || (other.gridShape ?? "squares") !== (scene.gridShape ?? "squares")) continue;
+    if (!playersSee(state, link.to)) continue;
+    out.push({ linkId: link.id, rev: link.rev, rect: link.rect, other: link.to, subs: subsOf(scene, other, link) });
+  }
+  return out.length > 0 ? out : NONE;
+}
+
+function sameRect(a: CellRect, b: CellRect): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
+/*
+ * The fog sub-cells of an end's squares in row order: on squares every
+ * sub-cell of each cell, on hexes those whose centers lie inside each hex
+ * (hex.ts hexSubcells), as a creature on hexes is read, and only those on
+ * both floors, so neither floor's sight reaches past its own raster. Kept
+ * per end, shape and the floors' sizes, since ends are replaced and never
+ * changed.
+ */
+const subsByLink = new WeakMap<FloorLink, Map<string, readonly (readonly [number, number])[]>>();
+
+function subsOf(scene: Scene, other: Scene, link: FloorLink): readonly (readonly [number, number])[] {
+  const shape = scene.gridShape ?? "squares";
+  const W = Math.min(scene.bounds.w, other.bounds.w) * FOG_SUBCELLS;
+  const H = Math.min(scene.bounds.h, other.bounds.h) * FOG_SUBCELLS;
+  const at = `${shape}|${W}|${H}`;
+  let byShape = subsByLink.get(link);
+  if (!byShape) subsByLink.set(link, (byShape = new Map()));
+  const hit = byShape.get(at);
+  if (hit) return hit;
+  const g = sceneGrid(scene);
+  const r = link.rect;
+  const out: [number, number][] = [];
+  if (g.shape === "hex") {
+    const seen = new Set<string>();
+    for (let row = r.y; row < r.y + r.h; row++) {
+      for (let col = r.x; col < r.x + r.w; col++) {
+        for (const [sx, sy] of hexSubcells(g, { col, row })) {
+          const key = `${sx},${sy}`;
+          if (sx < 0 || sy < 0 || sx >= W || sy >= H || seen.has(key)) continue;
+          seen.add(key);
+          out.push([sx, sy]);
+        }
+      }
+    }
+    out.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  } else {
+    for (let sy = r.y * FOG_SUBCELLS; sy < Math.min(H, (r.y + r.h) * FOG_SUBCELLS); sy++) for (let sx = r.x * FOG_SUBCELLS; sx < Math.min(W, (r.x + r.w) * FOG_SUBCELLS); sx++) out.push([sx, sy]);
+  }
+  byShape.set(at, out);
+  return out;
 }

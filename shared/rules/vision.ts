@@ -1218,6 +1218,14 @@ type LightEntry = {
   polyBox: Bounds | null;
   /** Per row, `[x0, x1, level]` triples, dim (2) or bright (3). */
   runs: { r0: number; off: Int32Array; data: Int16Array; box: SubBox | null };
+  /**
+   * A borrowed light's (docs/design/design-v1-floors.md phase 4, 7.3): the
+   * other floor's lights it was made from, each swept over that floor's
+   * walls at its size (`lentAt`), so a wall moved there redraws it
+   * (D-261119-101) and a light that held keeps its sweep.
+   */
+  lent?: readonly LightEntry[];
+  lentAt?: string;
 };
 
 /** One row of the light level: runs from `starts[k]` to the next start at `levels[k]`. Null rows are the scene's base level throughout. */
@@ -1257,6 +1265,8 @@ type Drawing = { lightRows: LightRow[] | null; packed: (Uint8Array | null)[]; ti
  */
 class SceneEntry implements Drawn {
   readonly walls: Held<WallSet>;
+  /** The joined floors' wall sets its borrowed lights were planned over (Inputs `remote`), which a match must find unchanged too. */
+  readonly remote: readonly Held<WallSet>[];
   readonly w: number;
   readonly h: number;
   readonly level: LightLevel;
@@ -1283,6 +1293,7 @@ class SceneEntry implements Drawn {
 
   constructor(sceneId: string, inp: Inputs, sources: Map<string, SourceEntry>, lights: Map<string, LightEntry>, anchor: SceneEntry | null) {
     this.walls = new WeakRef(inp.walls);
+    this.remote = inp.remote.map((walls) => new WeakRef(walls));
     this.w = inp.w;
     this.h = inp.h;
     this.level = inp.level;
@@ -1371,7 +1382,10 @@ class SceneEntry implements Drawn {
   #entryBytes(): number {
     let bytes = 4096 + 2 * this.signature.length;
     for (const s of this.sources.values()) bytes += sourceBytes(s);
-    for (const l of this.lights.values()) bytes += l.runs.data.byteLength + l.runs.off.byteLength + 2 * ARRAY_BYTES + 200;
+    for (const l of this.lights.values()) {
+      bytes += l.runs.data.byteLength + l.runs.off.byteLength + 2 * ARRAY_BYTES + 200;
+      for (const lent of l.lent ?? []) bytes += lent.runs.data.byteLength + lent.runs.off.byteLength + 2 * ARRAY_BYTES + 200;
+    }
     return bytes;
   }
 
@@ -1645,9 +1659,41 @@ type Inputs = {
   members: Candidate[];
   sources: SourcePlan[];
   lights: LightPlan[];
-  /** Everything the result is a function of, as one string. */
+  /** The light each opening lends from the floor across it (BorrowPlan), by key. */
+  borrowed: BorrowPlan[];
+  /** Each joined floor's wall set the borrowed lights were planned over, in their order. */
+  remote: WallSet[];
+  /** Everything the result is a function of, as one string, the joined floors' wall sets aside. */
   signature: string;
 };
+
+/**
+ * The light an opening lends a floor from the floor across it
+ * (docs/design/design-v1-floors.md phase 4, 7.1 and 7.3): that floor's own
+ * light over the join's sub-cells, its base level and the lights that
+ * reach them by its own walls, never what it borrows itself. One light of
+ * the floor's computation, cut to the join, built lazily as any light is.
+ * Its key holds the other floor's base level, the join's geometry and only
+ * the lights whose reach meets the join, so a lamp elsewhere below changes
+ * nothing here, and the lights' sweeps are checked against the other
+ * floor's walls (D-261119-101).
+ */
+type BorrowPlan = {
+  key: string;
+  inputKey: string;
+  join: Join;
+  /** The other floor's size and wall set, which its lights were planned over. */
+  w: number;
+  h: number;
+  walls: WallSet;
+  base: number;
+  lights: LightPlan[];
+  /** The join's sub-cells' box, in cells. */
+  litBox: Bounds;
+};
+
+/** A floor across a join as its borrowed lights read it, planned once for all its joins to one floor. */
+type Across = { scene: Scene; level: LightLevel; walls: WallSet; lights: LightPlan[] };
 
 /*
  * The lights that change the party's sight on a scene below Bright: free
@@ -1784,11 +1830,102 @@ function gather(state: RoomState, scene: Scene, world: VisionWorld): Inputs {
   const lights = level === "bright" ? [] : planLights(state, scene, tokens, walls, fpc);
   let litBounds: Bounds | null = null;
   for (const l of lights) litBounds = unionBox(litBounds, l.litBox);
+  // A Bright floor is lit throughout, so it borrows nothing.
+  const across = new Map<SceneId, Across | null>();
+  const borrowed = level === "bright" ? [] : (world.openings?.(state, scene.id) ?? []).flatMap((join) => borrowPlan(state, join, world, fpc, across) ?? []);
+  // A borrowed light lights the floor's sight as its own lights do, so a source sees as far as the lit join too.
+  for (const b of borrowed) litBounds = unionBox(litBounds, b.litBox);
   const sources = members.filter((c) => !c.reason).map((c) => planSource(walls, scene, level, fpc, litBounds, c));
   const parts: string[] = [`${w},${h},${level},${fpc}`];
   for (const p of sources) parts.push(`${p.id}|${p.polyKey}|${p.levelKey}`);
   for (const l of lights) parts.push(`${l.key}|${l.inputKey}`);
-  return { scene, walls, w, h, W: w * SUB, H: h * SUB, level, fpc, members, sources, lights, signature: parts.join(";") };
+  for (const b of borrowed) parts.push(`${b.key}|${b.inputKey}`);
+  return { scene, walls, w, h, W: w * SUB, H: h * SUB, level, fpc, members, sources, lights, borrowed, remote: borrowed.map((b) => b.walls), signature: parts.join(";") };
+}
+
+/**
+ * The light the join lends from its other floor (BorrowPlan), or null
+ * where that floor lends none: dark there with no light reaching the
+ * join. A Bright floor lends Bright throughout, whatever its lights.
+ */
+function borrowPlan(state: RoomState, join: Join, world: VisionWorld, fpc: number, across: Map<SceneId, Across | null>): BorrowPlan | null {
+  let other = across.get(join.other);
+  if (other === undefined) {
+    const scene = ownEntry(state.scenes, join.other);
+    const level: LightLevel = scene?.vision?.light === "dim" || scene?.vision?.light === "dark" ? scene.vision.light : "bright";
+    const walls = scene ? world.walls(scene, state.buildChunks) : null;
+    other = scene && walls ? { scene, level, walls, lights: level === "bright" ? [] : planLights(state, scene, tokensOn(state, scene.id), walls, fpc) } : null;
+    across.set(join.other, other);
+  }
+  if (!other || join.subs.length === 0) return null;
+  const { scene: there, level, walls } = other;
+  const { box } = joinShape(join.subs);
+  const litBox: Bounds = { x0: box.c0 / SUB, y0: box.r0 / SUB, x1: box.c1 / SUB, y1: box.r1 / SUB };
+  const lights = other.lights.filter((l) => intersectBox(l.litBox, litBox) !== null);
+  if (level === "dark" && lights.length === 0) return null;
+  const r = join.rect;
+  // The join's sub-cells are its squares under the floors' one grid, so its shape is part of its geometry.
+  const inputKey = [`${join.linkId},${join.rev},${r.x},${r.y},${r.w},${r.h},${there.gridShape ?? "squares"},${join.other},${join.subs.length},${there.bounds.w},${there.bounds.h},${level}`, ...lights.map((l) => `${l.key}|${l.inputKey}`)].join(";");
+  return { key: `j:${join.linkId}`, inputKey, join, w: there.bounds.w, h: there.bounds.h, walls, base: baseLevel(level), lights, litBox };
+}
+
+/**
+ * A borrowed light's runs (BorrowPlan): over each of the join's
+ * sub-cells, the other floor's base level raised by each of its lights
+ * there, as lightRow raises a row, kept where it is dim or bright. The
+ * other floor's lights are swept over its own walls at its own size.
+ */
+function buildBorrowed(inp: Pick<Inputs, "W" | "H">, plan: BorrowPlan, kept: readonly (LightEntry | null)[]): LightEntry {
+  const there = { W: plan.w * SUB, H: plan.h * SUB };
+  const built = plan.lights.map((p, i) => kept[i] ?? buildLight(there, p));
+  const rows = new Map<number, number[]>();
+  for (const [sx, sy] of plan.join.subs) {
+    if (sx >= inp.W || sy >= inp.H || sx >= there.W || sy >= there.H) continue;
+    let xs = rows.get(sy);
+    if (!xs) rows.set(sy, (xs = []));
+    xs.push(sx);
+  }
+  const ys = [...rows.keys()].sort((a, b) => a - b);
+  const r0 = ys.length > 0 ? ys[0]! : 0;
+  const count = ys.length > 0 ? ys[ys.length - 1]! - r0 + 1 : 0;
+  const off = new Int32Array(count + 1);
+  const data: number[] = [];
+  let box: SubBox | null = null;
+  const levelAt = (sx: number, sy: number) => {
+    let v = plan.base;
+    for (const l of built) {
+      const k = sy - l.runs.r0;
+      if (k < 0 || k >= l.runs.off.length - 1) continue;
+      for (let p = l.runs.off[k]!; p < l.runs.off[k + 1]!; p += 3) if (sx >= l.runs.data[p]! && sx < l.runs.data[p + 1]! && l.runs.data[p + 2]! > v) v = l.runs.data[p + 2]!;
+    }
+    return v;
+  };
+  for (let k = 0; k < count; k++) {
+    const j = r0 + k;
+    const xs = (rows.get(j) ?? []).sort((a, b) => a - b);
+    let i = 0;
+    while (i < xs.length) {
+      const a = xs[i]!;
+      const v = levelAt(a, j);
+      let b = a + 1;
+      i++;
+      while (i < xs.length && xs[i] === b && levelAt(b, j) === v) {
+        b++;
+        i++;
+      }
+      if (v < DIM) continue;
+      data.push(a, b, v);
+      if (!box) box = { c0: a, r0: j, c1: b, r1: j + 1 };
+      else {
+        if (a < box.c0) box.c0 = a;
+        if (b > box.c1) box.c1 = b;
+        if (j < box.r0) box.r0 = j;
+        if (j + 1 > box.r1) box.r1 = j + 1;
+      }
+    }
+    off[k + 1] = data.length;
+  }
+  return { key: plan.key, inputKey: plan.inputKey, pieces: null, polyBox: null, runs: { r0, off, data: Int16Array.from(data), box }, lent: built, lentAt: `${plan.w},${plan.h}` };
 }
 
 function buildSource(inp: Inputs, plan: SourcePlan, reuse: SourceEntry | null): SourceEntry {
@@ -1824,7 +1961,7 @@ function buildSource(inp: Inputs, plan: SourcePlan, reuse: SourceEntry | null): 
 }
 
 /** A light's lit runs per row (section 4.3.2): inside its own polygon when walls cast shadows, bright within its bright radius, dim in the band beyond. */
-function buildLight(inp: Inputs, plan: LightPlan): LightEntry {
+function buildLight(inp: Pick<Inputs, "W" | "H">, plan: LightPlan): LightEntry {
   const rows = subRows(plan.litBox, inp.W, inp.H);
   const empty = (pieces: Float64Array | null, polyBox: Bounds | null): LightEntry => ({
     key: plan.key,
@@ -2127,7 +2264,8 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
   const { W, H, w, h } = inp;
   const base = prev !== null && prev.w === w && prev.h === h && prev.level === inp.level && prev.fpc === inp.fpc ? prev : null;
   const diffs = new Map<Float64Array, Map<Float64Array, ChangedCells>>();
-  const stale = (held: Held<Float64Array> | null, now: Float64Array | null, polyBox: Bounds | null): boolean => {
+  // A borrowed light's pieces are the other floor's, so they are compared at that floor's size (`dw`, `dh`).
+  const stale = (held: Held<Float64Array> | null, now: Float64Array | null, polyBox: Bounds | null, dw = w, dh = h): boolean => {
     const was = held === null ? null : held.deref();
     if (was === undefined) return true;
     if (was === now) return false;
@@ -2135,7 +2273,7 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
     let row = diffs.get(was);
     if (!row) diffs.set(was, (row = new Map()));
     let changed = row.get(now);
-    if (!changed) row.set(now, (changed = new ChangedCells(pieceDiff(was, now), w, h)));
+    if (!changed) row.set(now, (changed = new ChangedCells(pieceDiff(was, now), dw, dh)));
     return changed.meets(polyBox);
   };
 
@@ -2168,6 +2306,25 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
       }
       const litSub = subOf(plan.litBox, W, H);
       if (seen.some((b) => boxesMeet(b, litSub))) lights.set(plan.key, buildLight(inp, plan));
+    }
+    /*
+     * Borrowed lights by the same rule, each held while its inputs and every
+     * lent light's sweep over the other floor's walls hold. One that changed
+     * keeps the sweeps of the lent lights that held, at the same size.
+     */
+    for (const plan of inp.borrowed) {
+      const old = base?.lights.get(plan.key) ?? null;
+      const at = `${plan.w},${plan.h}`;
+      const kept = plan.lights.map((p) => {
+        const l = old?.lentAt === at ? (old.lent?.find((e) => e.key === p.key) ?? null) : null;
+        return l !== null && l.inputKey === p.inputKey && !stale(l.pieces, p.walls && p.eye ? p.eye.set.pieces : null, l.polyBox, plan.w, plan.h) ? l : null;
+      });
+      if (old !== null && old.inputKey === plan.inputKey && old.lentAt === at && kept.every((l) => l !== null)) {
+        lights.set(plan.key, old);
+        continue;
+      }
+      const litSub = subOf(plan.litBox, W, H);
+      if (seen.some((b) => boxesMeet(b, litSub))) lights.set(plan.key, buildBorrowed(inp, plan, kept));
     }
   }
 
@@ -2433,7 +2590,8 @@ function resultOf(state: RoomState, sceneId: SceneId, world: VisionWorld): Scene
   if (hit) return hit;
   const inp = gather(state, scene, world);
   const held = cache.get(sceneId)?.entries ?? [];
-  let entry = held.find((e) => e.walls.deref() === inp.walls && e.signature === inp.signature);
+  // A borrowed light's key names no walls (D-261119-101), so each joined floor's wall set must be the one it was planned over too.
+  let entry = held.find((e) => e.walls.deref() === inp.walls && e.signature === inp.signature && e.remote.length === inp.remote.length && e.remote.every((r, i) => r.deref() === inp.remote[i]));
   if (!entry) entry = compute(inp, held[0] ?? null);
   remember(sceneId, entry, held);
   const result: SceneResult = { entry, views: new Map() };
@@ -2567,6 +2725,253 @@ class HolderSight implements PartySight {
     const raster = heldRaster(this.#sceneId, this.#entry.serial, this.#key);
     return raster ? raster.sight.seesSubcells(subs) : subcellsSeen(this.#entry, this.#sources, inScene(this.#entry, subs));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sight through openings (docs/design/design-v1-floors.md phase 4, 7.2)
+
+/** One join of a floor and the other floor's answer for the class asked (shared/ruleHooks.ts sightFor). */
+export type JoinedPart = { join: Join; other: PartySight };
+
+/**
+ * A class's sight on a floor joined through its openings (7.2): the
+ * floor's own answer, raised in each join's sub-cells to the other floor's
+ * answer for the same class. No cascade: a join's sub-cells lie inside one
+ * end on each floor and no two ends on a floor overlap, so the other
+ * floor's own answer is its whole answer there.
+ *
+ * Kept by the own answer's identity and, per join in id order, the link's
+ * id, rev and squares, the other floor and its answer's identity
+ * (D-261119-085), so equal inputs give the identical object: the fan-out's
+ * classes, the explore step's `own === shared` test and a floor with two
+ * neighbors read one answer. A finished state holds what it was given,
+ * and later states find it while anything still holds it.
+ */
+export function joinedSight(state: RoomState, sceneId: SceneId, own: PartySight, parts: readonly JoinedPart[]): PartySight {
+  if (parts.length === 0) return own;
+  const scene = ownEntry(state.scenes, sceneId);
+  const key = joinKey(`${scene?.gridShape ?? "squares"},${scene?.bounds.w},${scene?.bounds.h}`, own, parts);
+  const kept = writes(state) ? null : keptJoins(state);
+  const hit = kept?.get(`${sceneId}|${key}`);
+  if (hit) return hit;
+  let byOwn = joinedByOwn.get(own);
+  if (!byOwn) joinedByOwn.set(own, (byOwn = new Map()));
+  let sight = byOwn.get(key)?.deref();
+  if (!sight) {
+    sight = new JoinedSight(own, parts);
+    byOwn.delete(key);
+    byOwn.set(key, new WeakRef(sight));
+    while (byOwn.size > JOINS_KEPT) byOwn.delete(byOwn.keys().next().value!);
+  }
+  kept?.set(`${sceneId}|${key}`, sight);
+  return sight;
+}
+
+/** The same answer made afresh, ignoring and leaving the cache. For tests and benchmarks. */
+export function coldJoinedSight(own: PartySight, parts: readonly JoinedPart[]): PartySight {
+  return parts.length === 0 ? own : new JoinedSight(own, parts);
+}
+
+/*
+ * The joined answers, weakly: each holds its own and the other floors'
+ * answers, whose computations the scene cache bounds by bytes, so a joined
+ * answer must never keep one alive past it. Each own answer keeps the
+ * keys of its last few joins.
+ */
+const JOINS_KEPT = 16;
+const joinedByOwn = new WeakMap<PartySight, Map<string, WeakRef<PartySight>>>();
+const joinsOfState = new WeakMap<RoomState, Map<string, PartySight>>();
+
+function keptJoins(state: RoomState): Map<string, PartySight> {
+  let kept = joinsOfState.get(state);
+  if (!kept) joinsOfState.set(state, (kept = new Map()));
+  return kept;
+}
+
+/** A number for each answer object, which its identity alone decides. */
+const answerIds = new WeakMap<object, number>();
+let answersNamed = 0;
+
+function answerId(sight: PartySight): number {
+  let id = answerIds.get(sight);
+  if (id === undefined) answerIds.set(sight, (id = ++answersNamed));
+  return id;
+}
+
+/*
+ * A join's sub-cells are its squares under the floor's grid, clipped to
+ * both floors, so its geometry is its rect, the floor's shape and size,
+ * and the other floor's size, which that floor's answer carries unless it
+ * sees nothing, when the size changes nothing.
+ */
+function joinKey(floor: string, own: PartySight, parts: readonly JoinedPart[]): string {
+  let key = `${floor}|${answerId(own)}`;
+  for (const { join, other } of parts) {
+    const r = join.rect;
+    key += `|${join.linkId},${join.rev},${r.x},${r.y},${r.w},${r.h},${join.other},${join.subs.length},${answerId(other)}`;
+  }
+  return key;
+}
+
+/** One join as the joined answer reads it: the other floor's answer, and the join's sub-cells as a box and, on hexes, the set inside it. */
+type JoinRead = { other: PartySight; subs: readonly (readonly [number, number])[]; box: SubBox; inside: Set<number> | null };
+
+function joinRead({ join, other }: JoinedPart): JoinRead {
+  return { other, subs: join.subs, ...joinShape(join.subs) };
+}
+
+/** A join's sub-cells as a box and, where they do not fill it (hexes), the set inside it. Kept per list, which a join keeps per end. */
+const shapes = new WeakMap<readonly (readonly [number, number])[], { box: SubBox; inside: Set<number> | null }>();
+
+function joinShape(subs: readonly (readonly [number, number])[]): { box: SubBox; inside: Set<number> | null } {
+  let hit = shapes.get(subs);
+  if (hit) return hit;
+  const box: SubBox = { c0: Infinity, r0: Infinity, c1: -Infinity, r1: -Infinity };
+  for (const [sx, sy] of subs) {
+    if (sx < box.c0) box.c0 = sx;
+    if (sy < box.r0) box.r0 = sy;
+    if (sx + 1 > box.c1) box.c1 = sx + 1;
+    if (sy + 1 > box.r1) box.r1 = sy + 1;
+  }
+  const full = subs.length === (box.c1 - box.c0) * (box.r1 - box.r0);
+  hit = { box, inside: full ? null : new Set(subs.map(([sx, sy]) => sy * 65536 + sx)) };
+  shapes.set(subs, hit);
+  return hit;
+}
+
+/*
+ * The joined answer (joinedSight). Its tiles are made when first read:
+ * the own answer's, with each tile a join meets drawn again at the better
+ * of the two levels in the join's sub-cells. Until then a creature is
+ * asked of the own answer, then of the other floor's answer in those of
+ * its sub-cells that lie in a join, which answers as the tiles would.
+ */
+class JoinedSight implements PartySight {
+  readonly #own: PartySight;
+  readonly #joins: readonly JoinRead[];
+  #tiles: ReadonlyMap<string, SightTile> | null = null;
+
+  constructor(own: PartySight, parts: readonly JoinedPart[]) {
+    this.#own = own;
+    this.#joins = parts.map(joinRead);
+  }
+
+  get tiles(): ReadonlyMap<string, SightTile> {
+    return (this.#tiles ??= joinTiles(this.#own, this.#joins));
+  }
+
+  seesToken(probe: SightProbe, g: Grid): boolean {
+    if (this.#own.seesToken(probe, g)) return true;
+    if (g.shape === "hex") return this.#othersSee(footprintSubcells(g, probe));
+    // The sub-cell centers inside the rectangle, as TileSight.seesToken reads them (rectSeen).
+    const r = sightRect(probe);
+    const c0 = Math.max(0, firstCenterFrom(r.x0));
+    const c1 = firstCenterFrom(r.x1);
+    const r0 = Math.max(0, firstCenterFrom(r.y0));
+    const r1 = firstCenterFrom(r.y1);
+    for (const j of this.#joins) {
+      const x0 = Math.max(c0, j.box.c0);
+      const x1 = Math.min(c1, j.box.c1);
+      const y0 = Math.max(r0, j.box.r0);
+      const y1 = Math.min(r1, j.box.r1);
+      if (x0 >= x1 || y0 >= y1) continue;
+      const subs: [number, number][] = [];
+      for (let sy = y0; sy < y1; sy++) for (let sx = x0; sx < x1; sx++) if (!j.inside || j.inside.has(sy * 65536 + sx)) subs.push([sx, sy]);
+      if (subs.length > 0 && j.other.seesSubcells(subs)) return true;
+    }
+    return false;
+  }
+
+  seesSubcells(subs: readonly (readonly [number, number])[]): boolean {
+    return this.#own.seesSubcells(subs) || this.#othersSee(subs);
+  }
+
+  #othersSee(subs: readonly (readonly [number, number])[]): boolean {
+    for (const j of this.#joins) {
+      const inJoin = subs.filter(([sx, sy]) => sx >= j.box.c0 && sx < j.box.c1 && sy >= j.box.r0 && sy < j.box.r1 && (!j.inside || j.inside.has(sy * 65536 + sx)));
+      if (inJoin.length > 0 && j.other.seesSubcells(inJoin)) return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * The joined answer's tiles: the own answer's, each tile a join meets
+ * drawn again with every join sub-cell at the better level, one join after
+ * another where two meet one tile. Equal tiles in give the identical tile
+ * out (raisedTile), so a tile no change reached is the object it was, which
+ * the fan-out's diff and hashes read by identity.
+ */
+function joinTiles(own: PartySight, joins: readonly JoinRead[]): ReadonlyMap<string, SightTile> {
+  const out = new Map(own.tiles);
+  for (const j of joins) {
+    const theirs = j.other.tiles;
+    for (const [key, at] of subsByTile(j.subs)) {
+      const tile = raisedTile(out.get(key), at, theirs.get(key));
+      if (tile) out.set(key, tile);
+    }
+  }
+  return out;
+}
+
+/** A join's sub-cells by the tile they lie in, `"<tx>,<ty>"`, each as its index in the tile's levels. Kept per list, which a join keeps per end. */
+const tileSubs = new WeakMap<readonly (readonly [number, number])[], Map<string, Int32Array>>();
+
+function subsByTile(subs: readonly (readonly [number, number])[]): Map<string, Int32Array> {
+  let hit = tileSubs.get(subs);
+  if (hit) return hit;
+  const lists = new Map<string, number[]>();
+  for (const [sx, sy] of subs) {
+    const tx = Math.floor(sx / TILE);
+    const ty = Math.floor(sy / TILE);
+    const key = `${tx},${ty}`;
+    let list = lists.get(key);
+    if (!list) lists.set(key, (list = []));
+    list.push((sy - ty * TILE) * TILE + (sx - tx * TILE));
+  }
+  hit = new Map([...lists].map(([key, list]) => [key, Int32Array.from(list)]));
+  tileSubs.set(subs, hit);
+  return hit;
+}
+
+/*
+ * The tile `mine` with the sub-cells at `at` raised to `theirs` there, or
+ * `mine` itself where none is raised (undefined where it is absent too).
+ * Kept per triple of objects, which are replaced and never changed.
+ */
+const NO_TILE = {};
+const raised = new WeakMap<object, WeakMap<Int32Array, WeakMap<object, SightTile | undefined>>>();
+
+function raisedTile(mine: SightTile | undefined, at: Int32Array, theirs: SightTile | undefined): SightTile | undefined {
+  let byAt = raised.get(mine ?? NO_TILE);
+  if (!byAt) raised.set(mine ?? NO_TILE, (byAt = new WeakMap()));
+  let byTheirs = byAt.get(at);
+  if (!byTheirs) byAt.set(at, (byTheirs = new WeakMap()));
+  if (byTheirs.has(theirs ?? NO_TILE)) return byTheirs.get(theirs ?? NO_TILE);
+  const tile = raiseTile(mine, at, theirs);
+  byTheirs.set(theirs ?? NO_TILE, tile);
+  return tile;
+}
+
+function raiseTile(mine: SightTile | undefined, at: Int32Array, theirs: SightTile | undefined): SightTile | undefined {
+  const other = packedOf(theirs);
+  if (!other) return mine;
+  const was = packedOf(mine);
+  let packed: Uint8Array | null = null;
+  for (const i of at) {
+    const v = levelIn(other, i);
+    if (v <= (was ? levelIn(was, i) : NOT_SEEN)) continue;
+    packed ??= was ? Uint8Array.from(was) : new Uint8Array(SIGHT_TILE_BYTES);
+    const b = i >> 2;
+    const shift = (i & 3) << 1;
+    packed[b] = (packed[b]! & ~(3 << shift)) | (v << shift);
+  }
+  if (!packed) return mine;
+  // A tile all at one level goes as `{f}`, as renderTile's does. Some sub-cell was raised above 0, so it is never all unseen.
+  const first = packed[0]!;
+  let same = first === 0x55 || first === 0xaa || first === 0xff;
+  for (let b = 1; same && b < SIGHT_TILE_BYTES; b++) same = packed[b] === first;
+  return same ? tileOf(packed, first & 3) : tileOf(packed, -1);
 }
 
 /**
