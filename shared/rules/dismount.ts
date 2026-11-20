@@ -21,14 +21,16 @@ import type { Grid } from "./grid.ts";
 /**
  * Where a walk off a mount clears it: the route's pieces up to that spot
  * (`prefix`) and from it (`rest`), each none for a straight walk. `whole`
- * is true when the spot is the walk's end, so there is no rest.
+ * is true when the spot has the walk's final coordinates. A walk that
+ * returns to them from elsewhere has a rest all the same: see `restLeaves`.
  */
 export type DismountSplit = { off: RoutePoint; prefix: readonly RoutePiece[] | undefined; rest: readonly RoutePiece[] | undefined; whole: boolean };
 
 /**
  * The split of a rider's walk off its mount. `points` are the walk's
  * points from the seat, `route` its pieces when it has one. `whole` is
- * true when the first clear spot is the walk's end, so there is no rest.
+ * true when the first clear spot equals the final coordinates. A remainder
+ * that returns to the mount is still a rest: see `restLeaves`.
  */
 export function dismountSplit(g: Grid, build: Pick<BuildState, "buildChunks">, rider: Walker, mount: PlacedToken, points: readonly RoutePoint[], route?: readonly RoutePiece[]): DismountSplit {
   const walk = routeWalk(g, walkTrace(build.buildChunks, rider, points), build, snapStep(rider));
