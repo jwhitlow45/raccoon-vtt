@@ -257,12 +257,19 @@ function onPageScene(page: Page, token: { sceneId: string }, dice: DiceView): bo
   return token.sceneId === page.sceneId || (source.floors !== undefined && source.floors.includes(token.sceneId));
 }
 
-/** Why a page whose creatures all moved off its floor cannot apply, so a trap is never settled with no one hit. */
+/** Why an area's page whose creatures all moved off the floors it reaches cannot apply. */
 export const OFF_FLOOR_WORDS = "Its creatures have moved off this page's floor. Discard this page and start it again from its source.";
 
 /**
- * Words when every row still in play has its creature off the page's floor
- * (onPageScene). buildPlan leaves such rows out, so the plan would be empty, and a
+ * Why any other page, a trap's, a fall card's or a selection's, cannot apply
+ * once its creatures all moved to another scene: it covers every floor of
+ * its own (onPageScene), so a trap is never settled with no one hit.
+ */
+export const OFF_SCENE_WORDS = "Its creatures have moved to another scene. Discard this page and start it again from its source.";
+
+/**
+ * Words when every row still in play has its creature where the page does
+ * not apply (onPageScene). buildPlan leaves such rows out, so the plan would be empty, and a
  * trap's springing would still be settled with no damage and no saves. A page
  * restored from a draft started before pages took their source's floor reads this way.
  */
@@ -277,7 +284,8 @@ export function offFloorWords(page: Page, dice: DiceView): string | null {
     if (onPageScene(page, token, dice)) return null;
     elsewhere = true;
   }
-  return elsewhere ? OFF_FLOOR_WORDS : null;
+  if (!elsewhere) return null;
+  return page.source.kind === "area" ? OFF_FLOOR_WORDS : OFF_SCENE_WORDS;
 }
 
 /** Why Apply waits, in its words, or null when it may go (5.5). */

@@ -6,7 +6,7 @@ import { actor, castAsk, character, customMonster, room, scene, template, token,
 import type { DiceView } from "../creature.ts";
 import { holdsPageScene, mark, markGone, stateOf, newPage, sourceIds, type Page, type Source } from "./chain.ts";
 import { fallFill, trapFill } from "./fills.ts";
-import { applyWaits, buildPlan, OFF_FLOOR_WORDS } from "./plan.ts";
+import { applyWaits, buildPlan, OFF_SCENE_WORDS } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 import { sourceScene } from "./start.ts";
 
@@ -106,7 +106,7 @@ describe("a trap card from another floor applies", () => {
     const stamped = rolledPage("cellar", gone, trap);
     assert.equal(buildPlan(stamped.page, stamped.dice, [{ amount: 4 }], IDS), null);
     assert.equal(buildPlan(stamped.page, stamped.dice, null, IDS), null);
-    assert.equal(applyWaits(stamped.page, stamped.dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
+    assert.equal(applyWaits(stamped.page, stamped.dice, [{ amount: 4 }]), OFF_SCENE_WORDS);
   });
 
   test("a player's ask page is never stopped by the words, so Close the ask stays reachable", () => {
@@ -143,7 +143,7 @@ describe("a selection across the floors of one scene", () => {
     const some = selected("cellar", apart);
     assert.equal(buildPlan(some.page, some.dice, [{ amount: 4 }], IDS)?.targets.length, 1);
     const none = selected("far", view);
-    assert.equal(applyWaits(none.page, none.dice, [{ amount: 4 }]), OFF_FLOOR_WORDS);
+    assert.equal(applyWaits(none.page, none.dice, [{ amount: 4 }]), OFF_SCENE_WORDS);
     assert.equal(buildPlan(none.page, none.dice, [{ amount: 4 }], IDS), null);
   });
 });

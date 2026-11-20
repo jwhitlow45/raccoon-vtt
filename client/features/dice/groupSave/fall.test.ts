@@ -7,7 +7,7 @@ import { GROUND, UPPER, fallCard, run, thornToken, tower as floorsTower, withFal
 import type { DiceView } from "../creature.ts";
 import { mark, newPage, sourceIds, type Page, type Source } from "./chain.ts";
 import { fallFill, FALL_NAME } from "./fills.ts";
-import { applyWaits, buildPlan, rowOutcome, UNHURT_FALL } from "./plan.ts";
+import { applyWaits, buildPlan, OFF_SCENE_WORDS, rowOutcome, UNHURT_FALL } from "./plan.ts";
 import { captureChoices, restoreChoices } from "./reopen.ts";
 import { groupRows } from "./rows.ts";
 import { sourceScene } from "./start.ts";
@@ -251,6 +251,16 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     const plan = buildPlan(skipped, dice, SIX, ids())!;
     assert.deepEqual([...plan.fall!.tokenIds].sort(), ["horse", "thorn", "thorn2"]);
     assert.deepEqual(plan.targets.map((t) => t.target), [{ tokenId: "horse" }]);
+  });
+
+  test("a page whose creatures all moved to another scene says so, not that they left its floor (FLR4-OPUS-10)", () => {
+    const state = room4(["horse", "thorn"]);
+    const { page } = cardPage(state, state.falls!["120:0"]!);
+    const moved: RoomState = { ...state, tokens: Object.fromEntries(Object.entries(state.tokens).map(([id, t]) => [id, { ...t, sceneId: "s2" }])) };
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: moved, srd: { monsters: [], rolls: {} } };
+    assert.equal(applyWaits(page, dice, SIX), OFF_SCENE_WORDS);
+    const climbed: RoomState = { ...state, tokens: Object.fromEntries(Object.entries(state.tokens).map(([id, t]) => [id, { ...t, sceneId: UPPER }])) };
+    assert.equal(applyWaits(page, { ...dice, view: climbed }, SIX), null, "another floor of the scene still applies");
   });
 
   test("a token that shows another creature now stays on the card", () => {
