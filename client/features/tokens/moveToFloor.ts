@@ -1,5 +1,5 @@
 import type { RoomState, Scene, Token } from "#shared/model.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import type { ClientOp, Op } from "#shared/protocol.ts";
 import { floorsOf, onPlayersScene, openFloor, unhiddenPartyMember } from "#shared/rules/floors.ts";
 import { footprintSize, occupiedHexes } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
@@ -7,6 +7,7 @@ import { hexInScene } from "#shared/rules/hex.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { carriedGroup, onHolder } from "#shared/rules/attach.ts";
 import { linkDir, linksOn, spaceOn } from "#shared/rules/floorLinks.ts";
+import { planMove, type Pose } from "#shared/rules/moveLeg.ts";
 import { ownEntry } from "#shared/records.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -20,7 +21,8 @@ import type { Labels } from "../../lib/labels.ts";
  * and the reducer takes the passengers and the attached areas along.
  */
 
-type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openFloors" | "buildChunks" | "floorLinks">;
+/** The whole copy: the landings are planned by the reducer's own planner, which reads the room as the server does. */
+type View = RoomState;
 
 /** One floor the move could go to: whether it is off and why, and the line warning that it opens the floor to players. */
 export type FloorChoice = { floor: Scene; name: string; off: string | null; warning: string | null };
@@ -61,29 +63,48 @@ export function nameList(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+/** Move to floor is the DM's, and the reducer counts every holder for a DM's op (shared/reducer/falls.ts heldUp). */
+const MOVER = { role: "dm", memberId: "" } as const;
+
+/**
+ * Where each token of the move lands on the floor: the ops moveToFloorOps sends, holders first, each planned by the
+ * reducer's own planner (shared/rules/moveLeg.ts planMove) on the room as it is, so a passenger lands where its
+ * holder's op takes it and its own op, which names only the floor, moves it no further.
+ */
+function landings(view: View, named: readonly Token[], floor: Scene): Map<string, Pose> {
+  const out = new Map<string, Pose>();
+  for (const op of moveToFloorOps(view, named, floor)) {
+    for (const moved of planMove(op as Op, view, MOVER, {})) if (!out.has(moved.tokenId)) out.set(moved.tokenId, moved.to);
+  }
+  return out;
+}
+
 /**
  * Whether the move would set a token down on the ground wholly over an opening on the floor
- * (docs/design/design-v1-floors.md phase 4, 4.1 and 11, D-261119-061): one standing on the ground lands on the ground
- * there at its full size, as moveToFloorOps lands it, and a passenger whose holder moves with it stays on its holder.
- * Move to floor is a placement and drops no one, so such a floor is off.
+ * (docs/design/design-v1-floors.md phase 4, 4.1 and 11, D-261119-061), read at the pose it lands in (`landings`): a
+ * creature that keeps its height in the air lands on the ground where the floor's ground is that high, and a dragged
+ * one lands as the reducer lands it. A passenger whose holder lands there too stays on its holder. Move to floor is a
+ * placement and drops no one, so such a floor is off.
  */
-function landsOverOpening(view: Pick<RoomState, "buildChunks" | "scenes" | "floorLinks">, moved: readonly Token[], floor: Scene): boolean {
+function landsOverOpening(view: View, named: readonly Token[], moved: readonly Token[], floor: Scene): boolean {
   const holes = linksOn(view, floor.id).filter((l) => l.kind === "opening" && linkDir(view, l) === "down");
   if (holes.length === 0) return false;
-  const ids = new Set(moved.map((t) => t.id));
+  const landed = landings(view, named, floor);
   return moved.some((t) => {
-    if (t.attached && onHolder(t.attached.kind) && ids.has(t.attached.to)) return false;
-    if (t.elevation !== footprintGround(view.buildChunks, t)) return false;
+    const pose = landed.get(t.id);
+    if (pose === undefined || pose.sceneId !== floor.id) return false;
+    if (t.attached && onHolder(t.attached.kind) && landed.get(t.attached.to)?.sceneId === floor.id) return false;
+    // It lands full size, since a change of floor drops the squeeze.
     const { squeeze: _squeeze, ...full } = t;
-    const landed = { ...full, sceneId: floor.id };
-    return holes.some((l) => spaceOn(view, landed, l));
+    const there = { ...full, ...pose };
+    return there.elevation === footprintGround(view.buildChunks, there) && holes.some((l) => spaceOn(view, there, l));
   });
 }
 
 /**
  * The floors of the named creatures' scene they can move to, top first: every floor but the one all of them
- * already stand on. A floor is off where a creature's full space lies outside it ("Outside Attic"), or where one on
- * the ground would land wholly over an opening ("Over an opening on Upper floor"). A floor players have not reached
+ * already stand on. A floor is off where a creature's full space lies outside it ("Outside Attic"), or where one would
+ * land on the ground wholly over an opening ("Over an opening on Upper floor"). A floor players have not reached
  * warns, in one line, when the whole move holds an unhidden party member (D-261102-484).
  */
 export function floorChoices(view: View, named: readonly Token[], labels: Labels): FloorChoice[] {
@@ -96,7 +117,7 @@ export function floorChoices(view: View, named: readonly Token[], labels: Labels
     if (named.every((t) => t.sceneId === floor.id)) continue;
     const name = floor.floor?.name ?? floor.name;
     const outside = moved.some((t) => !fitsOn(floor, t));
-    const overOpening = !outside && landsOverOpening(view, moved, floor);
+    const overOpening = !outside && landsOverOpening(view, named, moved, floor);
     // Only the players' scene opens by a party member's arrival (markOpened), so a move on a scene the DM prepares in private opens nothing and warns of nothing.
     const warns = party.length > 0 && onPlayersScene(view, floor.id) && !openFloor(view as RoomState, floor.id);
     choices.push({
