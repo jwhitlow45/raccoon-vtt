@@ -8,7 +8,8 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
 import { floorRoot, LINK_PANE_ATTR } from "../client/features/floors/ids.ts";
-import { ConsoleWatch, dragCells, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { ConsoleWatch, dragCells, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, sleep, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
 
 /**
@@ -31,6 +32,15 @@ import { undoSetup } from "./helpers/undoScope.ts";
  * - FLRK-4: Add a floor above and below, Move up and Move down are off between
  *   two floors that stairs join, with the stairs' words, and on again once the
  *   pair is removed.
+ * - FLRK-5: a press on an end and a drag moves this floor's end alone, so the
+ *   pane says the far end lies on other squares and Line up with Upper floor
+ *   brings them together, a refused move shows the rules' reason and sends
+ *   nothing, the corner handle of the open pane's end resizes both ends, and
+ *   Undo takes each back.
+ * - FLRK-6: an opening's drag moves both of its ends, its handle resizes both,
+ *   and its pane has no Line up.
+ * - FLRK-7: the pane with Line up and its reason is in line at 1440 x 900,
+ *   390 x 844 and 320 x 568, at 100% and 130%.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty-four. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -405,6 +415,187 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     await ops.send({ t: "floorLink.delete", linkId: stairs });
     await waitFor("no ends", () => (ends().length === 0 ? true : null));
     await waitFor("Add a floor above on", async () => ((await above.isDisabled()) === false ? true : null));
+  });
+
+  /** The screen distance of one square at the camera's zoom, from two world points one apart. */
+  async function squareSize(): Promise<number> {
+    const a = await pagePoint(dm, BOUNDS, { x: 0, y: 0 });
+    const b = await pagePoint(dm, BOUNDS, { x: 1, y: 0 });
+    return b.x - a.x;
+  }
+
+  /** Drags the corner handle of the open pane's end, which sits a half of 44 px out from the end's bottom right corner, by whole squares. */
+  async function dragHandle(rect: { x: number; y: number; w: number; h: number }, by: { dx: number; dy: number }): Promise<void> {
+    const size = await squareSize();
+    const corner = await pagePoint(dm, BOUNDS, { x: rect.x + rect.w, y: rect.y + rect.h });
+    const from = { x: corner.x + 22, y: corner.y + 22 };
+    await dm.mouse.move(from.x, from.y);
+    await dm.mouse.down();
+    await dm.mouse.move(from.x + (by.dx * size) / 2, from.y + (by.dy * size) / 2, { steps: 4 });
+    await dm.mouse.move(from.x + by.dx * size, from.y + by.dy * size, { steps: 8 });
+    await dm.mouse.up();
+  }
+
+  test("FLRK-5. a drag of an end moves this floor's end alone, the pane says the far end lies on other squares and Line up brings them together, a refused move shows the reason and sends nothing, the handle resizes both ends, and Undo takes each back", async () => {
+    await showFloorNamed("Ground floor");
+    await pickTool(dm, TOOL);
+    await pickOption(dm, TOOL, "Builder mode", "Between floors");
+    const stairs = uuidv7();
+    const upperEnd = uuidv7();
+    await ops.send({ t: "floorLink.put", link: { id: stairs, pairId: upperEnd, sceneId: run.towerId, to: run.upperId, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } });
+    await waitFor("the pair", () => (ends().length === 2 ? true : null));
+
+    // A press on the end and a drag over 9 squares and 1 down moves this floor's end, and the far end stays.
+    await dragCells(dm, BOUNDS, { x: 3, y: 3 }, { x: 12, y: 4 });
+    await waitFor("Ground floor's end moved", () => (state().floorLinks?.[stairs]?.rect.x === 12 ? true : null));
+    assert.deepEqual(state().floorLinks?.[stairs]?.rect, { x: 12, y: 4, w: 2, h: 1 });
+    assert.deepEqual(state().floorLinks?.[upperEnd]?.rect, { x: 3, y: 3, w: 2, h: 1 }, "the far end stays");
+    await pane().getByRole("heading", { name: "Stairs up to Upper floor" }).waitFor();
+    await pane().getByText("On Upper floor at other squares.", { exact: true }).waitFor();
+    await pane().getByRole("button", { name: "Line up with Upper floor" }).waitFor();
+    await shots.take(dm, "flrk-5-apart");
+
+    // Undo takes the move back, and the pane's line goes with it.
+    await undoSetup(dm);
+    await waitFor("the end back", () => (state().floorLinks?.[stairs]?.rect.x === 3 ? true : null));
+    await pane().getByText("On Upper floor at other squares.", { exact: true }).waitFor({ state: "detached" });
+
+    // Move it again, then Line up with Upper floor moves it back onto Upper floor's squares.
+    await dragCells(dm, BOUNDS, { x: 3, y: 3 }, { x: 12, y: 4 });
+    await waitFor("moved again", () => (state().floorLinks?.[stairs]?.rect.x === 12 ? true : null));
+    await pane().getByRole("button", { name: "Line up with Upper floor" }).click();
+    await waitFor("lined up", () => (state().floorLinks?.[stairs]?.rect.x === 3 ? true : null));
+    assert.deepEqual(state().floorLinks?.[stairs]?.rect, state().floorLinks?.[upperEnd]?.rect);
+    await pane().getByText("On Upper floor at other squares.", { exact: true }).waitFor({ state: "detached" });
+
+    // A move onto a wall shows the rules' words in the builder's line and sends nothing.
+    await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "11,8,w", feature: { kind: "wall" } }] });
+    await holdDrag({ x: 3, y: 3 }, { x: 10, y: 8 }, async () => {
+      await waitFor("the wall's reason", async () => ((await line()) === LINK_WORDS.wall("Ground floor") ? true : null));
+      await waitFor("the draft red", async () => ((await drawnAt({ x: 10, y: 8 })) === "red" ? true : null));
+    });
+    assert.equal(await line(), LINK_WORDS.wall("Ground floor"));
+    assert.deepEqual(state().floorLinks?.[stairs]?.rect, { x: 3, y: 3, w: 2, h: 1 }, "nothing was sent");
+    await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "11,8,w", feature: null }] });
+
+    // The pane is open on this end, so its handle resizes both ends: the far square goes 2 over and 1 down.
+    await tapCell(dm, BOUNDS, { x: 3, y: 3 });
+    await pane().waitFor();
+    await dragHandle({ x: 3, y: 3, w: 2, h: 1 }, { dx: 1, dy: 1 });
+    await waitFor("both ends resized", () => (state().floorLinks?.[stairs]?.rect.w === 3 && state().floorLinks?.[upperEnd]?.rect.w === 3 ? true : null));
+    assert.deepEqual(state().floorLinks?.[stairs]?.rect, { x: 3, y: 3, w: 3, h: 2 });
+    assert.deepEqual(state().floorLinks?.[upperEnd]?.rect, { x: 3, y: 3, w: 3, h: 2 });
+    await shots.take(dm, "flrk-5-resized");
+    await undoSetup(dm);
+    await waitFor("both back", () => (state().floorLinks?.[stairs]?.rect.w === 2 && state().floorLinks?.[upperEnd]?.rect.w === 2 ? true : null));
+
+    // Stairs are held to 4 across: a long pull stops there.
+    await dragHandle({ x: 3, y: 3, w: 2, h: 1 }, { dx: 8, dy: 6 });
+    await waitFor("held to 4 by 4", () => (state().floorLinks?.[stairs]?.rect.w === 4 ? true : null));
+    assert.deepEqual(state().floorLinks?.[upperEnd]?.rect, { x: 3, y: 3, w: 4, h: 4 });
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "floorLink.delete", linkId: stairs });
+    await waitFor("no ends", () => (ends().length === 0 ? true : null));
+  });
+
+  test("FLRK-6. an opening's drag moves both of its ends, its handle resizes both, and its pane has no Line up", async () => {
+    await pickOption(dm, TOOL, "Kind", "Opening");
+    await pickOption(dm, TOOL, "To", "Up to Upper floor");
+    await dragCells(dm, BOUNDS, { x: 12, y: 6 }, { x: 13, y: 7 });
+    await waitFor("an opening's two ends", () => (ends().length === 2 ? true : null));
+    const [lower, upper] = [endOn(run.towerId, 12, 6)!, endOn(run.upperId, 12, 6)!];
+    assert.equal(lower.kind, "opening");
+    await pane().waitFor();
+    await dm.keyboard.press("Escape");
+
+    await dragCells(dm, BOUNDS, { x: 12, y: 6 }, { x: 15, y: 6 });
+    await waitFor("both ends moved", () => (state().floorLinks?.[lower.id]?.rect.x === 15 && state().floorLinks?.[upper.id]?.rect.x === 15 ? true : null));
+    assert.deepEqual(state().floorLinks?.[upper.id]?.rect, { x: 15, y: 6, w: 2, h: 2 }, "one rect on both floors");
+    assert.equal(await pane().getByRole("button", { name: /^Line up with/ }).count(), 0, "an opening's ends never lie apart");
+
+    // FLRK-3's pit trap on Upper floor lies under the squares a pull would take: refused with its reason, nothing sent.
+    await dragHandle({ x: 15, y: 6, w: 2, h: 2 }, { dx: 2, dy: 3 });
+    assert.equal(await line(), LINK_WORDS.pit("Upper floor"));
+    assert.deepEqual(state().floorLinks?.[lower.id]?.rect, { x: 15, y: 6, w: 2, h: 2 }, "a refused resize sends nothing");
+    for (const t of Object.values(state().traps ?? {})) if (t) await ops.send({ t: "trap.delete", trapId: t.id });
+    await waitFor("no traps", () => (Object.keys(state().traps ?? {}).length === 0 ? true : null));
+    await dragHandle({ x: 15, y: 6, w: 2, h: 2 }, { dx: 2, dy: 3 });
+    await waitFor("both ends resized", () => (state().floorLinks?.[lower.id]?.rect.w === 4 && state().floorLinks?.[upper.id]?.rect.h === 5 ? true : null));
+    assert.deepEqual([state().floorLinks?.[lower.id]?.rect, state().floorLinks?.[upper.id]?.rect], [{ x: 15, y: 6, w: 4, h: 5 }, { x: 15, y: 6, w: 4, h: 5 }]);
+    await shots.take(dm, "flrk-6-opening-resized");
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "floorLink.delete", linkId: lower.id });
+    await waitFor("no ends", () => (ends().length === 0 ? true : null));
+  });
+
+  /** A reloaded DM lands on the players' scene (made Tower before the first reload) and on its lowest floor, Ground floor. */
+  async function backOnGround(): Promise<void> {
+    await sleep(1500);
+  }
+
+  /** A reloaded page learns its floors a moment after it connects, and Between floors is offered once it has them. */
+  async function modeOffered(): Promise<void> {
+    const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+    await waitFor("Between floors offered", async () => {
+      await bar.getByRole("button", { name: /^Builder mode:/ }).first().click();
+      const picker = dm.getByRole("dialog", { name: "Builder mode" });
+      await picker.getByRole("radio", { name: "Brush", exact: true }).waitFor();
+      const offered = (await picker.getByRole("radio", { name: "Between floors", exact: true }).count()) > 0;
+      await dm.keyboard.press("Escape");
+      await picker.waitFor({ state: "detached" });
+      return offered ? true : null;
+    }, 20_000);
+  }
+
+  test("FLRK-7. the pane with Line up and the reason it waits on is in line at each size", async () => {
+    const stairs = uuidv7();
+    const upperEnd = uuidv7();
+    await pickOption(dm, TOOL, "Kind", "Stairs");
+    await ops.send({ t: "floorLink.put", link: { id: stairs, pairId: upperEnd, sceneId: run.towerId, to: run.upperId, rect: { x: 3, y: 3, w: 2, h: 1 }, kind: "stairs" } });
+    await ops.send({ t: "floorLink.update", linkId: stairs, patch: { rect: { x: 7, y: 5, w: 2, h: 1 } } });
+    await waitFor("apart", () => (state().floorLinks?.[stairs]?.rect.x === 7 ? true : null));
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.towerId });
+    const lines: string[] = [];
+    const sizes = [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }];
+    try {
+      for (const size of sizes) {
+        for (const scale of [1, 1.3]) {
+          const label = `${size.width}x${size.height}${scale === 1 ? "" : "-130"}`;
+          await dm.setViewportSize(size);
+          await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+          await dm.reload();
+          await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+          await backOnGround();
+          await pickTool(dm, TOOL);
+          await modeOffered();
+          await pickOption(dm, TOOL, "Builder mode", "Between floors");
+          await tapCell(dm, BOUNDS, { x: 7, y: 5 });
+          await pane().getByRole("button", { name: "Line up with Upper floor" }).waitFor();
+          lines.push(...alignmentLines(await measureAlignment(pane()), `${label} the stairs' pane with Line up`));
+          await shots.take(dm, `flrk-7-${label}`);
+          await dm.keyboard.press("Escape");
+        }
+      }
+    } finally {
+      await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await dm.setViewportSize(WIDE);
+      await dm.reload();
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    }
+    assert.deepEqual(lines, [], "the pane's Line up out of line");
+
+    // A wall on the far floor's squares for this end: Line up waits and says why.
+    await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "4,3,w", feature: { kind: "wall" } }] });
+    await backOnGround();
+    await pickTool(dm, TOOL);
+    await modeOffered();
+    await pickOption(dm, TOOL, "Builder mode", "Between floors");
+    await tapCell(dm, BOUNDS, { x: 7, y: 5 });
+    await pane().getByText(LINK_WORDS.wall("Ground floor"), { exact: true }).waitFor();
+    assert.equal(await pane().getByRole("button", { name: "Line up with Upper floor" }).isDisabled(), true);
+    await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "4,3,w", feature: null }] });
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "floorLink.delete", linkId: stairs });
   });
 
   test("FLRK-9. the page logged no console errors", () => {
