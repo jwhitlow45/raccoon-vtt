@@ -414,11 +414,24 @@ function shownChanges(state: RoomState, memberId: string): Record<string, string
   return out;
 }
 
-/** Which of `memberId`'s kept rulers their copy does not hold, which count as stored, since a ruler never changes (D-261119-021). */
-const heldRulers = (state: RoomState, memberId: string) => {
+/**
+ * Which of `memberId`'s drawings and asks their copy does not hold, which
+ * count as stored, since neither changes once made (D-261119-021,
+ * D-261120-010).
+ */
+const heldAsStored = (state: RoomState, memberId: string) => {
   const view = seatView(state, memberId);
-  return new Set(Object.values(state.drawings).filter((d) => d.ownerId === memberId && view.copy("drawing", d.id) === null).map((d) => `drawing:${d.id}`));
+  const drawings = Object.values(state.drawings).filter((d) => d.ownerId === memberId && view.copy("drawing", d.id) === null).map((d) => `drawing:${d.id}`);
+  const asks = Object.values(state.casts).filter((c) => c.by === memberId && view.copy("cast", c.id) === null).map((c) => `cast:${c.id}`);
+  return new Set([...drawings, ...asks]);
 };
+
+/**
+ * Residual 7: an area of theirs their copy does not hold, put on or taken off
+ * a creature or onto another floor, which only the DM does. Whose an area is
+ * never changes once made.
+ */
+const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId)$/.test(where);
 
 /** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
 function namedBase(seed: number): RoomState {
@@ -479,7 +492,7 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
         // Every change at a named place, and a sample of the rest.
         const forced = changes.filter((c) => Object.values(NAMED).some((re) => re.test(c.path.join("."))));
         const rest = changes.filter((c) => !forced.includes(c)).sort(() => r() - 0.5).slice(0, 30);
-        const [copy, shown, conditions, rulers] = [copyOf(base, memberId), shownBy(base, memberId), shownChanges(base, memberId), heldRulers(base, memberId)];
+        const [copy, shown, conditions, asStored] = [copyOf(base, memberId), shownBy(base, memberId), shownChanges(base, memberId), heldAsStored(base, memberId)];
         for (const change of [...forced, ...rest]) {
           const twin = applied(base, change);
           // A change no stored room could hold, such as a word outside its list, makes no twin.
@@ -495,7 +508,7 @@ describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out giv
           for (const [name, re] of Object.entries(NAMED)) if (re.test(where)) named.set(name, (named.get(name) ?? 0) + 1);
           const [after, conditionsAfter] = [shownBy(twin, memberId), shownChanges(twin, memberId)];
           for (const key of new Set([...Object.keys(shown), ...Object.keys(after)])) {
-            if (shown[key] === after[key] || rulers.has(key)) continue;
+            if (shown[key] === after[key] || asStored.has(key) || (key.startsWith("template:") && areaMoved(where))) continue;
             // Residual 9: an HP line moves only with what players are shown of its conditions.
             if (key.startsWith("log:") && conditions[key] !== conditionsAfter[key]) continue;
             found.push(`seed ${seed}, ${memberId}, ${where}${change.append ? " one longer" : ""}: ${key} ${shown[key] ?? "none"} against ${after[key] ?? "none"}`);

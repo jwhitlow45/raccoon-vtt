@@ -1745,8 +1745,8 @@ export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
 
 /**
  * A player's own things that their copy holds (ownHeld), by id, each as the
- * copy holds it, and in `unseenAreas` the areas on creatures held while
- * their copy holds neither, as stored.
+ * copy holds it, and in `unseenAreas` the areas held while their copy holds
+ * neither them nor the creature or floor they are on, as stored.
  */
 export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" | "companionBlock", ReadonlyMap<string, unknown>> & { readonly unseenAreas: ReadonlySet<string> };
 
@@ -1778,21 +1778,22 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
     }
     return out;
   };
-  // An area or a kept ruler of theirs on a creature their copy does not hold stays held, as stored, while their copy
-  // holds neither it nor that creature (D-261119-017). Its floor, and how the DM shows it, which change while they cannot
-  // see it, are never read (D-261119-021). One the DM hid on a creature in sight is not held, as a deleted one is not
-  // (LP43-PRIV-1), and behind a blackout their copy holds nothing.
+  // An area of theirs on a creature their copy does not hold, or on a floor they do not hold, stays held while their copy
+  // holds neither (D-261119-017, D-261120-010). Its floor, and how the DM shows it, which change while they cannot see
+  // it, are never read (D-261119-021). One the DM hid where they see it is not held, as a deleted one is not
+  // (LP43-PRIV-1). A drawing or an ask of theirs never changes once made, so one their copy does not hold stays held as
+  // stored, wherever it is. Behind a blackout their copy holds nothing.
   const blackout = state.meta.view?.blackout === true;
-  const onUnseen = (t: AreaTemplate) => !blackout && t.attachedTo !== undefined && !view.sees(t.attachedTo);
-  const onCreatures = (d: Drawing) => !blackout && (d.anchors?.some((id) => id !== null && !view.sees(id)) ?? false);
+  const onUnseen = (t: AreaTemplate) => !blackout && (!view.holds(t.sceneId) || (t.attachedTo !== undefined && !view.sees(t.attachedTo)));
+  const unchanging = () => !blackout;
   return {
     unseenAreas,
     // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
     token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownsSeatToken(state, memberId, t)),
     template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId, onUnseen),
-    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, onCreatures),
+    drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, unchanging),
     row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
-    cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId),
+    cast: copies("cast", Object.values(state.casts), (c) => c.by === memberId, unchanging),
     companionBlock: copies("companionBlock", Object.values(state.companionBlocks), (b) => ownEntry(state.characters, b.characterId)?.ownerIds.includes(memberId) ?? false),
   };
 }

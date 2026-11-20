@@ -2027,6 +2027,8 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   // (D-261119-017).
   cast: [
     fixed("", "rev", DIGITS.rev),
+    // Whether it was made on a floor, which their op writes and their copy never holds.
+    fixed("", "onFloor", 4),
     { ...fixed("", "targets", 2 + LIMITS.rollTargets * (ID_BYTES + 1)), applies: (c) => c.targets !== undefined, most: (c) => (c.targets !== undefined ? fieldBytes("targets") + 2 + LIMITS.rollTargets * (ID_BYTES + 1) + 1 : 0) },
     // A copy may hold an ask's targets or not, so the most counts its area whichever it holds.
     { ...fixed("", "area", ID_BYTES), applies: (c) => c.targets === undefined, most: () => fieldBytes("area") + ID_BYTES + 1 },
@@ -2681,12 +2683,8 @@ export function exactPastMost(state: RoomState, memberId: string, each?: (key: E
     if (anyToken || ownsSeatToken(state, memberId, token)) onFloor(token.sceneId, most("token", keys.token(token.id), token));
     if (settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
   }
-  // An area on a creature may count at its widest in every scene's reading (exactCopies).
-  for (const t of Object.values(state.templates)) {
-    if (t.ownerId !== memberId) continue;
-    if (t.attachedTo === undefined) onFloor(t.sceneId, most("template", keys.template(t.id), t));
-    else roomLevel += most("template", keys.template(t.id), t, fieldBytes(t.id) + AREA_MOST + 1);
-  }
+  // An area may count at its widest in every scene's reading, on a creature out of sight or a floor not held (exactCopies).
+  for (const t of Object.values(state.templates)) if (t.ownerId === memberId) roomLevel += most("template", keys.template(t.id), t, fieldBytes(t.id) + AREA_MOST + 1);
   for (const d of Object.values(state.drawings)) if (d.ownerId === memberId) onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
   for (const chunk of Object.values(state.buildChunks)) onFloor(chunk.sceneId, most("chunk", keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), chunk));
   for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry)) roomLevel += most("row", `row:${entry.id}` as EntityKey, entry);
