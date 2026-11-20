@@ -7,6 +7,9 @@ import { theme } from "../lib/theme.ts";
 import { sceneLoadView, shownScene, type SceneLoadNotice } from "../state/sceneLoad.ts";
 import { useRoomView } from "../state/view.ts";
 import { useMapProgressStore } from "./mapProgress.ts";
+import { windowLoadSlot } from "../features/floors/openingView.ts";
+import { windowLoading } from "../features/floors/linkWords.ts";
+import { useScoped } from "../state/scope.ts";
 
 /**
  * Which scene is loading and what to say about it (state/sceneLoad.ts), or
@@ -18,11 +21,14 @@ export function useSceneLoading(): SceneLoadNotice | null {
   const sceneId = useRoomView((s) => s.sceneId);
   const scenes = useRoomView((s) => s.floorView?.scenes);
   const progress = useStore(useMapProgressStore(), (s) => s.progress);
+  // An opening's window waits on the floor below's image under the same notice (docs/design/design-v1-floors.md phase 4, 7.4).
+  const windows = useStore(useScoped(windowLoadSlot), (s) => s.loading[0] ?? null);
   return useMemo(() => {
     const scene = sceneId ? scenes?.[sceneId] : undefined;
     const shown = scene ? shownScene(scene) : null;
-    return sceneLoadView({ load, shown, map: progress, nameOf: (id) => scenes?.[id]?.name });
-  }, [load, sceneId, scenes, progress]);
+    const notice = sceneLoadView({ load, shown, map: progress, nameOf: (id) => scenes?.[id]?.name });
+    return notice ?? (windows !== null && sceneId !== null ? { sceneId, text: windowLoading(windows), detail: null } : null);
+  }, [load, sceneId, scenes, progress, windows]);
 }
 
 /**

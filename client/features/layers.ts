@@ -23,6 +23,8 @@ import { PinLayer } from "./pins/PinLayer.tsx";
 import { TetherLayer } from "./attach/TetherLayer.tsx";
 import { TrapLayer, TrapNameLayer } from "./traps/TrapLayer.tsx";
 import { LinkLayer } from "./floors/LinkLayer.tsx";
+import { OpeningWindow } from "./floors/OpeningWindow.tsx";
+import { OpeningCrops } from "./floors/OpeningCrops.tsx";
 import { TrapAlerts } from "./traps/useTrapAlerts.ts";
 import { TeleportToasts } from "./movement/toasts.ts";
 import { PingController } from "./pings/PingController.ts";
@@ -176,6 +178,8 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "trapNames", layer: "overlay", order: 36, iso: "off", Component: TrapNameLayer },
   // Stairs and ladders lie flat under the fog, as a found trap's squares do, and their names stand as trap names do (docs/design/design-v1-floors.md phase 2, 11).
   { id: "floorLinks", layer: "board", order: 36, iso: ["ground", "upright"], Component: LinkLayer },
+  // The floor below in each opening, over the floor shown's build and under everything else on it (docs/design/design-v1-floors.md phase 4, 7.4).
+  { id: "openingWindows", layer: "board", order: 12, iso: "ground", Component: OpeningWindow },
   // The builder's draft over an end is drawn after the end, so a refusal's red shows over placed stairs.
   { id: "linkDraft", layer: "board", order: 37, iso: "ground", Component: LinkDraftLayer },
 ];
@@ -193,6 +197,8 @@ export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "tethers", Component: TetherController },
   { id: "weather", Component: WeatherController },
   { id: "animmap", Component: AnimMapController },
+  // Each opening's crop of the floor below, made once for both drawing trees (docs/design/design-v1-floors.md phase 4, 7.4).
+  { id: "openingWindows", Component: OpeningCrops },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {

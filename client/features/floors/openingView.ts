@@ -8,6 +8,8 @@ import { rectHexes } from "#shared/rules/traps.ts";
 import { createStore } from "zustand/vanilla";
 import { hexOutline } from "../../lib/scene.ts";
 import { scopeSlot } from "../../state/scope.ts";
+import type { AssetSource } from "../../state/view.ts";
+import { isAssetImage } from "#shared/imageRef.ts";
 
 /*
  * What an opening shows of the floor below it (docs/design/design-v1-floors.md
@@ -143,3 +145,28 @@ export function windowPxPerCell(rect: Pick<CellRect, "w" | "h">): number {
  * black with nothing said. One per Room page.
  */
 export const windowLoadSlot = scopeSlot(() => createStore<{ loading: readonly string[] }>(() => ({ loading: [] })));
+
+/**
+ * What the windows draw that OpeningCrops makes once for both drawing
+ * trees: each hole's crop of the floor below by the hole's id, and the
+ * pictures of the creatures under the holes by address. One per Room page.
+ */
+export const windowSlot = scopeSlot(() => createStore<{ crops: ReadonlyMap<string, HTMLCanvasElement>; images: ReadonlyMap<string, HTMLImageElement> }>(() => ({ crops: new Map(), images: new Map() })));
+
+/** The holes over floors the device holds, by far floor. */
+export function byFarFloor(holes: readonly HoleSpec[]): { far: Scene; holes: HoleSpec[] }[] {
+  const out = new Map<string, { far: Scene; holes: HoleSpec[] }>();
+  for (const hole of holes) {
+    if (hole.far === null) continue;
+    const entry = out.get(hole.far.id) ?? { far: hole.far, holes: [] };
+    entry.holes.push(hole);
+    out.set(hole.far.id, entry);
+  }
+  return [...out.values()];
+}
+
+/** A creature's picture's address, where it has an uploaded one. */
+export function tokenUrl(assets: AssetSource, token: Token): string | null {
+  const upload = token.image && isAssetImage(token.image) ? token.image : undefined;
+  return upload ? assets.url(upload.assetId, "full") : null;
+}
