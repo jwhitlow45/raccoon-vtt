@@ -363,11 +363,12 @@ async function roomWithChange(on: FastifyInstance, name: string): Promise<{ room
   return { roomId, dm, socket };
 }
 
-test("a delete that unloaded its room and then fails while the server stops leaves the room unsaved, and the stop names it (LP44-OPS-1)", async () => {
+test("a delete whose unload could not save its room and then fails while the server stops leaves the room unsaved, and the stop names it (LP44-OPS-1)", async () => {
   let doomed = "";
   const held = deferred();
   const deleteAnswer = deferred<never>();
   const pool = poolWith((text, values) => {
+    if (snapshotOf(doomed, text, values)) return Promise.reject(new Error("could not extend file: No space left on device"));
     if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
     held.resolve();
     return deleteAnswer.promise;
@@ -377,7 +378,7 @@ test("a delete that unloaded its room and then fails while the server stops leav
   const { roomId, dm, socket } = await roomWithChange(own, "Doomed");
   try {
     doomed = roomId;
-    // The DM's delete has unloaded the room, with no snapshot, and waits on the database when the stop comes.
+    // The DM's delete has unloaded the room, its snapshot refused, and waits on the database when the stop comes.
     const asked = dm.delete(`/api/rooms/${roomId}`, { name: "Doomed" }).catch(() => undefined);
     await held.promise;
     const roomsClosing = deferred();
@@ -398,14 +399,14 @@ test("a delete that unloaded its room and then fails while the server stops leav
   }
 });
 
-test("a delete that fails during the sockets' grace, before the rooms close, still leaves the room named unsaved (OPS-SOL-4)", async () => {
+test("a delete that fails, tried again and failing again, the second time during the sockets' grace, leaves the room saved at its last commit, and the stop exits 0 (OPS-SOL-4, OPS-SOL-5)", async () => {
   let doomed = "";
-  const held = deferred();
-  const deleteAnswer = deferred<never>();
+  // Each delete of the room reaches the database, which fails it once `failing` settles.
+  let failing: { reached: ReturnType<typeof deferred<void>>; answer: ReturnType<typeof deferred<void>> } | null = null;
   const pool = poolWith((text, values) => {
-    if (!text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
-    held.resolve();
-    return deleteAnswer.promise;
+    if (!failing || !text.startsWith("delete from rooms where id = $1") || values?.[0] !== doomed) return null;
+    failing.reached.resolve();
+    return failing.answer.promise.then(() => Promise.reject(new Error("canceling statement due to statement timeout"))) as Promise<never>;
   });
   const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 } });
   await own.listen({ port: 0, host: "127.0.0.1" });
@@ -413,9 +414,15 @@ test("a delete that fails during the sockets' grace, before the rooms close, sti
   const kept = await roomWithChange(own, "Kept");
   try {
     doomed = lost.roomId;
-    const asked = lost.dm.delete(`/api/rooms/${lost.roomId}`, { name: "Doomed" }).catch(() => undefined);
-    await held.promise;
-    // A phone slow to answer the close holds the sockets' grace open for its whole second.
+    const lastSeq = (await check.query<{ seq: number }>("select max(seq)::int as seq from room_ops where room_id = $1", [doomed])).rows[0]!.seq;
+    assert.ok(((await check.query<{ seq: number }>("select seq::int from room_snapshots where room_id = $1", [doomed])).rows[0]?.seq ?? -1) < lastSeq, "the room's snapshot is behind its last op");
+    failing = { reached: deferred(), answer: deferred() };
+    failing.answer.resolve();
+    assert.ok((await lost.dm.delete(`/api/rooms/${doomed}`, { name: "Doomed" })).statusCode >= 500, "the first delete failed");
+    // The second fails while a phone slow to answer the close holds the sockets' grace open, before the rooms close.
+    failing = { reached: deferred(), answer: deferred() };
+    const asked = lost.dm.delete(`/api/rooms/${doomed}`, { name: "Doomed" });
+    await failing.reached.promise;
     (kept.socket.ws as unknown as { _socket: NetSocket })._socket.pause();
     let roomsClosing = false;
     const close = own.rooms.close.bind(own.rooms);
@@ -423,12 +430,15 @@ test("a delete that fails during the sockets' grace, before the rooms close, sti
       roomsClosing = true;
       return close();
     };
-    const stopping = closeServer(own, () => pool.end());
+    const codes: number[] = [];
+    const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
     await new Promise((r) => setTimeout(r, 100));
-    deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
-    await asked;
-    assert.equal(roomsClosing, false, "the delete failed before the rooms began to close");
-    await losesOnly(stopping, [{ roomId: lost.roomId, why: "delete failed" }]);
+    failing.answer.resolve();
+    assert.ok((await asked).statusCode >= 500, "the second delete failed");
+    assert.equal(roomsClosing, false, "the second delete failed before the rooms began to close");
+    await stopping;
+    assert.deepEqual(codes, [0], "the stop exits 0");
+    assert.equal((await check.query<{ seq: number }>("select seq::int from room_snapshots where room_id = $1", [doomed])).rows[0]?.seq, lastSeq, "the room's snapshot is at its last commit");
   } finally {
     lost.socket.ws.terminate();
     kept.socket.ws.terminate();

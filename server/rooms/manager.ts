@@ -58,7 +58,7 @@ type Entry = {
   createdIp: string | null;
   unloading: Promise<void> | null;
   idleTimer: NodeJS.Timeout | null;
-  /** Whether its unload writes a snapshot, as a shutdown's and an eviction's do and a delete's does not. */
+  /** Whether its unload writes a snapshot, as a shutdown's, an eviction's and a delete's do and a crash's on request does not. */
   saves: boolean;
   /** Whether its unload threw, which the unload logs and gets past. */
   failed: boolean;
@@ -69,9 +69,9 @@ export type UnsavedRoom = { roomId: string; why: "unload failed" | "snapshot not
 
 /**
  * A room's deletion, from its unload to the database's answer. Its unload
- * writes no snapshot, so until the row is gone the room is unsaved at its
- * last commit, `lastSeq`, once the unload has read it (null when nothing
- * was loaded to save).
+ * writes the room's snapshot at its last commit, `lastSeq`, once the unload
+ * has read it (null when nothing was loaded to save), and a stop checks
+ * that it did unless the row is gone.
  */
 type Deletion = { done: Promise<void>; lastSeq: number | null };
 
@@ -284,36 +284,34 @@ export class RoomManager {
   /**
    * A room's deletion (the gateway's): `remove` unloads it through
    * unloadForDelete and deletes its row. It is kept until the database
-   * answers, so a shutdown meanwhile tells a deleted room from one left
-   * unsaved by a delete that failed or never ran (close()). A delete that
-   * failed after its unload, which wrote no snapshot, stays kept: the room
-   * is out of memory and unsaved at its last commit, and a later stop must
-   * still find it, even one whose sockets' grace saw the failure
-   * (OPS-SOL-4). Once a later snapshot reaches that commit, the stop counts
-   * it saved.
+   * answers, so a shutdown meanwhile waits to see the row gone or the room
+   * saved (close()).
    */
   async deleting<T>(roomId: string, remove: () => Promise<T>): Promise<T> {
     let settle!: () => void;
     const deletion: Deletion = { done: new Promise<void>((resolve) => (settle = resolve)), lastSeq: null };
     this.#deletions.set(roomId, deletion);
-    let unsaved = false;
     try {
       return await remove();
-    } catch (err) {
-      unsaved = deletion.lastSeq !== null;
-      throw err;
     } finally {
       settle();
-      if (!unsaved && this.#deletions.get(roomId) === deletion) this.#deletions.delete(roomId);
+      if (this.#deletions.get(roomId) === deletion) this.#deletions.delete(roomId);
     }
   }
 
-  /** Closes the room's sockets with 4009 and drops it from memory without a snapshot, ahead of deleting its rows. */
+  /**
+   * Closes the room's sockets with 4009 and drops it from memory ahead of
+   * deleting its rows. It writes the room's snapshot as any unload does, so
+   * a delete that fails, however often it is tried again, never leaves the
+   * room out of memory behind its last commit (OPS-SOL-4, OPS-SOL-5). A
+   * delete that succeeds pays one snapshot write, which its row's cascade
+   * removes.
+   */
   async unloadForDelete(roomId: string): Promise<void> {
     for (const listener of this.#deleteListeners) listener(roomId);
     const entry = this.#entries.get(roomId);
     if (!entry) return;
-    await (entry.unloading ?? this.#unload(entry, { code: CLOSE.roomClosed, snapshot: false }));
+    await (entry.unloading ?? this.#unload(entry, { code: CLOSE.roomClosed, snapshot: true }));
     const deletion = this.#deletions.get(roomId);
     if (deletion) deletion.lastSeq = savedSeqOf(entry);
   }
