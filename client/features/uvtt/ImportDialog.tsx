@@ -645,9 +645,12 @@ export function Options(props: {
 /**
  * A button that opens the file picker. A computer's picker offers only the
  * three extensions. A phone's or an iPad's gets no filter, since iOS greys
- * out files of a type it does not know.
+ * out files of a type it does not know. With `onFiles` it takes several
+ * files, as New scene does for a scene of several floors
+ * (docs/design/design-v1-floors.md phase 4, 9.5), and hands over every
+ * file picked.
  */
-export function FilePicker(props: { label: string; device: Device; disabled?: boolean; onFile(file: File): void }) {
+export function FilePicker(props: { label: string; device: Device; disabled?: boolean; onFile(file: File): void; onFiles?(files: File[]): void }) {
   return (
     <label
       style={{
@@ -670,11 +673,13 @@ export function FilePicker(props: { label: string; device: Device; disabled?: bo
         accept={props.device === "computer" ? EXTENSIONS.join(",") : undefined}
         aria-label={props.label}
         disabled={props.disabled}
+        multiple={props.onFiles !== undefined}
         style={{ position: "absolute", inset: 0, width: "100%", opacity: 0, cursor: props.disabled ? "default" : "pointer" }}
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          const files = Array.from(e.target.files ?? []);
           e.target.value = "";
-          if (f) props.onFile(f);
+          if (files.length > 1 && props.onFiles) props.onFiles(files);
+          else if (files[0]) props.onFile(files[0]);
         }}
       />
     </label>

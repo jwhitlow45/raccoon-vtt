@@ -44,8 +44,12 @@ export function floorNameOf(text: string): string {
  * it, and the vision with `byClock: false`, so a floor beside on Time of
  * day never relights it, and a pick that names no vision sends the vision
  * of a new scene that has none (E6). The reducer numbers a taken name.
+ * `besideName` names the floor beside on its scene's first add, as a new
+ * scene from several files names its first file's floor
+ * (docs/design/design-v1-floors.md phase 4, 9.5). The reducer ignores it
+ * on a scene that has floors already.
  */
-export function floorCreateOf(scene: SceneInput, target: FloorTarget, name: string, sight: FloorSight): OpOf<"scene.create"> {
+export function floorCreateOf(scene: SceneInput, target: FloorTarget, name: string, sight: FloorSight, besideName?: string): OpOf<"scene.create"> {
   const own: NonNullable<NonNullable<OpOf<"scene.create">["floor"]>["own"]> = {
     bounds: scene.bounds,
     background: scene.background ?? MAT_BACKGROUND,
@@ -61,10 +65,11 @@ export function floorCreateOf(scene: SceneInput, target: FloorTarget, name: stri
     own.vision = { on: vision.on, light: vision.light, ...(vision.perPlayer ? { perPlayer: true } : {}), byClock: false };
   }
   const floorName = floorNameOf(name);
+  const firstName = besideName === undefined ? "" : floorNameOf(besideName);
   return {
     t: "scene.create",
     scene: { id: scene.id, name: scene.name, bounds: scene.bounds },
-    floor: { beside: target.beside, side: target.side, ...(floorName === "" ? {} : { name: floorName }), own },
+    floor: { beside: target.beside, side: target.side, ...(firstName === "" ? {} : { besideName: firstName }), ...(floorName === "" ? {} : { name: floorName }), own },
   };
 }
 

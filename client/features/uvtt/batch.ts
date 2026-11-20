@@ -3,6 +3,7 @@ import type { LightLevel, SceneMap } from "#shared/model.ts";
 import { MAX_BUILD_EDGES, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { MAX_CELL_PX, MAX_ORIGIN_PX, MIN_CELL_PX } from "#shared/reducer/phases.ts";
 import { BLOCKS_MOVES, cleanName, DEFAULT_GRID, MAP_BACKGROUND } from "../scenes/create.ts";
+import { floorCreateOf } from "../scenes/floorSource.ts";
 import type { ImportPlan } from "./convert.ts";
 
 /**
@@ -100,4 +101,30 @@ export function importOps(scene: SceneInput, plan: Pick<ImportPlan, "edges" | "w
   const lightOp = (put: OpOf<"build.lights">["put"] & {}): ClientOp => ({ t: "build.lights", sceneId, put });
   for (const put of batchByBytes(lights, LIMITS.lightsPerOp, OP_BYTES, lightOp)) ops.push(lightOp(put));
   return ops;
+}
+
+/** One file of a new scene from several files, read and uploaded: its scene as a scene of its own would be made, its plan and its floor's name. */
+export type FileFloor = { scene: SceneInput; plan: Pick<ImportPlan, "edges" | "walls" | "lights">; floor: string };
+
+/**
+ * Every op of a new scene from several files (docs/design/design-v1-floors.md
+ * phase 4, 9.5), in the order they must apply: the first file's scene and
+ * its contents as one file's import sends them, then each next file's
+ * floor just above the one before, with the file's own settings (fog and
+ * vision included, so each floor starts as its file would), and its
+ * contents. The first add names the first floor. `floorAt` holds each
+ * op's file, for the steps the dialog shows.
+ */
+export function severalFilesOps(files: readonly FileFloor[], newLightId: () => string): { ops: ClientOp[]; floorAt: number[] } {
+  const ops: ClientOp[] = [];
+  const floorAt: number[] = [];
+  files.forEach((file, i) => {
+    const own = importOps(file.scene, file.plan, newLightId);
+    if (i > 0) own[0] = floorCreateOf(file.scene, { beside: files[i - 1]!.scene.id, side: "above" }, file.floor, "own", i === 1 ? files[0]!.floor : undefined);
+    for (const op of own) {
+      ops.push(op);
+      floorAt.push(i);
+    }
+  });
+  return { ops, floorAt };
 }
