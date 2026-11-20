@@ -654,6 +654,13 @@ newest first.
 
 **Since v0.3.1**
 
+- **A fight's room** ([design](design/design-v1-player-limits.md)): no
+  format step. While a fight runs, the room's size limit counts its turn
+  history at the 1 MiB it may keep. No data migrates. A fight already
+  running at the update in a room above about 9.5 MiB reads over the line
+  until it ends, so new things and growing edits are refused there while
+  moves, turns, HP and chat go on, and a fight can't start once a room
+  reads above about 8.5 MiB.
 - **Rider seats and hex walks** ([design](design/design-v1-attach.md)):
   change format 63. A move may carry where a rider was dropped. Creatures in
   single file on hexes hold their height until the holder lands, step
