@@ -7,7 +7,7 @@ import { realClock, type Clock } from "../../../state/timing.ts";
 import type { RoomViewStore } from "../../../state/view.ts";
 import type { ReceiptTracker } from "../useReceipt.ts";
 import { creatureKey } from "../options.ts";
-import { askAnswered, markGone, syncRequests, type Page } from "./chain.ts";
+import { askAnswered, holdsPageScene, markGone, syncRequests, type Page } from "./chain.ts";
 import { writeSaveDraft } from "./draftStorage.ts";
 import { SAVE_ANNOUNCED, type SaveDraft } from "./reopenContract.ts";
 import { draftOf, reconcileSave, SAVE_MEMORY_ONLY, type SaveAuthority, type SaveHistory, type SaveReceipt, type SaveReopen, type SaveSession } from "./reopen.ts";
@@ -53,7 +53,7 @@ export function authorityOf(room: RoomView, page: Page): SaveAuthority {
     seq: seq ?? 0,
     memberId: room.you?.memberId ?? "",
     ledger: confirmed?.saveOutcomes ?? {},
-    sceneAvailable: room.sceneId === page.sceneId && !!confirmed?.scenes[page.sceneId] && !room.sceneLoad?.requested,
+    sceneAvailable: !!confirmed && holdsPageScene(confirmed, room.sceneId ?? null, page) && !!confirmed.scenes[page.sceneId] && !room.sceneLoad?.requested,
     now: serverTime(room),
     pendingPlans: new Set(room.pending?.flatMap(pending => pending.op.t === "actor.outcome" ? [pending.op.plan] : []) ?? []),
     ...(history ? { history } : {}),
@@ -160,7 +160,7 @@ export function bindSaveLifecycle(options: SaveLifecycleOptions): () => void {
                 queuedRequests.delete(request.rollId);
               }
             }
-            page = markGone(page, view.sceneId, (row) => confirmed.tokens[row.tokenId] !== undefined);
+            page = markGone(page, holdsPageScene(confirmed, view.sceneId, page), (row) => confirmed.tokens[row.tokenId] !== undefined);
             current = { ...current, page };
           }
 

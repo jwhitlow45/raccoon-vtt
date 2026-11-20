@@ -58,6 +58,7 @@ import {
   dmRoll,
   dmRollSettled,
   mark,
+  holdsPageScene,
   markGone,
   results,
   roll,
@@ -311,7 +312,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   useEffect(() => {
     if (!confirmedView || page.phase === "setup") return;
     let next = syncRequests(pageRef.current, confirmedView.rolls, t => creatureKey(confirmedView, t));
-    next = markGone(next, viewing, (row) => confirmedView.tokens[row.tokenId] !== undefined);
+    next = markGone(next, holdsPageScene(confirmedView, viewing, page), (row) => confirmedView.tokens[row.tokenId] !== undefined);
     if (next !== pageRef.current) update(next);
   }, [confirmedView?.rolls, confirmedView?.tokens, viewing, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -334,7 +335,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   }, [ready, page.phase, page.rollNow]);
   if (!view || !dice) return <Note>Loading the creatures…</Note>;
 
-  const offScene = page.sceneId !== viewing || !view.scenes[page.sceneId];
+  const offScene = !holdsPageScene(view, viewing, page) || !view.scenes[page.sceneId];
   const sceneName = view.scenes[page.sceneId]?.name ?? "another scene";
   const fillType = page.fill?.damageType;
   const amounts = amountsOf(shown, fillType);
@@ -463,7 +464,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     let current = active.page.phase === "setup" ? { ...active.page, rows } : active.page;
     const confirmed = confirmedRoom();
     if (!confirmed) return;
-    current = markGone(current, roomStore.getState().sceneId, row => confirmed.tokens[row.tokenId] !== undefined);
+    current = markGone(current, holdsPageScene(confirmed, roomStore.getState().sceneId, current), row => confirmed.tokens[row.tokenId] !== undefined);
     const currentDice = { ...dice, view: confirmed };
     const currentAmounts = amountsOf(current, current.fill?.damageType);
     const waits = applyWaits(current, currentDice, currentAmounts);

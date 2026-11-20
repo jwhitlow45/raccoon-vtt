@@ -222,6 +222,27 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
   );
 }
 
+/** Why a page whose creatures all stand on another floor than its own cannot apply, so a trap is never settled with no one hit. */
+export const OFF_FLOOR_WORDS = "Its creatures are on another floor now. Discard this page and start it again from its card.";
+
+/**
+ * Words when every row still in play has its creature on a scene other than the
+ * page's. buildPlan leaves such rows out, so the plan would be empty, and a
+ * trap's springing would still be settled with no damage and no saves. A page
+ * restored from a draft started before pages took their source's floor reads this way.
+ */
+export function offFloorWords(page: Page, dice: DiceView): string | null {
+  const live = page.rows.filter((r) => !stateOf(page, r).gone && stateOf(page, r).mark !== "skip");
+  let elsewhere = false;
+  for (const row of live) {
+    const token = dice.view.tokens[row.tokenId];
+    if (!token || holderOf(token) !== row.holder) continue;
+    if (token.sceneId === page.sceneId) return null;
+    elsewhere = true;
+  }
+  return elsewhere ? OFF_FLOOR_WORDS : null;
+}
+
 /** Why Apply waits, in its words, or null when it may go (5.5). */
 export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | null): string | null {
   if (page.apply === "sending") return "Applying…";
@@ -234,6 +255,8 @@ export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | n
   if (amounts.length > MAX_DAMAGE_PARTS) return `Use at most ${MAX_DAMAGE_PARTS} damage parts.`;
   if (amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000) return "That number is too large.";
   if (page.outcome.saveEnds && page.outcome.conditions.length > 0 && saveEndsDc(page) === null) return "Give the save that ends it a DC";
+  const stranded = offFloorWords(page, dice);
+  if (stranded) return stranded;
   const live = page.rows.filter((r) => !stateOf(page, r).gone);
   for (const row of live) {
     const error = rowOutcome(page, row, dice, amounts).error;
@@ -287,6 +310,7 @@ export const SETTLE_WORDS = "Settle: it changes no one";
 export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | null, ids: { plan: string; newId: () => string }): OpOf<"actor.outcome"> | null {
   if (amounts && (amounts.length > MAX_DAMAGE_PARTS || amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000)) return null;
   if (pageBound(page, page.rows) !== null) return null;
+  if (offFloorWords(page, dice) !== null) return null;
   const rows: PlanRow[] = [];
   const seen = new Set<string>();
   for (const row of page.rows) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
+import type { RoomState } from "#shared/model.ts";
 import { closeAlertsOverlay } from "../../../canvas/barDock.ts";
 import { useRoomScope } from "../../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
@@ -81,6 +82,22 @@ export function quickRollNow(taken: Pick<Taken, "sources" | "secret">, baseline:
 }
 
 /**
+ * The scene a page belongs to: the one its source names, since the DM holds
+ * every floor of the scene on screen and a trap card, an area or a player's
+ * ask can belong to a floor that is not the one shown. A page stamped with
+ * the floor shown would drop every row of a creature on the source's floor
+ * (buildPlan) yet still settle a trap. A selection's creatures are on the
+ * floor shown, which is the answer when the source names none.
+ */
+export function sourceScene(input: Pick<StartInput, "source" | "cast">, view: Pick<RoomState, "traps" | "templates" | "tokens"> | null | undefined, shown: string | null): string {
+  const source = input.source;
+  const named =
+    input.cast?.ask.sceneId ??
+    (source.kind === "trap" ? view?.traps[source.trapId]?.sceneId : source.kind === "area" ? view?.templates[source.templateId]?.sceneId : source.tokenIds[0] !== undefined ? view?.tokens[source.tokenIds[0]]?.sceneId : undefined);
+  return named ?? shown ?? "";
+}
+
+/**
  * Starts a group save (5.1): one at a time in a browser tab, so a start
  * while one holds rolls returns false, and the caller asks "Discard the
  * Dexterity save for 6?" first (ReplaceConfirm), then starts again with
@@ -91,6 +108,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
   const store = useGroupSaveStore();
   const roomId = useRoomView((s) => s.roomId);
   const sceneId = useRoomView((s) => s.sceneId);
+  const room = useRoomStore();
   const ui = useRoomUi();
   const actions = useRoomActions();
   const scope = useRoomScope();
@@ -104,7 +122,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       for (const c of out.send) if (c.kind === "op") actions.dispatch(c.op);
       const page = newPage({
         id: uuidv7(),
-        sceneId: sceneId ?? "",
+        sceneId: sourceScene(input, room.getState().view, sceneId),
         source: input.source,
         test: input.test,
         dc: input.dc,
@@ -124,6 +142,6 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       closeAlertsOverlay(scope, input.panel);
       return true;
     },
-    [store, roomId, sceneId, ui, actions, scope],
+    [store, room, roomId, sceneId, ui, actions, scope],
   );
 }

@@ -54,11 +54,11 @@ describe("creatures gone from the group save", () => {
   test("with the DM on another scene, whose tokens the view does not hold, no row reads gone, and back on its scene a deleted creature does (LP7-PC-14)", () => {
     const page = sunburst(13);
     const row = ROWS[0]!;
-    const away = markGone(page, "other", () => false);
+    const away = markGone(page, false, () => false);
     assert.equal(stateOf(away, row).gone ?? false, false);
     assert.equal(buildPlan(away, DICE, [], { plan: "p", newId: () => "e" })!.targets.length, 1);
-    assert.equal(stateOf(markGone(page, "s1", () => true), row).gone ?? false, false);
-    assert.equal(stateOf(markGone(page, "s1", () => false), row).gone, true);
+    assert.equal(stateOf(markGone(page, true, () => true), row).gone ?? false, false);
+    assert.equal(stateOf(markGone(page, true, () => false), row).gone, true);
   });
 });
 

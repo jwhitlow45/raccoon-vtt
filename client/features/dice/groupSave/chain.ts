@@ -1,6 +1,7 @@
 import { d20Formula } from "#shared/dice/formula.ts";
 import { LIMITS } from "#shared/limits.ts";
-import type { CastAsk, CastEnd, DiceRoll, LogEntry, RollRequest, RollTest } from "#shared/model.ts";
+import type { CastAsk, CastEnd, DiceRoll, LogEntry, RollRequest, RollTest, RoomState } from "#shared/model.ts";
+import { sameScene } from "#shared/rules/floors.ts";
 import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
@@ -691,12 +692,20 @@ export function replace(old: Page | null): { ok: true; send: Command[] } | { ok:
 export const APPLYING = "The open group save is applying. Wait for it to finish.";
 
 /**
- * Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out.
- * The view holds only the scene on screen, so with the DM on another scene a missing token says
- * nothing about whether it was deleted, and every row keeps what it had.
+ * Whether the view holds the page's scene: the DM holds every floor of the scene on screen, so a page on
+ * another floor of it reads its creatures as the shown one does. Only a page on a different scene is out of reach.
  */
-export function markGone(page: Page, viewing: string | null, present: (row: RowBase) => boolean): Page {
-  if (page.sceneId !== viewing) return page;
+export function holdsPageScene(state: Pick<RoomState, "scenes">, viewing: string | null, page: Pick<Page, "sceneId">): boolean {
+  return viewing !== null && sameScene(state, viewing, page.sceneId);
+}
+
+/**
+ * Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out.
+ * The view holds only the scene on screen (with its floors), so with the DM on another scene a missing token says
+ * nothing about whether it was deleted, and every row keeps what it had (`held` false).
+ */
+export function markGone(page: Page, held: boolean, present: (row: RowBase) => boolean): Page {
+  if (!held) return page;
   let next = page;
   for (const row of page.rows) {
     const gone = !present(row);
