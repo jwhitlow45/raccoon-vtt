@@ -2,8 +2,8 @@ import type { Fall, FallId } from "../model.ts";
 
 /*
  * The order of fall cards (docs/design/design-v1-floors.md phase 4, 4.4),
- * read alike by the reducer's eviction and the DM's desk and toasts, so
- * the card a device shows first is the one the room keeps longest.
+ * read alike by the reducer's eviction and the DM's desk and toasts: the
+ * desk lists newest first, the reverse of eviction's order.
  */
 
 /** A card's place among the cards of the op it was made in: the part of its id after the seq, "120:1" is 1. */
