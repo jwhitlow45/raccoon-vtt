@@ -668,6 +668,10 @@ newest first.
   version 64 is not yet saved that way opens read-only in an older build, as
   it stood before that change, as at version 63. Going back needs the
   backups taken just before the update.
+  The room's size limit also holds room ahead for what drops and falls
+  write: about 30 KB for each scene with a pit or a trapdoor, and about
+  87 KB in a room with any opening, trapdoor or fall card, so such rooms
+  reach the limit sooner.
   From version 64 a creature a move drags along ends on its own squares or
   hexes, inside the scene and off every creature that holds it. Otherwise it
   takes the nearest full-size spot in its holder's reach that a step reaches
