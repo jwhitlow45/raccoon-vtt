@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { BACKUP_SUFFIX, type BackupSummary, type SupervisorStatus } from "../contract.ts";
 import { listBackups } from "./backup.ts";
+import { removeSupervisorData } from "./testing/cluster.ts";
 import { createRoom, query, roomNames, supervisorDbUrl } from "./testing/dataFixture.ts";
 import { startSupervisor, type SupervisorRun } from "./testing/supervisorProcess.ts";
 import { TEST_PORTS } from "./testing/testPorts.ts";
@@ -61,8 +62,9 @@ before(async () => {
 });
 
 after(async () => {
+  // A test may have killed it already, and the listing removeSupervisorData takes is what proves PostgreSQL ended.
   await stop().catch(() => undefined);
-  await rm(data, { recursive: true, force: true });
+  await removeSupervisorData(data);
 });
 
 describe("updates and going back", () => {
