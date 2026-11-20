@@ -45,8 +45,9 @@ export function exploreOp(state: RoomState, sceneId: string | null = startFloor(
  * ops equal those the actor reads floor by floor today, since without a
  * join no floor's op reads another floor.
  */
-export function exploreOps(_state: RoomState, _floors: readonly string[]): OpOf<"sys.explore">[] {
-  throw new Error("not built: exploreOps");
+export function exploreOps(state: RoomState, floors: readonly string[]): OpOf<"sys.explore">[] {
+  const pending = pendingOf(state, floors);
+  return floors.flatMap((sceneId) => opOf(state, sceneId, pending) ?? []);
 }
 
 /** Each per-player floor's joins to its holder list, among the floors explored, by floor (ruleHooks.ts PendingJoins). */
