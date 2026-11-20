@@ -654,6 +654,20 @@ newest first.
 
 **Since v0.3.1**
 
+- **Openings between floors** ([design](design/design-v1-floors.md)): room
+  format 48, change format 64. No data migrates, since a room saved before
+  reads as it did and its changes replay as they ran. Until it reloads, an
+  old page draws an opening's ends as ladders and may offer Go up or Go down
+  there, which the server refuses, and shows a creature that fell over a
+  hole where it was dropped until the server's answer moves it. It offers
+  no Fly up or Fly down, and an old DM page has no Opening kind, Hidden
+  switch or fall cards. Reload DM pages first, then every other open page,
+  table displays included. A room is saved in the new format with its first
+  change on this version, so an older build refuses every room and backup
+  this version has saved, openings or not. A room whose first change of
+  version 64 is not yet saved that way opens read-only in an older build, as
+  it stood before that change, as at version 63. Going back needs the
+  backups taken just before the update.
 - **A fight's room** ([design](design/design-v1-player-limits.md)): no
   format step. While a fight runs, the room's size limit counts its turn
   history at the 1 MiB it may keep. No data migrates. A fight already
