@@ -10,6 +10,7 @@ import { floorsOf } from "#shared/rules/floors.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import type { OpType } from "#shared/protocol.ts";
 import { actor, character, DM, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token, trap } from "#shared/testutil.ts";
+import { trapdoor, withOpening } from "#shared/floorLinksTestutil.ts";
 import { PLAYER_OPS, playerTable } from "./playerOpsTesting.ts";
 import { dropHeadrooms, dropReserve, exactCopies, farRoomBytes, heldBytes, farWidths, measuredStateBytes, ownHeldBytes, PIT_TOKENS_RESERVE, projectedSceneBytes } from "./sizeGuard.ts";
 
@@ -502,6 +503,150 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
     const walk: Op = { t: "token.move", tokenId: "thorn", x: 9, y: 4 };
     assertTwinsAlike([pitRoom(false), pitRoom(true)], walk);
     assert.equal(run(pitRoom(true), walk, P1).tokens.vic!.elevation, -10, "the hidden creature fell");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Floors phase 4: falls, trapdoor drops, flights and landings (docs/design/design-v1-floors.md phase 4, 4.7)
+
+/** The tower with an opening from the upper floor down to the ground floor, 2 by 2 at 6, 6, both floors reached, and Thorn upstairs at 4, 6. */
+function holed(): RoomState {
+  const s = withOpening(tower(), { upper: UPPER, lower: GROUND });
+  s.tokens.thorn = { ...s.tokens.thorn!, sceneId: UPPER, x: 4, y: 6 };
+  s.openFloors = { [GROUND]: { sceneId: GROUND, rev: 1 }, [UPPER]: { sceneId: UPPER, rev: 1 } };
+  return s;
+}
+
+/** A hidden creature on Thorn where it stands, its hidden area with it, as hiddenRider puts one on the ground floor. */
+function riderOnThorn(state: RoomState, over: Partial<Token> = {}): RoomState {
+  const s = structuredClone(state);
+  const thorn = s.tokens.thorn!;
+  s.tokens.owl = token("owl", { kind: "pc", size: "tiny", visibility: "dm", sceneId: thorn.sceneId, x: thorn.x, y: thorn.y, elevation: thorn.elevation, rev: 9, attached: { to: "thorn", kind: "perch" }, ...over });
+  s.templates.owlaura = template("owlaura", { sceneId: thorn.sceneId, attachedTo: "owl", ownerId: "dm1", visibility: "dm", rev: 9 });
+  return s;
+}
+
+/** A trapdoor on the upper floor at 10, 6, armed and public, that stops a walker or lets it on. */
+const withDoor = (state: RoomState, stops: boolean): RoomState => ({ ...state, traps: { td1: trapdoor("td1", { sceneId: UPPER, zone: { cells: [{ x: 10, y: 6, w: 2, h: 2 }] }, rig: { ...trapdoor().rig!, stops, foundOnSpring: false } }) } });
+
+const onTheHole: Op = { t: "token.move", tokenId: "thorn", x: 6, y: 6 };
+
+describe("D-261119-011 and floors phase 4: falls, drops, flights and landings read alike through a player's op", () => {
+  test("P1's walk onto the opening falls, with a hidden rider and its area or none", () => {
+    assertTwinsAlike([holed(), riderOnThorn(holed())], onTheHole);
+    const fell = run(riderOnThorn(holed()), onTheHole, P1);
+    assert.deepEqual([fell.tokens.thorn!.sceneId, fell.tokens.owl!.sceneId, fell.templates.owlaura!.sceneId], [GROUND, GROUND, GROUND], "Thorn fell with the rider and its area");
+    assert.ok(Object.values(fell.falls ?? {}).some((c) => c.riders?.includes("owl")), "its card names the hidden rider");
+  });
+
+  test("a hidden rider with a squeeze, a placement between squares and an old walk, or none of them, through a fall", () => {
+    assertTwinsAlike([riderOnThorn(holed()), riderOnThorn(holed(), { squeeze: true, nudge: { x: 0.25, y: 0.25 }, path: { turn: 1, stops: [0, 1, 2].map((i) => ({ x: i, y: i, elevation: 0 })) } })], onTheHole);
+  });
+
+  test("a hidden creature Thorn drags over the hole, let go as Thorn falls, or the same creature on no link", () => {
+    const dragged = (link: boolean) => {
+      const s = holed();
+      s.tokens.ally = token("ally", { visibility: "dm", sceneId: UPPER, x: 3, y: 6, rev: 9, ...(link ? { attached: { to: "thorn", kind: "drag" as const } } : {}) });
+      return s;
+    };
+    assertTwinsAlike([dragged(false), dragged(true)], onTheHole);
+  });
+
+  test("Fly down through the opening, with a hidden rider and its area or none", () => {
+    const flying = (s: RoomState) => ({ ...s, tokens: { ...s.tokens, thorn: { ...s.tokens.thorn!, x: 6, y: 6, elevation: 10 } } });
+    const fly: Op = { t: "token.climb", tokenId: "thorn", linkId: "o1" };
+    assertTwinsAlike([flying(holed()), riderOnThorn(flying(holed()))], fly);
+    const flown = run(riderOnThorn(flying(holed())), fly, P1);
+    assert.deepEqual([flown.tokens.thorn!.sceneId, flown.tokens.owl!.sceneId], [GROUND, GROUND], "Thorn flew down with the rider");
+  });
+
+  test("P1's walk past a trapdoor drops a hidden goblin with its area onto the ground floor, or there is none", () => {
+    const victim = (s: RoomState) => {
+      const out = structuredClone(s);
+      out.tokens.gob = token("gob", { visibility: "dm", sceneId: UPPER, x: 10, y: 6, rev: 9, nudge: { x: 0.25, y: 0 } });
+      out.templates.gobaura = template("gobaura", { sceneId: UPPER, attachedTo: "gob", ownerId: "dm1", visibility: "dm", rev: 9 });
+      return out;
+    };
+    const past: Op = { t: "token.move", tokenId: "thorn", x: 13, y: 6, route: [[10, 6, 0, 0], [13, 6, 0, 0]] } as Op;
+    const base = { ...withDoor(holed(), false), tokens: { ...holed().tokens, thorn: { ...holed().tokens.thorn!, x: 8 } } };
+    assertTwinsAlike([base, victim(base)], past);
+    const dropped = run(victim(base), past, P1);
+    assert.deepEqual([dropped.tokens.gob!.sceneId, dropped.templates.gobaura!.sceneId, dropped.tokens.thorn!.sceneId], [GROUND, GROUND, UPPER], "the goblin dropped, Thorn walked on");
+  });
+
+  test("P1's walk onto a trapdoor that stops it drops Thorn with a hidden rider and its area, or none", () => {
+    const onto: Op = { t: "token.move", tokenId: "thorn", x: 10, y: 6 };
+    const base = { ...withDoor(holed(), true), tokens: { ...holed().tokens, thorn: { ...holed().tokens.thorn!, x: 8 } } };
+    assertTwinsAlike([base, riderOnThorn(base)], onto);
+    assert.equal(run(riderOnThorn(base), onto, P1).tokens.owl!.sceneId, GROUND, "the rider dropped with Thorn");
+  });
+
+  test("random floors rooms: P1's falls, drops past and onto trapdoors, flights, climbs and walks, each undone, redone and reloaded, move P1's stepped parts alike beside hidden company", () => {
+    const dims: Record<string, (s: RoomState) => void> = {
+      "a hidden rider": (s) => Object.assign(s, riderOnThorn(s)),
+      "a hidden rider squeezed, between squares, with an old walk": (s) => Object.assign(s, riderOnThorn(s, { squeeze: true, nudge: { x: 0.25, y: -0.25 }, path: { turn: 1, stops: [0, 1, 2, 3].map((i) => ({ x: i, y: i, elevation: 0 })) } })),
+      "a hidden creature dragged": (s) => {
+        const th = s.tokens.thorn!;
+        s.tokens.ally = token("ally", { visibility: "dm", sceneId: th.sceneId, x: th.x - 1, y: th.y, elevation: th.elevation, rev: 9, attached: { to: "thorn", kind: "drag" } });
+      },
+      "a hidden victim on the trapdoor": (s) => {
+        s.tokens.gob = token("gob", { visibility: "dm", sceneId: UPPER, x: 11, y: 7, rev: 99 });
+        s.templates.gobaura = template("gobaura", { sceneId: UPPER, attachedTo: "gob", ownerId: "dm1", visibility: "dm", rev: 9 });
+      },
+      "ten hidden cards": (s) => {
+        s.falls = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`${30 + i}:0`, { id: `${30 + i}:0`, rev: 0, tokenId: `gone${i}`, riders: ["x".repeat(i + 1)], sceneId: GROUND, from: UPPER, ft: 10, made: 30 + i }]));
+      },
+    };
+    const found: string[] = [];
+    const total = () => [...COMPARED.values()].reduce((sum, n) => sum + n, 0);
+    const from = total();
+    const seen = { fall: 0, drop: 0, flight: 0 };
+    for (let seed = 1; seed <= 60; seed++) {
+      const r = rng(seed * 13 + 5);
+      const pick = <T>(items: readonly T[]): T => items[Math.floor(r() * items.length)]!;
+      let state = withDoor(holed(), r() < 0.5);
+      if (r() < 0.4) state.encounter = { rev: 9, round: 1, activeEntryId: "rthorn", entries: [entry("rthorn", { tokenId: "thorn" })], turnStart: { entryId: "rthorn", tokenId: "thorn", sceneId: UPPER, x: 4, y: 6, elevation: 0, seen: true, seq: 7 } };
+      state.tokens.thorn = { ...state.tokens.thorn!, x: pick([3, 4, 8]), y: pick([6, 7]) };
+      for (let k = 0; k < 4; k++) {
+        const th = state.tokens.thorn;
+        if (!th) break;
+        const ops: Op[] = [
+          onTheHole,
+          { t: "token.move", tokenId: "thorn", x: 13, y: th.y, route: [[th.x, th.y, 0, 0], [10, th.y, 0, 0], [13, th.y, 0, 0]] } as Op,
+          { t: "token.move", tokenId: "thorn", x: 10, y: 6 },
+          { t: "token.move", tokenId: "thorn", x: pick([2, 5, 12]), y: pick([2, 9]) },
+          { t: "token.update", tokenId: "thorn", patch: { elevation: 10 } } as Op,
+          { t: "token.climb", tokenId: "thorn", linkId: th.sceneId === UPPER ? "o1" : "o2" },
+          { t: "token.climb", tokenId: "thorn", linkId: th.sceneId === GROUND ? "l1" : "l2" },
+          { t: "token.move", tokenId: "thorn", x: 6, y: 6, elevation: 10 },
+        ];
+        // Over the hole in the air, mostly Fly up or Fly down next.
+        const hovering = th.x === 6 && th.y === 6 && th.elevation > 0;
+        const op = hovering && r() < 0.7 ? ops[5]! : pick(ops);
+        if (!canApplyOk(op, state)) continue;
+        for (const [name, dim] of Object.entries(dims)) {
+          const why = apart(state, dim, op);
+          if (why) found.push(`seed ${seed}, ${name}: ${why}`);
+        }
+        const next = apply(state, op);
+        if (!next) continue;
+        if (next.state.tokens.thorn?.sceneId !== th.sceneId) {
+          if (op.t === "token.climb" && op.linkId.startsWith("o")) seen.flight++;
+          else if (op.t === "token.move" && Object.keys(next.state.falls ?? {}).length > Object.keys(state.falls ?? {}).length) seen[op.x === 6 ? "fall" : "drop"]++;
+        }
+        if (next.state.tokens.gob === undefined && Object.keys(next.state.falls ?? {}).length > Object.keys(state.falls ?? {}).length) seen.drop++;
+        state = next.state;
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(total() - from > 300, `${total() - from} twins compared`);
+    assert.ok(seen.fall >= 3 && seen.drop >= 3 && seen.flight >= 3, JSON.stringify(seen));
+  });
+
+  test("P1's fall onto an armed trap below, with a hidden rider or none, springs it on the landing", () => {
+    const snared = (s: RoomState) => ({ ...s, traps: { snare: trap("snare", { sceneId: GROUND, name: "Snare", zone: { cells: [{ x: 6, y: 6, w: 2, h: 2 }] }, rig: { ...trap("snare").rig!, floor: false } }) } });
+    assertTwinsAlike([snared(holed()), riderOnThorn(snared(holed()))], onTheHole);
+    assert.equal(run(riderOnThorn(snared(holed())), onTheHole, P1).traps!.snare!.state, "sprung", "the landing sprang it");
   });
 });
 
