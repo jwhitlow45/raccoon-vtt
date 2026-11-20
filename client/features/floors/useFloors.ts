@@ -5,8 +5,8 @@ import { sayJoined } from "../view/choice.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
-import { heldHere } from "./follow.ts";
-import { followedLine, showingLine } from "./words.ts";
+import { fellThrough, heldHere } from "./follow.ts";
+import { fellLine, followedLine, showingLine } from "./words.ts";
 import { labelsOf } from "../../state/labels.ts";
 
 /*
@@ -32,8 +32,9 @@ export function useShownFloor(): Scene | null {
  * Says each switch of floors in the polite status (7.3), beside the view's
  * and the weather's lines (view/choice.ts sayJoined): "Showing Upper
  * floor.", or "Thorn is on Upper floor. Showing Upper floor." when the
- * device followed a creature there. The Room page's top bar and the table
- * display each run it, and the weather's own line joins it.
+ * device followed a creature there, "Thorn fell to Ground floor. Showing
+ * Ground floor." when it fell through an opening. The Room page's top bar
+ * and the table display each run it, and the weather's own line joins it.
  */
 export function useFloorVoice(): void {
   const scope = useRoomScope();
@@ -42,7 +43,8 @@ export function useFloorVoice(): void {
     const floor = s.sceneId ? s.view?.scenes[s.sceneId]?.floor?.name : undefined;
     if (floor === undefined || !s.floorShift) return null;
     const token = s.floorShift.tokenId ? s.view?.tokens[s.floorShift.tokenId] : undefined;
-    return token ? followedLine(displayName(token, labelsOf(s)), floor) : showingLine(floor);
+    if (!token) return showingLine(floor);
+    return (s.view && fellThrough(s.view, token) ? fellLine : followedLine)(displayName(token, labelsOf(s)), floor);
   });
   const heard = useRef(shift?.n ?? 0);
   useEffect(() => {

@@ -1,5 +1,7 @@
 import type { RoomState, Scene, SceneId, Token } from "#shared/model.ts";
+import { linkDir, linksOn, spaceOn } from "#shared/rules/floorLinks.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
+import { footprintGround } from "#shared/rules/heights.ts";
 import { ownEntry } from "#shared/records.ts";
 import type { FloorFollow } from "../../state/types.ts";
 import { ownsEntry } from "../encounter/logic.ts";
@@ -185,4 +187,17 @@ export function floorBeside(held: readonly Scene[], shown: SceneId | null, by: 1
   const at = held.findIndex((s) => s.id === shown);
   if (at < 0) return null;
   return held[at + by]?.id ?? null;
+}
+
+/**
+ * Whether a creature the device just followed to its floor came there by a
+ * fall (phase 4, 4.4), as the polite status words it: it stands on the
+ * ground with its space inside an opening's lower end, under the hole. A
+ * climb lands on stairs or a ladder, and a flight in the air, so only a
+ * fall ends there, or the DM's Move to floor onto those squares. Read from
+ * the copy alone, which holds no record of how it came.
+ */
+export function fellThrough(view: Pick<RoomState, "scenes" | "floorLinks" | "buildChunks">, token: Token): boolean {
+  if (token.elevation !== footprintGround(view.buildChunks, token)) return false;
+  return linksOn(view, token.sceneId).some((link) => link.kind === "opening" && linkDir(view, link) === "up" && spaceOn(view, token, link));
 }

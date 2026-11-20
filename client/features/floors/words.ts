@@ -60,6 +60,14 @@ export function followedLine(creature: string, floor: string): string {
   return `${creature} is on ${floor}. ${showingLine(floor)}`;
 }
 
+/**
+ * "Thorn fell to Ground floor. Showing Ground floor.", for a switch that
+ * follows a creature that fell through an opening (phase 4, 4.4).
+ */
+export function fellLine(creature: string, floor: string): string {
+  return `${creature} fell to ${floor}. ${showingLine(floor)}`;
+}
+
 /** "Viewing Upper floor.", the Viewing notice's words while a player shows a floor they picked (7.3). */
 export function viewingLine(floor: string): string {
   return `Viewing ${floor}.`;
