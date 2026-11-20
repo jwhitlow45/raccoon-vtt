@@ -13,6 +13,7 @@ import type {
   Drawing,
   Effect,
   EffectChange,
+  Fall,
   Encounter,
   EncounterSnapshot,
   Handout,
@@ -405,6 +406,18 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       links[id] = { ...end, id, pair: linkIds.of(end.pair), sceneId: scenes.of(end.sceneId), to: scenes.of(end.to) };
     }
     if (Object.keys(links).length > 0) out.floorLinks = links;
+  }
+  // Fall cards follow their floors (docs/design/design-v1-floors.md phase 4, 4.4), each naming its creature by its new id.
+  // One whose creature did not come through names a new id nothing holds, so it reads as a creature no longer on the map,
+  // as a dismissed companion's does, and no creature the new room makes can take its place. A card keeps its id and
+  // `made`: the new room's ops count on past every card's (lastLineSeq), so no card it makes later takes that id.
+  if (state.falls) {
+    const cards: Record<string, Fall> = {};
+    for (const card of Object.values(state.falls)) {
+      if (!scenes.has(card.sceneId) || !scenes.has(card.from)) continue;
+      cards[card.id] = { ...card, tokenId: tokens.has(card.tokenId) ? tokens.of(card.tokenId) : newId(), sceneId: scenes.of(card.sceneId), from: scenes.of(card.from) };
+    }
+    if (Object.keys(cards).length > 0) out.falls = cards;
   }
   for (const c of Object.values(state.buildChunks)) {
     if (!scenes.has(c.sceneId)) continue;
@@ -1129,7 +1142,8 @@ function numberedWithin<K>(lines: readonly { id: string; key: K }[], base: numbe
  * keep their seqs (remapState), so its own ops start after this one. So
  * does every pair of stairs' `made` (docs/design/design-v1-floors.md phase
  * 2, 3, ASTRA-16), so stairs placed again in the new room never share the
- * stamp of a pair that came in the file.
+ * stamp of a pair that came in the file, and every fall card's (phase 4,
+ * 4.4), so a card the new room makes never takes the id of one that came.
  */
 export function lastLineSeq(state: RoomState): number {
   let last = 0;
@@ -1139,6 +1153,7 @@ export function lastLineSeq(state: RoomState): number {
   for (const line of state.trapSeen ?? []) see(line.id);
   for (const trap of Object.values(state.traps ?? {})) for (const d of trap.rig?.due ?? []) see(d.id);
   for (const end of Object.values(state.floorLinks ?? {})) last = Math.max(last, end.made);
+  for (const card of Object.values(state.falls ?? {})) last = Math.max(last, card.made);
   return last;
 }
 
