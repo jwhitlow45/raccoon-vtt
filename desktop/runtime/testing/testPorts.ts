@@ -20,4 +20,6 @@ export const TEST_PORTS = {
   upgrade: 30432,
   shellE2e: 30500,
   windowE2e: 30600,
+  /** The headless smoke test's app server takes the first free port from here (desktop/scripts/smoke.ts). */
+  smoke: 30700,
 } as const;
