@@ -89,6 +89,9 @@ export function quickRollNow(taken: Pick<Taken, "sources" | "secret">, baseline:
  * (buildPlan) yet still settle a trap. A selection takes its first
  * creature's floor, else the floor shown. The plan reaches creatures on any
  * floor of the page's scene (plan.ts), so a selection across floors loses none.
+ * A fall card's page takes its creature's floor now, not the one it landed
+ * on, since it may have climbed back up before the DM applies it
+ * (docs/design/design-v1-floors.md phase 4, 4.4).
  */
 export function sourceScene(input: Pick<StartInput, "source" | "cast">, view: Pick<RoomState, "traps" | "templates" | "tokens"> | null | undefined, shown: string | null): string {
   const source = input.source;

@@ -2602,8 +2602,9 @@ const stateClientOps = [
   })
     .refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG })
     .refine((o) => [o.cast, o.trap, o.fall].filter((settled) => settled !== undefined).length <= 1, { message: "an outcome settles one thing" })
-    // A trap's springing that everyone passed with nothing to take settles with no creature (docs/design/design-v1-traps.md 4.4).
-    .refine((o) => o.targets.length > 0 || o.trap !== undefined, { message: "an outcome names at least one creature" }),
+    // A trap's springing that everyone passed with nothing to take settles with no creature (docs/design/design-v1-traps.md 4.4), and so
+    // does a fall card whose creature the DM skipped (docs/design/design-v1-floors.md phase 4, 4.4).
+    .refine((o) => o.targets.length > 0 || o.trap !== undefined || o.fall !== undefined, { message: "an outcome names at least one creature" }),
   op("actor.damageMany", {
     hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000), types: damageTypes.optional() })).min(1).max(MAX_ENTRIES_PER_OP),
   }),

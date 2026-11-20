@@ -762,7 +762,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       </div>
     ) : (
       <Button variant="primary" busy={page.apply === "sending" && !stranded} disabled={frozen || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
-        {waits ?? bound ?? (words !== NOTHING_TO_APPLY ? words : page.cast ? "Close the ask" : page.source.kind === "trap" ? SETTLE_WORDS : words)}
+        {waits ?? bound ?? (words !== NOTHING_TO_APPLY ? words : page.cast ? "Close the ask" : page.source.kind === "trap" || page.source.kind === "fall" ? SETTLE_WORDS : words)}
       </Button>
     );
 

@@ -8,6 +8,7 @@ import {
   combatUseSchemas,
   diceSchemas,
   dmToolSchemas,
+  fallSchemas,
   MAX_DAMAGE_PARTS,
   rollAnswerSchemas,
 } from "#shared/protocol.ts";
@@ -97,6 +98,8 @@ const source = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("selection"), tokenIds: z.array(id).max(HARD.groupSaveTokens), live: z.literal(true).optional(), except: id.optional() }),
   z.strictObject({ kind: z.literal("area"), templateId: id }),
   z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens) }),
+  // A fall card's page holds its one creature (docs/design/design-v1-floors.md phase 4, 4.4).
+  z.strictObject({ kind: z.literal("fall"), fallId: fallSchemas.fallId, tokenIds: z.array(id).max(1) }),
 ]) satisfies z.ZodType<Page["source"]>;
 
 const fill = z.strictObject({

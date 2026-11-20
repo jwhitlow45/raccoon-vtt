@@ -147,8 +147,14 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
   }
   // Only parts that deal damage contribute to the Regeneration note.
   out.types = out.amount > 0 ? types : [];
+  // A creature that takes no damage from a fall lands on its feet (SRD 5.2.1, docs/design/design-v1-floors.md phase 4, 4.4), once its damage is known.
+  const unhurtFall = page.source.kind === "fall" && amounts !== null && out.amount === 0;
   if (result === "fail" && state.conditions !== "off") {
     for (const key of page.outcome.conditions as ConditionKey[]) {
+      if (unhurtFall && key === "prone") {
+        out.skips.push(UNHURT_FALL);
+        continue;
+      }
       const skip = state.conditions === "on" ? null : conditionSkip(key, { defenses, qualifiedOn, effects, hp: hpOf(dice, row.target) }, out.amount);
       if (skip) {
         out.skips.push(skip);
@@ -170,9 +176,13 @@ function incomingDamage(page: Page, state: ReturnType<typeof stateOf>, parts: Pa
   };
 }
 
-/** The bound and the sent plan include the same ask or trap that Apply settles. */
-function closingOf(page: Page): Pick<OpOf<"actor.outcome">, "cast" | "trap"> {
+/** Why a fall's row gains no Prone: it took no damage. */
+export const UNHURT_FALL = "No damage from the fall, so not Prone";
+
+/** The bound and the sent plan include the same ask, trap or fall card that Apply settles. */
+function closingOf(page: Page): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
   if (page.cast) return { cast: page.cast.ask.id };
+  if (page.source.kind === "fall") return { fall: { fallId: page.source.fallId } };
   return page.source.kind === "trap" ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
 }
 
@@ -308,18 +318,19 @@ export function applyWords(outcomes: readonly RowOutcome[], conditions: readonly
   return parts.length > 0 ? `Apply: ${parts.join(", ")}` : NOTHING_TO_APPLY;
 }
 
-/** Apply's words when nothing would change, which a page holding a player's ask reads as Close the ask, and a trap's as SETTLE_WORDS. */
+/** Apply's words when nothing would change, which a page holding a player's ask reads as Close the ask, and a trap's or a fall's as SETTLE_WORDS. */
 export const NOTHING_TO_APPLY = "Nothing to apply";
 
-/** Apply's words on a trap's page where it changes no creature, as when everyone passes against a net: it still settles the springing. */
+/** Apply's words on a trap's page where it changes no creature, as when everyone passes against a net: it still settles the springing, as a fall's page still settles its card. */
 export const SETTLE_WORDS = "Settle: it changes no one";
 
 /**
  * The plan (5.5): each creature once, only those still present, never a
  * skipped row, with its amount, its conditions with ids from `newId`, and
  * each Legendary Resistance used. Null when nothing would change, but for
- * a trap's springing, which still has to be settled: its plan names no
- * creature (docs/design/design-v1-traps.md 4.4).
+ * a trap's springing or a fall card, which still has to be settled: its
+ * plan names no creature (docs/design/design-v1-traps.md 4.4,
+ * docs/design/design-v1-floors.md phase 4, 4.4).
  */
 export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | null, ids: { plan: string; newId: () => string }): OpOf<"actor.outcome"> | null {
   if (amounts && (amounts.length > MAX_DAMAGE_PARTS || amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000)) return null;
@@ -346,7 +357,8 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   // The outcome closes the player's ask it answers in the same op (docs/design/design-v1-player-save-spell.md 3.3).
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design/design-v1-traps.md 4.4).
   const closing = closingOf(page);
-  if (targets.length === 0 && closing.trap === undefined) return null;
+  // A fall card is settled as a springing is, even where no one is hurt (docs/design/design-v1-floors.md phase 4, 4.4).
+  if (targets.length === 0 && closing.trap === undefined && closing.fall === undefined) return null;
   // Saves rolled in secret keep a Legendary Resistance's use line from players (docs/design/design-v1-combat-controls.md 8).
   return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...closing, targets, ...(page.secret ? { quiet: true as const } : {}) };
 }

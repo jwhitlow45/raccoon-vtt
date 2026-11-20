@@ -31,16 +31,19 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
 /**
  * Where a page's rows come from until the roll freezes them (5.1): the
  * tokens a quick tap rolled, the room's selection as it changes (`live`,
- * less the creature acting, `except`), an area's caught creatures, or a
+ * less the creature acting, `except`), an area's caught creatures, a
  * trap's springing (docs/design/design-v1-traps.md 4.4), whose rows are the
- * creatures it hits, frozen when it went off, and which Apply settles.
+ * creatures it hits, frozen when it went off, and which Apply settles, or
+ * a fall card (docs/design/design-v1-floors.md phase 4, 4.4), whose one row
+ * is the creature that fell, and which Apply removes.
  * `tokenIds` of a live source are its last picks (followSelection), kept in
  * the draft, so a reload, which selects nothing, shows the same rows.
  */
 export type Source =
   | { kind: "selection"; tokenIds: string[]; live?: true; except?: string }
   | { kind: "area"; templateId: string }
-  | { kind: "trap"; trapId: string; due: string; tokenIds: string[] };
+  | { kind: "trap"; trapId: string; due: string; tokenIds: string[] }
+  | { kind: "fall"; fallId: string; tokenIds: string[] };
 
 /** The name players read in what the page sends them (Fill.publicName). */
 export function publicName(fill: Pick<Fill, "name" | "publicName">): string {
@@ -55,7 +58,7 @@ function rollName(page: Pick<Page, "fill" | "secret">): string {
 /** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature, or its last picks while nothing is selected. */
 export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
   if (source.kind === "area") return area ? area(source.templateId) : [];
-  if (source.kind === "trap") return source.tokenIds;
+  if (source.kind === "trap" || source.kind === "fall") return source.tokenIds;
   if (!source.live || selected.length === 0) return source.tokenIds;
   return selected.filter((id) => id !== source.except);
 }

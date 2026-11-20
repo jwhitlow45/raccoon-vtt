@@ -1,6 +1,7 @@
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
-import type { AreaTemplate, Character, Trap } from "#shared/model.ts";
+import type { AreaTemplate, Character, Fall, Trap } from "#shared/model.ts";
+import { fallDice } from "#shared/rules/floorLinks.ts";
 import { cantripTier, pcNamedRolls, pcSlots } from "#shared/rules/pcStats.ts";
 import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
@@ -215,5 +216,30 @@ export function trapFill(trap: Pick<Trap, "name" | "found" | "rig">): FillInput 
       lasts: lasts ? { mode: lasts.mode, rounds: lasts.rounds ?? 10, anchor: "own" } : { mode: "none", rounds: 10, anchor: "own" },
       saveEnds: null,
     },
+  };
+}
+
+/** A fall card's page's name, which its line, its title and the log's outcome line read. */
+export const FALL_NAME = "Fall";
+
+/**
+ * A fall card's fill (docs/design/design-v1-floors.md phase 4, 4.4, SRD
+ * 5.2.1): no save, 1d6 Bludgeoning for each full 10 ft dropped (fallDice,
+ * at most 20d6), and Prone, which the plan leaves off a creature the fall
+ * did no damage to (plan.ts rowOutcome). Under 10 ft it deals nothing, and
+ * the card has no Apply.
+ */
+export function fallFill(card: Pick<Fall, "ft">): FillInput {
+  const test: GroupTest = { kind: "none" };
+  const parts: Part[] = [{ formula: `${fallDice(card.ft)}d6`, type: "bludgeoning" }];
+  const damage = partsTextOf(parts);
+  const conditions = ["prone"];
+  return {
+    test,
+    dc: null,
+    spell: false,
+    // Everyone takes a fall with no save, so its Prone is no fail's: the line says it plainly, where fromLine would add "on a fail".
+    fill: { name: FALL_NAME, from: `From ${FALL_NAME}: No save, ${damage}, Prone.`, damageType: "bludgeoning" },
+    outcome: { damage, onPass: "none", conditions, lasts: { mode: "none", rounds: 10, anchor: "own" }, saveEnds: null },
   };
 }

@@ -59,7 +59,7 @@ export function worstCase(
   rows: readonly ActorTarget[],
   conditions: readonly OutcomeCondition[] | ((target: ActorTarget) => readonly OutcomeCondition[]),
   label?: string,
-  more: { types?: readonly DamageType[]; quiet?: boolean; damage?: (target: ActorTarget) => OutcomeDamage | undefined } & Pick<OpOf<"actor.outcome">, "cast" | "trap"> = {},
+  more: { types?: readonly DamageType[]; quiet?: boolean; damage?: (target: ActorTarget) => OutcomeDamage | undefined } & Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> = {},
 ): string | null {
   if (rows.length > LIMITS.outcomeTargets) return "At most 100 creatures in one group save.";
   const of = typeof conditions === "function" ? conditions : () => conditions;
@@ -72,6 +72,7 @@ export function worstCase(
     ...(label ? { label } : {}),
     ...(more.cast ? { cast: more.cast } : {}),
     ...(more.trap ? { trap: more.trap } : {}),
+    ...(more.fall ? { fall: more.fall } : {}),
     targets: planTargets(
       rows.map((target) => {
         const damage = more.damage?.(target);

@@ -37,7 +37,8 @@ export type SaveAuthority = {
 
 function copiedChoices(page: Page): SaveChoices {
   const { id: _id, plan: _plan, apply: _apply, applySays: _says, rollNow: _now, ...fields } = page;
-  const source = page.source.kind === "trap" ? page.source : { kind: "selection" as const, tokenIds: page.rows.map(r => r.tokenId) };
+  // A trap's and a fall's page keep their source, so applying again settles the springing or the card an undo brought back.
+  const source = page.source.kind === "trap" || page.source.kind === "fall" ? page.source : { kind: "selection" as const, tokenIds: page.rows.map(r => r.tokenId) };
   const cast = page.cast ? (({ closing: _closing, ...kept }) => kept)(page.cast) : undefined;
   return structuredClone({
     ...fields, source, phase: page.test.kind === "none" && page.phase === "setup" ? "setup" : "rolled",
