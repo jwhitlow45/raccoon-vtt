@@ -2255,7 +2255,11 @@ export class RoomActor {
     // springing never changes whether an op passes (docs/design/design-v1-traps.md 6.7). The room stored is the op's real result.
     const measured = result.withoutTraps ? result.withoutTraps() : result;
     if (!measured.ok) return measured;
-    const sceneIds = scenesOf(op, this.#staged.state, measured.state, viewer.role);
+    // A DM's op that lands creatures on another floor, by a fall or a trapdoor's drop (docs/design/design-v1-floors.md
+    // phase 4, 4.2, 4.6), meets that floor's limits too, as a DM's climb does (FL2-ASTRA-03). A player's never does, for
+    // the reasons a climb's does not.
+    const landed = viewer.role === "dm" ? landingFloors(this.#staged.state, measured.state, measured.touched) : [];
+    const sceneIds = [...new Set([...scenesOf(op, this.#staged.state, measured.state, viewer.role), ...landed])];
     const before = this.#staged.state;
     // A player's op meets their seats over their own view and the far line, the DM's and the server's the caps over what
     // no seat holds (shared/limits.ts admitLimits). `before` with no scene too, so a show past the room's handout pages
@@ -3865,6 +3869,19 @@ function withFloorWords(op: Op, before: RoomState, refused: Extract<LimitCheck, 
   return beside ? { ...refused, message: floorFullWords(beside.name) } : refused;
 }
 
+/** The floors creatures the op wrote stand on now, where it took them from another. */
+function landingFloors(before: RoomState, after: RoomState, touched: readonly EntityKey[]): string[] {
+  const out = new Set<string>();
+  for (const key of touched) {
+    const parsed = parseKey(key);
+    if (parsed?.kind !== "token") continue;
+    const was = ownEntry(before.tokens, parsed.id);
+    const now = ownEntry(after.tokens, parsed.id);
+    if (was && now && was.sceneId !== now.sceneId) out.add(now.sceneId);
+  }
+  return [...out];
+}
+
 /** The scenes whose per-scene limits an op can push, for admitLimits (design 10.5). */
 function scenesOf(op: Op, before: RoomState, after: RoomState, by: Viewer["role"]): string[] {
   const out = new Set<string>();
@@ -3989,7 +4006,8 @@ function scenesOf(op: Op, before: RoomState, after: RoomState, by: Viewer["role"
           // two floors of one scene and raises no count a floor keeps for itself, so a floor's limits could only answer it
           // from counts the player may not hold, as the far floor's would a climb (token.climb below). The scene's own
           // counts, the size guard and the floor check read what the restore touched and do not start here.
-          if (op.climb && by === "player" && (parsed.kind === "token" || parsed.kind === "template")) continue;
+          // So does one of a fall (phase 4, 4.5), which crosses as a climb does.
+          if ((op.climb || op.falls) && by === "player" && (parsed.kind === "token" || parsed.kind === "template")) continue;
           const restored = entry.value as { sceneId?: string } | null | undefined;
           if (restored?.sceneId) out.add(restored.sceneId);
           const current = readEntity(after, entry.key) as { sceneId?: string } | null;

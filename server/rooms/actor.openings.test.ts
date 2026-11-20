@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { GROUND, UPPER, thornToken, tower, withOpening } from "#shared/floorLinksTestutil.ts";
+import { GROUND, UPPER, thornToken, tower, withOpening, withTrapdoor } from "#shared/floorLinksTestutil.ts";
 import { holderTileKey } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { openTower, pc, subsOf, withAll } from "#shared/openingsTestutil.ts";
 import type { Op } from "#shared/protocol.ts";
 import { decodeTile, getBit } from "#shared/rules/fog.ts";
-import { token } from "#shared/testutil.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { token, trap } from "#shared/testutil.ts";
 import { scopeActor, type ScopeClient } from "./undoScopeTesting.ts";
 
 /*
@@ -121,5 +122,57 @@ describe("the explore step through the actor (7.2, D-261119-100)", () => {
     const tile = now.exploredBy[holderTileKey(GROUND, "p1", 0, 0)];
     const bits = tile ? decodeTile(tile.bits) : null;
     assert.ok(bits && subsOf().some(([sx, sy]) => getBit(bits, sx, sy)), "her own layer below holds the hole her scout above sees");
+  });
+});
+
+describe("the floors a fall lands on meet their limits as a climb's do (FL2-ASTRA-03, FL2-SOL-05)", () => {
+  const lit = { bright: 20, dim: 20 };
+
+  test("a DM's walk onto the hole that would add a 21st lit creature below is refused by the floor below's cap, and the same walk by Ana passes", async (t) => {
+    for (const who of ["dm", "player"] as const) {
+      const state = holed({}, { light: lit });
+      for (let k = 0; k < LIMITS.litTokenLightsPerScene; k++) state.tokens[`g${k}`] = token(`g${k}`, { sceneId: GROUND, x: k % 10, y: 12 + Math.floor(k / 10), light: lit });
+      const r = await room(t, state);
+      const ev = await (who === "dm" ? r.dm : r.ana).send(move("thorn", 6, 6));
+      assert.deepEqual(ev.rejects?.map((x) => x.code), who === "dm" ? ["quota"] : undefined, who);
+      assert.equal(r.now().tokens.thorn!.sceneId, who === "dm" ? UPPER : GROUND, who);
+    }
+  });
+
+  test("a DM's springing of a trapdoor that would drop a 21st lit creature below is refused by the floor below's cap, and one short of it drops", async (t) => {
+    for (const lamps of [LIMITS.litTokenLightsPerScene, LIMITS.litTokenLightsPerScene - 1]) {
+      const state = withTrapdoor(holed({}, { x: 10, y: 10, light: lit }));
+      for (let k = 0; k < lamps; k++) state.tokens[`g${k}`] = token(`g${k}`, { sceneId: GROUND, x: k % 10, y: 14 + Math.floor(k / 10), light: lit });
+      const r = await room(t, state);
+      const ev = await r.dm.send({ t: "trap.spring", trapId: "td1", tokenIds: ["thorn"] });
+      const full = lamps === LIMITS.litTokenLightsPerScene;
+      assert.deepEqual(ev.rejects?.map((x) => x.code), full ? ["quota"] : undefined, `${lamps} lit below`);
+      assert.equal(r.now().tokens.thorn!.sceneId, full ? UPPER : GROUND, `${lamps} lit below`);
+    }
+  });
+
+  /** Ana's fall, Undo and Redo, each answer's refusal or none, and Thorn's floor after each. */
+  async function fallUndoRedo(t: TestContext, state: RoomState): Promise<unknown[]> {
+    const r = await room(t, state);
+    const out: unknown[] = [];
+    const answer = (ev: { rejects?: { code: string; message: string }[] }) => out.push([ev.rejects?.[0] ? [ev.rejects[0].code, ev.rejects[0].message] : null, r.now().tokens.thorn!.sceneId]);
+    answer(await r.ana.send(move("thorn", 6, 6)));
+    answer(await restore(r.ana, "undo"));
+    answer(await restore(r.ana, "redo"));
+    return out;
+  }
+
+  /** The holed tower with `traps` hidden plates on a floor, as many as a room made before traps met their cap can hold. */
+  function plated(sceneId: string, traps: number): RoomState {
+    const state = holed();
+    state.traps = Object.fromEntries(Array.from({ length: traps }, (_, k) => [`plate${k}`, trap(`plate${k}`, { sceneId, name: "Plate", zone: { cells: [{ x: 10 + (k % 10), y: 12 + Math.floor(k / 10), w: 1, h: 1 }] }, rig: { ...trap("x").rig!, stops: false } })]));
+    return state;
+  }
+
+  test("Ana's fall, its Undo and its Redo answer alike whatever the floor below hides past its cap", async (t) => {
+    const plain = await fallUndoRedo(t, holed());
+    assert.deepEqual(plain, [[null, GROUND], [null, UPPER], [null, GROUND]], "the fall, the undo and the redo all apply");
+    assert.deepEqual(await fallUndoRedo(t, plated(GROUND, LIMITS.trapsPerScene + 1)), plain, "the floor below past its cap");
+    assert.deepEqual(await fallUndoRedo(t, plated(GROUND, LIMITS.trapsPerScene)), plain, "at its cap");
   });
 });
