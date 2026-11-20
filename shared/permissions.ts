@@ -18,7 +18,7 @@ import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
-import { deleteSet, heldFloors, holdsRecordOn, onPlayersScene, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
+import { deleteSet, heldFloors, holdsRecordOn, onPlayersScene, playersSee, startFloor, unhiddenPartyMember } from "./rules/floors.ts";
 import { LINK_WORDS, isHole, linksOn, rectsOverlap, spaceOn, standsOn, throughOpening } from "./rules/floorLinks.ts";
 import {
   LEDGE_IN_THE_WAY,
@@ -1828,9 +1828,10 @@ export function waitingAsks(state: Pick<RoomState, "casts" | "tokens" | "charact
  */
 /**
  * A player's ask for saves (docs/design/design-v1-player-save-spell.md 5.3):
- * the caster on a floor they hold, and the cast, its area and its targets
- * on the caster's floor (docs/design/design-v1-floors.md 8.3), since a spell
- * never reaches across floors.
+ * the caster on a floor they hold, and the cast and its area on the
+ * caster's floor (docs/design/design-v1-floors.md 8.3). A target stands
+ * there too, or on a floor an opening on the caster's floor leads to
+ * (phase 4, 9.2, D-261119-111): `openingTo` says which.
  */
 function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>): Decision {
   const input = op.cast;
@@ -1846,7 +1847,7 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
   if (input.targets !== undefined) {
     for (const id of input.targets) {
       const target = c.visibleToken(id);
-      if (!target || target.sceneId !== caster.sceneId) return GONE;
+      if (!target || (target.sceneId !== caster.sceneId && !openingTo(c, caster.sceneId, target.sceneId))) return GONE;
     }
     if (new Set(input.targets).size !== input.targets.length) return refuse("invalid", "a target is named twice");
   }
@@ -1858,6 +1859,22 @@ function castAskCheck(c: Check, op: OpOf<"cast.ask">, held: ReadonlySet<string>)
   // Only the asks the player holds count, as their block counts them, since one left on a floor they no longer hold is not theirs to withdraw.
   if (waitingAsks(c.state, c.actor).filter((ask) => holdsRecordOn(c.state, held, ask)).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
   return OK;
+}
+
+/**
+ * Whether a cast on floor `from` may name a target on floor `to` across an
+ * opening (docs/design/design-v1-floors.md phase 4, 9.2, D-261119-111): an
+ * opening's end on `from` that the requester's copy holds, leading to `to`,
+ * where players see both floors (rules/floors.ts playersSee), the gate a
+ * device's reach reads (client/features/areas/through.ts). It reads no
+ * geometry: whether the area really reaches the target is the DM's call,
+ * and walls or ground the requester was not sent never answer through it.
+ * An end they were not sent answers as no opening, so the answer never
+ * shows one.
+ */
+function openingTo(c: Check, from: string, to: string): boolean {
+  if (!playersSee(c.state, from) || !playersSee(c.state, to)) return false;
+  return linksOn(c.state, from).some((end) => end.kind === "opening" && end.hidden !== true && end.to === to && c.visible(keys.floorLink(end.id)));
 }
 
 /** A player's withdrawal, of an ask whose caster they own now. The DM's resolve and dismissal are the DM's alone. */
