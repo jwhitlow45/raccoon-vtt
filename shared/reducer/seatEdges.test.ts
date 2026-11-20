@@ -82,15 +82,21 @@ describe("a goblin players cannot see lands beside her seat inside the scene, at
     assert.ok(Math.max(Math.abs(after.tokens.gob!.x - 11), Math.abs(after.tokens.gob!.y - 4)) >= 4, `four squares or more from 11, 4: ${at(after, "gob")}`);
   });
 
-  test("squares, by a rise 10 ft high and a pit 10 ft deep beside the seat: it lands at the height a drag takes it to there, never inside the ground", () => {
-    for (const rise of [10, -10]) {
+  test("squares, by a rise or a pit on 11, 0 beside the seat: it lands at the height a drag takes it to there, never inside the ground, and never across a ledge", () => {
+    // Its walk ends on 12, 3, and 11, 1 is the nearest spot in her reach off the warhorse. Where walls block, the rise's or the
+    // pit's edge is a ledge in the way, so it goes round to 9, 3. Where nothing blocks, it stands on a 5 ft rise's top or a 5 ft
+    // pit's floor, and 10 ft up or down is out of her reach, so it takes 10, 1.
+    const landing: Record<string, [number, number, number]> = { "10 true": [9, 3, 0], "-10 true": [9, 3, 0], "5 true": [9, 3, 0], "-5 true": [9, 3, 0], "10 false": [10, 1, 0], "-10 false": [10, 1, 0], "5 false": [11, 1, 5], "-5 false": [11, 1, -5] };
+    for (const rise of [10, -10, 5, -5]) {
       for (const block of [true, false]) {
         const where = `${rise} ft, ${block ? "walls block" : "nothing blocks"}`;
         const s = squareRide(20, 10, "large", [2, 2], [3, 3], [4, 3], block);
         heights(s, { x: 11, y: 0, w: 2, h: 2 }, rise);
         const after = twinned(s, { t: "token.move", tokenId: "horse", x: 10, y: 2, seat: { tokenId: "bree", x: 10, y: 2 } }, where);
-        besideHer(SQUARES, after, where);
-        assert.equal(after.tokens.gob!.elevation, footprintGround(after.buildChunks, after.tokens.gob!), `${where}: on its ground, at ${at(after, "gob")}`);
+        assert.ok(besideHer(SQUARES, after, where), `${where}: still dragged`);
+        const gob = after.tokens.gob!;
+        assert.equal(gob.elevation, footprintGround(after.buildChunks, gob), `${where}: on its ground, at ${at(after, "gob")}`);
+        assert.deepEqual([gob.x, gob.y, gob.elevation], landing[`${rise} ${block}`], where);
       }
     }
   });
