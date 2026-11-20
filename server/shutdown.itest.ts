@@ -16,7 +16,7 @@ import { testConfig } from "./auth/testing.ts";
 import { sha256 } from "./auth/tokens.ts";
 import { applySchema } from "./db.ts";
 import { randomIp, Socket, TestClient } from "./rooms/testing.ts";
-import { closeServer } from "./shutdown.ts";
+import { closeServer, shutDown } from "./shutdown.ts";
 
 /**
  * A deploy's shutdown with sockets open (design 15.4, LP5-OPS-3): every
@@ -297,6 +297,49 @@ test("a stop whose sockets' last-sight writes fail saves both rooms, then fails 
     for (const roomId of ids) assert.equal(await snapshotSeq(roomId), await lastSeq(roomId), "each room saved at its last op");
   } finally {
     for (const socket of sockets) socket.ws.terminate();
+  }
+});
+
+test("a stop that begins while a periodic snapshot is being written leaves the room's snapshot at its last commit and exits 0 (LP44-OPS-1)", async () => {
+  // The room's first snapshot write is held until the stop has begun, so the stop meets it in flight, an older commit's.
+  let roomId = "";
+  let held: { seq: number; release(): void } | null = null;
+  let heldStarted!: () => void;
+  const started = new Promise<void>((resolve) => (heldStarted = resolve));
+  const pool = poolWith((text, values) => {
+    if (held || !snapshotOf(roomId, text, values)) return null;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    held = { seq: Number(values?.[1]), release };
+    heldStarted();
+    return gate.then(() => pool.query(text, values)) as Promise<never>;
+  });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { actor: { snapshotOps: 1 } } });
+  await own.listen({ port: 0, host: "127.0.0.1" });
+  const dm = client(() => own);
+  roomId = (await dm.createRoom("Periodic")).roomId;
+  const socket = await connect(roomId, dm, own);
+  try {
+    await socket.apply({ t: "log.chat", text: "The first change, whose snapshot is held." });
+    await started;
+    await socket.apply({ t: "log.chat", text: "A change after it." });
+    const lastSeq = (await check.query<{ seq: number }>("select max(seq)::int as seq from room_ops where room_id = $1", [roomId])).rows[0]!.seq;
+    assert.ok(held!.seq < lastSeq, `the write in flight holds seq ${held!.seq}, an older commit than ${lastSeq}`);
+
+    const actor = await own.rooms.acquire(roomId);
+    const codes: number[] = [];
+    const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
+    // Released only once the room is stopping, so its stop meets the write still in flight.
+    for (let i = 0; i < 500 && !actor.closed; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(actor.closed, "the room is stopping");
+    await new Promise((r) => setTimeout(r, 50));
+    held!.release();
+    await stopping;
+    assert.deepEqual(codes, [0], "the stop exits 0");
+    const stored = (await check.query<{ seq: number }>("select seq::int from room_snapshots where room_id = $1", [roomId])).rows[0]?.seq;
+    assert.equal(stored, lastSeq, "the room's snapshot is at its last commit");
+  } finally {
+    socket.ws.terminate();
   }
 });
 

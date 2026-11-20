@@ -1214,7 +1214,12 @@ export class RoomActor {
       if (this.#inFlightDone) await this.#inFlightDone;
       // A deletion statement already sent finishes before the room leaves memory, so a reload never overlaps it.
       if (this.#stepRunning) await this.#stepRunning;
-      if (opts.snapshot) await this.#writeSnapshot();
+      if (opts.snapshot) {
+        // A periodic snapshot already being written holds an older commit, which a stop must not leave as the room's last:
+        // once it ends, the newest is written if the stored one is still behind (LP44-OPS-1).
+        if (this.#snapshotting) await this.#snapshotting;
+        await this.#writeSnapshot();
+      }
     })();
     return this.#closing;
   }
