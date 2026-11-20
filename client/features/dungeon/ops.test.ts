@@ -353,18 +353,24 @@ test("DG3: Make gives every free wall a fresh wall id, and a Poisoned Needle fol
   const scene = builderScene({ id: SCENE_PLACEHOLDER, name: "Crypt", w: plan.w, h: plan.h, gridShape: "hexRows" });
   const landed = landDungeon(plan, scene, "5-10", null);
   assert.ok(landed.ok);
-  let n = 0;
-  const made = withIds(landed.ops, () => `fresh-${++n}`);
-  const walls = made.ops.flatMap((op) => (op.t === "build.walls" ? (op.put ?? []) : []));
-  assert.ok(walls.every((w) => /^[A-Za-z0-9_-]{12}$/.test(w.id) && !w.id.startsWith("dgw")));
-  assert.equal(new Set(walls.map((w) => w.id)).size, walls.length);
-  const trap = made.ops.find((op) => op.t === "trap.create" && "door" in op.trap.zone && "id" in op.trap.zone.door);
-  assert.ok(trap && trap.t === "trap.create");
-  const ref = trap.trap.zone as { door: { cx: number; cy: number; id: string } };
-  assert.ok(walls.some((w) => w.id === ref.door.id), "the needle names a wall Make put");
-  const stored = landAll(scratchRoom(), made.ops);
-  assert.ok(stored.ok, stored.ok ? "" : stored.why);
-  assert.ok(stored.room.buildChunks[`${made.sceneId}:${ref.door.cx},${ref.door.cy}`]?.walls?.some((w) => w.id === ref.door.id && w.f.kind === "door"), "the leaf stands in the chunk the trap names");
+  const placeholders = new Set(plan.walls!.map((_, i) => wallPlaceholder(i)));
+  // A fresh id is random and can start as the placeholders do, so it is told from them by the ids themselves. The second
+  // draw starts every fresh id that way.
+  let k = 0;
+  for (const newWall of [undefined, () => `dgw_${String(++k).padStart(8, "0")}`]) {
+    let n = 0;
+    const made = withIds(landed.ops, () => `fresh-${++n}`, undefined, newWall);
+    const walls = made.ops.flatMap((op) => (op.t === "build.walls" ? (op.put ?? []) : []));
+    assert.ok(walls.every((w) => /^[A-Za-z0-9_-]{12}$/.test(w.id) && !placeholders.has(w.id)), "every wall's id is fresh");
+    assert.equal(new Set(walls.map((w) => w.id)).size, walls.length);
+    const trap = made.ops.find((op) => op.t === "trap.create" && "door" in op.trap.zone && "id" in op.trap.zone.door);
+    assert.ok(trap && trap.t === "trap.create");
+    const ref = trap.trap.zone as { door: { cx: number; cy: number; id: string } };
+    assert.ok(walls.some((w) => w.id === ref.door.id), "the needle names a wall Make put");
+    const stored = landAll(scratchRoom(), made.ops);
+    assert.ok(stored.ok, stored.ok ? "" : stored.why);
+    assert.ok(stored.room.buildChunks[`${made.sceneId}:${ref.door.cx},${ref.door.cy}`]?.walls?.some((w) => w.id === ref.door.id && w.f.kind === "door"), "the leaf stands in the chunk the trap names");
+  }
 });
 
 test("DG3: a hex wing's join goes first, the wall it stood as removed beside its leaf, and its ids stay those of the scene", () => {
