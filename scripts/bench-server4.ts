@@ -743,7 +743,9 @@ async function runFar(rows: Row[]): Promise<void> {
  * DM moves the party two squares on across the holes, then the goblin two
  * squares on below, each move one batch, timed to its last frame. The same
  * room without the openings is the measure: each batch within 1.3 times
- * its time there, and the first snapshots, sight joined from nothing,
+ * its time there or 2 ms more than it, whichever is larger, since a batch
+ * that takes a fraction of a millisecond without them cannot hold a ratio
+ * (D-261120-005), and the first snapshots, sight joined from nothing,
  * under the 250 ms gate. Every table sits down fresh, the first round
  * untimed.
  */
@@ -825,6 +827,11 @@ export async function runOpeningsBench(): Promise<OpeningsBench> {
   return out;
 }
 
+/** Row OPEN-1's limit on a batch with the openings, from its median without them (D-261120-005): 1.30 times it or 2 ms more, whichever is larger. */
+export function openingsBatchLimit(without: number): number {
+  return Math.max(without * 1.3, without + 2);
+}
+
 export function formatOpeningsBench(bench: OpeningsBench, onServer: boolean, revision?: string): string {
   const factor = onServer ? 1 : 1.5;
   const f = (ms: number) => ms.toFixed(1);
@@ -832,7 +839,9 @@ export function formatOpeningsBench(bench: OpeningsBench, onServer: boolean, rev
   const both = (t: readonly number[]) => `${f(p50(t))} / ${f(Math.max(...t))}`;
   const of = (run: OpeningsRun, move: "party" | "carrier", part: keyof Timing) => run[move].map((t) => t[part]);
   const ratio = (move: "party" | "carrier") => p50(of(bench.with, move, "total")) / p50(of(bench.without, move, "total"));
-  const batches = ratio("party") <= 1.3 && ratio("carrier") <= 1.3;
+  const batchLimit = (move: "party" | "carrier") => openingsBatchLimit(p50(of(bench.without, move, "total")));
+  const fits = (move: "party" | "carrier") => p50(of(bench.with, move, "total")) <= batchLimit(move);
+  const batches = fits("party") && fits("carrier");
   const limit = 250 / factor;
   const snapshots = p50(bench.with.first) <= limit && p50(bench.with.later) <= limit;
   const lines = [
@@ -846,7 +855,7 @@ export function formatOpeningsBench(bench: OpeningsBench, onServer: boolean, rev
       return `${k === "with" ? "16 openings of 8 by 8" : "no openings"} | ${both(of(r, "party", "total"))} | ${f(p50(of(r, "party", "fanout")))} | ${f(p50(of(r, "party", "read")))} | ${both(of(r, "carrier", "total"))} | ${f(p50(of(r, "carrier", "read")))} | ${both(r.first)} | ${both(r.later)}`;
     }),
     "",
-    `Each batch with the openings over the same room without them, at the median: the party's move ${ratio("party").toFixed(2)}, the goblin's ${ratio("carrier").toFixed(2)}, limit 1.30: ${batches ? "yes" : "NO"}.`,
+    `Each batch with the openings against the same room without them, at the median: the party's move ${ratio("party").toFixed(2)} times, limit ${f(batchLimit("party"))} ms, the goblin's ${ratio("carrier").toFixed(2)} times, limit ${f(batchLimit("carrier"))} ms (1.30 times or 2 ms more, whichever is larger): ${batches ? "yes" : "NO"}.`,
     `First snapshots with the openings, sight joined from nothing, at the median: the DM's ${f(p50(bench.with.first))} ms, a player's ${f(p50(bench.with.later))} ms, limit ${f(limit)} ms: ${snapshots ? "yes" : "NO"}.`,
     "",
     `Moves: ${bench.with.party.length} of each a room kind, ${OPEN_STEPS} a table. Every table loaded fresh, the first ${OPEN_WARM} of ${OPEN_ROUNDS} rounds untimed.`,

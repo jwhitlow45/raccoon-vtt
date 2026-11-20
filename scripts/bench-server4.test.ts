@@ -71,17 +71,25 @@ test("the timing hook times a joined answer's tiles once, and leaves each floor'
   assert.equal(visionRules.sightFor, before.sightFor);
 });
 
-test("the openings row's report holds each batch to 1.3 times its time without openings and the first snapshots to the gate", async () => {
-  const { formatOpeningsBench } = await import("./bench-server4.ts");
+test("the openings row's report holds each batch to 1.3 times its time without openings or 2 ms more, and the first snapshots to the gate", async () => {
+  const { formatOpeningsBench, openingsBatchLimit } = await import("./bench-server4.ts");
   const moves = (ms: number) => Array.from({ length: 3 }, () => ({ total: ms, fanout: ms / 2, drawn: 0, read: ms / 4 }));
   const run = (party: number, carrier: number, first: number) => ({ party: moves(party), carrier: moves(carrier), first: [first], later: [first / 2] });
+  // The larger of the two (D-261120-005): the ratio over a slow batch, 2 ms over a fast one, equal where the batch takes 6.67 ms.
+  assert.equal(openingsBatchLimit(10), 13);
+  assert.equal(openingsBatchLimit(0.2), 2.2);
+  assert.equal(openingsBatchLimit(20 / 3), 20 / 3 + 2);
   const fits = formatOpeningsBench({ without: run(10, 2, 50), with: run(13, 2.6, 160) }, false, REVISION);
   assert.ok(fits.includes(`Revision: ${REVISION}`));
-  assert.ok(fits.includes("the party's move 1.30, the goblin's 1.30, limit 1.30: yes"));
+  assert.ok(fits.includes("the party's move 1.30 times, limit 13.0 ms, the goblin's 1.30 times, limit 4.0 ms (1.30 times or 2 ms more, whichever is larger): yes"));
   assert.ok(fits.includes("the DM's 160.0 ms, a player's 80.0 ms, limit 166.7 ms: yes"));
   assert.ok(fits.includes("16 openings of 8 by 8 | 13.0 / 13.0 | 6.5 | 3.3 | 2.6 / 2.6 | 0.7 | 160.0 / 160.0 | 80.0 / 80.0"));
-  const over = formatOpeningsBench({ without: run(10, 2, 50), with: run(10, 2.7, 170) }, false);
-  assert.ok(over.includes("the goblin's 1.35, limit 1.30: NO"), "either move past the ratio fails the row");
+  // The goblin's move at ten times its fraction of a millisecond still fits within 2 ms more.
+  assert.ok(formatOpeningsBench({ without: run(10, 0.2, 50), with: run(10, 2.1, 160) }, false).includes("the goblin's 10.50 times, limit 2.2 ms (1.30 times or 2 ms more, whichever is larger): yes"));
+  const over = formatOpeningsBench({ without: run(10, 0.2, 50), with: run(13.1, 2.3, 170) }, false);
+  assert.ok(over.includes("the party's move 1.31 times, limit 13.0 ms, the goblin's 11.50 times, limit 2.2 ms (1.30 times or 2 ms more, whichever is larger): NO"), "either move past its limit fails the row");
+  assert.ok(formatOpeningsBench({ without: run(10, 0.2, 50), with: run(13.1, 2, 160) }, false).includes(": NO."), "the party's move alone past its limit fails the row");
+  assert.ok(formatOpeningsBench({ without: run(10, 0.2, 50), with: run(13, 2.3, 160) }, false).includes(": NO."), "the goblin's move alone past its limit fails the row");
   assert.ok(over.includes("limit 166.7 ms: NO"));
   assert.ok(formatOpeningsBench({ without: run(10, 2, 50), with: run(10, 2, 170) }, true).includes("limit 250.0 ms: yes"), "the server box's gate is the budget itself");
 });
