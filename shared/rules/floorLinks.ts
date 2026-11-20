@@ -1,6 +1,7 @@
 import { LIMITS } from "../limits.ts";
 import type { CellRect, FloorLink, FloorLinkId, RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
-import { FLOOR_HEIGHT } from "../protocol.ts";
+import { FLOOR_HEIGHT, STAIRS_SIDE_WORDS } from "../protocol.ts";
+import { OPENING_SIDE } from "../model.ts";
 import { parseKey, writeEntity, type EntityKey } from "../keys.ts";
 import { ownEntry } from "../records.ts";
 import { floorLinkRules, floorsOf, sameScene } from "./floors.ts";
@@ -28,41 +29,76 @@ import { RAISED, sceneWalls } from "./walls.ts";
 export type LinkEnd = Pick<FloorLink, "id" | "rev" | "sceneId" | "rect" | "kind" | "locked" | "grid"> & { to?: SceneId; dir?: "up" | "down" };
 
 /** What `floorLink.put` names: the two ends' ids, the two floors, the squares and the kind. */
-export type LinkDraft = { id: FloorLinkId; pairId: FloorLinkId; sceneId: SceneId; to: SceneId; rect: CellRect; kind: FloorLink["kind"] };
+export type LinkDraft = {
+  id: FloorLinkId;
+  pairId: FloorLinkId;
+  sceneId: SceneId;
+  to: SceneId;
+  rect: CellRect;
+  kind: FloorLink["kind"];
+  /** The far end's own squares, where stairs or a ladder on squares lie on other squares of the far floor (phase 4, 8.2). */
+  pairRect?: CellRect;
+};
 
 /** Whether a creature on an end may take it (6.1): it fits, it fits only squeezed, or it is too big. */
 export type Stand = "on" | "squeeze" | "tooBig";
 
-/** "stairs" or "ladder", as the words name it. */
+/** "stairs", "ladder" or "opening", as the words name it. */
 type Kind = FloorLink["kind"];
 
-const them = (kind: Kind) => (kind === "stairs" ? "them" : "it");
+/**
+ * How the words name each kind (phase 4, 3, D-261119-093): exhaustive, so a
+ * new kind cannot fall into another's words. `bare` stands alone after a
+ * verb ("place stairs"), `the` after a preposition ("block the opening"),
+ * `this` names the one a creature stands on, and `them` takes its place.
+ */
+export const KIND_WORDS: Record<Kind, { bare: string; the: string; this: string; them: "them" | "it"; joins: string }> = {
+  stairs: { bare: "stairs", the: "the stairs", this: "these stairs", them: "them", joins: "Stairs join" },
+  ladder: { bare: "a ladder", the: "the ladder", this: "this ladder", them: "it", joins: "A ladder joins" },
+  opening: { bare: "an opening", the: "the opening", this: "this opening", them: "it", joins: "An opening joins" },
+};
 
-/** The words of every refusal of stairs and ladders (docs/design/design-v1-floors.md 6.3, 7.3, 8). */
+const them = (kind: Kind) => KIND_WORDS[kind].them;
+
+/** The words of every refusal of stairs, ladders and openings (docs/design/design-v1-floors.md 6.3, 7.3, 8, phase 4 3 and 5). */
 export const LINK_WORDS = {
-  /** An end gone, fogged, on a floor not held or not under the creature: one code, one text (4). */
+  /** An end gone, fogged, hidden, on a floor not held or not under the creature: one code, one text (4). */
   noStairs: "There are no stairs here.",
-  carried: (name: string, kind: Kind) => `${name} is carried. Its holder takes the ${kind === "stairs" ? "stairs" : "ladder"}.`,
+  carried: (name: string, kind: Kind) => (kind === "opening" ? `${name} is carried. Its holder goes through the opening.` : `${name} is carried. Its holder takes ${KIND_WORDS[kind].the}.`),
   locked: "It's locked.",
-  tooBigSqueeze: (kind: Kind) => `Too big for ${kind === "stairs" ? "these stairs" : "this ladder"}. Squeeze to fit.`,
-  tooBig: (kind: Kind) => `Too big for ${kind === "stairs" ? "these stairs" : "this ladder"}.`,
+  tooBigSqueeze: (kind: Kind) => `Too big for ${KIND_WORDS[kind].this}. Squeeze to fit.`,
+  tooBig: (kind: Kind) => `Too big for ${KIND_WORDS[kind].this}.`,
+  /** A creature on the ground under or over an opening: only a flier goes through (phase 4, 5). */
+  onlyInAir: "Only a creature in the air goes through an opening.",
   /** The reason a climb's undo or redo is refused, after the label the actor puts before it. */
-  changed: (kind: Kind) => (kind === "stairs" ? "the stairs changed" : "the ladder changed"),
+  changed: (kind: Kind) => `${KIND_WORDS[kind].the} changed`,
   // The builder's refusals of a draft (7.3).
   wall: (floor: string) => `A wall crosses those squares on ${floor}.`,
   twoHeights: (floor: string) => `Those squares aren't one height on ${floor}.`,
   pit: (floor: string) => `A pit trap lies under those squares on ${floor}.`,
   pastEdge: (floor: string) => `${floor} ends before those squares.`,
-  overEnd: (kind: Kind, floor: string) => `Those squares already have ${kind === "stairs" ? "stairs" : "a ladder"} to ${floor}.`,
+  overEnd: (kind: Kind, floor: string) => `Those squares already have ${KIND_WORDS[kind].bare} to ${floor}.`,
   tooMany: (scene: string) => `${scene} has ${LIMITS.floorLinksPerScene} stairs and ladders, the most a scene can hold.`,
   notNext: "Stairs join a floor and the floor just above or below it.",
+  /** notNext for any kind (phase 4, 3): "An opening joins a floor and the floor just above or below it." */
+  notNextFor: (kind: Kind) => `${KIND_WORDS[kind].joins} a floor and the floor just above or below it.`,
+  /** Stairs and ladders past their side (phase 4, 3), the put schema's words. Openings keep to OPENING_SIDE, which the schema holds. */
+  stairsSide: STAIRS_SIDE_WORDS,
+  openingSide: `Openings are at most ${OPENING_SIDE} squares a side.`,
+  /** An opening's lock and hiding (phase 4, 3). */
+  openingLocked: "Openings can't be locked.",
+  openingHidden: "Openings can't be hidden. A pit trap can open to the floor below.",
+  /** A change of kind to or from an opening (phase 4, 3): "Remove it and place an opening." */
+  kindChange: (from: Kind, to: Kind) => `Remove ${them(from)} and place ${KIND_WORDS[to].bare}.`,
+  /** Ends on their own squares (phase 4, 8.2): stairs and ladders on squares, at one size. */
+  oneSize: (kind: Kind) => `Both ends of ${KIND_WORDS[kind].the} are one size.`,
+  sameSquares: (kind: Kind) => (kind === "opening" ? "An opening lies on the same squares of both floors." : `On hexes both ends of ${KIND_WORDS[kind].the} lie on the same hexes.`),
   // A later edit floorProblem refuses (3), each ending in one of STAIRS_ENDINGS, which isStairsRefusal reads.
-  changeGround: (kind: Kind, floor: string) => `That would change the ground under the ${kind === "stairs" ? "stairs" : "ladder"} to ${floor}. ${removeFirst(kind)}`,
-  block: (kind: Kind, floor: string) => `That would block the ${kind === "stairs" ? "stairs" : "ladder"} to ${floor}. ${removeFirst(kind)}`,
-  between: (kind: Kind, lower: string, upper: string) =>
-    `${kind === "stairs" ? "Stairs join" : "A ladder joins"} ${lower} and ${upper}. ${kind === "stairs" ? "Remove them" : "Remove it"} before putting a floor between.`,
-  /** A pit trap's create or update over an end, in the trap pane's words (3). */
-  pitUnder: (kind: Kind) => `A pit can't open under ${kind === "stairs" ? "stairs" : "a ladder"}. ${removeFirst(kind)}`,
+  changeGround: (kind: Kind, floor: string) => `That would change the ground under ${KIND_WORDS[kind].the} to ${floor}. ${removeFirst(kind)}`,
+  block: (kind: Kind, floor: string) => `That would block ${KIND_WORDS[kind].the} to ${floor}. ${removeFirst(kind)}`,
+  between: (kind: Kind, lower: string, upper: string) => `${KIND_WORDS[kind].joins} ${lower} and ${upper}. Remove ${them(kind)} before putting a floor between.`,
+  /** A pit trap's create or update over an end, in the trap pane's words (3). A trapdoor reads the same (phase 4, 4.6). */
+  pitUnder: (kind: Kind) => `A pit can't open under ${kind === "stairs" ? "stairs" : KIND_WORDS[kind].bare}. ${removeFirst(kind)}`,
 } as const;
 
 function removeFirst(kind: Kind): string {
@@ -70,8 +106,8 @@ function removeFirst(kind: Kind): string {
 }
 
 /** The sentence a restore's stairs refusal reads in place of "Remove them first." (8): true whoever placed them. */
-function placerCan(kind: Kind): string {
-  return kind === "stairs" ? "The DM who placed them can remove them." : "The DM who placed it can remove it.";
+function placerCan(kind: "them" | "it"): string {
+  return kind === "them" ? "The DM who placed them can remove them." : "The DM who placed it can remove it.";
 }
 
 const STAIRS_ENDINGS = [/ Remove them first\.$/, / Remove it first\.$/, / Remove them before putting a floor between\.$/, / Remove it before putting a floor between\.$/];
@@ -90,28 +126,33 @@ export function isStairsRefusal(message: string): boolean {
 export function restoreStairsWords(message: string): string {
   for (const ending of STAIRS_ENDINGS) {
     if (!ending.test(message)) continue;
-    const kind: Kind = /Remove them/.test(message) ? "stairs" : "ladder";
-    return `${message.replace(ending, "")} ${placerCan(kind)}`;
+    return `${message.replace(ending, "")} ${placerCan(/Remove them/.test(message) ? "them" : "it")}`;
   }
   return message;
 }
 
 /**
  * The label of a climb's undo step (6.3), without "Undo": "moving Thorn up
- * the stairs". The undo labels read it for the step and its refusals.
+ * the stairs", and a flight's through an opening (phase 4, 5): "flying
+ * Thorn down through the opening". The undo labels read it for the step
+ * and its refusals.
  */
 export function climbLabel(name: string, dir: "up" | "down", kind: Kind): string {
-  return `moving ${name} ${dir} the ${kind === "stairs" ? "stairs" : "ladder"}`;
+  return kind === "opening" ? `flying ${name} ${dir} through the opening` : `moving ${name} ${dir} ${KIND_WORDS[kind].the}`;
 }
 
-/** The labels of the builder's undo steps (7.2), without "Undo": "placing stairs to Upper floor". */
+/** The labels of the builder's undo steps (7.2, phase 4 8.2), without "Undo": "placing stairs to Upper floor". */
 export const LINK_LABELS = {
-  placed: (kind: Kind, floor: string) => `placing ${kind === "stairs" ? "stairs" : "a ladder"} to ${floor}`,
-  removed: (kind: Kind, floor: string) => `removing ${kind === "stairs" ? "stairs" : "a ladder"} to ${floor}`,
-  lock: (kind: Kind, locked: boolean) => `${locked ? "locking" : "unlocking"} the ${kind === "stairs" ? "stairs" : "ladder"}`,
+  placed: (kind: Kind, floor: string) => `placing ${KIND_WORDS[kind].bare} to ${floor}`,
+  removed: (kind: Kind, floor: string) => `removing ${KIND_WORDS[kind].bare} to ${floor}`,
+  lock: (kind: Kind, locked: boolean) => `${locked ? "locking" : "unlocking"} ${KIND_WORDS[kind].the}`,
+  /** Only stairs and ladders change kind: an opening is removed and placed again (phase 4, 3). */
   kind: (from: Kind) => (from === "stairs" ? "changing stairs to a ladder" : "changing a ladder to stairs"),
+  hide: (kind: Kind, hidden: boolean) => `${hidden ? "hiding" : "showing"} ${KIND_WORDS[kind].the}`,
+  moved: (kind: Kind, floor: string) => `moving ${KIND_WORDS[kind].bare} to ${floor}`,
+  resized: (kind: Kind, floor: string) => `resizing ${KIND_WORDS[kind].bare} to ${floor}`,
   /** An update that changes neither the kind nor the lock, which the pane never sends. */
-  same: (kind: Kind) => (kind === "stairs" ? "changing stairs" : "changing a ladder"),
+  same: (kind: Kind) => `changing ${KIND_WORDS[kind].bare}`,
 } as const;
 
 /** The ends on a floor, by id order, so every reader walks them alike. */
@@ -158,14 +199,17 @@ export function linkHeight(state: Pick<RoomState, "scenes">, link: Pick<LinkEnd,
  * least 0. The server reads both grounds from the pair, and a device from
  * its own build chunks with its end's `rise`.
  */
-export function fallDrop(_rise: number, _upperGround: number, _lowerGround: number): number {
-  throw new Error("not built: fallDrop");
+export function fallDrop(rise: number, upperGround: number, lowerGround: number): number {
+  return Math.max(0, rise + upperGround - lowerGround);
 }
 
 /** A fall's d6 of Bludgeoning damage (SRD 5.2.1): one for each full 10 ft dropped, at most 20, none under 10 ft. */
-export function fallDice(_ft: number): number {
-  throw new Error("not built: fallDice");
+export function fallDice(ft: number): number {
+  return Math.min(20, Math.max(0, Math.floor(ft / 10)));
 }
+
+/** How high above the far end's ground a flight through an opening lands (phase 4, 5). */
+export const FLIGHT_LANDING_FT = 5;
 
 /**
  * Whether a flier may take an opening (5): standsOn's test with the
@@ -173,8 +217,10 @@ export function fallDice(_ft: number): number {
  * the squares, squeeze rules unchanged. A creature on the ground gets null,
  * as it gets no Fly up or Fly down.
  */
-export function throughOpening(_view: RoomState, _viewer: Viewer, _token: Token, _link: LinkEnd): Stand | null {
-  throw new Error("not built: throughOpening");
+export function throughOpening(view: RoomState, _viewer: Viewer, token: Token, link: LinkEnd): Stand | null {
+  if (link.kind !== "opening" || token.sceneId !== link.sceneId) return null;
+  if (!(token.elevation > footprintGround(view.buildChunks, token))) return null;
+  return standing(view, token, link);
 }
 
 /**
@@ -182,8 +228,39 @@ export function throughOpening(_view: RoomState, _viewer: Viewer, _token: Token,
  * on other squares (8.2): the far end's place less this end's, in cells.
  * A player's end carries it as `shift` only while the far end is projected.
  */
-export function landingShift(_near: Pick<FloorLink, "rect">, _far: Pick<FloorLink, "rect">): { dx: number; dy: number } {
-  throw new Error("not built: landingShift");
+export function landingShift(near: Pick<FloorLink, "rect">, far: Pick<FloorLink, "rect">): { dx: number; dy: number } {
+  return { dx: far.rect.x - near.rect.x, dy: far.rect.y - near.rect.y };
+}
+
+/**
+ * Where a creature that goes through an end lands on the far floor (3,
+ * phase 4 4.2, 5, 8.2): on the far end's ground, shifted by the far end's
+ * offset, and 5 ft above that ground for a flier through an opening, which
+ * is in the air where it starts, where a faller stands on the ground. The
+ * move's plan (rules/moveLeg.ts) and the landing (reducer/floorLinks.ts
+ * landThrough) both read it, so the two never part.
+ */
+export function landingOf(state: Pick<RoomState, "buildChunks">, token: Token, link: Pick<FloorLink, "rect" | "kind">, far: Pick<FloorLink, "rect" | "ground">): { x: number; y: number; elevation: number } {
+  const { dx, dy } = landingShift(link, far);
+  const flies = link.kind === "opening" && token.elevation > footprintGround(state.buildChunks, token);
+  return { x: dx === 0 ? token.x : token.x + dx, y: dy === 0 ? token.y : token.y + dy, elevation: flies ? far.ground + FLIGHT_LANDING_FT : far.ground };
+}
+
+/** The floor just below this one in its scene, or undefined on the lowest floor or a scene without floors (phase 4, 4.6). */
+export function floorBelow(state: Pick<RoomState, "scenes">, sceneId: SceneId): Scene | undefined {
+  const here = ownEntry(state.scenes, sceneId)?.floor;
+  if (here === undefined) return undefined;
+  return floorsOf(state, sceneId).find((s) => s.floor !== undefined && s.floor.level === here.level - 1);
+}
+
+/** The most squares a side of an end of this kind (phase 4, 3): OPENING_SIDE for an opening, LIMITS.floorLinkSide for stairs and ladders. */
+export function linkSideOf(kind: Kind): number {
+  return kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
+}
+
+/** Whether an end is an opening's upper end, the hole: an opening whose far floor lies below its own (phase 4, 3). */
+export function isHole(state: Pick<RoomState, "scenes">, link: LinkEnd): boolean {
+  return link.kind === "opening" && linkDir(state, link) === "down";
 }
 
 // ---------------------------------------------------------------------------
@@ -337,15 +414,16 @@ function overlapsAlong(px: number, py: number, qx: number, qy: number, ax: numbe
 }
 
 /**
- * A trap whose rig opens a pit and whose squares share a cell with these on
- * the floor (3), the first by id, or null: a pit would drop the ground an
- * end stands on.
+ * A trap whose rig opens a pit, or drops to the floor below, and whose
+ * squares share a cell with these on the floor (3, phase 4 4.6), the first
+ * by id, or null: a pit would drop the ground an end stands on.
  */
 export function pitUnder(state: Pick<RoomState, "traps">, sceneId: SceneId, rect: CellRect): string | null {
   const ids = Object.keys(state.traps).sort();
   for (const id of ids) {
     const trap = state.traps[id]!;
-    if (trap.sceneId !== sceneId || trap.rig?.pit === undefined || !("cells" in trap.zone)) continue;
+    // A trapdoor drops what stands on it (phase 4, 4.6), so it keeps off every end as a pit does, and a landing never lies on one.
+    if (trap.sceneId !== sceneId || (trap.rig?.pit === undefined && trap.rig?.below !== true) || !("cells" in trap.zone)) continue;
     if (trap.zone.cells.some((cells) => rectsOverlap(cells, rect))) return trap.id;
   }
   return null;
@@ -389,12 +467,17 @@ export function spaceOn(state: Pick<RoomState, "scenes">, token: Token, link: Pi
  */
 export function standsOn(view: RoomState, _viewer: Viewer, token: Token, link: LinkEnd): Stand | null {
   if (token.sceneId !== link.sceneId) return null;
+  if (token.elevation !== footprintGround(view.buildChunks, token)) return null;
+  return standing(view, token, link);
+}
+
+/** standsOn's test of the creature's space against the squares, whatever its height: throughOpening asks it of a flier. */
+function standing(view: RoomState, token: Token, link: LinkEnd): Stand | null {
   const scene = ownEntry(view.scenes, token.sceneId);
   if (scene === undefined) return null;
   const g = sceneGrid(scene);
   const place = placeOn(g, token, link.rect);
   if (!place.touches) return null;
-  if (token.elevation !== footprintGround(view.buildChunks, token)) return null;
   if (place.inside) return "on";
   const now = footprintRect(g, token);
   const E = 1e-9;
@@ -443,6 +526,8 @@ function shownCondition(state: Pick<RoomState, "characters">, token: Token, key:
  */
 export function climbCost(state: RoomState, token: Token, link: Pick<FloorLink, "sceneId" | "to" | "kind">): { moved: number; cost: number } {
   const height = linkHeight(state, link);
+  // A flight through an opening costs the height alone: no ladder's doubling, and a flier is not crawling (phase 4, 5).
+  if (link.kind === "opening") return { moved: height, cost: height };
   const climbs = link.kind === "ladder" && !((actorOf(state, token)?.speeds.climb ?? 0) > 0) ? 1 : 0;
   const crawls = shownCondition(state, token, "prone") ? 1 : 0;
   return { moved: height, cost: height * (1 + climbs + crawls) };
@@ -472,19 +557,27 @@ function pairsOn(state: Pick<RoomState, "scenes" | "floorLinks">, sceneId: Scene
 export function linkProblem(state: RoomState, draft: LinkDraft): string | null {
   const here = ownEntry(state.scenes, draft.sceneId);
   const there = ownEntry(state.scenes, draft.to);
-  if (here?.floor === undefined || there?.floor === undefined || here.id === there.id || !sameScene(state, here.id, there.id) || Math.abs(here.floor.level - there.floor.level) !== 1) return LINK_WORDS.notNext;
-  const floors = [here, there];
-  for (const floor of floors) if (!rectInScene(floor, draft.rect)) return LINK_WORDS.pastEdge(floorName(state, floor.id));
-  for (const floor of floors) {
-    const over = linksOn(state, floor.id).find((l) => l.id !== draft.id && l.id !== draft.pairId && rectsOverlap(l.rect, draft.rect));
+  if (here?.floor === undefined || there?.floor === undefined || here.id === there.id || !sameScene(state, here.id, there.id) || Math.abs(here.floor.level - there.floor.level) !== 1) {
+    return draft.kind === "opening" ? LINK_WORDS.notNextFor("opening") : LINK_WORDS.notNext;
+  }
+  // Each floor judges its own end's squares (phase 4, 8.2): the same squares unless stairs or a ladder lie on other squares there.
+  const floors: [Scene, CellRect][] = [
+    [here, draft.rect],
+    [there, draft.pairRect ?? draft.rect],
+  ];
+  const side = linkSideOf(draft.kind);
+  if (floors.some(([, rect]) => rect.w > side || rect.h > side)) return draft.kind === "opening" ? LINK_WORDS.openingSide : LINK_WORDS.stairsSide;
+  for (const [floor, rect] of floors) if (!rectInScene(floor, rect)) return LINK_WORDS.pastEdge(floorName(state, floor.id));
+  for (const [floor, rect] of floors) {
+    const over = linksOn(state, floor.id).find((l) => l.id !== draft.id && l.id !== draft.pairId && rectsOverlap(l.rect, rect));
     if (over) return LINK_WORDS.overEnd(over.kind, floorName(state, over.to));
   }
   if (pairsOn(state, here.id) >= LIMITS.floorLinksPerScene) return LINK_WORDS.tooMany(here.name);
-  for (const floor of floors) {
+  for (const [floor, rect] of floors) {
     const name = floorName(state, floor.id);
-    if (wallInside(state, floor.id, draft.rect)) return LINK_WORDS.wall(name);
-    if (rectGround(state.buildChunks, floor.id, draft.rect) === null) return LINK_WORDS.twoHeights(name);
-    if (pitUnder(state, floor.id, draft.rect) !== null) return LINK_WORDS.pit(name);
+    if (wallInside(state, floor.id, rect)) return LINK_WORDS.wall(name);
+    if (rectGround(state.buildChunks, floor.id, rect) === null) return LINK_WORDS.twoHeights(name);
+    if (pitUnder(state, floor.id, rect) !== null) return LINK_WORDS.pit(name);
   }
   return null;
 }
@@ -520,7 +613,8 @@ export function restoredLinkWords(state: RoomState, entries: readonly { key: str
     return { ...restored, floorLinks: others };
   };
   for (const end of ends) {
-    const problem = linkProblem(without(end), { id: end.id, pairId: end.pair, sceneId: end.sceneId, to: end.to, rect: end.rect, kind: end.kind });
+    const pair = restored.floorLinks?.[end.pair];
+    const problem = linkProblem(without(end), { id: end.id, pairId: end.pair, sceneId: end.sceneId, to: end.to, rect: end.rect, kind: end.kind, ...(pair && !sameRect(pair.rect, end.rect) ? { pairRect: pair.rect } : {}) });
     if (problem !== null) return problem;
   }
   for (const end of ends) {
@@ -568,7 +662,12 @@ export function linksProblem(state: RoomState, sceneId: SceneId): string | null 
     const here = ownEntry(state.scenes, end.sceneId);
     const there = ownEntry(state.scenes, end.to);
     if (pair === undefined || pair.id === end.id || pair.pair !== end.id || pair.sceneId !== end.to || pair.to !== end.sceneId) return brokenLinks(sceneName);
-    if (!sameRect(pair.rect, end.rect) || pair.kind !== end.kind || pair.locked !== end.locked || pair.rev !== end.rev || pair.made !== end.made) return brokenLinks(sceneName);
+    if (pair.kind !== end.kind || pair.locked !== end.locked || pair.hidden !== end.hidden || pair.rev !== end.rev || pair.made !== end.made) return brokenLinks(sceneName);
+    // An opening is never locked or hidden, and keeps one rect on both floors, as both ends on hexes do. Stairs and ladders on
+    // squares may lie on other squares of the far floor at one size (phase 4, 3, 8.1, 8.2).
+    if (end.kind === "opening" && (end.locked !== undefined || end.hidden !== undefined)) return brokenLinks(sceneName);
+    if (end.rect.w > linkSideOf(end.kind) || end.rect.h > linkSideOf(end.kind)) return brokenLinks(sceneName);
+    if (end.kind === "opening" || end.grid !== undefined ? !sameRect(pair.rect, end.rect) : pair.rect.w !== end.rect.w || pair.rect.h !== end.rect.h) return brokenLinks(sceneName);
     if (here?.floor === undefined || there?.floor === undefined || !sameScene(state, here.id, there.id)) return brokenLinks(sceneName);
     if (end.grid !== here.gridShape || end.grid !== there.gridShape) return brokenLinks(sceneName);
     if (Math.abs(here.floor.level - there.floor.level) !== 1) {

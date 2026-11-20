@@ -1,7 +1,7 @@
 import { attaches, draggedWalkFull, fileEndsWithHolder, fileGoesDirectWhereFar, floorsOps, followsHexByHex, followsInSingleFile, followsInSingleFileOnHexes, hiddenTowStands, seatsApart, seatsApartOnHexes, seatsFromSnappedFull, seatsOnSqueeze, seatsWhereDropped, walksRoutes, walksThatReturn } from "../migrate.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
-import type { Op } from "../protocol.ts";
+import type { Op, OpOf } from "../protocol.ts";
 import { movementRules, type BuildState } from "../ruleHooks.ts";
 import { attachReachFt, carriedGroup, footprintInScene, fullRect, linkHolds, moveGroups, onHolder, overlaps, publicMembers, seatedAt, seatSpot, squeezedSeatsApart, walkerFor, type SeenByAll } from "./attach.ts";
 import { footprintRect, footprintSize, placedOnHex, snapStep, tokenRefHex } from "./footprint.ts";
@@ -9,7 +9,7 @@ import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexKey, hexLine, hexNeighbors } from "./hex.ts";
 import { sameScene } from "./floors.ts";
-import { climbKeepsSqueeze } from "./floorLinks.ts";
+import { climbKeepsSqueeze, landingOf } from "./floorLinks.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { groundUnder, hexFullStop, landing, legSpots, legStop, offGridWallThrough, storedBuild, walkEnd, type MovingToken } from "./movement.ts";
 import { fileRoutes, followerTrace, hexFileClasses, hexFileRoutes, pieceReach, routeWalkers, walkAt, walkSqueezes, type FileAlong, type FilePoint as AlongPoint, type RoutePoint, type WalkTrace } from "./route.ts";
@@ -117,6 +117,22 @@ export function withTrapCut<T extends Op>(op: T, stopped: ReadonlySet<string>, f
   return { ...op, [TRAP_CUT]: { stopped, file, own } };
 }
 
+/**
+ * A trapdoor's drop (docs/design/design-v1-floors.md phase 4, 4.6), as the
+ * reducer plans it: a climb's move, so what sits on the victim rides down
+ * with it and what it drags stays, to the floor below, where no end leads.
+ * Only the reducer makes one (reducer/floorLinks.ts dropThrough), and a
+ * symbol key never comes off the wire, so no client can send one.
+ */
+const DROP: unique symbol = Symbol("drop");
+
+type Dropped = { readonly [DROP]?: Pose };
+
+/** A `token.climb` that lands its creature at `to`, a trapdoor's drop (`DROP`). */
+export function withDrop<T extends OpOf<"token.climb">>(op: T, to: Pose): T {
+  return { ...op, [DROP]: to };
+}
+
 /** A stopped group's part of a trap's cut (`TRAP_CUT`), and whom the trap step judged: each it stopped that every player sees. */
 type GroupCut = { file?: CutWalks | undefined; own?: CutWalks | undefined; judged: (t: { id: string }) => boolean };
 
@@ -175,12 +191,16 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       return [straight(token, { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation ?? token.elevation }, "walk")];
     }
     case "token.climb": {
-      // The same squares of the far floor, on the ground its end keeps (docs/design/design-v1-floors.md phase 2, 3).
       const token = ownEntry(before.tokens, op.tokenId);
+      // A trapdoor's drop lands where the reducer put it, full size (docs/design/design-v1-floors.md phase 4, 4.6).
+      const dropped = (op as Dropped)[DROP];
+      if (dropped) return token ? [straight(token, dropped, "climb")] : [];
+      // The same squares of the far floor, on the ground its end keeps (docs/design/design-v1-floors.md phase 2, 3), shifted where
+      // the far end lies on other squares, and 5 ft over it for a flight through an opening (phase 4, 5, 8.2).
       const link = ownEntry(before.floorLinks, op.linkId);
       const far = link && ownEntry(before.floorLinks, link.pair);
       if (!token || !link || !far || link.sceneId !== token.sceneId) return [];
-      const named = straight(token, { sceneId: link.to, x: token.x, y: token.y, elevation: far.ground }, "climb");
+      const named = straight(token, { sceneId: link.to, ...landingOf(before, token, link, far) }, "climb");
       return [climbKeepsSqueeze(before, token, link) ? { ...named, squeezed: true } : named];
     }
     default:
