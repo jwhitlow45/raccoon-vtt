@@ -5,7 +5,7 @@ import { ZERO_HP_UNCONSCIOUS_ID, type HpLabel } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { MAX_HISTORY } from "#shared/reducer/encounter.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
@@ -2442,10 +2442,12 @@ const STOP_MOST = serializedBytes({
  * who saw it at the roster's widest, MAX_PATH_CORNERS corners among them,
  * and what the turn took on floors it left.
  */
-const pathMost = (listWidth: number) =>
+const pathMost = (listWidth: number) => walkMost(listWidth, MAX_PATH_STOPS, MAX_PATH_CORNERS);
+/** A walk at its widest with `stops` stops and `corners` corners among them, as pathMost counts each. */
+const walkMost = (listWidth: number, stops: number, corners: number) =>
   serializedBytes({ turn: WIDEST_REV, prior: { moved: 100_000, cost: 100_000, diag: [100_000, 100_000], seenDiag: [100_000, 100_000] }, stops: [] }) +
-  MAX_PATH_STOPS * (STOP_MOST + fieldBytes("seenBy") + 2 + listWidth + 1 + fieldBytes("via") + 2 + 1 + 1) +
-  2 * MAX_PATH_CORNERS * (NUMBER_MOST + 1);
+  stops * (STOP_MOST + fieldBytes("seenBy") + 2 + listWidth + 1 + fieldBytes("via") + 2 + 1 + 1) +
+  2 * corners * (NUMBER_MOST + 1);
 const atWidth = (key: string, value: () => number): WidthField => ({ key, width: () => fieldBytes(key) + value() + 1 });
 
 /**
@@ -2659,15 +2661,72 @@ export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => 
  * What the far line counts beyond the measure on the floors given, or the
  * room's: every creature's and area's FAR_WIDTHS fields at their widths
  * (D-261119-011) and the room-level part's (farWidthsRoomLevel), which
- * every scene's measure holds, less each pit floor's reserve for the
- * creatures its pits move (PIT_TOKENS_RESERVE), which those widths already
- * hold. Falls and trapdoors count by the same widths.
+ * every scene's measure holds, and each drop scene's headroom
+ * (dropReserve) in place of the near measure's reserve for the creatures a
+ * pit floor's pits move (PIT_TOKENS_RESERVE). Falls and trapdoors count by
+ * the same widths.
  */
 export function farWidths(state: RoomState, floors?: ReadonlySet<string>): number {
   let bytes = farWidthsRoomLevel(state, undefined, floors !== undefined);
   for (const [floor, extra] of farWidthsByFloor(state)) if (!floors || floors.has(floor)) bytes += extra;
   const pits = new Set(Object.values(state.traps ?? {}).filter((trap) => trap.rig?.pit && (!floors || floors.has(trap.sceneId))).map((trap) => trap.sceneId));
-  return bytes - pits.size * PIT_TOKENS_RESERVE;
+  return bytes - pits.size * PIT_TOKENS_RESERVE + dropReserve(state, floors);
+}
+
+/** A creature's elevation's widest growth: from `0` to the widest whole feet a token may stand at. */
+const DROP_ELEVATION_MOST = serializedBytes(-100_000) - serializedBytes(0);
+/** The areas on creatures a scene may hold whoever's they are: the DM's cap and every seat's (shared/limits.ts seatHeld). */
+const RIDING_AREAS_MOST = LIMITS.templatesPerScene + LIMITS.membersPerRoom * SEAT.ridingAreas;
+
+/** A drop scene's headroom by what it holds (dropReserve): its creatures, the areas on them and the turn's walks. */
+export type DropHeadroom = { creatures: number; areas: number; walks: number };
+
+/**
+ * Each drop scene's headroom (D-261119-114, D-261119-123): a scene with a
+ * pit or a trapdoor on any of its floors. A drop is a trap's write, which
+ * the limits read an op without (actor.ts), so what it may add is held
+ * ahead. FAR_WIDTHS already holds every field it writes on a creature or
+ * an area a reading steps, so this keeps only what it may add to those a
+ * reading counts as they are: a player's own, lent and move-any creatures
+ * and their areas in their exact part, and every seat's in the DM's.
+ * Read from the scenes, the traps' rigs and the roster alone, none of
+ * which a player's op changes, so a springing never moves it.
+ */
+export function dropReserve(state: RoomState, floors?: ReadonlySet<string>): number {
+  let bytes = 0;
+  for (const part of dropHeadrooms(state, floors).values()) bytes += part.creatures + part.areas + part.walks;
+  return bytes;
+}
+
+/**
+ * Each drop scene's headroom by its main floor, from the seat-inclusive
+ * bounds whatever the scene holds now: FAR.tokens creatures, each with its
+ * floor id grown to the scene's longest where a trapdoor may drop it to
+ * another floor and its elevation to its widest, RIDING_AREAS_MOST areas
+ * that follow them, their floor ids grown so, and the walks of the turn's
+ * creature and the mounts sharing its turn folded at a landing with two
+ * stops, a group's most.
+ */
+export function dropHeadrooms(state: RoomState, floors?: ReadonlySet<string>): Map<string, DropHeadroom> {
+  const drops = new Map<string, boolean>();
+  for (const trap of Object.values(state.traps ?? {})) {
+    const below = trap.rig?.below === true;
+    if (!trap.rig?.pit && !below) continue;
+    if (floors && !floors.has(trap.sceneId)) continue;
+    const scene = state.scenes[trap.sceneId];
+    if (!scene) continue;
+    const main = scene.floor?.of ?? scene.id;
+    drops.set(main, (drops.get(main) ?? false) || below);
+  }
+  const out = new Map<string, DropHeadroom>();
+  if (drops.size === 0) return out;
+  const walks = LIMITS.groupTokens * (fieldBytes("path") + walkMost(widestListExtra(state.members), 2, 0) + 1);
+  for (const [main, below] of drops) {
+    const ids = floorsOf(state, main).map((floor) => utf8Bytes(JSON.stringify(floor.id)));
+    const spread = below && ids.length > 0 ? Math.max(...ids) - Math.min(...ids) : 0;
+    out.set(main, { creatures: FAR.tokens * (spread + DROP_ELEVATION_MOST), areas: RIDING_AREAS_MOST * spread, walks });
+  }
+  return out;
 }
 
 /**

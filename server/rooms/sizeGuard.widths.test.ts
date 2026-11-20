@@ -11,7 +11,7 @@ import { FAR_TREATMENT } from "#shared/farLine.ts";
 import type { OpType } from "#shared/protocol.ts";
 import { actor, character, DM, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token, trap } from "#shared/testutil.ts";
 import { PLAYER_OPS, playerTable } from "./playerOpsTesting.ts";
-import { farRoomBytes, farWidths, measuredStateBytes, ownHeldBytes, PIT_TOKENS_RESERVE, projectedSceneBytes } from "./sizeGuard.ts";
+import { dropHeadrooms, dropReserve, exactCopies, farRoomBytes, heldBytes, farWidths, measuredStateBytes, ownHeldBytes, PIT_TOKENS_RESERVE, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
  * D-261119-011: the fields a player's op may write on creatures and areas
@@ -505,29 +505,91 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
   });
 });
 
-describe("D-261119-011: a pit scene's reserve for what its pits move", () => {
-  test("a room of several pit scenes just under the far line before the widths stays under it with them", () => {
-    const base = room();
-    for (let i = 0; i < 6; i++) {
-      const id = `pit${i}`;
-      base.scenes[id] = scene(id, { order: 10 + i });
-      base.traps = { ...base.traps, [id]: trap(id, { sceneId: id, rig: { ...trap("x").rig!, pit: { floor: -10 } } }) };
-      for (let k = 0; k < 8; k++) base.tokens[`${id}m${k}`] = token(`${id}m${k}`, { sceneId: id, x: k, y: 1 });
-    }
-    // The DM's reading before the widths: the measure with every pit scene's reserve for its creatures, and no widths.
-    const before = (s: RoomState) => farRoomBytes(s, true, measuredStateBytes(s) - farWidths(s));
-    const line = FAR.roomBytes - 512 * 1024;
-    const padded = (n: number): RoomState => ({ ...base, tokens: { ...base.tokens, pad: token("pad", { sceneId: "s2", notes: "p".repeat(n) }) } });
-    let [lo, hi] = [0, line];
-    while (hi - lo > 1) {
-      const mid = Math.floor((lo + hi) / 2);
-      if (before(padded(mid)) <= line) lo = mid;
-      else hi = mid;
-    }
-    const last = padded(lo);
-    const tokens = Object.keys(last.tokens).length;
-    const widths = farWidths(last);
-    assert.ok(widths < 0 && widths + 6 * PIT_TOKENS_RESERVE > 0, `the widths of ${tokens} creatures less 6 pit reserves: ${widths}`);
-    assert.ok(before(last) <= line && farRoomBytes(last, true) <= line, `before ${before(last)}, after ${farRoomBytes(last, true)}, line ${line}`);
-  });
+/**
+ * A drop scene past the DM's caps (D-261119-114, D-261119-123): a ground
+ * floor with a long id below a short one, its ground at its lowest under a
+ * trap on 30 by 20 squares of the upper floor, with a creature on every
+ * square, 600 past the DM's 500, and 260 areas of P1's on them, past the
+ * DM's 200. P1 moves any creature, and holds both floors, so every one of
+ * them is in P1's exact part, as stored. Thorn, P1's, stands on the trap
+ * on its turn, and P1's companion walks onto it from beside it.
+ */
+const LOW = "ground-floor-of-the-long-tower";
+const HIGH = "u";
+function dropScene(rig: "below" | "pit"): RoomState {
+  const floorOf = (id: string, level: number) => scene(id, { name: "Tower", order: 0, bounds: { w: 40, h: 40 }, floor: { of: LOW, level, name: `Floor ${level}`, height: 10 } });
+  let state = room({ scenes: { [LOW]: floorOf(LOW, 0), [HIGH]: floorOf(HIGH, 1), s2: scene("s2", { order: 1 }) } });
+  state.meta = { ...state.meta, playerSceneId: LOW, settings: { ...state.meta.settings, playersMoveAny: "all" } };
+  const cells = Array.from({ length: 600 }, (_, i) => `${2 + (i % 30)},${2 + Math.floor(i / 30)}`);
+  state = run(state, { t: "build.height", sceneId: LOW, cells, height: -100 } as Op);
+  state.openFloors = { [LOW]: { sceneId: LOW, rev: 1 }, [HIGH]: { sceneId: HIGH, rev: 1 } };
+  // Thorn stands on the trap on its own turn, not yet moved, so the drop starts its walk where it lands.
+  state.tokens.thorn = token("thorn", { kind: "pc", ownerIds: ["p1"], sceneId: HIGH, x: 2, y: 2, rev: 9 });
+  state.encounter = { rev: 0, round: 1, activeEntryId: "rthorn", entries: [entry("rthorn", { tokenId: "thorn" })], turnStart: { entryId: "rthorn", tokenId: "thorn", sceneId: HIGH, x: 2, y: 2, elevation: 0, seen: true, seq: 7 } };
+  state.tokens.pet = token("pet", { ownerIds: ["p1"], sceneId: HIGH, x: 0, y: 2, rev: 9 });
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 30; x++) state.tokens[`m${x}x${y}`] = token(`m${x}x${y}`, { sceneId: HIGH, x: 2 + x, y: 2 + y, rev: 9 });
+  for (let i = 0; i < 260; i++) {
+    const on = `m${i % 30}x${Math.floor(i / 30)}`;
+    state.templates[`a${i}`] = template(`a${i}`, { sceneId: HIGH, ownerId: "p1", attachedTo: on, rev: 9 });
+  }
+  const base = trap("t1", { sceneId: HIGH, zone: { cells: [{ x: 2, y: 2, w: 30, h: 20 }] } });
+  state.traps = { t1: { ...base, rig: { ...base.rig!, ...(rig === "below" ? { below: true } : { pit: { floor: -10 } }) } } };
+  return state;
+}
+
+/** A room reading's two parts before rounding: P1's stepped and exact parts, or the DM's, whose exact part is what seats hold. */
+const partsOf = (state: RoomState, who: "p1" | "dm") => {
+  const own = who === "p1" ? ownHeldBytes(state, "p1") : { sub: heldBytes(state), shown: heldBytes(state) };
+  return { stepped: measuredStateBytes(state) + farWidths(state) - own.sub, exact: own.shown };
+};
+
+describe("D-261119-114 and 123: a drop scene's reserve holds what its drops write past the far line's widths", () => {
+  for (const rig of ["below", "pit"] as const) {
+    test(`a ${rig === "below" ? "trapdoor" : "pit"} under 600 creatures and 260 areas on them: what its drop adds to P1's reading and the DM's stays within the reserve`, () => {
+      const state = dropScene(rig);
+      const walk: Op = { t: "token.move", tokenId: "pet", x: 2, y: 2 };
+      assert.ok(canApplyOk(walk, state), "P1 may walk their companion");
+      const result = applyOp(state, walk, P1, env(2_500_000));
+      assert.ok(result.ok && result.withoutTraps, result.ok ? "the trap went off" : result.message);
+      const plain = result.withoutTraps();
+      assert.ok(plain.ok);
+      const moved = Object.values(result.state.tokens).filter((t) => t.id.startsWith("m") && (rig === "below" ? t.sceneId !== state.tokens[t.id]!.sceneId : t.elevation !== state.tokens[t.id]!.elevation)).length;
+      assert.equal(moved, 600, "every creature on it dropped");
+      const [was, is] = [exactCopies(plain.state, "p1"), exactCopies(result.state, "p1")];
+      const held = (copies: typeof was) => [...copies.keys()].filter((key) => key.startsWith("token:") || key.startsWith("template:")).sort();
+      assert.deepEqual(held(is), held(was), "P1's exact part holds the same creatures and areas");
+      assert.equal(held(was).length, 862, "every one of them");
+      const reserve = dropReserve(result.state);
+      // What the drop adds to a reading's exact part, which no step rounds away, and to both parts together.
+      for (const who of ["p1", "dm"] as const) {
+        const [before, after] = [partsOf(plain.state, who), partsOf(result.state, who)];
+        const [exact, both] = [after.exact - before.exact, after.stepped + after.exact - before.stepped - before.exact];
+        assert.ok((who === "dm" || exact > 0) && exact <= reserve && both <= reserve, `${who}: the drop added ${exact} bytes to the exact part and ${both} in all, the reserve ${reserve}`);
+      }
+      // Each part of the headroom holds what the drop adds to its kind, more than the DM's caps alone would hold.
+      const part = dropHeadrooms(result.state).get(LOW)!;
+      const grew = (prefix: string) => [...is].filter(([key]) => key.startsWith(prefix)).reduce((sum, [key, copy]) => sum + copy.shown - (was.get(key)?.shown ?? 0), 0);
+      const [creatures, areas] = [grew("token:m"), grew("template:")];
+      // A trapdoor's drop to a floor with a longer id comes close to each creature's and area's width, so its creatures and areas
+      // outgrow what 500 creatures and 200 areas would hold. A pit only lowers them.
+      assert.ok(creatures > 0 && creatures <= part.creatures, `600 creatures added ${creatures} bytes, the headroom ${part.creatures}`);
+      if (rig === "below") {
+        assert.ok(creatures > (part.creatures / FAR.tokens) * 500, `600 creatures added ${creatures} bytes, past what 500 would hold`);
+        assert.ok(areas <= part.areas && areas > (part.areas / RIDING_AREAS) * 200, `260 areas added ${areas} bytes, the headroom ${part.areas}, past what 200 would hold`);
+      } else assert.equal(part.areas, 0, "a pit moves no area to another floor");
+      // Thorn's walk, started where it landed, grows it past a creature's own headroom, which the turn's walks hold.
+      const thorn = is.get("token:thorn" as never)!.shown - was.get("token:thorn" as never)!.shown;
+      if (rig === "below") assert.ok(thorn > part.creatures / FAR.tokens && thorn <= part.creatures / FAR.tokens + part.walks / 20, `Thorn grew ${thorn} bytes`);
+      // The far line holds the reserve in place of the near measure's 4 KiB a pit floor, in the room's reading and the tower's,
+      // and another scene's reading holds none of it.
+      const pit = rig === "pit" ? PIT_TOKENS_RESERVE : 0;
+      const tower = new Set([LOW, HIGH]);
+      assert.equal(farWidths(state) - farWidths({ ...state, traps: {} }), reserve - pit);
+      assert.equal(farWidths(state, tower) - farWidths({ ...state, traps: {} }, tower), reserve - pit);
+      assert.equal(farWidths(state, new Set(["s2"])), farWidths({ ...state, traps: {} }, new Set(["s2"])));
+    });
+  }
 });
+
+/** The areas on creatures a scene may hold, the DM's and every seat's (shared/limits.ts seatHeld). */
+const RIDING_AREAS = 200 + 50 * 20;
