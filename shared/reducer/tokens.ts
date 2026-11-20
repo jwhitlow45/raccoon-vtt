@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, playerLimitsOps, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
+import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, playerLimitsOps, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes, walksThatReturn } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { gridOfToken, inSightOfNonOwners, seatView, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
@@ -9,7 +9,7 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { foldPrior, keepPrior, pathCounters, pathThisTurn, priorDiag, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { sameScene } from "../rules/floors.ts";
 import { hexRouteFeet, onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
-import { planMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
+import { leftStart, planMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
 import { walkFrom } from "../rules/movement.ts";
@@ -568,7 +568,9 @@ export function withPath(
   const resized = (from.w !== to.w || from.h !== to.h) && sinceV6;
   const reshaped = resized || (sinceV6 && isSqueezed(before) !== isSqueezed(after));
   const inPlace = sameSpot(before, after);
-  if (!floors && !reshaped && inPlace) return after;
+  // From op version 63 a carried walk that left its start and came back is a leg of the turn all the same (review HEXOP-ASTRA-5).
+  const returned = carried !== undefined && walksThatReturn(tx.env.opVersion) && leftStart(carried);
+  if (!floors && !reshaped && inPlace && !returned) return after;
   const encounter = tx.state.encounter;
   let turn = turnUnderWay(encounter);
   if (!turn) {

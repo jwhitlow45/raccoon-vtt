@@ -302,13 +302,13 @@ describe("squares: random loops and cuts in single file (review FU45B-ASTRA-06 t
       const horse = s.tokens.horse!;
       if (op.x === horse.x && op.y === horse.y) loops++;
       const walks = planWalks(op, s, P1, {});
-      const walked = walkedIn(walks);
+      const walked = walkedIn(walks, undefined);
       if (walks.some((m) => m.carriedBy !== undefined && walked(m) && m.from.x === m.to.x && m.from.y === m.to.y && m.from.elevation === m.to.elevation)) still++;
       // The walk dispatch moves, cut where a trap stops it: each walk every player sees in it passes the leg test.
       const cut = planTrapMove(op, s, P1, {}).op;
       if (cut !== op) cuts++;
       const cutWalks = planWalks(cut, s, P1, {});
-      const cutWalked = walkedIn(cutWalks);
+      const cutWalked = walkedIn(cutWalks, undefined);
       for (const m of cutWalks) {
         if (m.carriedBy === undefined || m.pass !== "public" || !cutWalked(m) || s.tokens[m.tokenId]?.attached?.kind !== "drag") continue;
         for (let i = 1; i < m.route.length; i++) assert.equal(movementRules.legBlocker(s, m.trace[i - 1]!, { ...m.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);

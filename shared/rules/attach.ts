@@ -443,14 +443,14 @@ function at(token: PlacedToken, spot: Point): PlacedToken {
  */
 export function getOffFits(g: Grid, settings: DistanceSettings, bounds: { w: number; h: number }, carried: FootprintToken, holder: FootprintToken, spot: Point & { elevation?: number }): boolean {
   const placed: FootprintToken = { ...at(carried, spot), elevation: spot.elevation ?? carried.elevation, ...(carried.height !== undefined ? { height: carried.height } : {}) };
-  if (isHex(g)) {
-    // Inside the scene is every hex of it the scene's (docs/design/design-v1-hex-grids.md 4.2).
-    if (!fullHexes(g, placed).every((h) => hexInScene(g, bounds, h))) return false;
-  } else {
-    const r = fullRect(g, placed);
-    if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
-  }
-  return clearOfStand(g, placed, holder) && withinReach(g, settings, placed, holder);
+  return footprintInScene(g, bounds, placed) && clearOfStand(g, placed, holder) && withinReach(g, settings, placed, holder);
+}
+
+/** Whether a token's full footprint lies inside the scene: on hexes every hex of it the scene's (docs/design/design-v1-hex-grids.md 4.2). */
+export function footprintInScene(g: Grid, bounds: { w: number; h: number }, placed: FootprintToken): boolean {
+  if (isHex(g)) return fullHexes(g, placed).every((h) => hexInScene(g, bounds, h));
+  const r = fullRect(g, placed);
+  return !(r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS);
 }
 
 /**

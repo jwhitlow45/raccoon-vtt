@@ -1517,7 +1517,7 @@ function trapMoveParts(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion
  */
 function trapPlan(op: Op, before: RoomState, actor: Viewer, env: { opVersion?: number }): MovedToken[] {
   const plan = planWalks(op, before, actor, env);
-  return plan.filter(walkedIn(plan));
+  return plan.filter(walkedIn(plan, env.opVersion));
 }
 
 /**

@@ -1,10 +1,10 @@
-import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
+import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes, walksThatReturn } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token, Viewer } from "../model.ts";
 import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
-import { describeMove, wayOf, type MovedToken } from "../rules/moveLeg.ts";
+import { describeMove, leftStart, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, legAt, pieceReach, placedOnTrace, routePoints, walkAt, type FileAlong, type HexPiece, type RoutePoint } from "../rules/route.ts";
 import { footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
@@ -330,9 +330,15 @@ function groupWalks(described: readonly MovedToken[]): GroupWalks {
   return { named: described.filter((m) => m.carriedBy === undefined), all: described.map(wayOf) };
 }
 
-/** The move's description (moveLeg.ts describeMove) of each token whose place it changed. */
+/**
+ * The move's description (moveLeg.ts describeMove) of each token whose place
+ * it changed, and from op version 63 of each whose walk left its start and
+ * came back (migrate.ts walksThatReturn, review HEXOP-ASTRA-5): it crossed
+ * the areas between all the same.
+ */
 function describedMoves(op: Op, before: RoomState, after: RoomState, actor: Viewer, env: { opVersion?: number }): MovedToken[] {
-  return describeMove(op, before, after, actor, env).filter((m) => placeChanged(ownEntry(before.tokens, m.tokenId), ownEntry(after.tokens, m.tokenId)));
+  const returns = walksThatReturn(env.opVersion);
+  return describeMove(op, before, after, actor, env).filter((m) => placeChanged(ownEntry(before.tokens, m.tokenId), ownEntry(after.tokens, m.tokenId)) || (returns && leftStart(m)));
 }
 
 /*

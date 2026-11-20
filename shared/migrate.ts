@@ -1491,8 +1491,8 @@ export const opMigrations: MigrationStep[] = [
     // single file on hexes that reaches its last hex before its holder ends holds that hex to the holder's end
     // (`fileEndsWithHolder`), and one a hex step from its holder's start whose way by the one ahead ends out of a hex step of
     // its holder steps straight onto that start where that ends within one (`fileGoesDirectWhereFar`). A trap's stop that
-    // keeps the file on its spots for reach steps each that shares a hex back where it can (`stopsStepApartInReach`). Ops
-    // stored before replay as they ran.
+    // keeps the file on its spots for reach steps each that shares a hex back where it can (`stopsStepApartInReach`), and a
+    // walk that comes back to where it started counts as a walk (`walksThatReturn`). Ops stored before replay as they ran.
     // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
     // version 63 ops after its last snapshot, which an older build refuses.
     from: 62,
@@ -2178,6 +2178,19 @@ export function stopsStepApartInReach(opVersion: number | undefined): boolean {
  * 63 carries a seat, and each that did would replay without it.
  */
 export function seatsWhereDropped(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
+
+/**
+ * Whether a walk that leaves where it started and comes back there counts as
+ * a walk (review HEXOP-ASTRA-5, HEXOP-OPUS4C-1, rules/moveLeg.ts leftStart):
+ * a rider whose mount's route loops back, or whose dropped seat puts her on
+ * her own start, still passed the squares between. From op version 63 the
+ * trap step, an area's sweep and the turn's path read her walk, so a stop
+ * on the way lands her where the trap step had her and an area she crossed
+ * reminds. Ops stored before replay as they ran, skipping her.
+ */
+export function walksThatReturn(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
 }
 

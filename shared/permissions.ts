@@ -2011,7 +2011,7 @@ function draggedWalls(c: Check, op: Op): Decision {
   if (op.t === "token.move" && op.teleport !== undefined) return OK;
   // Every walk, those that end where they start too: one in single file walks its holder's line on the way all the same.
   const walks = planWalks(op, c.state, c.actor, {});
-  const walked = walkedIn(walks);
+  const walked = walkedIn(walks, undefined);
   for (const walk of walks) {
     const member = ownEntry(c.state.tokens, walk.tokenId);
     if (walk.carriedBy === undefined || !walked(walk) || walk.pass !== "public" || !member || member.attached?.kind !== "drag") continue;

@@ -7,7 +7,7 @@ import { projectState, stableStringify } from "../project.ts";
 import type { Op, OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
-import { carriedGroup, hexPlacements, linkHolds, onHolder, seatedAt } from "../rules/attach.ts";
+import { carriedGroup, footprintInScene, hexPlacements, linkHolds, onHolder, overlaps, seatedAt } from "../rules/attach.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { routeWorld } from "../rules/hexWalk.ts";
@@ -69,7 +69,7 @@ type Tally = { taken: number; filed: number; refusedFar: number; cuts: number; h
 function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
   const { state: s, op } = made;
   const walks = planWalks(op, s, P1, {});
-  const walked = walkedIn(walks);
+  const walked = walkedIn(walks, undefined);
   // The reach of each public creature in the file, as the link pass reads it where the uncut walk leaves them.
   const ends = new Map(walks.map((m) => [m.tokenId, { ...s.tokens[m.tokenId]!, ...m.to, ...(m.tokenId === "horse" ? { squeeze: true as const } : {}) }]));
   const far = walks.filter((m) => m.file === true && m.pass === "public" && !linkHolds(g, s.meta.settings, "drag", ends.get(m.tokenId)!, ends.get(s.tokens[m.tokenId]!.attached!.to) ?? s.tokens[s.tokens[m.tokenId]!.attached!.to]!));
@@ -99,7 +99,7 @@ function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
   const cut = planTrapMove(op, s, P1, {}).op;
   if (cut !== op) tally.cuts++;
   const cutWalks = planWalks(cut, s, P1, {});
-  const cutWalked = walkedIn(cutWalks);
+  const cutWalked = walkedIn(cutWalks, undefined);
   for (const m of cutWalks) {
     if (m.file !== true || m.pass !== "public" || !cutWalked(m)) continue;
     for (let i = 1; i < m.route.length; i++) assert.equal(movementRules.legBlocker(s, m.trace[i - 1]!, { ...m.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);
@@ -709,7 +709,7 @@ for (const [name, g] of [
                 const trapped = trapWalks(op, s, actor, {});
                 const heights = trapSpotHeights(op, s, actor, {});
                 const all = trapped.flatMap((w) => w.spots.map((p) => p.progress));
-                const walked = walkedIn(walks);
+                const walked = walkedIn(walks, undefined);
                 for (const m of walks) {
                   if (!m.along || !walked(m)) continue;
                   const token = s.tokens[m.tokenId]!;
@@ -778,6 +778,7 @@ for (const [name, g] of [
       let twins = 0;
       let cuts = 0;
       let swept = 0;
+      let beside = 0;
       for (let seed = 1; seed <= 3000; seed++) {
         const room = caseOf(seed, g);
         if (!room) continue;
@@ -825,6 +826,20 @@ for (const [name, g] of [
           }
           const r = applyOp(s, op, actor, env(5));
           assert.ok(r.ok, at);
+          // What a seated rider drags arrives inside the scene, and where it is still dragged, off the mount in her reach
+          // (moveLeg.ts besideSeat, reviews HEXOP-ASTRA-4 and HEXOP-OPUS4-1).
+          if (ridden.carried && planTrapMove(op, s, actor, {}).op === op) {
+            for (const m of walks) {
+              const link = s.tokens[m.tokenId]!.attached;
+              if (link?.kind !== "drag" || link.to !== rider) continue;
+              const t = r.state.tokens[m.tokenId]!;
+              assert.ok(footprintInScene(g, r.state.scenes.s1!.bounds, t), `${at}: ${m.tokenId} inside the scene`);
+              if (t.attached?.to !== rider) continue;
+              assert.ok(!overlaps(g, t, r.state.tokens.horse!), `${at}: ${m.tokenId} off the warhorse`);
+              assert.ok(linkHolds(g, r.state.meta.settings, "drag", t, r.state.tokens[rider]!), `${at}: ${m.tokenId} in ${rider}'s reach`);
+              beside++;
+            }
+          }
           if (planTrapMove(op, s, actor, {}).op === op) {
             for (const point of sweptAlong(op, s, r.state, actor, {})) {
               if (point.f !== 1) continue;
@@ -862,8 +877,9 @@ for (const [name, g] of [
         }
         }
       }
-      // About 1200 to 1300 moves on each layout, 490 to 540 seated, 540 to 590 cut, 440 to 490 twins, 77 to 120 swept corners.
-      assert.ok(moves >= 1000 && seated >= 400 && corners >= 2200 && twins >= 380 && cuts >= 450 && swept >= 60, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}, cuts ${cuts}, swept ${swept}`);
+      // About 1200 to 1300 moves on each layout, 490 to 540 seated, 540 to 590 cut, 440 to 490 twins, 77 to 120 swept
+      // corners, and 14 to 16 creatures still dragged beside a seated rider.
+      assert.ok(moves >= 1000 && seated >= 400 && corners >= 2200 && twins >= 380 && cuts >= 450 && swept >= 60 && beside >= 10, `moves ${moves}, seated ${seated}, corners ${corners}, twins ${twins}, cuts ${cuts}, swept ${swept}, beside ${beside}`);
     });
   });
 }

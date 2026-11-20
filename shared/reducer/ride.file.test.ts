@@ -365,7 +365,9 @@ describe("squares: what a holder drags follows it in single file where its move 
     s.tokens.imp = token("imp", { x: 10, y: 6, name: "imp", kind: "npc", attached: { to: "horse", kind: "drag" } });
     s.traps.t1 = trap("t1", { zone: { cells: [{ x: 7, y: 5, w: 1, h: 2 }] } });
     const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 10, y: 5, squeeze: true, route: [[6, 5, 1, 0], [10, 5, 1, 0]] };
-    assert.equal(walkOf(s, op, "imp"), undefined, "the move writes no imp");
+    // Op 62 writes no imp. From op 63 a walk that comes back to where it started is a walk, written too (migrate.ts walksThatReturn).
+    assert.equal(walkOf(s, op, "imp", 62), undefined, "op 62 writes no imp");
+    assert.ok(walkOf(s, op, "imp"), "from op 63 the move writes the imp");
     // As the reducer runs it, its trap step and its dispatch: no permission reads a trap. At op 51: from 52 the imp half a square
     // off its grid is judged on its grid beside it, so the stop waits for no whole square (traps.fileSnap.test.ts).
     const r = applyOp(s, op, P1, { ...env(5), opVersion: 51 });
