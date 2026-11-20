@@ -459,16 +459,21 @@ export class HexWalkWorld {
    * from beside the walker at the piece's start to beside it at its end.
    * One whose seat stays put along the piece walks it as the walker's own
    * steps have it (`#towedStep`), so only one whose seat moves on it needs
-   * the leg of its own (review DP34-ASTRA-01).
+   * the leg of its own (review DP34-ASTRA-01). A piece that stands up or
+   * squeezes on its last step moves the walker's box by more than its
+   * hexes, so a creature kept beside the box goes off the line its steps
+   * walked and needs its leg too (live play 44: a squeezed warhorse out of
+   * a corridor one hex wide took its captive through the rock).
    */
   #towedPiece(nodes: readonly number[], i: number, j: number): boolean {
     if (this.#towed.length === 0) return true;
     const stands = nodes.slice(i, j + 1).map((n) => this.standOf(n));
     const a: LeadAt = { place: this.place(stands[0]!), stand: stands[0]!, start: nodes[i] === this.startNode };
     const b: LeadAt = { place: this.place(stands[stands.length - 1]!), stand: stands[stands.length - 1]!, start: false };
+    const oneSize = stands.every((s) => s.squeezed === a.stand!.squeezed);
     for (const t of this.#towed) {
       const shifts = stands.map((s) => this.#seatShift(t, this.place(s), s.squeezed));
-      if (shifts.every((by) => by.x === shifts[0]!.x && by.y === shifts[0]!.y)) continue;
+      if (oneSize && shifts.every((by) => by.x === shifts[0]!.x && by.y === shifts[0]!.y)) continue;
       if (!this.#towedLeg(t, a, b)) return false;
     }
     return true;
