@@ -1,13 +1,13 @@
 import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
-import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type Actor, type AreaTemplate, type BuildChunk, type Effect, type Encounter, type EncounterSnapshot, type LifeState, type LogEntry, type Token, type Trap } from "#shared/model.ts";
+import { AUTO_CHARS, CHUNK_CELLS, FALL_RIDERS_MOST, KNOWN_CHARS, UP_DIR_CHARS, type Actor, type AreaTemplate, type BuildChunk, type Effect, type Encounter, type EncounterSnapshot, type Fall, type LifeState, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { ZERO_HP_UNCONSCIOUS_ID, type HpLabel } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { MAX_HISTORY } from "#shared/reducer/encounter.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
-import { MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
+import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { movesAnyToken } from "#shared/permissions.ts";
@@ -724,7 +724,9 @@ export function roomLevelBytes(state: RoomState): number {
     const entries = collectionBytes(state[name] ?? {});
     if (entries > 2) bytes += 1 + fieldBytes(name) + entries;
   }
-  return bytes;
+  // A DM's projection holds the fall cards, at their widest while the room may hold one (docs/design/design-v1-floors.md
+  // phase 4, 4.7), whatever it holds.
+  return bytes + fallsMeasure(state);
 }
 
 const measuredLogs = new WeakMap<readonly LogEntry[], readonly LogEntry[]>();
@@ -1269,6 +1271,60 @@ function trapsMeasure(state: RoomState): number {
 }
 
 // ---------------------------------------------------------------------------
+// Fall cards (docs/design/design-v1-floors.md phase 4, 4.7)
+
+/** A fall card's id at its widest: the op's seq and its place among the op's cards, each at the id schema's most digits. */
+const FALL_ID_MOST = `${"9".repeat(18)}:${"9".repeat(6)}`;
+/** An id a device chose at its widest as JSON: 64 characters, each escaped to six bytes. */
+const ESCAPED_ID_MOST = "\u0001".repeat(64);
+
+/**
+ * The room's fall cards at their widest (D-261119-089): `,"falls":{…}`
+ * with LIMITS.fallsPerRoom cards under their ids, each with every rider a
+ * card names, every id at its widest, the most feet a fall drops, and its
+ * rev and the op it was made in at their widest. Derived from the bounds
+ * of the card's schema, so no stored card is wider.
+ */
+export const FALL_RESERVE =
+  1 +
+  fieldBytes("falls") +
+  2 +
+  LIMITS.fallsPerRoom * (fieldBytes(FALL_ID_MOST) + serializedBytes({ id: FALL_ID_MOST, rev: WIDEST_REV, tokenId: ESCAPED_ID_MOST, riders: Array.from({ length: FALL_RIDERS_MOST }, () => ESCAPED_ID_MOST), sceneId: ESCAPED_ID_MOST, from: ESCAPED_ID_MOST, ft: FALL_FEET_MOST, made: WIDEST_REV } satisfies Required<Fall>)) +
+  LIMITS.fallsPerRoom -
+  1;
+
+/**
+ * Whether the room may hold a fall card: it has an opening's end, a
+ * trapdoor or a card. Only the DM's ops place or remove an end or a
+ * trapdoor, a player's card needs one of them, and a player's dismissal
+ * of their companion leaves its card, so no player's op turns this on or
+ * off (4.7). An empty record, which the reducer leaves where the last card
+ * went, holds none.
+ */
+export function fallsReserved(state: RoomState): boolean {
+  for (const _ in state.falls ?? {}) return true;
+  for (const link of Object.values(state.floorLinks ?? {})) if (link.kind === "opening") return true;
+  for (const trap of Object.values(state.traps ?? {})) if (trap.rig?.below === true) return true;
+  return false;
+}
+
+/**
+ * What the measures count of the room's fall cards: none of their bytes,
+ * and FALL_RESERVE while the room may hold one. So a card's creation, its
+ * eviction, its Dismiss or Apply and an undo or redo that takes it away or
+ * writes it back move no measure, and how many cards the DM keeps never
+ * shows in a player's answer (D-261119-003, D-261119-089).
+ */
+function fallsMeasure(state: RoomState): number {
+  return fallsReserved(state) ? FALL_RESERVE : 0;
+}
+
+/** The stored bytes of a room-level field the measures count otherwise: `,"name":…`, its comma included, or 0 where the room lacks it. */
+function storedField(state: RoomState, name: "falls"): number {
+  return state[name] === undefined ? 0 : serializedBytes({ [name]: state[name] }) - 1;
+}
+
+// ---------------------------------------------------------------------------
 // Creature numbers (shared/numbering.ts)
 
 /*
@@ -1369,19 +1425,26 @@ export function scenesOverByNumbering(state: RoomState, share: number, sceneLimi
  * or fails by what they cannot read. So does players' memory, which the
  * guard reserves at its caps and its share (docs/design/design-v1-map-discovery.md
  * 5.5), whatever it holds. Creature numbers count at their widest
- * (numberingAdjust).
+ * (numberingAdjust), and fall cards at theirs (fallsMeasure).
  */
 export function measuredStateBytes(state: RoomState): number {
   const memory = state.memory === undefined ? {} : { memory: {} };
   const memoryBy = state.memoryBy === undefined ? {} : { memoryBy: {} };
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state) + numberingAdjust(state);
+  return (
+    serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, falls: undefined, ...memory, ...memoryBy }) +
+    trapsMeasure(state) +
+    fallsMeasure(state) -
+    privateStateBytes(state) +
+    perPlayerStoredReserve(state) +
+    numberingAdjust(state)
+  );
 }
 
 /**
  * The measure of a state already serialized to `bytes`, such as a snapshot
  * just written, without serializing it again: its traps and their logs
- * swapped for their measures, and the lines and the record outside them
- * taken out.
+ * and its fall cards swapped for their measures, and the lines and the
+ * record outside them taken out.
  */
 export function measuredFromStored(bytes: number, state: RoomState): number {
   const traps = state.traps ?? {};
@@ -1391,7 +1454,9 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
   const saveOutcomes = state.saveOutcomes === undefined ? 0 : serializedBytes({ saveOutcomes: state.saveOutcomes }) - 1;
-  const outside = reminded + saveOutcomes + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state) - numberingAdjust(state);
+  // The fall cards, swapped for what the measures count of them.
+  const floors = storedField(state, "falls") - fallsMeasure(state);
+  const outside = reminded + saveOutcomes + floors + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state) - numberingAdjust(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
@@ -1555,6 +1620,9 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
   const trapped = hasTraps(after);
   // A room's first trap brings the room's reserves for occurrences and both trap logs (docs/design/design-v1-traps.md 6.7).
   if (trapped && !hasTraps(before)) growth += DUE_RESERVE + TRAP_LOG_RESERVE + TRAP_SEEN_RESERVE;
+  // So does the room's first opening, trapdoor or card for the fall cards (docs/design/design-v1-floors.md phase 4, 4.7),
+  // since no card counts at its own bytes.
+  if (fallsReserved(after) && !fallsReserved(before)) growth += FALL_RESERVE;
   for (const key of touched) {
     const next = readEntity(after, key);
     if (next === null || next === undefined) continue;
@@ -1568,6 +1636,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     if (parsed?.kind === "log" && lineAudience(next as LogEntry) !== "shared") continue;
     // Players' memory counts at its caps and its share, which the reserves hold whatever it writes (docs/design/design-v1-map-discovery.md 5.5).
     if (parsed?.kind === "memory" || parsed?.kind === "memoryBy") continue;
+    // Fall cards count at their widest, which the reserve above holds.
+    if (parsed?.kind === "fall") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
     const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value) - namesOf(parsed?.kind, value) + numberingOf(parsed?.kind, value));
