@@ -12,7 +12,7 @@ import { loadTexture } from "../builder/textures.ts";
 import type { ControllerProps } from "../layers.ts";
 import { traceGrid } from "../mapexport/render.ts";
 import { MAP_BACKGROUND } from "../scenes/create.ts";
-import { byFarFloor, farChunks, farTokensIn, holeOutline, holesOn, tokenUrl, windowLoadSlot, windowPxPerCell, windowSlot, type HoleOutline, type HoleSpec } from "./openingView.ts";
+import { byFarFloor, cropKey, farChunks, farTokensIn, holeOutline, holesOn, tokenUrl, windowLoadSlot, windowPxPerCell, windowSlot, type HoleOutline, type HoleSpec } from "./openingView.ts";
 
 const NO_LINKS: RoomState["floorLinks"] = {};
 const NO_SCENES: RoomState["scenes"] = {};
@@ -89,7 +89,7 @@ function FarCrops(props: { far: Scene; holes: HoleSpec[]; grid: Grid; role: "dm"
   const chunks = useSameList(useMemo(() => farChunks({ buildChunks: allChunks }, far.id), [allChunks, far.id]));
   const map = far.map;
   const urls = map && mapWorldRect(map) ? [assets.url(map.assetId, "mobile"), assets.url(map.assetId, "full")] : [];
-  const key = JSON.stringify([far.id, urls, far.background, far.bounds, far.grid, far.gridShape, far.autoWalls, outlines.map((x) => [x.id, x.o.x, x.o.y, x.o.w, x.o.h])]);
+  const key = cropKey(far, urls, outlines);
   useEffect(() => {
     let cancelled = false;
     let made: Map<string, HTMLCanvasElement> | null = null;

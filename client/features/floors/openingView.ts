@@ -6,7 +6,7 @@ import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { hexKey } from "#shared/rules/hex.ts";
 import { rectHexes } from "#shared/rules/traps.ts";
 import { createStore } from "zustand/vanilla";
-import { hexOutline } from "../../lib/scene.ts";
+import { hexOutline, mapWorldRect } from "../../lib/scene.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import type { AssetSource } from "../../state/view.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
@@ -72,6 +72,18 @@ export function holeOutline(g: Grid, rect: CellRect): HoleOutline {
     y1 = Math.max(y1, loop[i + 1]!);
   }
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, loop };
+}
+
+/**
+ * What a far floor's crops are drawn from (OpeningCrops.tsx drawCrop) but its
+ * build, which comes by its own dependency: the crops are drawn again
+ * whenever it changes. The map counts by its addresses and by the rectangle
+ * it is drawn in (lib/scene.ts mapWorldRect), so a map calibrated anew,
+ * with the same image and bounds, moves in every window over it.
+ */
+export function cropKey(far: Pick<Scene, "id" | "background" | "bounds" | "grid" | "gridShape" | "autoWalls" | "map">, urls: readonly string[], outlines: readonly { id: string; o: HoleOutline }[]): string {
+  const mapRect = far.map ? mapWorldRect(far.map) : null;
+  return JSON.stringify([far.id, urls, mapRect, far.background, far.bounds, far.grid, far.gridShape, far.autoWalls, outlines.map((x) => [x.id, x.o.x, x.o.y, x.o.w, x.o.h])]);
 }
 
 /** The most pixels a window's crop takes a side (7.4, 13): at most 512 by 512, so 16 windows hold at most 16 MiB. */

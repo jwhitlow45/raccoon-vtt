@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ATTIC, GROUND, OPENING_RECT, UPPER, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
-import type { FloorLink, RoomState } from "#shared/model.ts";
+import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
-import { farChunks, farEnd, farTokensIn, holeDrop, holeDrops, holeOutline, holesOn, windowPxPerCell, WINDOW_MAX_PX } from "./openingView.ts";
+import { cropKey, farChunks, farEnd, farTokensIn, holeDrop, holeDrops, holeOutline, holesOn, windowPxPerCell, WINDOW_MAX_PX } from "./openingView.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
 /*
@@ -107,5 +107,31 @@ describe("what a window draws of the floor below", () => {
 
   test("a hole's outline is its squares, the box round its hexes on hexes", () => {
     assert.deepEqual(holeOutline(SQUARES, OPENING_RECT), { ...OPENING_RECT, loop: null });
+  });
+});
+
+describe("a far floor's crops are drawn again on every change they read (FLR4INT-ASTRA-02)", () => {
+  const MAP = { assetId: "a1", widthPx: 1920, heightPx: 1120, cellPx: 80, originPx: { x: 0, y: 0 } };
+  const far = { ...tower().scenes[GROUND]!, map: MAP, background: "#202020" } as Scene;
+  const outlines = [{ id: "o1", o: holeOutline(SQUARES, OPENING_RECT) }];
+  const URLS = ["/m/a1", "/f/a1"];
+  const key = (over: Partial<Scene>, urls: readonly string[] = URLS, holes = outlines) => cropKey({ ...far, ...over }, urls, holes);
+
+  test("a map calibrated anew, the same image on the same bounds, is a new crop: its scale, its origin and its size each", () => {
+    const calibrated: Partial<Scene["map"] & object>[] = [{ cellPx: 70 }, { originPx: { x: -160, y: 0 } }, { originPx: { x: 0, y: 40 } }, { widthPx: 1600 }, { heightPx: 900 }];
+    for (const patch of calibrated) assert.notEqual(key({ map: { ...MAP, ...patch } }), key({}), JSON.stringify(patch));
+    assert.notEqual(key({ map: undefined }, []), key({}), "the map taken away");
+    assert.equal(key({ map: { ...MAP } }), key({}), "the same calibration, a new object, draws nothing again");
+  });
+
+  test("so is every other input the crop reads but the build: the addresses, the background, the bounds, the grid, its shape, the walls' rule and the holes", () => {
+    assert.notEqual(key({}, ["/m/a2", "/f/a2"]), key({}));
+    assert.notEqual(key({ background: "#303030" }), key({}));
+    assert.notEqual(key({ bounds: { w: 30, h: 20 } }), key({}));
+    assert.notEqual(key({ grid: { ...far.grid, show: !far.grid.show } }), key({}));
+    assert.notEqual(key({ grid: { ...far.grid, opacity: 0.6 } }), key({}));
+    assert.notEqual(key({ gridShape: "hexRows" }), key({}));
+    assert.notEqual(key({ autoWalls: "off" }), key({}));
+    assert.notEqual(key({}, URLS, [{ id: "o1", o: holeOutline(SQUARES, { ...OPENING_RECT, x: 7 }) }]), key({}));
   });
 });

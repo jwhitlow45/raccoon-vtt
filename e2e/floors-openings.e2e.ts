@@ -55,6 +55,10 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - fl4o-9: the window's memory: four floors with four openings each over
  *   mapped floors, and Ana's phone switching 20 times among them, its heap
  *   within 10% over the last 10.
+ * - FLR4R1-1: a second hole on Upper floor over a two-colored map on Ground
+ *   floor: the window shows the map's blue half, and a calibration that
+ *   shifts the map, the same image on the same bounds, turns the window red
+ *   while it stays shown.
  * - fl4o-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-one, one file after
@@ -87,6 +91,8 @@ const RAT_AT = { x: 12, y: 8 };
 const TRAPDOOR = { x: 16, y: 4, w: 2, h: 2 };
 /** The hidden stairs' square on Ground floor and Upper floor. */
 const STAIRS = { x: 20, y: 10 };
+/** A second hole on Upper floor, clear of every end on both floors, for the window's own steps. */
+const WINDOW_HOLE = { x: 16, y: 10, w: 2, h: 2 };
 
 let server: Server;
 let browser: Browser;
@@ -159,6 +165,15 @@ async function openRoom(page: Page, watch: ConsoleWatch, socket: SocketWatch): P
 /** A plain map image of the room's, `w` by `h` px in one color, through the asset route. */
 async function uploadImage(w: number, h: number, background: { r: number; g: number; b: number }): Promise<{ id: string; width: number; height: number }> {
   const data = await sharp({ create: { width: w, height: h, channels: 3, background } }).png().toBuffer();
+  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+  assert.ok(res.ok(), `the image upload answered ${res.status()}`);
+  return (await res.json()) as { id: string; width: number; height: number };
+}
+
+/** A map image of the room's, 1920 by 1120 px, red on its left half and blue on its right, through the asset route. */
+async function uploadSplitImage(): Promise<{ id: string; width: number; height: number }> {
+  const red = await sharp({ create: { width: 960, height: 1120, channels: 3, background: { r: 220, g: 40, b: 40 } } }).png().toBuffer();
+  const data = await sharp({ create: { width: 1920, height: 1120, channels: 3, background: { r: 40, g: 40, b: 220 } } }).composite([{ input: red, left: 0, top: 0 }]).png().toBuffer();
   const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
   assert.ok(res.ok(), `the image upload answered ${res.status()}`);
   return (await res.json()) as { id: string; width: number; height: number };
@@ -682,6 +697,22 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     console.log(`fl4o-9: heap after each switch, MB: ${used.map((u) => (u / 1e6).toFixed(1)).join(" ")}; peak during a draw ${(peak / 1e6).toFixed(1)} MB`);
     await shots.take(ana, "fl4o-9-ana-roof-windows");
     assert.ok(worst <= tenth * 1.1, `the heap grew to ${(worst / 1e6).toFixed(1)} MB over the last 10, past 10% above the tenth's ${(tenth / 1e6).toFixed(1)} MB`);
+  });
+
+  test("FLR4R1-1. a window over a two-colored map shows its blue half, and a calibration that shifts the map turns it red while it stays shown", async () => {
+    await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: run.upper, to: run.ground, rect: WINDOW_HOLE, kind: "opening" } });
+    const image = await uploadSplitImage();
+    await ops.send({ t: "scene.setMap", sceneId: run.ground, map: imageMap(image) });
+    await showFloor(dm, "Upper floor");
+    const cell = { x: WINDOW_HOLE.x, y: WINDOW_HOLE.y };
+    const blue = (c: [number, number, number] | null) => c !== null && c[2] > c[0] + 40;
+    const red = (c: [number, number, number] | null) => c !== null && c[0] > c[2] + 40;
+    // 16 cells in, past the image's middle at cell 12, the window shows the blue half.
+    await waitFor("the window's blue half", async () => (blue(await colorAt(dm, cell)) ? true : null), 15_000);
+    // Moved 8 cells east on the same bounds, the middle lies at cell 20, so the same squares show the red half.
+    await ops.send({ t: "scene.setGrid", sceneId: run.ground, cellPx: image.width / BOUNDS.w, originPx: { x: -8 * (image.width / BOUNDS.w), y: 0 } });
+    await waitFor("the window redrawn from the new calibration", async () => (red(await colorAt(dm, cell)) ? true : null), 15_000);
+    await shots.take(dm, "flr4r1-1-window-recalibrated");
   });
 
   test("fl4o-10. no page logged an error", () => {
