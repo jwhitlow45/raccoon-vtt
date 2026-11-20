@@ -199,7 +199,7 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     const iso = read("canvas/relief/IsoBoard.tsx");
     const impl = iso.slice(iso.indexOf("function IsoBoardImpl("), iso.indexOf("\n}\n", iso.indexOf("function IsoBoardImpl(")));
     assert.doesNotMatch(impl, /useRoomView\(/, "every read of the room goes through useShownView");
-    assert.equal(impl.match(/useShownView\(!hidden, /g)?.length, 3);
+    assert.equal(impl.match(/useShownView\(!hidden, /g)?.length, 4);
     assert.match(read("canvas/relief/context.ts"), /useRoomView\(\(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
   });
 

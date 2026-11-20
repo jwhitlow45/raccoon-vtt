@@ -1,8 +1,9 @@
 import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES, TEXTURE_CELLS } from "../../features/builder/textures.ts";
 import type { Camera } from "../../lib/camera.ts";
-import { theme } from "../../lib/theme.ts";
-import { depth, isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
+import { MAT_BACKGROUND } from "../../features/scenes/create.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
+import { depth, isometric, K, toView, turnAxes, type Hole, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type Item, type VolumePiece } from "./buckets.ts";
 import { patternOf, tintedPatternOf } from "./looks.ts";
@@ -20,7 +21,9 @@ import { boundsOf, edgeLow, facesOf, frameParts, isOpening, partCorners, risersO
  * clipped to its own floor polygon, then its far sides, all inside the
  * openings of its connected region, so a floor seen through a neighbor's
  * opening shows its own pixels and its own shade
- * (docs/design/design-v1-iso-hex-relief.md 5.2). Consecutive
+ * (docs/design/design-v1-iso-hex-relief.md 5.2). An opening's hole is a
+ * pit to the floor below whose bottom copies the window the ground stage
+ * draws there (docs/design/design-v1-floors.md phase 4, 9.1). Consecutive
  * bands of one area standing as its real shape draw as one
  * (docs/design/design-v1-iso-area-shapes.md 4.3 and 5).
  */
@@ -47,6 +50,8 @@ export type DrawContext = {
   regions?: readonly VBox[] | null;
   /** Where a draw records the toned box, in device pixels, of each cell it draws whose top or floor takes the face tone (docs/design/design-v1-relief-pan.md 5.3). */
   toned?: TonedBox[];
+  /** The hole whose bottom a cell's piece draws (buckets.ts ReliefIndex.holeOf). Absent, no piece draws one. */
+  hole?: (p: CellPiece) => Hole | undefined;
 };
 
 /**
@@ -162,6 +167,8 @@ function paints(box: VBox, dc: DrawContext, view: VBox): boolean {
 function tonedCell(c: CellPiece, dc: DrawContext, view: VBox): boolean {
   // A stair's treads each copy the ground at their own lift (docs/design/design-v1-iso-depth.md 5.2).
   if (c.kind === "steps") return stepsShapeOf(c, dc.turn).treads.some((t) => tonedAt(t.source, t.z, dc, view));
+  // A hole over a floor this device does not hold copies nothing: it is black wherever it stands, as a tone alone is.
+  if (blindHole(c, dc)) return false;
   return tonedAt(shapeOf(c, dc.turn).source, c.z, dc, view);
 }
 
@@ -737,19 +744,47 @@ function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn
 }
 
 /**
+ * The tone a hole's bottom takes where its copy runs out, past the ground
+ * canvas: the floor below's background, as its own board draws it under
+ * the map (canvas/layers/MapLayer.tsx), and black where the device does
+ * not hold that floor.
+ */
+export function holeTone(hole: Hole): string {
+  return hole.below === null ? boardTheme.color.stage : hole.below || MAT_BACKGROUND;
+}
+
+/** Whether a cell draws the bottom of a hole over a floor this device does not hold. */
+function blindHole(c: CellPiece, dc: DrawContext): boolean {
+  return dc.hole?.(c)?.below === null;
+}
+
+/**
  * Copies the ground under cells of one height, moved by that height up (a
  * top) or down (a pit's floor, negative), inside their polygons at it: one
  * path of those polygons in view units, filled with the ground's pixels
  * shifted by the lift. A cell whose copy runs out takes `tone` under it,
- * or with none its own look's color.
+ * or with none its own look's color, and a hole's bottom its hole's tone.
+ * A hole over a floor this device does not hold is black and copies
+ * nothing (docs/design/design-v1-floors.md phase 4, 9.1), whatever the
+ * ground stage draws under it.
  */
 function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string | null, view: VBox, tops: Path2D | null = null): void {
   const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
+  let blind: CellPiece[] | null = null;
+  if (dc.hole) {
+    for (const c of cells) if (blindHole(c, dc)) (blind ??= []).push(c);
+    if (blind?.length === cells.length) {
+      g.fillStyle = boardTheme.color.stage;
+      fillWith(g, tops ?? topsPath(g, cells, dc.turn));
+      return;
+    }
+  }
   // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up. Each cell tones by its own copy, never its batch's.
   let toned: Map<string, CellPiece[]> | null = null;
   for (const c of cells) {
     if (!tonedCell(c, dc, view)) continue;
-    const color = tone ?? c.look.color;
+    const hole = dc.hole?.(c);
+    const color = hole ? holeTone(hole) : (tone ?? c.look.color);
     toned ??= new Map();
     const group = toned.get(color);
     if (group) group.push(c);
@@ -764,15 +799,21 @@ function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc
     }
   }
   const pattern = groundPattern(g, dc);
-  if (!pattern) return;
-  const path = tops ?? topsPath(g, cells, dc.turn);
-  // Pattern space is the ground's device pixels, moved up by the lift: undo the run's view transform, then shift.
-  const k = dc.pixelRatio * dc.camera.scale;
-  const ex = dc.pixelRatio * dc.camera.x;
-  const ey = dc.pixelRatio * dc.camera.y;
-  pattern.setTransform({ a: 1 / k, b: 0, c: 0, d: 1 / k, e: -ex / k, f: -(ey + shift) / k });
-  g.fillStyle = pattern;
-  fillWith(g, path);
+  if (pattern) {
+    const path = tops ?? topsPath(g, cells, dc.turn);
+    // Pattern space is the ground's device pixels, moved up by the lift: undo the run's view transform, then shift.
+    const k = dc.pixelRatio * dc.camera.scale;
+    const ex = dc.pixelRatio * dc.camera.x;
+    const ey = dc.pixelRatio * dc.camera.y;
+    pattern.setTransform({ a: 1 / k, b: 0, c: 0, d: 1 / k, e: -ex / k, f: -(ey + shift) / k });
+    g.fillStyle = pattern;
+    fillWith(g, path);
+  }
+  // Black over the copy the batch shares, so the tops beside a black bottom at its lift keep their one copy.
+  if (blind) {
+    g.fillStyle = boardTheme.color.stage;
+    fillWith(g, topsPath(g, blind, dc.turn));
+  }
 }
 
 /**
@@ -836,9 +877,12 @@ function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], d
  */
 function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, view: VBox): void {
   copyGround(g, [p], dc, theme.relief.side, view);
-  const floor = topsPath(g, [p], dc.turn);
-  g.fillStyle = theme.relief.pitShade;
-  fillWith(g, floor);
+  // A hole's bottom is the window onto the floor below, already under its own veil (features/floors/OpeningWindow.tsx), so it takes no shade of its own.
+  if (!dc.hole?.(p)) {
+    const floor = topsPath(g, [p], dc.turn);
+    g.fillStyle = theme.relief.pitShade;
+    fillWith(g, floor);
+  }
   drawSides(g, p, dc);
 }
 

@@ -28,7 +28,7 @@ import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
 import { footprintCells } from "../../lib/groundCells.ts";
-import { drawnFootprintGround, drawnHeights, drawnStandBase, groundGroups, heightsDetail, heightsStand, isometric, K, standSurface, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
+import { drawnFootprintGround, drawnHeights, drawnStandBase, groundGroups, heightsDetail, heightsStand, holeFloors, holesKey, holesOfKey, isometric, K, standSurface, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useStore } from "zustand";
 import { seenSeat, dropView } from "../../features/movement/drop.ts";
 import { localDragSlot, type DragSpot } from "../../state/localDrags.ts";
@@ -51,7 +51,7 @@ import { IsoGroundContext, TreeShownContext, useShownView, useTreeShown, useTree
 import { drawRun, runPaintedBox, standeePaintedBox, type DrawContext, type GroundCopy } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, hexLook, imageReader } from "./looks.ts";
-import { heldPainted, type VBox } from "./pieces.ts";
+import { heldPainted, type CellPiece, type VBox } from "./pieces.ts";
 import { floorOf, leafDoorKey, pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler, type KeptLayer } from "./scheduler.ts";
 import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
@@ -184,6 +184,17 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The standing walls and pillars, by bucket, each bucket's list kept while its pieces stay the same. Their stair directions are the ones the drawn heights' runs read.
   const walls = useMemo(() => sceneWalls(scene, chunks), [scene, chunks]);
   const heights = useMemo(() => drawnHeights(src, feet, walls), [src, feet, walls]);
+  /*
+   * The openings on the floor shown draw as drops onto the floor below
+   * (docs/design/design-v1-floors.md phase 4, 9.1). How deep one goes reads
+   * the floor below's build, which the floor's cut leaves out, so this one
+   * read takes the whole copy, through lib/view.ts outside the board's
+   * folders (canvas/floorViewReads.test.ts), as the window's reads go
+   * through features/floors/openingView.ts. It is one string while no hole
+   * changes.
+   */
+  const holesNow = useShownView(!hidden, (s) => (s.view ? holesKey(s.view, scene.id) : ""));
+  const holes = useMemo(() => holeFloors(src, holesOfKey(holesNow), feet), [src, holesNow, feet]);
 
   // The walls a hex creature's sub-cells are clipped by, as the server withholds it (HX-D10), for the DM's dimming.
   const sightClip = useMemo(() => (isHex(grid) ? sightClipOf(walls) : null), [grid, walls]);
@@ -226,6 +237,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       walls: grouped,
       global,
       grid,
+      holes,
       src: {
         ground: (x, y) => heights.at(x, y),
         terrain: (x, y) => terrainAt(chunks, scene.id, x, y),
@@ -238,7 +250,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       },
     });
     return {};
-  }, [hidden, relief, scene.id, w, h, chunks, props.viewerFog, grouped, global, heights, fog, tints, grid]);
+  }, [hidden, relief, scene.id, w, h, chunks, props.viewerFog, grouped, global, heights, fog, tints, grid, holes]);
 
   // Who stands and who lies flat, by the stand rule.
   const { standing, flat } = useMemo(() => splitTokens(fog, grid, props.tokens, props.aboveFog), [fog, grid, props.tokens, props.aboveFog]);
@@ -467,6 +479,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const reliefRootRef = useRef<Konva.Group>(null);
   const mainRef = useRef<Konva.Stage>(null);
   const dc = useRef<DrawContext | null>(null);
+  const holeOfPiece = useCallback((p: CellPiece) => relief.holeOf(p), [relief]);
   // Counts the ground's draws (Konva's layer `draw` event, on every path that draws it), so the tops copy one pattern of each and the kept picture knows a ground draw it did not ask for.
   const groundCopy = useRef<GroundCopy>({ version: 0, made: -1, canvas: null, pattern: null });
   // The camera-derived fields are set again from the main stage at each draw (scheduler.ts KeptHost.prepare), so a draw between renders culls by the view on screen.
@@ -479,6 +492,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     view: screenBox(cam, size),
     openings: (region, box, asker) => relief.openingsMeeting(region, turn, box, asker),
     groundCopy: groundCopy.current,
+    ...(holes.holes.length > 0 ? { hole: holeOfPiece } : {}),
   };
 
   /*

@@ -3,7 +3,7 @@ import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 import type { GroundCell } from "../../lib/groundCells.ts";
 import { keySpan, neighborOf } from "../../lib/groundCells.ts";
-import type { Turn } from "../../lib/view.ts";
+import type { Hole, HoleFloors, Turn } from "../../lib/view.ts";
 import type { BandDraw } from "../../features/areas/volume.ts";
 import type { AreaPits, VolumeLook } from "./drawRelief.ts";
 import { boundsOf, cellPieces, edgeLow, isOpening, keyOf, localKeyOf, lowestOf, polyBox, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type PitRegion, type StaticPiece, type VBox } from "./pieces.ts";
@@ -16,11 +16,12 @@ import { samePiece, type WallPiece } from "./runs.ts";
  * full projected bounds for culling. A bucket is rebuilt only when what it
  * reads changes: its chunk or a neighbor's (heights, terrain, stairs), the
  * fog tiles under them (the viewer's seen ground), its own and its
- * neighbors' wall pieces, the spans of the stepping stairs in them, or
+ * neighbors' wall pieces, the spans of the stepping stairs in them, the
+ * holes over them (docs/design/design-v1-floors.md phase 4, 9.1), or
  * whatever the caller passes as `global` (the stand threshold, the
  * detail, the feet per cell, the side looks). The store replaces each of
  * those objects on every change, so identity says when, and the spans
- * compare as strings.
+ * and holes compare as strings.
  *
  * Standees are placed among the pieces per layout by the own-cells rule:
  * a standee draws after every cell of its footprint whose drawn ground is at
@@ -186,6 +187,28 @@ function hexTiles(grid: Grid, sceneId: string, cx: number, cy: number): string[]
   return out;
 }
 
+/**
+ * Each bucket's part of its signature from the holes: every hole that meets
+ * its chunk or one of the eight around it, which its cells' sides and their
+ * ends read, by its id, squares, drop and floor below, as one string. A
+ * hole placed, moved, removed or deepened, or its floor below newly held,
+ * rebuilds only the buckets around it.
+ */
+function holeSignatures(holes: readonly Hole[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const h of holes) {
+    const r = h.rect;
+    const sig = `${h.id}@${r.x},${r.y},${r.w},${r.h}:${h.drop}:${h.below === null ? "unheld" : `below ${h.below}`};`;
+    for (let cy = Math.floor(r.y / CHUNK_CELLS) - 1; cy <= Math.floor((r.y + r.h - 1) / CHUNK_CELLS) + 1; cy++) {
+      for (let cx = Math.floor(r.x / CHUNK_CELLS) - 1; cx <= Math.floor((r.x + r.w - 1) / CHUNK_CELLS) + 1; cx++) {
+        const key = `${cx},${cy}`;
+        out.set(key, (out.get(key) ?? "") + sig);
+      }
+    }
+  }
+  return out;
+}
+
 export function meets(a: VBox, b: VBox): boolean {
   return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
 }
@@ -217,6 +240,12 @@ export type SyncInput = {
   src: PieceSource;
   /** The scene's grid. Squares when left out. */
   grid?: Grid;
+  /**
+   * The floor's holes (lib/view.ts holeFloors): each seen cell of one draws
+   * as a drop to its bottom, a pit's piece wherever the bottom lies below 0,
+   * whatever `src.ground` reads there. None when left out.
+   */
+  holes?: HoleFloors;
 };
 
 export class ReliefIndex {
@@ -236,12 +265,18 @@ export class ReliefIndex {
   /** Counts the syncs that changed what any piece draws, buckets or their regions: a layout reuses only the last one made since the last of them. */
   #generation = 0;
   #last: LastLayout | null = null;
+  /** The hole each piece of a hole's cell draws the bottom of, set as its bucket is built. */
+  readonly #holes = new WeakMap<CellPiece, Hole>();
 
   /** Rebuilds every bucket whose inputs changed, and drops buckets past the scene's edge. */
   sync(input: SyncInput): void {
     const { sceneId, chunks, tiles } = input;
     const grid = input.grid ?? input.src.grid ?? SQUARES;
-    const src: PieceSource = input.src.grid ? input.src : { ...input.src, grid };
+    const holes = input.holes && input.holes.holes.length > 0 ? input.holes : null;
+    const own: PieceSource = input.src.grid ? input.src : { ...input.src, grid };
+    // A hole's cells read their bottom, and their neighbors read it beside them, so its far sides and theirs draw down to it.
+    const src: PieceSource = holes ? { ...own, ground: (x, y) => holes.at(x, y)?.z ?? own.ground(x, y) } : own;
+    const holeSigs = holes ? holeSignatures(holes.holes) : null;
     const span = keySpan(grid, input.bounds);
     const across = Math.max(1, Math.ceil(span.cols / CHUNK_CELLS));
     const down = Math.max(1, Math.ceil(span.rows / CHUNK_CELLS));
@@ -271,13 +306,18 @@ export class ReliefIndex {
           ...(hex && tiles ? hexTiles(grid, sceneId, cx, cy).map((k) => tiles[k]) : []),
           // The spans of its own stepping stairs and of the chunks around it, whose sides and their ends read them, as one string compared by value: an edit anywhere along a run rebuilds every bucket whose steps it moves (docs/design/design-v1-iso-depth.md 5.2).
           runs && !hex ? NINE.map(([dx, dy]) => runs.chunkSig(cx + dx, cy + dy)).join("|") : "",
+          holeSigs?.get(key) ?? "",
         ];
         const old = this.#buckets.get(key);
         if (old && sameSig(old.sig, sig)) continue;
         this.rebuilt++;
         const cellList = cellPieces(src, cx, cy, chunks[at(0, 0)]);
         const cells = new Map<number, CellPiece>();
-        for (const c of cellList) cells.set(c.y * 1_000_000 + c.x, c);
+        for (const c of cellList) {
+          cells.set(c.y * 1_000_000 + c.x, c);
+          const hole = holes?.at(c.x, c.y)?.hole;
+          if (hole) this.#holes.set(c, hole);
+        }
         const near = NINE.flatMap(([dx, dy]) => input.walls.get(`${cx + dx},${cy + dy}`) ?? []);
         const pieces: StaticPiece[] = [...cellList, ...wallItems(src, input.walls.get(key) ?? [], near)];
         this.#buckets.set(key, { key, pieces, sig, cells, turns: new Map() });
@@ -376,6 +416,11 @@ export class ReliefIndex {
       if (c?.region) return c.region;
     }
     return undefined;
+  }
+
+  /** The hole whose bottom a cell's piece draws, if it draws one (drawRelief.ts DrawContext.hole). */
+  holeOf(p: CellPiece): Hole | undefined {
+    return this.#holes.get(p);
   }
 
   /** The pit regions, for the tests. */
