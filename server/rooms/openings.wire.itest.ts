@@ -31,7 +31,9 @@ import { Socket, startEngine, type Engine, type TestClient } from "./testing.ts"
  * the batch clock. The reducer's and projection's side of each twin is in
  * shared/openings.differential.test.ts, and sight's in
  * shared/openingSight.twins.test.ts and project.openings.test.ts. O10 and
- * O10b, areas through openings, are 4B-2's. O11b's stepped part and
+ * O10b, casts through openings, are at the end, and their reach and
+ * permission sides in client/features/areas/through.test.ts and
+ * shared/permissions.castThrough.test.ts. O11b's stepped part and
  * admission answer wait for the size guard's stepped widths.
  */
 
@@ -593,6 +595,72 @@ describe("openings over the wire: the privacy twins (phase 4, 10.5)", () => {
     assert.equal(await step(a, b, (x) => ({ t: "token.move", tokenId: (x as typeof a).wren, x: 7, y: 6 }), "Wren onto the hole", (x) => x.seats.bree), "applied: ");
     for (const x of [a, b]) assert.equal(live(x.roomId).tokens[(x as typeof a).wren]!.sceneId, x.ground);
     assert.equal(live(a.roomId).tokens[a.mount!]!.sceneId, a.upper, "the horse stays");
+    close(a, b);
+  });
+
+  /** The ids of one step's records, made once and named by role in both rooms, so a frame reads them alike. */
+  function named(a: Compared, b: Compared, role: string): string {
+    const id = uuidv7();
+    for (const x of [a, b]) x.roles.push([id, role]);
+    return id;
+  }
+  const roleOf = (x: Compared, role: string): string => x.roles.find(([, r]) => r === role)![0];
+  const ask = (x: Compared, id: string, fields: { area?: string; targets?: string[] }): Op => ({ t: "cast.ask", cast: { id, caster: roleOf(x, "thorn"), sceneId: roleOf(x, "upper"), spell: "Fireball", ...fields } }) as Op;
+
+  for (const order of ["ana first", "bree first"] as const) {
+    test(`O10, Ana's area over the hole: a hidden goblin below or none, her area, its ask and casts named by hand through the hole answer and send alike (${order})`, async () => {
+      const make = async (lurker: boolean) => {
+        const h = await holed("O10");
+        const goblin = await create(h.r, h.r.ground, { name: "Goblin", x: 6, y: 6 });
+        const secret = lurker ? await create(h.r, h.r.ground, { name: "Lurker", visibility: "dm", x: 7, y: 7 }) : null;
+        const x = await seated(t, h.r, [...h.roles, [goblin, "goblin"]], secret ? [secret, '"Lurker"'] : ['"Lurker"'], order);
+        return { ...x, lurker: secret };
+      };
+      const a = await make(true);
+      const b = await make(false);
+      await alike(a, b, "seated");
+      const area = named(a, b, "area");
+      const fireball = (x: Compared): Op => ({ t: "template.create", template: { id: area, sceneId: roleOf(x, "upper"), shape: "sphere", size: 20, origin: { x: 7, y: 7, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId: x.anaId, visibility: "all" } }) as Op;
+      assert.equal(await step(a, b, fireball, "Ana's fireball over the hole"), "applied: ");
+      const k1 = named(a, b, "ask1");
+      assert.equal(await step(a, b, (x) => ask(x, k1, { area }), "her ask by the area"), "applied: ");
+      const k2 = named(a, b, "ask2");
+      assert.equal(await step(a, b, (x) => ask(x, k2, { targets: [roleOf(x, "goblin")] }), "the goblin below named through the hole"), "applied: ");
+      const k3 = named(a, b, "ask3");
+      const nobody = uuidv7();
+      assert.equal(await step(a, b, (x) => ask(x, k3, { targets: [(x as typeof a).lurker ?? nobody] }), "the hidden goblin named by hand"), "refused gone: that is not here");
+      close(a, b);
+    });
+  }
+
+  test("O10b, both floors fogged but round Thorn and a goblin below: an opening under full fog on both, or none, answers a cast through it alike", async () => {
+    const make = async (opening: boolean) => {
+      const r = await newRoom(t, "O10b");
+      await ok(r.dmSocket, { t: "scene.update", sceneId: r.ground, patch: { name: "Tower" } });
+      const upper = await addFloor(r, r.ground, "above", "Upper floor");
+      const roles: [string, string][] = [[r.ground, "ground"], [upper, "upper"]];
+      const secrets: string[] = [];
+      if (opening) {
+        const hole = uuidv7();
+        const below = uuidv7();
+        await ok(r.dmSocket, { t: "floorLink.put", link: { id: hole, pairId: below, sceneId: upper, to: r.ground, rect: HOLE, kind: "opening" } } as Op);
+        secrets.push(hole, below);
+      }
+      for (const sceneId of [r.ground, upper]) await ok(r.dmSocket, { t: "scene.update", sceneId, patch: { fogEnabled: true } } as Op);
+      const thorn = await create(r, upper, { kind: "pc", name: "Thorn", disposition: "ally", ownerIds: [r.anaId], x: 2, y: 2 });
+      const goblin = await create(r, r.ground, { name: "Goblin", x: 12, y: 12 });
+      await ok(r.dmSocket, { t: "fog.live", sceneId: upper, ops: [{ id: "r1", mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 5, h: 5 } }] } as Op);
+      await ok(r.dmSocket, { t: "fog.live", sceneId: r.ground, ops: [{ id: "r2", mode: "reveal", shape: { kind: "rect", x: 10, y: 10, w: 8, h: 9 } }] } as Op);
+      const x = await seated(t, r, [...roles, [thorn, "thorn"], [goblin, "goblin"]], secrets);
+      return x;
+    };
+    const a = await make(true);
+    const b = await make(false);
+    await alike(a, b, "seated");
+    const k1 = named(a, b, "ask1");
+    assert.equal(await step(a, b, (x) => ask(x, k1, { targets: [roleOf(x, "goblin")] }), "the goblin below named through the fogged hole"), "refused gone: that is not here");
+    const k2 = named(a, b, "ask2");
+    assert.equal(await step(a, b, (x) => ask(x, k2, { targets: [roleOf(x, "thorn")] }), "Thorn named on his own floor"), "applied: ");
     close(a, b);
   });
 });
