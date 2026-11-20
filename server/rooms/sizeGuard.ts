@@ -1811,12 +1811,13 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
 
 /**
  * The room's facts a field's width may read: the player and the creatures
- * they own, the creatures whose walk the turn under way writes, the
- * roster's ids and a list of them at its widest, the Per player scenes,
+ * they own, the creatures they may move but do not own that have a walk,
+ * the roster's ids and a list of them at its widest, the Per player scenes,
  * which every player sees, and the characters the player plays only
- * through a creature of theirs.
+ * through a creature of theirs. Each one moves only with what their copy
+ * shows.
  */
-type WidthRoom = { readonly memberId: string; readonly turn: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly walked: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -1911,8 +1912,12 @@ const USES_MOST = 4096;
 const BOOLEAN_MOST = 5;
 /** An HP label's widest as JSON (shared/rules/hp.ts HpLabel). */
 const HP_LABEL_MOST = Math.max(...Object.keys({ Healthy: 0, Bloodied: 0, Dying: 0, Dead: 0 } satisfies Record<HpLabel, 0>).map((label) => serializedBytes(label)));
-/** Whether the turn under way writes the walk of a creature the player moves but does not own. */
-const movedWalk = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => !room.owns.has(token.id as string) && room.turn.has(token.id as string);
+/**
+ * Whether a creature the player may move but does not own has a walk, which
+ * their moves on its turn may have written stops of past their sight, and
+ * which stays after the turn (D-261119-022).
+ */
+const movedWalk = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => room.walked.has(token.id as string);
 
 const field = (parent: string, key: string, width: OwnField["width"], kept?: OwnField["kept"]): OwnField => ({ parent, key, width, kept });
 /** A field at a fixed number of value bytes. */
@@ -1972,8 +1977,8 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     fixed("actor.inline", "dmNotes", 2),
     // A link to a holder, as if present: the copy holds it only while the holder is in sight (D-261119-017).
     fixed("", "attached", ATTACHED_BYTES),
-    // The turn's walk of a creature they move but do not own, at the far line's walk width, as if present: the copy
-    // holds only the stops players saw (D-261119-017).
+    // The walk of a creature they may move but do not own, at the far line's walk width: the copy holds only the stops
+    // players saw (D-261119-017, D-261119-022).
     {
       ...field("", "path", (_t, room) => fieldBytes("path") + pathMost(room.listWidth) + 1),
       applies: (_t, room, token) => movedWalk(room, token),
@@ -2451,7 +2456,7 @@ function exactRoom(state: RoomState, memberId: string, held: (tokenId: string) =
   const viewer: Viewer = { memberId, role: "player" };
   const room: WidthRoom = {
     memberId,
-    turn: widthsRoom(state).turn,
+    walked: new Set(movesAnyToken(state.meta.settings, memberId) ? Object.values(state.tokens).filter((token) => token.path !== undefined && !ownsToken(state, viewer, token)).map((token) => token.id) : []),
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),
