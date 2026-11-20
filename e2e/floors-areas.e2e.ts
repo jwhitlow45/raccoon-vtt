@@ -21,7 +21,10 @@ import { ConsoleWatch, OpSocket, openSideTab, sideTabName, Shots, SocketWatch, s
  * - fl4a-2: the DM's Save and damage opens the group save with a row for
  *   the goblin below, the page holds both floors, and as No save its Apply
  *   hurts the goblin below and the kobold beside the hole alike.
- * - fl4a-3: no page logged an error.
+ * - fl4a-3: Ana's own Fireball over the hole: her Ask for saves block names
+ *   the goblin below, never the lurker the DM hid beside it, and the DM's
+ *   card for her ask counts all three.
+ * - fl4a-4: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-five, one file
  * after another. The other environment variables are the smoke run's
@@ -48,6 +51,7 @@ let anaContext: BrowserContext;
 let dm: Page;
 let ana: Page;
 let ops: OpSocket;
+let anaOps: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const anaSocket = new SocketWatch("ana");
 const consoles = { dm: new ConsoleWatch("dm"), ana: new ConsoleWatch("ana") };
@@ -64,6 +68,8 @@ const run = {
   goblin: uuidv7(),
   kobold: uuidv7(),
   fireball: uuidv7(),
+  anaFireball: uuidv7(),
+  lurker: uuidv7(),
 };
 
 function actor(hp: number) {
@@ -130,6 +136,7 @@ describe("areas through an opening", { concurrency: false, timeout: 600_000 }, (
       console.error(server?.output().split("\n").slice(-40).join("\n"));
     }
     ops?.close();
+    anaOps?.close();
     if (run.roomId && dmContext) {
       try {
         const res = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
@@ -218,7 +225,30 @@ describe("areas through an opening", { concurrency: false, timeout: 600_000 }, (
     await shots.take(dm, "fl4a-2-dm-applied");
   });
 
-  test("fl4a-3. no page logged an error", () => {
+  test("fl4a-3. Ana's own Fireball over the hole: her block names the goblin below and not the hidden lurker, and the DM's card counts all three", async () => {
+    await ops.send({ t: "token.create", token: { id: run.lurker, sceneId: run.ground, kind: "monster", name: "Lurker", disposition: "hostile", actor: { inline: actor(20) }, x: HOLE.x + 1, y: HOLE.y + 1, size: "medium", visibility: "dm" } });
+    anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(anaContext) });
+    const anaId = run.anaId;
+    await anaOps.send({ t: "template.create", template: { id: run.anaFireball, sceneId: run.upper, shape: "sphere", size: 20, origin: { x: HOLE.x + 1, y: HOLE.y + 1, z: 0 }, yaw: 0, includeOrigin: true, color: "#30a46c", ownerId: anaId, visibility: "all", casterId: run.tThorn, spell: "Fireball" } });
+    await waitFor("Ana's Fireball in her copy", () => (anaSocket.state as RoomState | null)?.templates[run.anaFireball] ?? null);
+    await openSideTab(ana, "Areas");
+    await ana.getByRole("button", { name: "Ask the DM for saves against Fireball" }).click();
+    const block = ana.getByRole("group", { name: "Ask for saves: Fireball" });
+    await block.waitFor();
+    await waitFor("Ana's block names the goblin below", async () => (/In area \(2\): Goblin, Kobold/.test((await block.textContent()) ?? "") ? true : null), 15_000);
+    assert.doesNotMatch((await block.textContent()) ?? "", /Lurker/, "the hidden lurker reached Ana's block");
+    await shots.take(ana, "fl4a-3-ana-block");
+
+    await anaOps.send({ t: "cast.ask", cast: { id: uuidv7(), caster: run.tThorn, sceneId: run.upper, spell: "Fireball", area: run.anaFireball } });
+    const card = dm.getByRole("group", { name: "Thorn asks for saves: Fireball" });
+    await card.waitFor();
+    const toggle = card.locator("button[aria-expanded]").first();
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await card.getByText("In the area: 3").waitFor();
+    await shots.take(dm, "fl4a-3-dm-card");
+  });
+
+  test("fl4a-4. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s console`);
   });
 });
