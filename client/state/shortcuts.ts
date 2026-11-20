@@ -503,9 +503,11 @@ export const FLOOR_SHORTCUTS: readonly Shortcut[] = [
 /**
  * `}` and `{` (docs/design/design-v1-floors.md phase 2, 6.2, D-261109-020):
  * Go up and Go down for the one selected creature, as its bar's button
- * does, through the same wait, so a key never sends a second climb while
- * one is out. Shift with the floor keys. Elsewhere a note says why: no
- * stairs that way, locked, too big, or its holder takes them.
+ * does, and Fly up and Fly down through an opening (phase 4, 5), through
+ * the same wait, so a key never sends a second climb while one is out.
+ * Shift with the floor keys. Elsewhere a note says why: no stairs that
+ * way, locked, too big, its holder takes them, or only a flier goes
+ * through.
  */
 function climbByKey(env: ShortcutEnv, dir: "up" | "down"): void {
   const s = env.getState();
@@ -524,7 +526,7 @@ export const CLIMB_SHORTCUTS: readonly Shortcut[] = [
     id: "goUp",
     ...single("}"),
     name: "Go up",
-    does: "Go up the stairs or ladder the selected creature stands on",
+    does: "Go up the stairs or ladder the selected creature stands on, or fly up through an opening it is under",
     roles: ["dm", "player"],
     when: oneSelected,
     run: (env) => climbByKey(env, "up"),
@@ -533,7 +535,7 @@ export const CLIMB_SHORTCUTS: readonly Shortcut[] = [
     id: "goDown",
     ...single("{"),
     name: "Go down",
-    does: "Go down the stairs or ladder the selected creature stands on",
+    does: "Go down the stairs or ladder the selected creature stands on, or fly down through an opening it is over",
     roles: ["dm", "player"],
     when: oneSelected,
     run: (env) => climbByKey(env, "down"),
