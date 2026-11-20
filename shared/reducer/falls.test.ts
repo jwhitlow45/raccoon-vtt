@@ -101,6 +101,26 @@ describe("who falls (4.1)", () => {
     assert.deepEqual([moved.state.floorLinks!.o1!.rect, moved.state.floorLinks!.o2!.rect], [{ x: 12, y: 12, w: 2, h: 2 }, { x: 12, y: 12, w: 2, h: 2 }]);
   });
 
+  test("a copy of the tower with its creatures keeps a goblin on the hole standing, with no card (FLR4-OPUS-1, D-261120-008)", () => {
+    const state = withTokens(withOpening(tower({ tokens: {} })), up("g1", { x: 6, y: 6 }));
+    const r = applied(state, { t: "scene.duplicate", sceneId: GROUND, newSceneId: "copy", name: "Tower 2", include: { creatures: true, characters: true, fog: false, drawings: false } });
+    const copies = Object.values(r.state.tokens).filter((t) => t.id !== "g1");
+    assert.equal(copies.length, 1, "the goblin is copied");
+    const copyFloor = r.state.scenes[copies[0]!.sceneId]!;
+    assert.deepEqual([copyFloor.floor?.level, copies[0]!.x, copies[0]!.y], [1, 6, 6], "on the copy's Upper floor, over its hole");
+    assert.ok(Object.values(r.state.floorLinks ?? {}).some((l) => l.sceneId === copyFloor.id && l.kind === "opening"), "the copy has its own opening");
+    assert.equal(r.state.tokens.g1!.sceneId, UPPER);
+    assert.deepEqual([r.state.falls, r.falls], [undefined, undefined]);
+  });
+
+  test("a floor reorder that makes the floor below the upper one leaves a goblin on what is now the hole standing, with no card (D-261120-008)", () => {
+    const state = withTokens(withOpening(tower({ tokens: {} })), token("g1", { sceneId: GROUND, name: "g1", x: 6, y: 6 }));
+    const r = applied(state, { t: "floor.order", sceneId: GROUND, floors: [UPPER, GROUND, ATTIC] });
+    assert.ok((r.state.scenes[GROUND]!.floor?.level ?? 0) > (r.state.scenes[UPPER]!.floor?.level ?? 0), "Ground floor now lies above");
+    assert.equal(r.state.tokens.g1!.sceneId, GROUND);
+    assert.deepEqual([r.state.falls, r.falls], [undefined, undefined]);
+  });
+
   test("an elevation lowered to the ground, a resize and a detach over the hole each fall with a card and a record", () => {
     const lowered = applied(withTokens(holed(), up("bat", { x: 6, y: 6, elevation: 10 })), { t: "token.update", tokenId: "bat", patch: { elevation: 0 } });
     assert.equal(lowered.state.tokens.bat!.sceneId, GROUND);

@@ -104,24 +104,32 @@ function placed(was: Token, now: Token): boolean {
   );
 }
 
+/** Whether the op places an opening's squares (4.1): a new pair, or new squares for one. A copied scene's ends are neither. */
+function placesEnds(op: Op): boolean {
+  return op.t === "floorLink.put" || (op.t === "floorLink.update" && (op.patch.rect !== undefined || op.patch.pairRect !== undefined));
+}
+
 /**
  * The fall pass's candidates (4.1): every token the op placed anew and
  * that stood in the room before it, and every token standing on the upper
- * end of an opening whose squares the op wrote. None for a create, an
- * undo, a redo or a restore, which never fall (4.1, D-261119-007). The
- * creatures trapdoors dropped join them from the op's record.
+ * end of an opening whose squares a `floorLink.put` or a `floorLink.update`
+ * wrote. None for a create, a copied scene, a floor reorder, an undo, a
+ * redo or a restore, which never fall (4.1, D-261119-007, D-261120-008):
+ * a creature placed on a hole stands there until it moves. The creatures
+ * trapdoors dropped join them from the op's record.
  */
 export function fallCandidates(tx: Tx, before: RoomState, op: Op): Set<TokenId> {
   const out = new Set<TokenId>();
   // A room without an opening has nothing to fall through, so most ops read no further.
   if (op.t === "sys.restore" || !Object.values(tx.state.floorLinks ?? {}).some((link) => link.kind === "opening")) return out;
+  const ends = placesEnds(op);
   for (const key of tx.touched()) {
     if (key.startsWith("token:")) {
       const id = key.slice("token:".length);
       const was = ownEntry(before.tokens, id);
       const now = ownEntry(tx.state.tokens, id);
       if (was && now && placed(was, now)) out.add(id);
-    } else if (key.startsWith("floorLink:")) {
+    } else if (ends && key.startsWith("floorLink:")) {
       const id = key.slice("floorLink:".length);
       const end = ownEntry(tx.state.floorLinks, id);
       const was = ownEntry(before.floorLinks, id);
