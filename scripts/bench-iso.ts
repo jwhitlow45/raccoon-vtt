@@ -1164,6 +1164,41 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       return dm;
     };
 
+    /*
+     * Row OPEN-ISO: 16 openings over a mapped floor, a pan and a turn, and
+     * the page's heap after them (docs/design/design-v1-floors.md phase 4,
+     * 13). First of the rows, while its room, built last, is still loaded:
+     * with --only the blocks before it would open room after room within the
+     * minute an idle room stays loaded, past the rooms one address may hold
+     * (server/rooms/manager.ts maxPerCreatorIp), and the server closes the
+     * next one's socket.
+     */
+    if (!opts.only || opts.only.some((o) => OPEN_ROWS.some((r) => r.includes(o)))) {
+      const { room, scene } = built.openings!;
+      const dm = await dmOf("openings");
+      const map = await uploadMap(context, server.origin, room.roomId);
+      for (const sceneId of [dm.sceneId, scene.below!]) await dm.op({ t: "scene.setMap", sceneId, map });
+      await open("openings", 40);
+      await page.waitForTimeout(1000);
+      await frames(page, 30);
+      await addPan(OPEN_PAN_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      if (view === "isometric") {
+        const hook = (call: "turn", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
+        for (const t of [1, 2, 3, 0] as const) {
+          await hook("turn", t);
+          await frames(page, 6);
+        }
+        await add(OPEN_TURN_ROW, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+      }
+      await cdp.send("HeapProfiler.collectGarbage");
+      const heap = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number };
+      const mb = Math.round(heap.usedSize / 1e5) / 10;
+      rows.push({ row: OPEN_HEAP_ROW, view, ms: { median: mb, max: mb, n: 1 } });
+    }
+
+    // Asked for OPEN-ISO alone, the bench ends here, before the other blocks open their rooms (above).
+    if (opts.only?.every((o) => o.includes("OPEN-ISO"))) return rows;
+
     // The typical scene.
     {
       const { room, scene } = built.typical!;
@@ -1524,30 +1559,6 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         count("fills and strokes", c.fills);
         if (c.kept) for (const [what, v] of Object.entries(c.kept)) count(what, v);
       }
-    }
-
-    // Row OPEN-ISO: 16 openings over a mapped floor, a pan and a turn, and the page's heap after them (docs/design/design-v1-floors.md phase 4, 13).
-    if (!opts.only || opts.only.some((o) => OPEN_ROWS.some((r) => r.includes(o)))) {
-      const { room, scene } = built.openings!;
-      const dm = await dmOf("openings");
-      const map = await uploadMap(context, server.origin, room.roomId);
-      for (const sceneId of [dm.sceneId, scene.below!]) await dm.op({ t: "scene.setMap", sceneId, map });
-      await open("openings", 40);
-      await page.waitForTimeout(1000);
-      await frames(page, 30);
-      await addPan(OPEN_PAN_ROW, (t) => touchPan(page, cdp, STEPS, t));
-      if (view === "isometric") {
-        const hook = (call: "turn", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
-        for (const t of [1, 2, 3, 0] as const) {
-          await hook("turn", t);
-          await frames(page, 6);
-        }
-        await add(OPEN_TURN_ROW, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
-      }
-      await cdp.send("HeapProfiler.collectGarbage");
-      const heap = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number };
-      const mb = Math.round(heap.usedSize / 1e5) / 10;
-      rows.push({ row: OPEN_HEAP_ROW, view, ms: { median: mb, max: mb, n: 1 } });
     }
 
     /*
