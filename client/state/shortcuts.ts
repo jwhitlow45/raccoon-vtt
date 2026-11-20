@@ -1153,6 +1153,8 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "roomEdits", input: "Tap or click a room in the preview or the wing's ghost", does: "Open its edits", roles: DM, when: "in Generate a dungeon, or in Add a wing with Edit rooms on", device: "pointer" },
   { id: "wingArea", input: "Drag in Add a wing", does: "Set the wing's area", roles: DM, when: "in the Map builder", device: "pointer" },
   { id: "wingJoin", input: "Tap a wall in Add a wing", does: "Set where the wing joins", roles: DM, when: "in the Map builder", device: "pointer" },
+  { id: "linkMove", input: "Drag an end of stairs, a ladder or an opening", does: "Move that floor's end, or both ends of an opening", roles: DM, when: "in Between floors, in the Map builder", device: "pointer" },
+  { id: "linkResize", input: "Drag the handle at an open end's corner", does: "Resize the pair", roles: DM, when: "in Between floors, in the Map builder", device: "pointer" },
   // The fight's cards have no surface of their own: features/encounter/CardRoll.tsx for concentration, save-ends and death-save cards.
   {
     id: "cardRollOptions",
