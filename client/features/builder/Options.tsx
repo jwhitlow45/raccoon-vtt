@@ -2,7 +2,7 @@ import { usePreview } from "../dm/previewContext.ts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import type { TerrainId } from "#shared/model.ts";
+import type { FloorLink, TerrainId } from "#shared/model.ts";
 import { cellWord, isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -95,7 +95,7 @@ export function brushWords(n: number, g: Grid): string {
   return `${n} ${cellWord(g, n !== 1)}`;
 }
 
-function hint(mode: Exclude<BuildMode, "wing">, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid, kind: "stairs" | "ladder"): string {
+function hint(mode: Exclude<BuildMode, "wing">, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid, kind: FloorLink["kind"]): string {
   const limit = hexBuilderLine(mode, g);
   if (limit !== null) return limit;
   if (isHex(g) && mode === "edge") {
@@ -394,7 +394,8 @@ export default function BuilderOptions() {
   }
   if (s.mode === "light") slots.push({ id: "light", priority: 1, control: <LightChip /> });
   if (s.mode === "link") {
-    const kinds = (["stairs", "ladder"] as const).map((k) => ({ value: k, label: KIND_NAMES[k] }));
+    // An opening is a third kind (docs/design/design-v1-floors.md phase 4, 3): a hole onto the floor just below, placed as stairs are.
+    const kinds = (["stairs", "ladder", "opening"] as const).map((k) => ({ value: k, label: KIND_NAMES[k] }));
     const to = chosenTarget(targets, s.linkTo);
     const tos = targets.map((t) => ({ value: t.id, label: toChoice(t.dir, t.name) }));
     slots.push(
@@ -404,7 +405,7 @@ export default function BuilderOptions() {
         control: (
           <ValueChip label={KIND_GROUP} kind="choice" value={s.linkKind} options={kinds.map((k) => ({ key: k.value, words: k.label }))}>
             <PickCloses>
-              <ChoiceRows<"stairs" | "ladder"> label={KIND_GROUP} value={s.linkKind} options={kinds} onChange={(linkKind) => set({ linkKind })} />
+              <ChoiceRows<FloorLink["kind"]> label={KIND_GROUP} value={s.linkKind} options={kinds} onChange={(linkKind) => set({ linkKind })} />
             </PickCloses>
           </ValueChip>
         ),

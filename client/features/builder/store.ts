@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { CellRect, TerrainId } from "#shared/model.ts";
+import type { CellRect, FloorLink, TerrainId } from "#shared/model.ts";
 import type { IconName } from "../../components/Icon.tsx";
 import { LINK_MODE } from "../floors/linkWords.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
@@ -53,7 +53,7 @@ export type BuilderState = {
   /** Gestures whose ops wait on the server's answer to their asks (ask.ts), which the option bar says. */
   asking: number;
   /** Between floors: the kind a new pair takes, and the floor next to this one it leads to (null: the floor above, else below). */
-  linkKind: "stairs" | "ladder";
+  linkKind: FloorLink["kind"];
   linkTo: string | null;
   /** The squares being dragged in Between floors and the rules' first refusal of them, which shows the draft red and fills the note. */
   linkDraft: { rect: CellRect; problem: string | null } | null;

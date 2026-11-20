@@ -18,7 +18,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { requestPan } from "../encounter/pan.ts";
 import { LINK_PANE_ATTR } from "../floors/ids.ts";
-import { goToFloor, KIND_GROUP, KIND_NAMES, LOCKED_SWITCH, lockedHelp, notReachedLine, paneTitle, REMOVE_BOTH, removeWords } from "../floors/linkWords.ts";
+import { goToFloor, HIDDEN_SWITCH, hiddenHelp, KIND_GROUP, KIND_NAMES, LOCKED_SWITCH, lockedHelp, notReachedLine, PANE_KINDS, paneName, paneTitle, REMOVE_BOTH, removeWords } from "../floors/linkWords.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
 import { playersAt } from "../scenes/floorWords.ts";
 import { trapScreenBox } from "../traps/paneBox.ts";
@@ -27,14 +27,17 @@ import { paneEscape, panePlacement, sheetPanAnchor, SHEET_BELOW_PX } from "./lab
 import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
 import { linkPaneSlot } from "./store.ts";
 
-const KINDS = (["stairs", "ladder"] as const).map((value) => ({ value, label: KIND_NAMES[value] }));
+const KINDS = PANE_KINDS.map((value) => ({ value, label: KIND_NAMES[value] }));
 
 /**
  * An end's pane in Between floors (docs/design/design-v1-floors.md phase 2,
- * 7.2), for the DM: its kind, whether it is locked, where players stand with
- * the floor it leads to, Go to that floor, and Remove. It hangs beside the
- * squares on a wide screen and is a bottom sheet on a phone, as the label
- * pane is (labelEdit.ts panePlacement).
+ * 7.2), for the DM: its kind, whether it is locked, whether players see it
+ * (phase 4, 8.1), where players stand with the floor it leads to, Go to
+ * that floor, and Remove. An opening's pane has no Kind, Locked or Hidden
+ * (phase 4, 3): the server turns no opening into stairs or the reverse, and
+ * an opening is never locked or hidden. It hangs beside the squares on a
+ * wide screen and is a bottom sheet on a phone, as the label pane is
+ * (labelEdit.ts panePlacement).
  *
  * Each choice is sent as it is made, to both ends, as one `floorLink.update`
  * and so one step to undo. The pane opens on Kind, and Escape closes it.
@@ -106,7 +109,7 @@ export default function LinkPane(props: { link: FloorLink; camera: Camera; viewp
       <div
         ref={paneRef}
         role="dialog"
-        aria-label="Edit stairs"
+        aria-label={paneName(link.kind)}
         data-map-pane=""
         {...{ [LINK_PANE_ATTR]: link.id }}
         style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}
@@ -124,18 +127,20 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
   const actions = useRoomActions();
   const scope = useRoomScope();
   const kindRef = useRef<HTMLDivElement>(null);
+  const goRef = useRef<HTMLButtonElement>(null);
   const far = useRoomView((s) => s.view?.scenes[link.to]);
   const dir = useRoomView((s) => (s.view ? linkDir(s.view, link) : null)) ?? "up";
   const at = useRoomView((s) => (s.view && far ? playersAt(s.view, far) : null));
   const farName = far?.floor?.name ?? far?.name ?? "the other floor";
 
-  // The pane opens on Kind. A phone would throw its keyboard up over the map for a text field, but a choice takes none, so only a mouse's focus is moved, to keep a touch from a ring.
+  // The pane opens on Kind, and an opening's, which has none, on Go to. A phone would throw its keyboard up over the map for a text field, but a choice takes none, so only a mouse's focus is moved, to keep a touch from a ring.
   useEffect(() => {
     if (isCoarsePointer()) return;
-    kindRef.current?.querySelector<HTMLInputElement>("input:checked, input")?.focus();
+    (kindRef.current?.querySelector<HTMLInputElement>("input:checked, input") ?? goRef.current)?.focus();
   }, []);
 
-  const update = (patch: { kind?: FloorLink["kind"]; locked?: boolean }) => actions.dispatch({ t: "floorLink.update", linkId: link.id, patch });
+  const update = (patch: { kind?: FloorLink["kind"]; locked?: boolean; hidden?: boolean }) => actions.dispatch({ t: "floorLink.update", linkId: link.id, patch });
+  const opening = link.kind === "opening";
   const goTo = () => {
     actions.showFloor(link.to);
     // The other end, on the floor now shown, is the one whose pane stays open.
@@ -148,16 +153,22 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title={<span role="heading" aria-level={2}>{paneTitle(dir, link.kind, farName)}</span>} closeLabel="Close" onClose={props.onClose} grab={props.sheet} controls={props.controls} />
-      <div ref={kindRef} style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <span style={{ flex: 1, color: theme.color.textMuted }}>{KIND_GROUP}</span>
-        <Segmented<FloorLink["kind"]> label={KIND_GROUP} value={link.kind} options={KINDS} onChange={(kind) => update({ kind })} />
-      </div>
-      <Switch label={LOCKED_SWITCH} help={lockedHelp(link.kind)} checked={link.locked === true} onChange={(locked) => update({ locked })} />
+      {/* Two lines, so a long title such as "Opening down to Ground floor" reads whole in the card's width. */}
+      <PaneHeader title={<span role="heading" aria-level={2}>{paneTitle(dir, link.kind, farName)}</span>} lines={2} closeLabel="Close" onClose={props.onClose} grab={props.sheet} controls={props.controls} />
+      {opening ? null : (
+        <>
+          <div ref={kindRef} style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+            <span style={{ flex: 1, color: theme.color.textMuted }}>{KIND_GROUP}</span>
+            <Segmented<FloorLink["kind"]> label={KIND_GROUP} value={link.kind} options={KINDS} onChange={(kind) => update({ kind })} />
+          </div>
+          <Switch label={LOCKED_SWITCH} help={lockedHelp(link.kind)} checked={link.locked === true} onChange={(locked) => update({ locked })} />
+          <Switch label={HIDDEN_SWITCH} help={hiddenHelp(link.kind)} checked={link.hidden === true} onChange={(hidden) => update({ hidden })} />
+        </>
+      )}
       {at === "not" ? <Help>{notReachedLine(farName, dir, link.kind)}</Help> : null}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: theme.space(2), marginTop: theme.space(1) }}>
         <ConfirmButton label={removeWords(link.kind)} confirm={REMOVE_BOTH} onConfirm={remove} wrap />
-        <Button size="sm" variant="primary" onClick={goTo}>
+        <Button ref={goRef} size="sm" variant="primary" onClick={goTo}>
           {goToFloor(farName)}
         </Button>
       </div>

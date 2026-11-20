@@ -1,4 +1,4 @@
-import type { CellRect, FloorLink, RoomState, SceneId } from "#shared/model.ts";
+import { OPENING_SIDE, type CellRect, type FloorLink, type RoomState, type SceneId } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
@@ -52,15 +52,17 @@ export function chosenTarget(targets: readonly LinkTarget[], picked: SceneId | n
 }
 
 /**
- * The squares of a drag, held to LIMITS.floorLinkSide a side. The trap tool's
- * snapping does the work (traps/rules.ts rectBetween, hexes included), then
- * a side that is too long gives up its far end, so the rectangle stays on the
- * square the drag began on.
+ * The squares of a drag, held to the kind's longest side: LIMITS.floorLinkSide
+ * for stairs and ladders, and an opening's own, which is longer
+ * (docs/design/design-v1-floors.md phase 4, 3). The trap tool's snapping does
+ * the work (traps/rules.ts rectBetween, hexes included), then a side that is
+ * too long gives up its far end, so the rectangle stays on the square the
+ * drag began on.
  */
-export function draftRect(g: Grid, from: Point, to: Point, bounds: Bounds): CellRect {
+export function draftRect(g: Grid, from: Point, to: Point, bounds: Bounds, kind: Kind = "stairs"): CellRect {
   const rect = rectBetween(g, from, to, bounds);
   const start = rectBetween(g, from, from, bounds);
-  const side = LIMITS.floorLinkSide;
+  const side = kind === "opening" ? OPENING_SIDE : LIMITS.floorLinkSide;
   const clip = (at: number, length: number, begin: number) => {
     if (length <= side) return { at, length };
     return at < begin ? { at: at + length - side, length: side } : { at, length: side };
@@ -117,7 +119,7 @@ function move(p: ToolPointer, ctx: ToolContext): void {
   const target = plan(ctx);
   if (!start || !view || !target) return;
   if (store.getState().linkDraft === null && distance(start.screen, p.screen) <= TAP_SLOP_PX) return;
-  const draft = judgeDraft(view, ctx.scene.id, target.to, draftRect(sceneGrid(ctx.scene), start.world, p.world, ctx.scene.bounds), target.kind);
+  const draft = judgeDraft(view, ctx.scene.id, target.to, draftRect(sceneGrid(ctx.scene), start.world, p.world, ctx.scene.bounds, target.kind), target.kind);
   store.setState({ linkDraft: draft, note: draft.problem });
 }
 
@@ -141,7 +143,7 @@ function up(p: ToolPointer, ctx: ToolContext): void {
   }
   const target = plan(ctx);
   if (!target) return;
-  const rect = drafted ? draftRect(g, start.world, p.world, ctx.scene.bounds) : draftRect(g, p.world, p.world, ctx.scene.bounds);
+  const rect = drafted ? draftRect(g, start.world, p.world, ctx.scene.bounds, target.kind) : draftRect(g, p.world, p.world, ctx.scene.bounds, target.kind);
   const ids = { id: ctx.actions.newId(), pairId: ctx.actions.newId() };
   const problem = linkProblem(view, draftOf(ctx.scene.id, target.to, rect, target.kind, ids));
   if (problem !== null) {
