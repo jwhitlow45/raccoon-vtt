@@ -1970,7 +1970,8 @@ const shownConditions = (revert: unknown, room: WidthRoom) =>
 /**
  * Every field a player's own ops write beyond their copy, by the kind of
  * thing (D-261119-003). Each counts in their exact part at its width, so
- * their own op never moves the stepped part. Beside what they write past
+ * their own op writes nothing into the stepped part, but for the residuals
+ * tracked privately (D-261119-019). Beside what they write past
  * their copy are the fixed differences between copy and stored: the copy
  * holds every rev as 0, an anchored ruler's stops where its creatures
  * stand, and `aboveFog`, `party` and an HP label or bar it adds.
@@ -2428,13 +2429,15 @@ export function farWidths(state: RoomState, floors?: ReadonlySet<string>): numbe
  * things on floors, rows, asks and companion blocks (shared/limits.ts
  * ownHeld), every creature their copy holds while the room lets them move
  * any, their member, the characters they own or a creature of theirs plays,
- * the roll requests their copy holds, and the log's shared lines their copy
- * holds, which their chat and rolls add to and whose oldest drops as they
- * do. Each takes out of the stepped part all of its stored bytes but what
- * the copy hides and their ops never write, and counts the copy, with each
- * own-written field at its width (OWN_WRITTEN). So their own ops never move
- * the stepped part, the exact part shows nothing their copy does not, and
- * the reading never falls below the stored total (D-261116-015 and 026,
+ * the roll requests their copy holds, and the log's shared lines they may
+ * read, each by its own rules and not by where their live log starts,
+ * which their chat and rolls add to and whose oldest drops as they do. Each
+ * takes out of the stepped part all of its stored bytes but what the copy
+ * hides and their ops never write, and counts the copy, with each
+ * own-written field at its width (OWN_WRITTEN). So their own ops write
+ * nothing into the stepped part, but for the residuals tracked privately
+ * (D-261119-019), the exact part shows nothing their copy does not, and the
+ * reading never falls below the stored total (D-261116-015 and 026,
  * D-261119-003).
  */
 export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): OwnCopyBytes {
