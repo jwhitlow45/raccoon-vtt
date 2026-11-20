@@ -576,6 +576,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       revealed: snap.revealed.filter((r) => tokens.has(r.tokenId)).map((r) => ({ ...r, tokenId: tokens.of(r.tokenId) })),
       at: snap.at,
     };
+    // Its walks stay behind: each names its turn by a seq of the old room, as the tokens' paths do.
     const legendaryHolder = snap.legendary ? holder(snap.legendary.holderId) : null;
     if (snap.legendary && legendaryHolder) next.legendary = { holderId: legendaryHolder, actionsUsed: snap.legendary.actionsUsed };
     const reactions = (snap.companionReactions ?? []).filter((id) => tokens.has(id)).map((id) => tokens.of(id));

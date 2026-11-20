@@ -9,7 +9,9 @@ import {
   type EncounterSnapshot,
   type InitEntry,
   type RoomState,
+  type SavedWalk,
   type Token,
+  type TokenPath,
   type TurnFlag,
   type TurnStart,
   type TurnUses,
@@ -28,7 +30,7 @@ import {
   unbindFromEntry,
   type StoredDuration,
 } from "../rules/durations.ts";
-import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, playerLimitsOps, revealsRowAnew, takesBackTurnOnly, timedEnds } from "../migrate.ts";
+import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, playerLimitsOps, revealsRowAnew, takesBackTurnOnly, timedEnds, walksEndWithTurn } from "../migrate.ts";
 import { effectsFitAt } from "../rules/effects.ts";
 import { clockNow, fightSeconds } from "../calendar.ts";
 import { HISTORY_BYTES, LIMITS, serializedBytes } from "../limits.ts";
@@ -40,6 +42,7 @@ import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 import { restoreTurnUses, savedHolder, startTurnUses, withoutTurnScoped } from "./uses.ts";
 import { ownEntry } from "../records.ts";
 import { openFloor } from "../rules/floors.ts";
+import { turnUnderWay } from "../rules/path.ts";
 
 /** How many `next` steps `prev` can walk back. */
 export const MAX_HISTORY = 20;
@@ -79,6 +82,55 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
     next.turnStart = start;
   }
   return next;
+}
+
+/**
+ * Takes every walk off its creature at a turn's end, from op version 65
+ * (walksEndWithTurn), so the room keeps no walk past its turn, as no
+ * player's copy does. Returns those of the turn `ended` names, for its
+ * Next's step (`EncounterSnapshot.walks`), in id order. One from an earlier
+ * turn, stored before op version 64, goes without a trace, since no turn
+ * can resume to read it.
+ */
+function endWalks(tx: Tx, ended: number | undefined): SavedWalk[] {
+  if (!walksEndWithTurn(tx.env.opVersion)) return [];
+  const saved: SavedWalk[] = [];
+  for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    if (token.path === undefined) continue;
+    const { path, ...rest } = token;
+    tx.write(keys.token(token.id), rest);
+    if (path.turn === ended) saved.push({ tokenId: token.id, sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation, path: withoutSeenBy(path) });
+  }
+  return saved;
+}
+
+/**
+ * A walk as a history step keeps it: its stops without the lists of who saw
+ * them. The measures count each list at the roster's widest, and the
+ * history's bound has room for one a step, its turn start's. So on a Per
+ * player scene a walk Previous puts back shows a player who does not own
+ * its creature only the stops every player saw.
+ */
+function withoutSeenBy(path: TokenPath): TokenPath {
+  if (!path.stops.some((stop) => stop.seenBy !== undefined)) return path;
+  return { ...path, stops: path.stops.map(({ seenBy: _seenBy, ...stop }) => stop) };
+}
+
+/**
+ * Puts back the walks of the turn a Previous resumes (`step` the deepest it
+ * takes back), each on its creature while the creature stands where that
+ * turn's end left it, on the same floor. One moved since starts the turn
+ * again with no walk, as a move off its turn took its walk before.
+ */
+function walksBack(tx: Tx, step: EncounterSnapshot): void {
+  const turn = turnUnderWay(tx.state.encounter);
+  if (!turn) return;
+  for (const walk of step.walks ?? []) {
+    if (walk.path.turn !== turn.seq) continue;
+    const token = ownEntry(tx.state.tokens, walk.tokenId);
+    if (!token || token.sceneId !== walk.sceneId || token.x !== walk.x || token.y !== walk.y || token.elevation !== walk.elevation) continue;
+    tx.write(keys.token(token.id), { ...token, path: walk.path });
+  }
 }
 
 /**
@@ -249,6 +301,8 @@ export function encounterEnd(tx: Tx): void {
   }
   tx.write(keys.encounter, null);
   if (tx.state.encounterHistory.length > 0) tx.write(keys.encounterHistory, []);
+  // The fight's history goes, and the walks of its last turn with it.
+  endWalks(tx, undefined);
   tx.addEvent({ type: "encounter", action: "end" });
 }
 
@@ -293,6 +347,9 @@ export function removeEntries(tx: Tx, entryIds: string[]): void {
   // A turn passed on by the removal starts where its creature stands now, with the mounts it rides (docs/design/design-v1-attach.md 7.1).
   const passed = activeEntryId === encounter.activeEntryId ? kept : withTurn(tx, kept, activeEntryId);
   writeEncounter(tx, passed !== kept && attaches(tx.env.opVersion) ? withMounts(tx, passed, false) : passed);
+  // The turn it ends takes its walks with it. The removal's undo puts them back with the turn, and Previous never resumes
+  // the turn of a row that left the fight.
+  if (passed !== kept) endWalks(tx, undefined);
   for (const entry of sorted) {
     if (!removing.has(entry.id)) continue;
     unbindDurations(tx, entry);
@@ -520,6 +577,10 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
     tx.putActor(landingActor, { ...landingActor.actor, legendary: { ...landingActor.actor.legendary, actionsUsed: 0 } });
   }
 
+  // The turn's walks end with it, kept in its step for Previous (walksEndWithTurn).
+  const walks = endWalks(tx, turnUnderWay(encounter)?.seq);
+  if (walks.length > 0) snapshot.walks = walks;
+
   // After the reveal, so a creature this turn reveals has its starting spot marked as its turn line is.
   let turned = withTurn(tx, { ...encounter, round, entries }, step.landing);
   // The mounts the starting creature rides join its turn, their Reactions back with its own (7.1).
@@ -710,6 +771,11 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
     undoStep(tx, step);
   }
   tx.write(keys.encounterHistory, history.slice(0, history.length - steps.length));
+  // The turn taken back ends its walks, and the one that resumes gets its own back (walksEndWithTurn).
+  if (walksEndWithTurn(tx.env.opVersion)) {
+    endWalks(tx, undefined);
+    walksBack(tx, deepest);
+  }
   if (taken) {
     // Older ops name the step's copy of the row, which is the row as it now stands.
     const resumed = (turnOnly ? (tx.state.encounter?.entries ?? []) : back.entries).find((e) => e.id === back.activeEntryId);

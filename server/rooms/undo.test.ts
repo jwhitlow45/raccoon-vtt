@@ -332,38 +332,44 @@ describe("a player's move undo and the path of the turn", () => {
   const visible = () => true;
   const deps = { canUseAsset: () => true };
 
-  test("takes the move's leg back with it, keeps the legs before it, and the turn passing between changes nothing", () => {
-    let state = room({ tokens: { wolf: token("wolf", { name: "Wolf", ownerIds: ["p1"], x: 1, y: 1 }) } });
-    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "wolf", value: 20 }, { id: "n2", value: 5 }] }, DM, 1);
-    state = apply(state, { t: "encounter.next" }, DM, 2);
-    const stacks = new UndoStacks();
-    for (const [seq, x] of [[3, 3], [4, 5]] as const) {
-      const result = applyOp(state, { t: "token.move", tokenId: "wolf", x, y: 1 }, P1, env(seq));
-      assert.ok(result.ok);
-      state = result.state;
-      stacks.push("p1", result.inverse!, "moving Wolf", undefined, posesAfter(state, result.inverse!));
-    }
-    assert.equal(state.tokens.wolf!.path!.stops.length, 3);
-    state = apply(state, { t: "actor.hp", target: { tokenId: "wolf" }, change: { kind: "damage", amount: 5 } }, DM, 5);
-    state = apply(state, { t: "encounter.next" }, DM, 6);
-    const undo = () => {
-      const step = stacks.popUndo("p1")!;
-      const built = poseRestore(state, { ...step, poses: step.poses! }, visible);
-      assert.ok(built.ok);
-      const op: Op = { t: "sys.restore", entries: built.entries, from: "undo", deps: true };
-      assert.ok(canApply(op, P1, state, deps).ok, "the player's restore check lets the path go back with the token");
-      const result = applyOp(state, op, P1, env(7));
-      assert.ok(result.ok);
-      state = result.state;
-    };
-    undo();
-    const wolf = state.tokens.wolf!;
-    assert.deepEqual([wolf.x, wolf.y], [3, 1]);
-    assert.deepEqual(wolf.path!.stops.map((s) => s.x), [1, 3]);
-    assert.equal("inline" in wolf.actor && wolf.actor.inline.hp.cur, 15, "damage dealt since stays");
-    undo();
-    assert.equal(state.tokens.wolf!.path, undefined, "before its first move it had none");
-  });
+  for (const ended of [false, true]) {
+    const name = ended ? "after its turn ended takes the move back and leaves no walk, which ended with the turn (D-261120-100)" : "takes the move's leg back with it and keeps the legs before it";
+    test(name, () => {
+      let state = room({ tokens: { wolf: token("wolf", { name: "Wolf", ownerIds: ["p1"], x: 1, y: 1 }) } });
+      state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "wolf", value: 20 }, { id: "n2", value: 5 }] }, DM, 1);
+      state = apply(state, { t: "encounter.next" }, DM, 2);
+      const stacks = new UndoStacks();
+      for (const [seq, x] of [[3, 3], [4, 5]] as const) {
+        const result = applyOp(state, { t: "token.move", tokenId: "wolf", x, y: 1 }, P1, env(seq));
+        assert.ok(result.ok);
+        state = result.state;
+        stacks.push("p1", result.inverse!, "moving Wolf", undefined, posesAfter(state, result.inverse!));
+      }
+      assert.equal(state.tokens.wolf!.path!.stops.length, 3);
+      state = apply(state, { t: "actor.hp", target: { tokenId: "wolf" }, change: { kind: "damage", amount: 5 } }, DM, 5);
+      if (ended) state = apply(state, { t: "encounter.next" }, DM, 6);
+      const undo = () => {
+        const step = stacks.popUndo("p1")!;
+        // Its path is looked at only while P1's copy shows one, as the server reads it (actor.ts).
+        const shown = (id: string) => (projectEntity(keys.token(id), state, P1, { sceneId: state.meta.playerSceneId }) as Partial<Token> | null)?.path !== undefined;
+        const built = poseRestore(state, { ...step, poses: step.poses! }, visible, shown);
+        assert.ok(built.ok);
+        const op: Op = { t: "sys.restore", entries: built.entries, from: "undo", deps: true };
+        assert.ok(canApply(op, P1, state, deps).ok, "the player's restore check lets the path go back with the token");
+        const result = applyOp(state, op, P1, env(7));
+        assert.ok(result.ok);
+        state = result.state;
+      };
+      undo();
+      const wolf = state.tokens.wolf!;
+      assert.deepEqual([wolf.x, wolf.y], [3, 1]);
+      assert.deepEqual(wolf.path?.stops.map((s) => s.x), ended ? undefined : [1, 3]);
+      assert.equal("inline" in wolf.actor && wolf.actor.inline.hp.cur, 15, "damage dealt since stays");
+      undo();
+      assert.deepEqual([state.tokens.wolf!.x, state.tokens.wolf!.y], [1, 1]);
+      assert.equal(state.tokens.wolf!.path, undefined, "before its first move it had none");
+    });
+  }
 
   test("is refused once the token was moved away and back since, which would take the later legs with it", () => {
     let state = room({ tokens: { wolf: token("wolf", { name: "Wolf", ownerIds: ["p1"], x: 1, y: 1 }) } });

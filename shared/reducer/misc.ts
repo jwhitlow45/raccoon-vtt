@@ -1,10 +1,10 @@
 import { keys, parseKey, readEntity, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
-import { meetsNumbers, oldSrdIdGuards, playerLimitsOps, withOldSrdIds } from "../migrate.ts";
+import { meetsNumbers, oldSrdIdGuards, playerLimitsOps, walksEndWithTurn, withOldSrdIds } from "../migrate.ts";
 import { CHANGED_SINCE, MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, BuildChunk, Character, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
-import { allKeys, gridOfToken } from "../project.ts";
+import { allKeys, gridOfToken, stableStringify } from "../project.ts";
 import { holderOf, linkHolds } from "../rules/attach.ts";
 import { normalEffects } from "../rules/effects.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
@@ -150,6 +150,9 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (value !== null && (parsed?.kind === "token" || parsed?.kind === "character") && playerLimitsOps(tx.env.opVersion)) value = withNormalEffects(entry.key, value as Token | Character);
     tx.write(entry.key, value);
   }
+  // A walk lives only on its turn, so one a restore brings back from a turn since ended stays off (D-261120-100). From op
+  // version 65, and ops stored before replay as stored.
+  if (walksEndWithTurn(tx.env.opVersion)) keepTurnWalks(tx, op.entries, before);
   // A scene a restore takes away takes the party's explored layer with it, as bookkeeping (docs/design/design-v1-maps-vision.md
   // 4.3.3): it is no one's work, so it never counts as work that depends on the scene.
   for (const p of removed) if (p.kind === "scene" && !ownEntry(tx.state.scenes, p.id)) forgetExplored(tx, p.id);
@@ -166,6 +169,28 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   }
   if (tracked) writeSaveOutcome(tx, op.saveOutcome!.id, tracked);
   else pruneSaveOutcomes(tx);
+}
+
+/**
+ * Takes off each walk a restore brings back that is not of the turn under
+ * way as the restore leaves the fight: a player's undo of a move made on a
+ * turn since ended puts back the walk before the move, and a DM's undo of a
+ * creature's delete its whole value. An undo of the turn's end puts back
+ * the fight with the walks, and keeps them. A walk the creature holds
+ * already, which a room kept from before op version 65 may, stays as it
+ * is, so an undo writes nothing of a creature's but what it puts back.
+ */
+function keepTurnWalks(tx: Tx, entries: readonly RestoreEntry[], before: ReadonlyMap<EntityKey, unknown>): void {
+  const seq = turnUnderWay(tx.state.encounter)?.seq;
+  for (const entry of entries) {
+    if (parseKey(entry.key)?.kind !== "token") continue;
+    const token = readEntity(tx.state, entry.key) as Token | null;
+    if (token?.path === undefined || token.path.turn === seq) continue;
+    const held = (before.get(entry.key) as Token | null | undefined)?.path;
+    if (held !== undefined && stableStringify(held) === stableStringify(token.path)) continue;
+    const { path: _path, ...rest } = token;
+    tx.write(entry.key, rest);
+  }
 }
 
 /**

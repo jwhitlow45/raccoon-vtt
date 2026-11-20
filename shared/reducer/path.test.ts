@@ -78,21 +78,22 @@ describe("the active creature's path this turn", () => {
     assert.equal(f.path("gob"), undefined);
   });
 
-  test("the turn passing writes no token, a path from an earlier turn counts as empty, and the next turn starts its own", () => {
+  test("the turn's end takes its walk off (D-261120-100), a path from an earlier turn counts as empty, and the next turn starts its own", () => {
     const f = fight();
     f.run(move("wolf", 4, 1));
     const wolf = f.state.tokens.wolf!;
     f.run(NEXT);
-    assert.equal(f.state.tokens.wolf, wolf, "the token is untouched");
-    assert.equal(pathThisTurn(f.state.encounter, wolf), null);
+    assert.equal(f.path("wolf"), undefined, "the turn's end takes the walk off");
+    assert.equal(pathThisTurn(f.state.encounter, wolf), null, "and one a room kept from before op version 65 counts as empty");
     f.run(move("gob", 12, 1));
     assert.equal(f.path("gob")!.turn, f.state.encounter!.turnStart!.seq);
     f.run(NEXT);
+    assert.equal(f.path("gob"), undefined, "the goblin's turn's end takes its walk off too");
     assert.equal(f.state.encounter!.round, 2);
     f.run(move("wolf", 4, 5));
     assert.deepEqual(f.path("wolf"), { turn: f.state.encounter!.turnStart!.seq!, stops: [at(4, 1), at(4, 5)] });
     f.run(move("gob", 13, 1));
-    assert.equal(f.path("gob"), undefined, "moved out of its turn, the last turn's path goes");
+    assert.equal(f.path("gob"), undefined, "moved out of its turn, it gets none");
   });
 
   test("Previous brings the earlier turn's path back with the turn, and Next after it starts afresh", () => {

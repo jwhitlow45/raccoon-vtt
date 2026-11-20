@@ -22,7 +22,11 @@ const at = (i: number) => new Date(Date.UTC(2026, 5, 1, 20, 0, i)).toISOString()
 const hashOf = (value: unknown) => hash128(stableStringify(value));
 const pc = (id: string, sceneId: string, owner: string) => token(id, { sceneId, kind: "pc", name: id, ownerIds: [owner], actor: { ref: `c-${id}` }, hpVisibility: "exact" });
 
-type Sequence = { name: string; start: () => RoomState; ops: Op[]; viewers: { viewer: Viewer; sceneId: string | null }[]; steps: string[]; copies: string[] };
+/**
+ * `live`, where a rule since that build changes what the same ops do sent
+ * today: hashes recorded on this build, the rule named beside them.
+ */
+type Sequence = { name: string; start: () => RoomState; ops: Op[]; viewers: { viewer: Viewer; sceneId: string | null }[]; steps: string[]; copies: string[]; live?: { steps: string[]; copies: string[] } };
 
 const three = () => ({ s1: scene("s1", { name: "Gate" }), s2: scene("s2", { name: "Hall", order: 1 }), s3: scene("s3", { name: "Crypt", order: 2 }) });
 
@@ -107,6 +111,12 @@ const SEQUENCES: Sequence[] = [
     ],
     steps: ["9d2de72fcf2cdb5756afe5de4e9a8b07", "179781c4dec72efc3db17df8a562a415", "3d4b03654936ec100c64f46ddabfc386", "762a0c35094565b095d947bdbcec2c56", "82d00e63def2854136551c9bccd1e083", "5a060229706c7c8eaf45c61e84fee585", "b1f6c14157b794fbd0700ea8d1c03bfe", "03924e19450b63ad8b5527cc02d6c297"],
     copies: ["ecca28346456f4affa1aefb7525a104e", "f98a2a3091c1868cfca23643ce5a91c0", "0ed3c50624402f56e6bbed36fcc0dabe"],
+    // From change format 64 a turn's end takes its walks off (D-261120-100), so sent today the second Next on differs.
+    live: {
+      steps: ["9d2de72fcf2cdb5756afe5de4e9a8b07", "179781c4dec72efc3db17df8a562a415", "3d4b03654936ec100c64f46ddabfc386", "917d0583fa096f150c915df32c162891", "48e8e7ab834ffb01d4062b54e10a4ca1", "8d1b9dadf297d1200705045ac942c7b7", "143ff658b7edbc5908c97862b0e93767", "68570befe5739316f788ac49fa3d0e11"],
+      // Players' copies of the end are as they were: only the DM's held the walks past their turns.
+      copies: ["ecca28346456f4affa1aefb7525a104e", "f98a2a3091c1868cfca23643ce5a91c0", "fc06939e6cb1c8163873198706b41802"],
+    },
   },
 ];
 
@@ -141,8 +151,9 @@ describe("rooms without floors replay as the build before floors left them (9)",
     ] as const) {
       test(`${seq.name}, ${how}`, () => {
         const got = replay(seq, version);
-        assert.deepEqual(got.steps, seq.steps, "each op's state");
-        assert.deepEqual(got.copies, seq.copies, "each viewer's copy of the end");
+        const want = version === undefined && seq.live ? seq.live : seq;
+        assert.deepEqual(got.steps, want.steps, "each op's state");
+        assert.deepEqual(got.copies, want.copies, "each viewer's copy of the end");
       });
     }
   }

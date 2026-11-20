@@ -326,6 +326,8 @@ function normalized(key: string, value: unknown, after: RoomState): unknown {
     const link = out.attached as Token["attached"];
     const holder = link ? after.tokens[link.to] : undefined;
     if (!link || !holder || !linkHolds(SQUARES, after.meta.settings, link.kind, out as unknown as Token, holder)) delete out.attached;
+    // A walk lives only on its turn, so the restore leaves off one from a turn since ended (D-261120-100).
+    if ((out.path as Token["path"])?.turn !== turnUnderWay(after.encounter)?.seq) delete out.path;
   }
   if (key === "encounter" && out.turnStart) {
     const { mounts: _mounts, ...start } = out.turnStart as Record<string, unknown>;

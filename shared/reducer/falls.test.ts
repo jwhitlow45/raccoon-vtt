@@ -413,7 +413,9 @@ describe("before change format 64 (opensOps)", () => {
 describe("a creature a fall or a trapdoor lands outside its turn keeps its old path from 64 (D-261119-016)", () => {
   test("a goblin an opening placed under it drops outside its turn, and one a trapdoor drops, keep their old paths at 64", () => {
     const old = { turn: 1, stops: [{ x: 0, y: 0, elevation: 0 }] } as unknown as Token["path"];
-    const state = onThornsTurn(withTokens(tower(), up("goblin", { x: 6, y: 6, path: old }), up("rat", { x: 10, y: 10, path: old })));
+    // A room kept from before change format 65 may hold them past their turn: from 65 a turn's end takes every walk off (D-261120-100).
+    const fight = onThornsTurn(withTokens(tower(), up("goblin", { x: 6, y: 6 }), up("rat", { x: 10, y: 10 })));
+    const state = { ...fight, tokens: { ...fight.tokens, goblin: { ...fight.tokens.goblin!, path: old }, rat: { ...fight.tokens.rat!, path: old } } };
     const r = applied(state, putOpeningOp());
     assert.equal(r.state.tokens.goblin!.sceneId, GROUND);
     assert.deepEqual(r.state.tokens.goblin!.path, old);

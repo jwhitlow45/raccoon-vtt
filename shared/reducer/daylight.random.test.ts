@@ -94,6 +94,18 @@ function sameClock(a: RoomClock | null | undefined, b: RoomClock | null | undefi
 const lightSettings = (s: Scene | undefined) => (s ? JSON.stringify([s.phaseId ?? null, s.vision ?? null]) : null);
 const withoutRev = (s: Scene | undefined) => (s ? { ...s, rev: 0 } : s);
 
+/**
+ * The state outside its scenes, without what a turn's end does from op
+ * version 65 and not at 54 (D-261120-100): each walk it takes off, the rev
+ * that write moves on, and the walks its step keeps. The pass writes none of
+ * them.
+ */
+function outsideScenes(state: RoomState): unknown {
+  const tokens = Object.fromEntries(Object.entries(state.tokens).map(([id, { path: _path, rev: _rev, ...rest }]) => [id, rest]));
+  const encounterHistory = state.encounterHistory.map(({ walks: _walks, ...step }) => step);
+  return { ...state, scenes: {}, tokens, encounterHistory };
+}
+
 type Scope = "play" | "setup";
 type Stacks = Record<Scope, { undo: RestoreEntry[][]; redo: RestoreEntry[][] }>;
 
@@ -141,7 +153,7 @@ test("daylight keeps its invariants over random play, undo and redo", () => {
         assert.ok(!result.touched.some((key) => key.startsWith("scene:")), `${where}: wrote a scene`);
       }
       // Invariant 3.
-      assert.deepEqual({ ...result.state, scenes: {} }, { ...without.state, scenes: {} }, `${where}: the pass wrote outside the scenes`);
+      assert.deepEqual(outsideScenes(result.state), outsideScenes(without.state), `${where}: the pass wrote outside the scenes`);
       assert.deepEqual(Object.keys(result.state.scenes).sort(), Object.keys(without.state.scenes).sort());
       const clockMoved = !sameClock(before.clock, clock) || (before.encounter !== null && state.encounter === null);
       for (const [id, lit] of Object.entries(result.state.scenes)) {
