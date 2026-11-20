@@ -30,7 +30,7 @@ export type ManagerOptions = {
   minIdleMs: number;
   /** How long a room with no sockets and nothing to do stays loaded. */
   idleUnloadMs: number;
-  /** How long close() waits for actors to finish and write snapshots. */
+  /** How long close() waits for actors to finish and write snapshots: 18 s, so the stop's other steps fit in its 25 s (design 15.4). */
   closeTimeoutMs: number;
   snapshotBudget: Partial<SnapshotBudgetLimits>;
   actor: Partial<ActorOptions>;
@@ -43,7 +43,7 @@ export const DEFAULT_MANAGER_OPTIONS: ManagerOptions = {
   minLoadedMs: 10 * 60_000,
   minIdleMs: 10 * 60_000,
   idleUnloadMs: 60_000,
-  closeTimeoutMs: 20_000,
+  closeTimeoutMs: 18_000,
   snapshotBudget: {},
   actor: {},
   now: Date.now,
@@ -58,7 +58,14 @@ type Entry = {
   createdIp: string | null;
   unloading: Promise<void> | null;
   idleTimer: NodeJS.Timeout | null;
+  /** Whether its unload writes a snapshot, as a shutdown's and an eviction's do and a delete's does not. */
+  saves: boolean;
+  /** Whether its unload threw, which the unload logs and gets past. */
+  failed: boolean;
 };
+
+/** A room the shutdown cannot show saved, and why (server/shutdown.ts names each). */
+export type UnsavedRoom = { roomId: string; why: "unload failed" | "snapshot not written" | "timed out" | "not checked" };
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -93,6 +100,7 @@ export class RoomManager {
    */
   #locks = new Map<string, Promise<void>>();
   #closing = false;
+  #unsavedAtClose: readonly UnsavedRoom[] | null = null;
   #pruneTimer: NodeJS.Timeout;
   #deleteListeners: Array<(roomId: string) => void> = [];
 
@@ -282,22 +290,64 @@ export class RoomManager {
     await this.#unload(entry, { code, snapshot, flush: snapshot });
   }
 
-  /** Shutdown (design 15.4): sockets already closed with 1012 by the socket layer, actors finish and write snapshots, bounded in time. */
-  async close(): Promise<void> {
+  /**
+   * Shutdown (design 15.4): sockets already closed with 1012 by the socket
+   * layer, actors finish and write snapshots, bounded in time. It resolves
+   * with every room it cannot show saved and never rejects, so one room's
+   * failure stops no other room's snapshot, and the stop names them all and
+   * exits 1 (server/shutdown.ts). An actor logs a snapshot write that fails
+   * and goes on, so a room counts as saved only once its stored snapshot
+   * reads its last commit.
+   */
+  async close(): Promise<readonly UnsavedRoom[]> {
     this.#closing = true;
     clearInterval(this.#pruneTimer);
+    const entries = [...this.#entries.values()];
+    const checked = new Map<Entry, UnsavedRoom["why"] | null>();
     const work = Promise.all(
-      [...this.#entries.values()].map((entry) => (entry.unloading ?? this.#unload(entry, { code: CLOSE.restarting, snapshot: true })).catch(() => undefined)),
+      entries.map(async (entry) => {
+        await (entry.unloading ?? this.#unload(entry, { code: CLOSE.restarting, snapshot: true }));
+        checked.set(entry, await this.#unsavedWhy(entry));
+      }),
     );
     let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        this.#log.error({ rooms: this.#entries.size }, "room shutdown did not finish in time");
-        resolve();
-      }, this.options.closeTimeoutMs);
+    const deadline = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), this.options.closeTimeoutMs);
     });
-    await Promise.race([work, deadline]);
-    if (timer) clearTimeout(timer);
+    if ((await Promise.race([work, deadline])) === "late") this.#log.error({ rooms: entries.length - checked.size }, "room shutdown did not finish in time");
+    clearTimeout(timer);
+    // A room still loading at the deadline would have saved once loaded, so it counts too.
+    const unsaved = entries.flatMap((entry): UnsavedRoom[] => {
+      const why = checked.has(entry) ? checked.get(entry) : entry.saves ? "timed out" : null;
+      return why ? [{ roomId: entry.roomId, why }] : [];
+    });
+    if (unsaved.length > 0) this.#log.error({ rooms: unsaved }, "rooms not saved at shutdown");
+    this.#unsavedAtClose = unsaved;
+    return unsaved;
+  }
+
+  /** What the last close() could not show saved, or null before it has finished. */
+  get unsavedAtClose(): readonly UnsavedRoom[] | null {
+    return this.#unsavedAtClose;
+  }
+
+  /**
+   * Why a room whose unload has settled is not saved, or null when it is or
+   * holds nothing to save: a room that never loaded, an unload without a
+   * snapshot (a delete's), or a room whose replay failed, which is never
+   * snapshotted by design.
+   */
+  async #unsavedWhy(entry: Entry): Promise<UnsavedRoom["why"] | null> {
+    const actor = entry.actor;
+    if (!entry.saves || !actor || actor.replayFailed) return null;
+    if (entry.failed) return "unload failed";
+    try {
+      const { rows } = await this.#pool.query<{ seq: string }>("select seq::text from room_snapshots where room_id = $1", [entry.roomId]);
+      return Number(rows[0]?.seq ?? 0) < actor.committed.seq ? "snapshot not written" : null;
+    } catch (err) {
+      this.#log.error({ err, roomId: entry.roomId }, "room snapshot could not be checked at shutdown");
+      return "not checked";
+    }
   }
 
   #load(info: RoomInfo): Entry {
@@ -317,6 +367,8 @@ export class RoomManager {
       createdIp: info.createdIp,
       unloading: null,
       idleTimer: null,
+      saves: false,
+      failed: false,
     };
     entry.loading.catch(() => undefined);
     entry.loading = RoomActor.load({
@@ -365,11 +417,13 @@ export class RoomManager {
       clearTimeout(entry.idleTimer);
       entry.idleTimer = null;
     }
+    entry.saves = opts.snapshot;
     entry.unloading = (async () => {
       try {
         const actor = await entry.loading.catch(() => null);
         if (actor) await actor.shutdown(opts);
       } catch (err) {
+        entry.failed = true;
         this.#log.error({ err, roomId: entry.roomId }, "room unload failed");
       } finally {
         if (this.#entries.get(entry.roomId) === entry) this.#entries.delete(entry.roomId);

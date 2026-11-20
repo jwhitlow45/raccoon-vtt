@@ -10,11 +10,11 @@ import { shutDown } from "./shutdown.ts";
  * with 1012 so clients reconnect at once to the new container, let each room
  * finish its current commit and write its snapshot, then close the pool. The
  * socket layer and the room manager hook Fastify's preClose and onClose to do
- * their parts inside `app.close()`, the socket layer closing every HTTP
- * connection too once its sockets have closed, since the rooms' part waits
- * for the server to close. server/shutdown.ts then waits for the sockets
- * still closing and what they write, closes the pool and exits, logging each
- * step, with 1 when the stop fails or has not finished at 25 s. The log
+ * their parts inside `app.close()`, and Fastify closes every HTTP connection
+ * between the two (server/app.ts), since the rooms' part waits for the
+ * server to close. server/shutdown.ts then waits for the sockets still
+ * closing and what they write, closes the pool and exits, logging each step,
+ * with 1 when the stop lost anything or has not finished at 25 s. The log
  * archive's metadata worker starts only once the server listens, and
  * app.close() stops it first, its job's connection closed.
  */
