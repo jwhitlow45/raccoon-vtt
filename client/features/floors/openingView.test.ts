@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { ATTIC, GROUND, OPENING_RECT, UPPER, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState, Scene } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
-import { cropKey, farChunks, farEnd, farTokensIn, holeDrop, holeDrops, holeOutline, holesOn, windowPxPerCell, WINDOW_MAX_PX } from "./openingView.ts";
+import { cropKey, farChunks, farEnd, farTokensIn, holeDrop, holeDrops, holeOutline, holesOn, paintFloorRaster, pastFloorEdge, windowPxPerCell, WINDOW_MAX_PX, type RasterPainter } from "./openingView.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
 /*
@@ -133,5 +133,57 @@ describe("a far floor's crops are drawn again on every change they read (FLR4INT
     assert.notEqual(key({ gridShape: "hexRows" }), key({}));
     assert.notEqual(key({ autoWalls: "off" }), key({}));
     assert.notEqual(key({}, URLS, [{ id: "o1", o: holeOutline(SQUARES, { ...OPENING_RECT, x: 7 }) }]), key({}));
+  });
+});
+
+describe("the far floor's fog in a window composites over what the window drew, and clears none of it (FLR4INT-ASTRA-01)", () => {
+  type Call = { op: string; args: number[]; fill?: string };
+  /** A context that keeps every call, with no clearRect: a clear would throw. */
+  function recorder(): RasterPainter & { calls: Call[] } {
+    const calls: Call[] = [];
+    const g = {
+      calls,
+      imageSmoothingEnabled: true,
+      fillStyle: "" as RasterPainter["fillStyle"],
+      save: () => void calls.push({ op: "save", args: [] }),
+      restore: () => void calls.push({ op: "restore", args: [] }),
+      fillRect: (...args: number[]) => void calls.push({ op: "fillRect", args, fill: String(g.fillStyle) }),
+      drawImage: (_image: unknown, ...args: number[]) => void calls.push({ op: "drawImage", args }),
+    };
+    return g as unknown as RasterPainter & { calls: Call[] };
+  }
+  const RASTER = { width: 40, height: 28 } as unknown as HTMLCanvasElement;
+  const BOUNDS = { w: 20, h: 14 };
+  const area = (r: { w: number; h: number }) => r.w * r.h;
+  const meets = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  test("a hole wholly on the floor below: its fog is drawn once over the window, with no fill and no clear", () => {
+    const g = recorder();
+    paintFloorRaster(g, RASTER, BOUNDS, { x: 6, y: 6, w: 2, h: 2 }, false, "#101418");
+    assert.deepEqual(g.calls.map((c) => c.op), ["save", "drawImage", "restore"]);
+    assert.deepEqual(g.calls[1]!.args, [12, 12, 4, 4, 6, 6, 2, 2], "the raster's own part under the hole, two pixels a cell");
+  });
+
+  test("a hole past the floor's edge: fog fills only what lies past it, and the raster draws the rest over the window", () => {
+    for (const o of [{ x: 18, y: 5, w: 4, h: 2 }, { x: -1, y: -1, w: 3, h: 3 }, { x: 17, y: 12, w: 4, h: 4 }]) {
+      const g = recorder();
+      paintFloorRaster(g, RASTER, BOUNDS, o, false, "#101418");
+      const fills = g.calls.filter((c) => c.op === "fillRect").map((c) => ({ x: c.args[0]!, y: c.args[1]!, w: c.args[2]!, h: c.args[3]! }));
+      assert.ok(fills.every((f) => !meets(f, { x: 0, y: 0, ...BOUNDS })), `${JSON.stringify(o)}: no fill on the floor itself`);
+      assert.ok(g.calls.every((c) => c.op !== "fillRect" || c.fill === "#101418"), "in the fog's color");
+      const inside = { w: Math.min(BOUNDS.w, o.x + o.w) - Math.max(0, o.x), h: Math.min(BOUNDS.h, o.y + o.h) - Math.max(0, o.y) };
+      assert.equal(fills.reduce((n, f) => n + area(f), 0), area(o) - area(inside), `${JSON.stringify(o)}: the fills cover all the rest of the box`);
+      assert.equal(g.calls.filter((c) => c.op === "drawImage").length, 1);
+    }
+  });
+
+  test("sight fills nothing past the edge, and a hole wholly off the floor is all fog", () => {
+    const sight = recorder();
+    paintFloorRaster(sight, RASTER, BOUNDS, { x: 18, y: 5, w: 4, h: 2 }, true, null);
+    assert.deepEqual(sight.calls.map((c) => c.op), ["save", "drawImage", "restore"]);
+    assert.deepEqual(pastFloorEdge({ x: 30, y: 2, w: 2, h: 2 }, BOUNDS), [{ x: 30, y: 2, w: 2, h: 2 }]);
+    const off = recorder();
+    paintFloorRaster(off, RASTER, BOUNDS, { x: 30, y: 2, w: 2, h: 2 }, false, "#101418");
+    assert.deepEqual(off.calls.map((c) => c.op), ["save", "fillRect", "restore"]);
   });
 });

@@ -59,6 +59,9 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   floor: the window shows the map's blue half, and a calibration that
  *   shifts the map, the same image on the same bounds, turns the window red
  *   while it stays shown.
+ * - FLR4R1-2: fog on Ground floor, hidden but for the hole's west column:
+ *   the DM's window keeps the map in the revealed squares as it drew them
+ *   with the fog off, and draws the fog over the rest.
  * - fl4o-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-one, one file after
@@ -713,6 +716,24 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await ops.send({ t: "scene.setGrid", sceneId: run.ground, cellPx: image.width / BOUNDS.w, originPx: { x: -8 * (image.width / BOUNDS.w), y: 0 } });
     await waitFor("the window redrawn from the new calibration", async () => (red(await colorAt(dm, cell)) ? true : null), 15_000);
     await shots.take(dm, "flr4r1-1-window-recalibrated");
+  });
+
+  test("FLR4R1-2. with fog on below, the window keeps the map in the revealed squares and fogs the rest", async () => {
+    await showFloor(dm, "Upper floor");
+    const revealed = { x: WINDOW_HOLE.x, y: WINDOW_HOLE.y };
+    const hidden = { x: WINDOW_HOLE.x + 1, y: WINDOW_HOLE.y + 1 };
+    const unfogged = await waitFor("the window with the fog off", async () => {
+      const [a, b] = [await colorAt(dm, revealed), await colorAt(dm, hidden)];
+      return a !== null && b !== null ? { a, b } : null;
+    });
+    await ops.send({ t: "scene.update", sceneId: run.ground, patch: { fogEnabled: true } });
+    await ops.send({ t: "fog.reset", sceneId: run.ground, to: "hidden" });
+    await ops.send({ t: "fog.live", sceneId: run.ground, ops: [{ id: uuidv7(), mode: "reveal", shape: { kind: "rect", x: WINDOW_HOLE.x, y: WINDOW_HOLE.y, w: 1, h: WINDOW_HOLE.h } }] });
+    const near = (a: readonly number[] | null, b: readonly number[]) => a !== null && a.every((v, i) => Math.abs(v - b[i]!) <= 10);
+    await waitFor("the fog over the hole's hidden squares", async () => (!near(await colorAt(dm, hidden), unfogged.b) ? true : null), 15_000);
+    const shown = await colorAt(dm, revealed);
+    assert.ok(near(shown, unfogged.a), `a revealed square of the window shows the map as with the fog off: read ${shown}, then ${unfogged.a}`);
+    await shots.take(dm, "flr4r1-2-window-fog-revealed");
   });
 
   test("fl4o-10. no page logged an error", () => {

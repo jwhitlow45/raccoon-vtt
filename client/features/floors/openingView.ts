@@ -86,6 +86,55 @@ export function cropKey(far: Pick<Scene, "id" | "background" | "bounds" | "grid"
   return JSON.stringify([far.id, urls, mapRect, far.background, far.bounds, far.grid, far.gridShape, far.autoWalls, outlines.map((x) => [x.id, x.o.x, x.o.y, x.o.w, x.o.h])]);
 }
 
+/** A box in cells. */
+type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * The parts of a hole's box that lie past the far floor's edge, as at most
+ * four boxes that do not meet the floor: the floor's fog fills them, as the
+ * board's own fog frames a floor.
+ */
+export function pastFloorEdge(o: Box, bounds: { w: number; h: number }): Box[] {
+  const x0 = Math.max(0, o.x);
+  const y0 = Math.max(0, o.y);
+  const x1 = Math.min(bounds.w, o.x + o.w);
+  const y1 = Math.min(bounds.h, o.y + o.h);
+  if (x1 <= x0 || y1 <= y0) return [{ x: o.x, y: o.y, w: o.w, h: o.h }];
+  const out: Box[] = [];
+  if (y0 > o.y) out.push({ x: o.x, y: o.y, w: o.w, h: y0 - o.y });
+  if (o.y + o.h > y1) out.push({ x: o.x, y: y1, w: o.w, h: o.y + o.h - y1 });
+  if (x0 > o.x) out.push({ x: o.x, y: y0, w: x0 - o.x, h: y1 - y0 });
+  if (o.x + o.w > x1) out.push({ x: x1, y: y0, w: o.x + o.w - x1, h: y1 - y0 });
+  return out;
+}
+
+/** What paintFloorRaster draws with: a 2D context's own calls. */
+export type RasterPainter = Pick<CanvasRenderingContext2D, "save" | "restore" | "fillRect" | "drawImage"> & { imageSmoothingEnabled: boolean; fillStyle: CanvasRenderingContext2D["fillStyle"] };
+
+/**
+ * A whole far floor's raster, one pixel a sub-cell, drawn into a hole's box
+ * over what the window already drew there: its map crop, its creatures and
+ * its sight. The raster composites over them and never clears, so revealed
+ * fog leaves them showing. Fog (`edge`, its color) also fills the box past
+ * the floor's edge, and only there.
+ */
+export function paintFloorRaster(g: RasterPainter, raster: CanvasImageSource & { width: number; height: number }, bounds: { w: number; h: number }, o: Box, smooth: boolean, edge: string | null): void {
+  const kx = raster.width / bounds.w;
+  const ky = raster.height / bounds.h;
+  g.save();
+  g.imageSmoothingEnabled = smooth;
+  if (edge !== null) {
+    g.fillStyle = edge;
+    for (const r of pastFloorEdge(o, bounds)) g.fillRect(r.x, r.y, r.w, r.h);
+  }
+  const x0 = Math.max(0, o.x);
+  const y0 = Math.max(0, o.y);
+  const x1 = Math.min(bounds.w, o.x + o.w);
+  const y1 = Math.min(bounds.h, o.y + o.h);
+  if (x1 > x0 && y1 > y0) g.drawImage(raster, x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky, x0, y0, x1 - x0, y1 - y0);
+  g.restore();
+}
+
 /** The most pixels a window's crop takes a side (7.4, 13): at most 512 by 512, so 16 windows hold at most 16 MiB. */
 export const WINDOW_MAX_PX = 512;
 

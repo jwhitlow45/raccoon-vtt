@@ -16,7 +16,7 @@ import type { LayerProps } from "../layers.ts";
 import { withExplored } from "../vision/exploredFog.ts";
 import { partySightSlot, sightMode, visionOn } from "../vision/sightMode.ts";
 import { PARTY_PALETTE, SightRaster, VEIL_PALETTE } from "../vision/sightRaster.ts";
-import { byFarFloor, farTokensIn, holeOutline, holesOn, tokenUrl, windowSlot, type HoleOutline, type HoleSpec } from "./openingView.ts";
+import { byFarFloor, farTokensIn, holeOutline, holesOn, paintFloorRaster, tokenUrl, windowSlot, type HoleOutline, type HoleSpec } from "./openingView.ts";
 
 const NO_LINKS: RoomState["floorLinks"] = {};
 const NO_SCENES: RoomState["scenes"] = {};
@@ -177,25 +177,9 @@ function RasterCrop(props: { canvas: HTMLCanvasElement; version: number; bounds:
       opacity={props.opacity}
       // Not read by Konva: a changed value is what makes react-konva redraw the layer.
       rasterVersion={props.version}
-      sceneFunc={(ctx) => {
-        const g = ctx._context;
-        const kx = canvas.width / bounds.w;
-        const ky = canvas.height / bounds.h;
-        g.save();
-        g.imageSmoothingEnabled = props.smooth;
-        // Past the floor's edge is fogged, as the board's own fog frames it.
-        g.fillStyle = boardTheme.color.fog;
-        if (!props.smooth) g.fillRect(o.x, o.y, o.w, o.h);
-        const x0 = Math.max(0, o.x);
-        const y0 = Math.max(0, o.y);
-        const x1 = Math.min(bounds.w, o.x + o.w);
-        const y1 = Math.min(bounds.h, o.y + o.h);
-        if (x1 > x0 && y1 > y0) {
-          if (!props.smooth) g.clearRect(x0, y0, x1 - x0, y1 - y0);
-          g.drawImage(canvas, x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky, x0, y0, x1 - x0, y1 - y0);
-        }
-        g.restore();
-      }}
+      // Konva draws this shape straight into the layer the crop, creatures and sight are on (perfectDrawEnabled off), so the
+      // raster composites over them and only the fog past the floor's edge is filled (openingView.ts paintFloorRaster).
+      sceneFunc={(ctx) => paintFloorRaster(ctx._context, canvas, bounds, o, props.smooth, props.smooth ? null : boardTheme.color.fog)}
     />
   );
 }
