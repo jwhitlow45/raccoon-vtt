@@ -18,6 +18,7 @@ import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
 import { dragWalkers } from "../attach/groups.ts";
+import { riderSeat } from "./riderSeat.ts";
 import type { Labels } from "../../lib/labels.ts";
 
 /**
@@ -185,10 +186,12 @@ export function walkStart<T extends DropToken & Walker>(state: Pick<BuildState, 
 /**
  * One token's landing, as a move op carries it. `elevation` only when the
  * landing changes it, `squeeze` only when it squeezes, `route` only for a
- * walk that is not the straight leg, and `drawnAt` only where the token is
- * drawn between squares after it (free.ts, docs/design/design-v1-snap-off.md 6.4).
+ * walk that is not the straight leg, `drawnAt` only where the token is
+ * drawn between squares after it (free.ts, docs/design/design-v1-snap-off.md 6.4),
+ * and `seat` only where a token sitting on it sits where it was dropped
+ * (riderSeat.ts).
  */
-export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"]; drawnAt?: Point };
+export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"]; drawnAt?: Point; seat?: OpOf<"token.move">["seat"] };
 
 /**
  * What stopped a walk as a player hears of it: a wall or a ledge, or
@@ -236,6 +239,12 @@ export type DropPlan = {
 
 function moved(token: DropToken, at: Point & { squeeze: boolean }): boolean {
   return at.x !== token.x || at.y !== token.y || at.squeeze !== (token.squeeze === true);
+}
+
+/** `move` with the `seat` of the token the drop was pressed on, where it takes one (riderSeat.ts). */
+function seated(state: DropView, token: DropToken, raw: Aim, move: Landed, at: Point & { squeeze: boolean }): Landed {
+  const seat = riderSeat(state, token, raw, at);
+  return seat ? { ...move, seat } : move;
 }
 
 export function landed(state: DropState, token: DropToken, at: Point & { squeeze: boolean }): Landed {
@@ -562,7 +571,7 @@ export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclu
   const walker = walkerOf(state, token);
   const land = landing(state, walker, { x: to.x, y: to.y, elevation }, mode);
   const at = land.stopped ? standingBack(state, walker, { x: to.x, y: to.y, elevation }, land) : { x: land.x, y: land.y, squeeze: land.squeeze };
-  const moves = moved(token, at) ? [landed(state, token, at)] : [];
+  const moves = moved(token, at) ? [seated(state, token, raw, landed(state, token, at), at)] : [];
   const named = land.stopped ? heardStop(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, land.stopped) : null;
   const stop: Stop | null = named ? { tokenId: token.id, sceneId: token.sceneId, ...named, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: at.x, y: at.y } } : null;
   return { moves, stop, held: [] };
@@ -861,7 +870,7 @@ export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Excl
   const held = ledge ? ledgeHold(state, token, found.route.pieces) : null;
   const walk = found.kind === "route" && (!ledge || held) ? routeLanding(state, token, held ? held.at : routeTarget(state, token, raw), held ? held.pieces : found.route.pieces, feetPerCell) : null;
   if (walk) {
-    const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });
+    const move = seated(state, token, raw, landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true }), { ...walk.at, squeeze: walk.at.squeeze === true });
     const route = walk.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
     return { moves: [{ ...move, route }], stop: ledge ? atLedge(state, token, raw, walk.at) : null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
   }
@@ -1251,13 +1260,14 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
 
 /**
  * The ops for a plan's moves: one `token.move` for a lone token, which may
- * squeeze, else `token.moveMany` in batches the protocol takes, which never
- * squeezes. Each carries its landing's `drawnAt`.
+ * squeeze and seat a rider where she was dropped, else `token.moveMany` in
+ * batches the protocol takes, which does neither. Each carries its
+ * landing's `drawnAt`.
  */
 export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
   if (moves.length === 0) return [];
   if (moves.length === 1) return [{ t: "token.move", ...moves[0]! }];
-  const plain = moves.map(({ squeeze: _squeeze, route: _route, ...m }) => m);
+  const plain = moves.map(({ squeeze: _squeeze, route: _route, seat: _seat, ...m }) => m);
   const ops: ClientOp[] = [];
   for (let i = 0; i < plain.length; i += MAX_MOVES) ops.push({ t: "token.moveMany", moves: plain.slice(i, i + MAX_MOVES) });
   return ops;

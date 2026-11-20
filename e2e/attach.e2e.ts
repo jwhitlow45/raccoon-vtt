@@ -1540,12 +1540,13 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   /*
    * The lp41fix- step: a rider dragged out of a squeezed mount
    * onto the floor beside a rise lands beside it (LP41-RIDER-1), where the
-   * tie took the mount's stand across the rise's edge and nothing moved, the
+   * tie took the mount's stand across the rise's edge and nothing moved, and
+   * sits on the square she is let go over (LP40-HEX-SEAT), the
    * note names the orc that closes the corridor, not a goblin the walk goes
    * round (LP41-MOVE-1), and a walk stops before the creature the note
    * names (LP41-MOVE-2), where it went on through it.
    */
-  test("lp41fix-1. Pat's finger drags Bree, on the warhorse squeezed in the corridor's mouth, onto the floor beside a rise 10 ft high: she lands a square left of it; then Wren's drag past a goblin in room A names the orc in the corridor, and her drag along the corridor holds before the goblin there (LP41-RIDER-1, LP41-MOVE-1, LP41-MOVE-2)", async () => {
+  test("lp41fix-1. Pat's finger drags Bree, on the warhorse squeezed in the corridor's mouth, onto the floor beside a rise 10 ft high: the warhorse stands a square left of it and she sits under the finger; then Wren's drag past a goblin in room A names the orc in the corridor, and her drag along the corridor holds before the goblin there (LP41-RIDER-1, LP41-MOVE-1, LP41-MOVE-2, LP40-HEX-SEAT)", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const field = { w: 24, h: 14 };
     const keep = { scene: uuidv7(), horse: uuidv7(), bree: uuidv7(), wren: uuidv7(), gob: uuidv7(), orc: uuidv7() };
@@ -1568,7 +1569,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       return t && t.x !== 12.5 ? t : null;
     });
     assert.deepEqual([out.x, out.y, out.squeeze], [14, 11, undefined], "full size beside the rise, on the stand that seats Bree nearest the finger");
-    assert.deepEqual([token(patSocket, keep.bree)?.x, token(patSocket, keep.bree)?.y], [14, 11]);
+    // The drop sends the square she was let go over, a seat of that stand, and she sits there.
+    assert.deepEqual([token(patSocket, keep.bree)?.x, token(patSocket, keep.bree)?.y], [15, 11], "Bree under the finger");
     await shots.take(pat, "lp41fix-rider-beside-the-rise");
     // A goblin on Wren's line in room A, which her way goes round, and an orc closing the corridor down column 13.
     await ops.send({ t: "token.create", token: { id: keep.wren, sceneId: keep.scene, kind: "pc", name: "Wren", size: "medium", x: 3, y: 4, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });

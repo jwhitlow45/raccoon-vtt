@@ -497,7 +497,9 @@ describe("a rider's drag where the mount's box lies across a ledge (RIDER-DRAG-L
     for (const role of ["dm", "player"] as const) {
       const s = field([7, 14]);
       const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "mara" }, { x: 13.5, y: 14.5 }], viewer: { role }, everything: role === "dm" })!;
-      assert.deepEqual([m.legs[0]!.to.x, m.legs[0]!.to.y], role === "dm" ? [13, 14] : [12, 14], `${role}: Mara on her seat where the warhorse lands`);
+      // A player's walk held at the ledge stands the warhorse on 12, 13, and the square she was dropped on is a seat of that stand,
+      // so the drop seats her there (riderSeat.ts), where her place carried her to 12, 14. The DM's lands her there on her place.
+      assert.deepEqual([m.legs[0]!.to.x, m.legs[0]!.to.y], [13, 14], `${role}: Mara on the square she is dropped on, where the warhorse lands`);
     }
   });
 
