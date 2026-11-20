@@ -66,3 +66,23 @@ export const FLOOR_LINK_ATTR = "data-floor-link";
 export const CLIMB_ATTR = "data-climb";
 /** An end's pane in the builder's Between floors mode (LinkPane.tsx). */
 export const LINK_PANE_ATTR = "data-link-pane";
+
+/*
+ * The test ids of phase 4 (docs/design/design-v1-floors.md phase 4, 12 and
+ * 15), which its e2e files and their alignment checks find each surface by.
+ * Fly up and Fly down are the climb's button, CLIMB_ATTR, and an opening's
+ * end and pane are an end's, FLOOR_LINK_ATTR and LINK_PANE_ATTR.
+ */
+
+/** A fall card on the DM's desk, its value the card's id: `[data-fall-card="120:0"]` (FallCard.tsx). */
+export const FALL_CARD_ATTR = "data-fall-card";
+/** The trap pane's Into choice, A pit or the floor below (traps/TrapPane.tsx). */
+export const TRAP_INTO_ATTR = "data-trap-into";
+/** The tracker's This floor or Every floor choice for a new fight (panels/TrackerPanel.tsx). */
+export const FIGHT_FLOORS_ATTR = "data-fight-floors";
+/** Export as image's Floors choice, This floor or Every floor (mapexport/MapExport.tsx). */
+export const EXPORT_FLOORS_ATTR = "data-export-floors";
+/** The New scene from several files dialog (uvtt/FloorsImportDialog.tsx). */
+export const FLOORS_IMPORT_ATTR = "data-floors-import";
+/** A row of the outliner's Other floors group, its value the creature's id (outliner/otherFloors.ts). */
+export const OTHER_FLOOR_ROW_ATTR = "data-other-floor";
