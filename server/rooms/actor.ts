@@ -6,7 +6,7 @@ import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, OPENINGS_SNAPSHOT_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
+import type { FallRecord, HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -37,7 +37,7 @@ import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seed
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
-import { exploreOp, floorsExplored } from "./explore.ts";
+import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
@@ -68,7 +68,7 @@ import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
 import { FIGHT_HISTORY_FULL, growthBound, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, SizeGuard, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
-import { climbOf, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { climbOf, fallsKept, fallsRestored, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, withoutFallCards, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
@@ -377,7 +377,7 @@ type Batch = {
 };
 
 /** `number` is the one the op's envelope took (#reduce). */
-type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
+type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string };
 
 /**
  * The DM's ops that ask before players' remembered map is forgotten
@@ -1709,6 +1709,8 @@ export class RoomActor {
       // A player's climb crosses back by the stairs its step names, which permissions find on the climber's floor
       // (docs/design/design-v1-floors.md phase 2, 8). The DM's restore is the generic one, with the floor check after.
       const climb = step.poses && step.climb ? { climb: step.climb } : {};
+      // A fall's crosses back by the hole its records name, server-built as a climb's is (docs/design/design-v1-floors.md phase 4, 4.5).
+      const falls = step.poses && step.falls && step.falls.length > 0 ? { falls: step.falls } : {};
       let saveOutcome: SaveOutcomeTransition | undefined;
       if (step.saveOutcome) {
         const record = retainedSaveOutcome(this.#staged.state, step.saveOutcome.id, at);
@@ -1733,7 +1735,7 @@ export class RoomActor {
       }
       // A DM's restore carries the head its command named, which its clock line carries, so the sending device knows the line
       // for its own (docs/design/design-v1-calendar-c2c3.md 4.6). A second command naming that head in this batch is refused above.
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label }, claim: historyHead } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...climb, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label }, claim: historyHead } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...climb, ...falls, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
       if (!checked.ok) {
         this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", checked.message);
@@ -1888,15 +1890,21 @@ export class RoomActor {
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
       if (!fromLog && historyHead !== undefined) this.#undo.consume(viewer.memberId, restoredFrom, historyScope, historyHead);
-      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step, { scope: historyScope, ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, historyScope === "play") } : {}) });
+      // A player's undone or redone step keeps no fall card either, and its records carry the card an undo removed (undo.ts fallsRestored).
+      const restored = inverse && step.poses ? withoutFallCards(inverse) : inverse;
+      const falls = step.poses ? fallsRestored(step.falls, restoredFrom, before, this.#staged.state) : undefined;
+      if (restored && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, restored, step.label, step.poses ? posesAfter(this.#staged.state, restored, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step, { scope: historyScope, ...(viewer.role === "dm" ? { values: dmHistoryValues(restored, this.#staged.state, historyScope === "play") } : {}), ...(falls ? { falls } : {}) });
     } else if (actionScope !== "none" && UndoStacks.records(viewer.role, op, before) && (reduced.inverse || trackedOutcome)) {
       // Players keep their existing pose and trap rules. DM history independently records eligible token poses and
       // keeps every other inverse, including trap effects, under its original whole-value guard.
       const pose = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op));
       const trapWrote = reduced.trapWrote;
       const allEntries = reduced.inverse ?? [];
-      const inverse = pose && trapWrote ? allEntries.filter((e) => !trapWrote.has(e.key)) : allEntries;
+      // Nor a fall's card, which the step settles by its records alone (docs/design/design-v1-floors.md phase 4, 4.5).
+      const inverse = pose ? withoutFallCards(trapWrote ? allEntries.filter((e) => !trapWrote.has(e.key)) : allEntries) : allEntries;
       const poses = pose ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
+      // One record a root the player received at the op whose key the step kept (D-261119-120), read off the room before it.
+      const falls = pose ? fallsKept(reduced.falls, inverse, this.#shows(viewer, before)) : [];
       // A teleport's step remembers it, so its redo passes the wall again (docs/design/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       // A player's walk keeps its route for the redo (docs/design/design-v1-movement.md 7.4), a plain move as its one straight piece.
@@ -1907,7 +1915,7 @@ export class RoomActor {
       const climb = climbOf(before, op);
       const wing = this.#wingGroups.get(key);
       const label = wing !== undefined && wing.group === cmd.group ? wingLabel(before, wing.sceneId) : describeOp(clientOp, before, viewer, this.#staged.state);
-      recording = this.#undo.push(viewer.memberId, inverse, label, trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}), ...(climb ? { climb } : {}) });
+      recording = this.#undo.push(viewer.memberId, inverse, label, trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}), ...(climb ? { climb } : {}), ...(falls.length > 0 ? { falls } : {}) });
     }
     if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
@@ -1938,9 +1946,8 @@ export class RoomActor {
     return absent ?? restoreStairsWords(reason);
   }
 
-  /** Which tokens a viewer sees in the staged room, as their undo's poses read links (undo.ts poseOf). */
-  #shows(viewer: Viewer): (tokenId: string) => boolean {
-    const state = this.#staged.state;
+  /** Which tokens a viewer sees in the staged room, or in `state`, as their undo's poses read links (undo.ts poseOf). */
+  #shows(viewer: Viewer, state: RoomState = this.#staged.state): (tokenId: string) => boolean {
     return (id) => viewer.role === "dm" || projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) !== null;
   }
 
@@ -2343,6 +2350,7 @@ export class RoomActor {
       },
       ...(result.trapped ? { trapped: true as const } : {}),
       ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
+      ...(result.falls ? { falls: result.falls } : {}),
     };
   }
 
@@ -2884,14 +2892,13 @@ export class RoomActor {
 
   /**
    * The explore step on the staged state now, inside the batch: before its end where an op wrote an area's reminder.
-   * One op for each floor that explores (docs/design/design-v1-floors.md 7.5), each read off the state the one before
-   * left, as it would be on its own.
+   * One op for each floor that explores (docs/design/design-v1-floors.md 7.5), all read off the state before the first,
+   * with every floor's joins to its holder list pending (phase 4, 7.2, D-261119-100): a player one floor adds borrows
+   * sight through an opening into the other floor's column in the same pass, whatever the floors' order. With no
+   * opening no floor's op reads another's, so each is what it would be on its own.
    */
   #exploreNow(batch: Batch): void {
-    for (const sceneId of floorsExplored(this.#staged.state)) {
-      const op = exploreOp(this.#staged.state, sceneId);
-      if (op) this.#appendServerOp(batch, op, "explore");
-    }
+    for (const op of exploreOps(this.#staged.state, floorsExplored(this.#staged.state))) this.#appendServerOp(batch, op, "explore");
   }
 
   /**
