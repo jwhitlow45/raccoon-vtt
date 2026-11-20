@@ -121,6 +121,20 @@ test("a short discovery walk receives both turn and routed-move answers", async 
   }
 });
 
+test("an op whose commit a loaded machine holds well past half a second still gets its answer, timed to its frames", async () => {
+  const { send } = await import("./bench-server4.ts");
+  const table = await shortDiscoveryTable();
+  try {
+    // Longer than any window of polls the bench once gave an answer (100 waits of 5 ms), as a loaded machine can be.
+    table.db.hold = new Promise((resolve) => setTimeout(resolve, 1_500));
+    const timing = await send(table, table.dm, { t: "encounter.next" });
+    assert.equal(table.db.hold, null, "the commit took the hold");
+    assert.ok(timing.total >= 1_400, `the op is timed to the frames after its held commit, not ${timing.total} ms`);
+  } finally {
+    await table.actor.shutdown({ code: 1012, snapshot: false });
+  }
+});
+
 test("answer selection keeps operation identity across seeded interleavings of replies and other frames", async () => {
   const { benchAnswer } = await import("./bench-server4.ts");
   let seed = 40;

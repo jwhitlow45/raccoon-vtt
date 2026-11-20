@@ -180,8 +180,11 @@ function checkMode(state: RoomState, perPlayer: boolean): void {
   if (mode !== perPlayer || on !== (perPlayer ? PLAYERS : 0)) throw new Error(`the bench room is ${mode ? "per player" : "for the whole party"} with ${on} holders`);
 }
 
-/** The commit and fan-out of the op being timed: when its batch's COMMIT ran, and how long holders' tiles took to read since. */
-type Span = { commitAt: number; drawn: number };
+/**
+ * The commit and fan-out of the op being timed: when its batch's COMMIT ran, and how long holders' tiles took to read
+ * since. `hold`, for tests, keeps the next commit from landing until it settles, as a loaded machine would.
+ */
+type Span = { commitAt: number; drawn: number; hold?: Promise<void> | null };
 
 /** The span of the table sitting at the bench, which the wrapped holder sight below adds to. */
 let live: Span | null = null;
@@ -230,11 +233,15 @@ function memoryPool(state: RoomState, at: Span): Pool {
       const s = sql.trim();
       if (s.includes("from room_snapshots")) return { rows: [{ seq: "0", state, schema_version: SNAPSHOT_VERSION }] };
       if (s.includes("from grants")) return { rows: [{ member_id: "dm" }] };
-      if (s === "commit") {
+      if (s !== "commit") return { rows: [], rowCount: 0 };
+      const landed = () => {
         at.commitAt = performance.now();
         at.drawn = 0;
-      }
-      return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 0 };
+      };
+      const hold = at.hold;
+      at.hold = null;
+      return hold ? hold.then(landed) : landed();
     });
   return { query: run, connect: () => Promise.resolve({ query: run, release: () => undefined }) } as unknown as Pool;
 }
@@ -243,8 +250,8 @@ type Table = {
   actor: RoomActor;
   dm: Connection;
   players: Connection[];
-  /** When anything was last sent, and every frame to the current sender during this op or ask. */
-  sent: { last: number; sender: Connection | null; senderMessages: string[] };
+  /** When anything was last sent, every frame to the current sender during this op or ask, and who waits on the next frame (`whenSent`). */
+  sent: { last: number; sender: Connection | null; senderMessages: string[]; onFrame: (() => void) | null };
   db: Span;
   n: Map<Connection, number>;
 };
@@ -279,7 +286,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
   const actor = await RoomActor.load(deps);
   if (!actor) throw new Error("the bench room did not load");
   times?.load.push(performance.now() - t0);
-  const sent: Table["sent"] = { last: 0, sender: null, senderMessages: [] };
+  const sent: Table["sent"] = { last: 0, sender: null, senderMessages: [], onFrame: null };
   const snapshotted = new Set<Connection>();
   const open = (memberId: string, role: "dm" | "player"): Connection => {
     let conn: Connection | null = null;
@@ -291,6 +298,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
         sent.last = performance.now();
         if (conn === sent.sender) sent.senderMessages.push(text);
         if (conn && text.startsWith('{"t":"snapshot"')) snapshotted.add(conn);
+        sent.onFrame?.();
       },
       close: () => undefined,
       terminate: () => undefined,
@@ -306,10 +314,8 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
   for (const [i, conn] of [dm, ...players].entries()) {
     const start = performance.now();
     await actor.hello(conn, { clientId: "bench", resumeFrom: 1, sceneId: SCENE });
-    await settle();
     // A hello's snapshot is read at the next commit, a timer away. An op sent before it arrives goes unanswered.
-    for (let wait = 0; !snapshotted.has(conn) && wait < 2_000; wait++) await new Promise((resolve) => setTimeout(resolve, 1));
-    if (!snapshotted.has(conn)) throw new Error(`${conn.memberId} got no snapshot`);
+    await whenSent(sent, () => snapshotted.has(conn) || null, `${conn.memberId} got no snapshot`);
     (i === 0 ? times?.first : times?.later)?.push(sent.last - start);
   }
   return table;
@@ -322,9 +328,37 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
  */
 const fastClock = () => performance.now() * 1000;
 
-/** Lets every pending promise run: the in-memory database answers within the microtasks before this. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+/** How long the bench waits for a frame it is owed: long, since a loaded machine answers late, not wrongly. */
+const OWED_MS = 30_000;
+
+/**
+ * Resolves with what `check` finds, at once or once a later frame has gone out to any socket, and fails with
+ * `missing` after OWED_MS. The check waits for the frame's task to end, so its own time falls in no fan-out or
+ * total: each frame's time is read as it goes (`sent.last`).
+ */
+function whenSent<T>(sent: Table["sent"], check: () => T | null, missing: string): Promise<T> {
+  const now = check();
+  if (now !== null) return Promise.resolve(now);
+  return new Promise<T>((resolve, reject) => {
+    let queued = false;
+    const timer = setTimeout(() => {
+      sent.onFrame = null;
+      reject(new Error(missing));
+    }, OWED_MS);
+    const onFrame = () => {
+      if (queued) return;
+      queued = true;
+      setImmediate(() => {
+        queued = false;
+        const got = check();
+        if (got === null || sent.onFrame !== onFrame) return;
+        clearTimeout(timer);
+        sent.onFrame = null;
+        resolve(got);
+      });
+    };
+    sent.onFrame = onFrame;
+  });
 }
 
 type Timing = { total: number; fanout: number; drawn: number };
@@ -342,16 +376,7 @@ export async function send(table: Table, conn: Connection, op: Op, refusalOk = f
   // An op that applied commits at once (one op per batch). A refusal changes nothing and waits for the batch timer,
   // so its time is the actor's work on it, which is over when `op` returns.
   const worked = performance.now() - t0;
-  await settle();
-  const answered = () => benchAnswer(table.sent.senderMessages, n);
-  let answer = answered();
-  if (!answer) {
-    for (let wait = 0; wait < 100 && !answer; wait++) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      answer = answered();
-    }
-    if (!answer) throw new Error(`${op.t} got no answer`);
-  }
+  const answer = await whenSent(table.sent, () => benchAnswer(table.sent.senderMessages, n), `${op.t} got no answer`);
   const refused = answer.rejects?.find((r) => r.n === n);
   if (refused && !refusalOk) throw new Error(`${op.t} was refused: ${refused.message}`);
   if (!refused && refusalOk) throw new Error(`${op.t} was meant to be refused`);
@@ -948,12 +973,9 @@ export async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn
     table.n.set(conn, n);
     await table.actor.op(conn, n, part, group);
   }
-  const answered = () => benchAnswer(table.sent.senderMessages, n);
-  for (let wait = 0; wait < 20_000 && !answered(); wait++) await new Promise((resolve) => setTimeout(resolve, 1));
+  const answer = await whenSent(table.sent, () => benchAnswer(table.sent.senderMessages, n), "the ask got no answer");
   const total = performance.now() - t0;
   const turn = sampler.stop();
-  const answer = answered();
-  if (!answer) throw new Error("the ask got no answer");
   const refused = answer.rejects?.find((r) => r.n === n);
   // An ask whose ops would forget players' remembered map is answered with that question, which is its whole answer.
   if (refused && refused.code !== "forget") throw new Error(`the ask was refused: ${refused.message}`);
