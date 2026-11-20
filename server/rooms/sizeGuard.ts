@@ -1,8 +1,10 @@
 import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
 import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
+import type { HpLabel } from "#shared/rules/hp.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { ownEntry } from "#shared/records.ts";
 import { MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
@@ -418,16 +420,19 @@ export class SizeGuard {
       return { sub: held, shown: held };
     };
     // A player's reading counts what their exact part shows past what it takes out, its widths, so the bounds that skip
-    // reading exactly hold that too, and every answer is the exact reading's.
-    const past = (sceneIds?: readonly string[]) => {
-      if (player === undefined) return 0;
+    // reading exactly hold that too, and every answer is the exact reading's. Where that part's bound from the stored
+    // room (exactPastMost) leaves a bound under its line, the copy is never built.
+    let most: PastMost | undefined;
+    const over = (bound: number, line: number, sceneIds?: readonly string[]) => {
+      if (player === undefined || bound > line) return bound > line;
+      if (bound + pastMostOf((most ??= exactPastMost(next, player)), next, sceneIds) <= line) return false;
       const held = heldOf(next, sceneIds);
-      return Math.max(0, held.shown - held.sub);
+      return bound + Math.max(0, held.shown - held.sub) > line;
     };
     const state = this.#state;
     const reserves = farReserves(next, widest);
     const roomLine = farByteLine(kind, "room", line)!;
-    if (!state || state.bytes + state.growth + reserves + FAR.byteStep + past() > roomLine) {
+    if (!state || over(state.bytes + state.growth + reserves + FAR.byteStep, roomLine)) {
       const bytes = measuredStateBytes(next);
       const held = heldOf(next);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
@@ -451,7 +456,7 @@ export class SizeGuard {
       const measures = floors.map((scene) => scenes.get(scene.id));
       const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
       const widths = farWidths(next, new Set(floors.map((scene) => scene.id)));
-      if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + sight + explored + maps + widths + FAR.byteStep + past([main]) <= sceneLine) continue;
+      if (measures.every((measure) => measure !== undefined) && !over(SHELL_BYTES + room + measured + sight + explored + maps + widths + FAR.byteStep, sceneLine, [main])) continue;
       const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + sight + explored + maps + widths;
       const held = heldOf(next, [main]);
       const widthsBefore = before?.scenes[main] ? farWidths(before, new Set(floorsOf(before, main).map((scene) => scene.id))) : 0;
@@ -1831,6 +1836,13 @@ type OwnField = {
   readonly kept?: (stored: unknown, parent: Readonly<Record<string, unknown>>, room: WidthRoom) => number;
   /** Whether the field counts at its width on this thing, always unless given. Where it does not, it counts as any other. */
   readonly applies?: (parent: Readonly<Record<string, unknown>>, room: WidthRoom, thing: Readonly<Record<string, unknown>>) => boolean;
+  /**
+   * The most `width` counts on any copy of the stored thing, read from the
+   * stored thing alone, 0 where the field never applies to such a copy:
+   * `width` on the stored thing unless given (exactPastMost). A field that
+   * reads its value from the copy, or applies only on some things, gives it.
+   */
+  readonly most?: (stored: Readonly<Record<string, unknown>>, room: WidthRoom, thing: Readonly<Record<string, unknown>>) => number;
 };
 
 /** A number's widest digits: a rev (WIDEST_REV), a clock tick, an HP value. */
@@ -1859,24 +1871,42 @@ const REVERT_MOST = 2 * (fieldBytes("before") + VITALS_MOST + 1) + fieldBytes("a
 const PRIOR_MOST = serializedBytes({ moved: 100_000, cost: 100_000, diag: [100_000, 100_000], seenDiag: [100_000, 100_000] });
 /** A creature's marks of what it has used, which a player writes on a character they play only through a creature of theirs. */
 const USES_MOST = 4096;
+/** `false`, a flag's widest. */
+const BOOLEAN_MOST = 5;
+/** An HP label's widest as JSON (shared/rules/hp.ts HpLabel). */
+const HP_LABEL_MOST = Math.max(...Object.keys({ Healthy: 0, Bloodied: 0, Dying: 0, Dead: 0 } satisfies Record<HpLabel, 0>).map((label) => serializedBytes(label)));
+/** Whether the turn under way writes the walk of a creature the player moves but does not own. */
+const turnWalk = (room: WidthRoom, token: Readonly<Record<string, unknown>>) => !room.owns.has(token.id as string) && room.turn.has(token.id as string);
 
 const field = (parent: string, key: string, width: OwnField["width"], kept?: OwnField["kept"]): OwnField => ({ parent, key, width, kept });
 /** A field at a fixed number of value bytes. */
 const fixed = (parent: string, key: string, value: number): OwnField => field(parent, key, () => fieldBytes(key) + value + 1);
+/** The larger of a stored field's bytes and `most` value bytes: the most a field the copy holds as stored or at `most` counts. */
+const storedOr = (key: string, stored: unknown, most: number) => Math.max(memberBytes(key, stored), fieldBytes(key) + most + 1);
 /** A field the copy holds as stored where it holds it, and at `most` value bytes where it does not. */
-const shownOr = (parent: string, key: string, most: number): OwnField => field(parent, key, (p) => (p[key] === undefined ? fieldBytes(key) + most + 1 : memberBytes(key, p[key])));
+const shownOr = (parent: string, key: string, most: number): OwnField => ({
+  ...field(parent, key, (p) => (p[key] === undefined ? fieldBytes(key) + most + 1 : memberBytes(key, p[key]))),
+  most: (p) => storedOr(key, p[key], most),
+});
 /** A field of an event line of the given types, as shownOr. */
-const lineField = (key: string, types: readonly string[], most: number): OwnField =>
-  field("data", key, (d) => (!types.includes(d.type as string) ? memberBytes(key, d[key]) : d[key] === undefined ? fieldBytes(key) + most + 1 : memberBytes(key, d[key])));
+const lineField = (key: string, types: readonly string[], most: number): OwnField => ({
+  ...field("data", key, (d) => (!types.includes(d.type as string) ? memberBytes(key, d[key]) : d[key] === undefined ? fieldBytes(key) + most + 1 : memberBytes(key, d[key]))),
+  most: (d) => (types.includes(d.type as string) ? storedOr(key, d[key], most) : memberBytes(key, d[key])),
+});
 /** Whether a chunk's copy holds a door, on a grid edge or off it. */
 const holdsDoor = (chunk: Readonly<Record<string, unknown>>) =>
   Object.values((chunk.edges ?? {}) as Record<string, { kind?: string }>).some((f) => f.kind === "door") || ((chunk.walls ?? []) as Array<{ f: { kind?: string } }>).some((w) => w.f.kind === "door");
 /** A door's field, on a wall feature that is a door in the copy. */
 const doorField = (parent: string, key: string, value: number): OwnField => field(parent, key, (f) => (f.kind === "door" ? fieldBytes(key) + value + 1 : 0));
-/** A field the copy itself holds and the stored thing lacks, counted as the copy holds it. */
-const copyOnly = (parent: string, key: string): OwnField => field(parent, key, (p) => memberBytes(key, p[key]));
-/** A list of readers at every member of the public roster. */
-const readersWidth = (room: WidthRoom) => 2 + Math.max(0, room.memberIds.length - 1) + sum(room.memberIds, (id) => utf8Bytes(JSON.stringify(id)));
+/** A field the copy itself holds and the stored thing lacks, counted as the copy holds it, at `most` value bytes at most. */
+const copyOnly = (parent: string, key: string, most: number): OwnField => ({ ...field(parent, key, (p) => memberBytes(key, p[key])), most: () => fieldBytes(key) + most + 1 });
+/** A list of readers at every member of the public roster, kept per room's facts. */
+const readersWidths = new WeakMap<WidthRoom, number>();
+const readersWidth = (room: WidthRoom) => {
+  let width = readersWidths.get(room);
+  if (width === undefined) readersWidths.set(room, (width = 2 + Math.max(0, room.memberIds.length - 1) + sum(room.memberIds, (id) => utf8Bytes(JSON.stringify(id)))));
+  return width;
+};
 /** The conditions an HP change put on or took off, those hidden from players or those shown. */
 const conditions = (revert: unknown, hidden: boolean) => {
   const r = revert as { added?: Array<{ hiddenFromPlayers?: boolean }>; removed?: Array<{ hiddenFromPlayers?: boolean }> } | undefined;
@@ -1896,23 +1926,30 @@ const conditions = (revert: unknown, hidden: boolean) => {
 export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   token: [
     fixed("", "rev", DIGITS.rev),
-    copyOnly("", "aboveFog"),
-    copyOnly("", "party"),
+    copyOnly("", "aboveFog", BOOLEAN_MOST),
+    copyOnly("", "party", BOOLEAN_MOST),
     // HP where the copy holds a label or a bar: a player's damage writes the numbers.
     shownOr("actor.inline", "hp", HP_MOST),
-    copyOnly("actor.inline", "hpLabel"),
-    copyOnly("actor.inline", "hpBar"),
+    copyOnly("actor.inline", "hpLabel", HP_LABEL_MOST),
+    copyOnly("actor.inline", "hpBar", NUMBER_MOST),
     // A player's own create stores the DM's notes empty. What the DM writes past that stays stepped.
     fixed("actor.inline", "dmNotes", 2),
     // A link to a holder, as if present: the copy holds it only while the holder is in sight (D-261119-017).
     fixed("", "attached", ATTACHED_BYTES),
     // The turn's walk of a creature they move but do not own, at the far line's walk width, as if present: the copy
     // holds only the stops players saw (D-261119-017).
-    { ...field("", "path", (_t, room) => fieldBytes("path") + pathMost(room.listWidth) + 1), applies: (_t, room, token) => !room.owns.has(token.id as string) && room.turn.has(token.id as string) },
+    {
+      ...field("", "path", (_t, room) => fieldBytes("path") + pathMost(room.listWidth) + 1),
+      applies: (_t, room, token) => turnWalk(room, token),
+      most: (_t, room, token) => (turnWalk(room, token) ? fieldBytes("path") + pathMost(room.listWidth) + 1 : 0),
+    },
     // A walk's stops: whether players saw each, and on a Per player scene which of them did, as wide as the roster allows,
     // and what a stop took and how, which a player who moves a creature not theirs writes and does not read back.
     // What the turn took on floors the creature left, which owners get whole and other players only in part.
-    field("path", "prior", (path, room, token) => (room.owns.has(token.id as string) ? memberBytes("prior", path.prior) : fieldBytes("prior") + PRIOR_MOST + 1)),
+    {
+      ...field("path", "prior", (path, room, token) => (room.owns.has(token.id as string) ? memberBytes("prior", path.prior) : fieldBytes("prior") + PRIOR_MOST + 1)),
+      most: (path) => storedOr("prior", path.prior, PRIOR_MOST),
+    },
     fixed("path.stops[]", "seen", 4),
     field("path.stops[]", "seenBy", (_stop, room, token) => (room.perPlayer.has(token.sceneId as string) ? fieldBytes("seenBy") + room.listWidth + 2 + 1 : 0)),
     fixed("path.stops[]", "joinedUnseen", 4),
@@ -1928,8 +1965,8 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   // (D-261119-017).
   template: [
     fixed("", "rev", DIGITS.rev),
-    { ...field("", "sceneId", (_t, room) => fieldBytes("sceneId") + room.sceneIdMost + 1), applies: (t) => t.attachedTo !== undefined },
-    { ...fixed("", "attachedTo", ID_BYTES), applies: (t) => t.attachedTo !== undefined },
+    { ...field("", "sceneId", (_t, room) => fieldBytes("sceneId") + room.sceneIdMost + 1), applies: (t) => t.attachedTo !== undefined, most: (t, room) => (t.attachedTo !== undefined ? fieldBytes("sceneId") + room.sceneIdMost + 1 : 0) },
+    { ...fixed("", "attachedTo", ID_BYTES), applies: (t) => t.attachedTo !== undefined, most: (t) => (t.attachedTo !== undefined ? fieldBytes("attachedTo") + ID_BYTES + 1 : 0) },
     fixed("", "casterId", ID_BYTES),
   ],
   // A kept ruler's stops on creatures, and the creatures, at their widest: the copy holds the ruler only while its
@@ -1942,8 +1979,9 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
   // (D-261119-017).
   cast: [
     fixed("", "rev", DIGITS.rev),
-    { ...fixed("", "targets", 2 + LIMITS.rollTargets * (ID_BYTES + 1)), applies: (c) => c.targets !== undefined },
-    { ...fixed("", "area", ID_BYTES), applies: (c) => c.targets === undefined },
+    { ...fixed("", "targets", 2 + LIMITS.rollTargets * (ID_BYTES + 1)), applies: (c) => c.targets !== undefined, most: (c) => (c.targets !== undefined ? fieldBytes("targets") + 2 + LIMITS.rollTargets * (ID_BYTES + 1) + 1 : 0) },
+    // A copy may hold an ask's targets or not, so the most counts its area whichever it holds.
+    { ...fixed("", "area", ID_BYTES), applies: (c) => c.targets === undefined, most: () => fieldBytes("area") + ID_BYTES + 1 },
   ],
   companionBlock: [fixed("", "rev", DIGITS.rev)],
   member: [fixed("", "rev", DIGITS.rev)],
@@ -1952,12 +1990,15 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     // A Long Rest's stamp by the room's clock, whoever rests the character.
     fixed("", "longRest", serializedBytes({ at: 0, clock: "" }) - 1 + DIGITS.tick + ID_MOST - 2),
     shownOr("actor", "hp", HP_MOST),
-    copyOnly("actor", "hpLabel"),
-    copyOnly("actor", "hpBar"),
+    copyOnly("actor", "hpLabel", HP_LABEL_MOST),
+    copyOnly("actor", "hpBar", NUMBER_MOST),
     fixed("actor", "dmNotes", 2),
     // A character played only through a creature of theirs, whose copy holds none of its actor's marks.
     shownOr("actor", "deathSaves", serializedBytes({ ok: 3, fail: 3 })),
-    field("actor", "uses", (a, room, c) => (a.uses !== undefined || !room.playsOnly.has(c.id as string) ? memberBytes("uses", a.uses) : fieldBytes("uses") + USES_MOST + 1)),
+    {
+      ...field("actor", "uses", (a, room, c) => (a.uses !== undefined || !room.playsOnly.has(c.id as string) ? memberBytes("uses", a.uses) : fieldBytes("uses") + USES_MOST + 1)),
+      most: (a) => storedOr("uses", a.uses, USES_MOST),
+    },
   ],
   roll: [
     fixed("", "rev", DIGITS.rev),
@@ -2373,22 +2414,19 @@ export function ownCopyBytes(state: RoomState, memberId: string, view: SeatView 
 }
 
 /**
- * Each thing a player's exact part holds (ownCopyBytes), by its key: where
- * the reading counts it, a floor, the room-level part every scene counts or
- * only the room's blocks, and its part (exactBytes).
+ * The room's facts a player's widths read (WidthRoom), and the characters
+ * they own or a creature they own plays, whose actor their ops on that
+ * creature write.
  */
-export function exactCopies(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<EntityKey, { on: string } & ExactBytes> {
-  const out = new Map<EntityKey, { on: string } & ExactBytes>();
-  // The characters they own, and one a creature they own plays, whose actor their ops on that creature write.
+function exactRoom(state: RoomState, memberId: string): { room: WidthRoom; characters: Set<string> } {
   const owned = new Set(Object.values(state.characters).filter((c) => c.ownerIds.includes(memberId)).map((c) => c.id));
   const characters = new Set(owned);
   for (const token of Object.values(state.tokens)) if (token.ownerIds.includes(memberId) && "ref" in token.actor) characters.add(token.actor.ref);
   const viewer: Viewer = { memberId, role: "player" };
-  const turnOf = widthsRoom(state).turn;
   const room: WidthRoom = {
     memberId,
     sceneIdMost: Math.max(0, ...Object.keys(state.scenes).map((id) => utf8Bytes(JSON.stringify(id)))),
-    turn: turnOf,
+    turn: widthsRoom(state).turn,
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),
@@ -2396,6 +2434,17 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
     perPlayer: new Set(Object.values(state.scenes).filter(perPlayerScene).map((scene) => scene.id)),
     playsOnly: new Set([...characters].filter((id) => !owned.has(id))),
   };
+  return { room, characters };
+}
+
+/**
+ * Each thing a player's exact part holds (ownCopyBytes), by its key: where
+ * the reading counts it, a floor, the room-level part every scene counts or
+ * only the room's blocks, and its part (exactBytes).
+ */
+export function exactCopies(state: RoomState, memberId: string, view: SeatView = seatView(state, memberId)): Map<EntityKey, { on: string } & ExactBytes> {
+  const out = new Map<EntityKey, { on: string } & ExactBytes>();
+  const { room, characters } = exactRoom(state, memberId);
   // A thing at its bytes in the measures: a creature's lists of who saw at their widest and its numbers and rev at theirs.
   const measured = (kind: CopiedKind, id: string, stored: unknown) => {
     const bytes = entityBytes(id, stored);
@@ -2482,6 +2531,116 @@ export function ownHeldBytes(state: RoomState, memberId: string, sceneIds?: read
     for (const id of floors) parts.push(own.floors.get(id) ?? { sub: 0, shown: 0 });
   }
   return { sub: sum(parts, (p) => p.sub) - collectionCommas(state, floors), shown: sum(parts, (p) => p.shown) };
+}
+
+/** What a player's exact part may count past what it takes out (exactPastMost): on each floor, in the room-level part and in their blocks. */
+export type PastMost = { floors: ReadonlyMap<string, number>; roomLevel: number; blocks: number };
+
+/** Each place the own-written fields name, by the place it is in: its key and its own place, `*` for any entry. */
+const CHILD_PLACES = new Map<FieldIndex, ReadonlyMap<string, ReadonlyArray<{ key: string; at: string }>>>(
+  [...FIELD_INDEX.values()].map((index) => {
+    const children = new Map<string, Array<{ key: string; at: string }>>();
+    for (const at of index.prefixes) {
+      if (at === "" || at.endsWith("[]")) continue;
+      const dot = at.lastIndexOf(".");
+      const [parent, key] = dot < 0 ? ["", at] : [at.slice(0, dot), at.slice(dot + 1)];
+      children.set(parent, [...(children.get(parent) ?? []), { key, at }]);
+    }
+    return [index, children];
+  }),
+);
+
+/** The own-written fields' most on a stored thing (OwnField `most`), through every element and entry of it the fields name. */
+function widthsMost(stored: unknown, path: string, index: FieldIndex, room: WidthRoom, thing: Readonly<Record<string, unknown>>): number {
+  if (Array.isArray(stored)) {
+    let bytes = 0;
+    for (const item of stored) bytes += widthsMost(item, `${path}[]`, index, room, thing);
+    return bytes;
+  }
+  if (!isRecord(stored)) return 0;
+  let bytes = 0;
+  for (const f of index.byParent.get(path) ?? []) bytes += f.most ? f.most(stored, room, thing) : f.width(stored, room, thing, stored[f.key]);
+  for (const { key, at } of CHILD_PLACES.get(index)!.get(path) ?? []) {
+    if (key === "*") for (const value of Object.values(stored)) bytes += widthsMost(value, at, index, room, thing);
+    else if (stored[key] !== undefined) bytes += widthsMost(stored[key], at, index, room, thing);
+  }
+  return bytes;
+}
+
+/** A stored entity's lists and records that hold anything, itself among them, kept per entity object as its size is. */
+const containerCounts = new WeakMap<object, number>();
+
+function containersOf(entity: object): number {
+  const walk = (value: unknown): number => {
+    if (value === null || typeof value !== "object") return 0;
+    const items = Array.isArray(value) ? value : Object.values(value);
+    let count = items.length > 0 ? 1 : 0;
+    for (const item of items) count += walk(item);
+    return count;
+  };
+  let count = containerCounts.get(entity);
+  if (count === undefined) {
+    count = walk(entity);
+    if (!isWritable(entity)) containerCounts.set(entity, count);
+  }
+  return count;
+}
+
+/**
+ * A bound on what a player's exact part counts past what it takes out of
+ * the stepped part (ownHeldBytes `shown` less `sub`), read from the stored
+ * room without their copy, on everything the exact part may hold
+ * (exactCopies). A thing there counts every field but the own-written ones
+ * alike in its copy and its stored bytes, but for a comma of each list or
+ * record the copy holds none of, which stays stepped (hiddenOf), and each
+ * own-written one at its width less what of it the part takes out. So it
+ * counts past what it takes out at most each own-written field's most and
+ * a byte for each of its lists and records. The stepped part's commas add
+ * the rest (pastMostOf). The far check builds the copy only where this
+ * bound could take a reading past its line. `each` hears each thing's
+ * bound by its key in exactCopies.
+ */
+export function exactPastMost(state: RoomState, memberId: string, each?: (key: EntityKey, bytes: number) => void): PastMost {
+  const { room, characters } = exactRoom(state, memberId);
+  const floors = new Map<string, number>();
+  let roomLevel = 0;
+  let blocks = 0;
+  const most = (kind: CopiedKind, key: EntityKey, stored: unknown) => {
+    const bytes = isRecord(stored) ? widthsMost(stored, "", FIELD_INDEX.get(kind)!, room, stored) + containersOf(stored) : 0;
+    each?.(key, bytes);
+    return bytes;
+  };
+  const onFloor = (on: string, bytes: number) => floors.set(on, (floors.get(on) ?? 0) + bytes);
+  const settings = state.meta.settings;
+  const anyToken = movesAnyToken(settings, memberId) || settings.playersApplyDamage;
+  for (const token of Object.values(state.tokens)) {
+    if (anyToken || ownsSeatToken(state, memberId, token)) onFloor(token.sceneId, most("token", keys.token(token.id), token));
+    if (settings.playersApplyDamage && "ref" in token.actor) characters.add(token.actor.ref);
+  }
+  for (const t of Object.values(state.templates)) if (t.ownerId === memberId) onFloor(t.sceneId, most("template", keys.template(t.id), t));
+  for (const d of Object.values(state.drawings)) if (d.ownerId === memberId) onFloor(d.sceneId, most("drawing", keys.drawing(d.id), d));
+  for (const chunk of Object.values(state.buildChunks)) onFloor(chunk.sceneId, most("chunk", keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), chunk));
+  for (const entry of state.encounter?.entries ?? []) if (ownsRow(state, memberId, entry)) roomLevel += most("row", `row:${entry.id}` as EntityKey, entry);
+  for (const cast of Object.values(state.casts)) if (cast.by === memberId) roomLevel += most("cast", keys.cast(cast.id), cast);
+  roomLevel += most("member", keys.member(memberId), ownEntry(state.members, memberId));
+  for (const id of characters) roomLevel += most("character", keys.character(id), ownEntry(state.characters, id));
+  for (const [id, roll] of Object.entries(state.rolls)) roomLevel += most("roll", keys.roll(id), roll);
+  for (const line of measuredLog(state.log)) roomLevel += most("log", keys.log(line.id), line);
+  for (const block of Object.values(state.companionBlocks)) if (ownEntry(state.characters, block.characterId)?.ownerIds.includes(memberId)) blocks += most("companionBlock", keys.companionBlock(block.id), block);
+  return { floors, roomLevel, blocks };
+}
+
+/**
+ * The bound of exactPastMost for the room's reading or for the floors of
+ * `sceneIds` with the room-level part, and the most commas the stepped part
+ * keeps there (collectionCommas): three kinds on each floor, or once for
+ * the room, and each room-level collection.
+ */
+export function pastMostOf(most: PastMost, state: RoomState, sceneIds?: readonly string[]): number {
+  if (!sceneIds) return most.roomLevel + most.blocks + sum([...most.floors.values()], (bytes) => bytes) + 3 + 7;
+  const floors = new Set<string>();
+  for (const id of sceneIds) for (const floor of floorsOf(state, id)) floors.add(floor.id);
+  return most.roomLevel + sum([...floors], (id) => most.floors.get(id) ?? 0) + 3 * floors.size + 6;
 }
 
 /**

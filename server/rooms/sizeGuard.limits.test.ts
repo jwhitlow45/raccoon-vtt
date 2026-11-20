@@ -6,8 +6,10 @@ import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, room, scene, template, token } from "#shared/testutil.ts";
-import { farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, overFarLine, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
+import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { fullRoom } from "./limitsTesting.ts";
+import { PLAYER_OPS, playerTable } from "./playerOpsTesting.ts";
+import { exactCopies, exactPastMost, farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, overFarLine, ownCopyBytes, ownHeldBytes, pastMostOf, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
 
 /*
  * The byte lines under player limits: the near lines (the guard's state and
@@ -695,6 +697,68 @@ describe("LP44-PRIV-1: the far line's quick bound holds a player's widths, so ev
     };
     assert.deepEqual(answer(true), answer(false));
     assert.equal(answer(true).ok, false);
+  });
+});
+
+describe("LP44-PRIV-1: the far check's bound on a player's exact part, read from the stored room, holds what that part counts past what it takes out", () => {
+  /**
+   * Each thing in each player's exact part of `state`, and each of their
+   * readings, that counts past what it takes out more than its bound says.
+   */
+  function unbounded(state: RoomState, players = Object.keys(state.members).filter((id) => state.members[id]!.kind === "player")): string[] {
+    const out: string[] = [];
+    const mains = Object.values(state.scenes).filter((s) => !s.floor || s.floor.of === s.id);
+    for (const id of players) {
+      const each = new Map<string, number>();
+      const most = exactPastMost(state, id, (key, bytes) => each.set(key, bytes));
+      for (const [key, part] of exactCopies(state, id)) {
+        const bound = each.get(key);
+        if (bound === undefined || part.shown - part.sub > bound) out.push(`${id}'s ${key}: ${part.shown - part.sub} past ${bound ?? "no bound"}`);
+      }
+      const own = ownCopyBytes(state, id);
+      for (const scope of [undefined, ...mains.map((s) => [s.id])]) {
+        const held = ownHeldBytes(state, id, scope, own);
+        const bound = pastMostOf(most, state, scope);
+        if (held.shown - held.sub > bound) out.push(`${id} on ${scope?.[0] ?? "the room"}: ${held.shown - held.sub} past ${bound}`);
+      }
+    }
+    return out;
+  }
+
+  const anySettings = (state: RoomState): RoomState => ({ ...state, meta: { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: "all", playersApplyDamage: true } } });
+
+  test("random rooms through P1's ops and the DM's", () => {
+    const found: string[] = [];
+    for (let seed = 1; seed <= 80 && found.length === 0; seed++) {
+      const r = rng(seed * 13 + 5);
+      let state = randomState(r);
+      for (let k = 0; k < 8 && found.length === 0; k++) {
+        const who = k % 3 === 2 ? DM : P1;
+        const op = k === 4 ? randomDiceRoll(r, state, P1) : randomOp(r, state, who);
+        const result = applyOp(state, op, who, env(4_000_000 + k));
+        if (result.ok) state = result.state;
+        found.push(...unbounded(state).map((why) => `seed ${seed}, ${op.t}: ${why}`), ...unbounded(anySettings(state)).map((why) => `seed ${seed}, ${op.t}, any: ${why}`));
+      }
+    }
+    assert.deepEqual(found, []);
+  });
+
+  test("one op of each kind a player may send, on a table of theirs, before and after", () => {
+    const found: string[] = [];
+    for (const [kind, fixed] of Object.entries(PLAYER_OPS)) {
+      const state = playerTable();
+      fixed.room?.(state);
+      const result = applyOp(state, fixed.op(state), P1, env(4_100_000));
+      assert.ok(result.ok, `${kind}: ${result.ok ? "" : result.message}`);
+      for (const s of [state, result.state, anySettings(result.state)]) found.push(...unbounded(s).map((why) => `${kind}: ${why}`));
+    }
+    assert.deepEqual(found, []);
+  });
+
+  test("the room at the far lines, under every setting", () => {
+    const { state } = fullRoom();
+    const players = Object.keys(state.members).filter((id) => state.members[id]!.kind === "player").slice(0, 2);
+    assert.deepEqual([...unbounded(state, players), ...unbounded(anySettings(state), players)], []);
   });
 });
 

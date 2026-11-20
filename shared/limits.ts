@@ -1571,15 +1571,19 @@ function seatCharacter(state: RoomState, token: Token): Character | undefined {
   return of === undefined ? undefined : ownEntry(state.characters, of);
 }
 
+/** Whether a creature is one of the member's own: theirs outright, a creature the DM lent them included, or their character's. */
+export function ownsSeatToken(state: RoomState, memberId: string, token: Token): boolean {
+  return token.ownerIds.includes(memberId) || (seatCharacter(state, token)?.ownerIds.includes(memberId) ?? false);
+}
+
 /** Whether the row is one of the member's own: of a creature they own, directly or through its character, or of their character. */
-function ownsRow(state: RoomState, memberId: string, entry: InitEntry): boolean {
+export function ownsRow(state: RoomState, memberId: string, entry: InitEntry): boolean {
   if (entry.characterId !== undefined) {
     if (ownEntry(state.characters, entry.characterId)?.ownerIds.includes(memberId)) return true;
   }
   if (entry.tokenId === undefined) return false;
   const token = ownEntry(state.tokens, entry.tokenId);
-  if (!token) return false;
-  return token.ownerIds.includes(memberId) || (seatCharacter(state, token)?.ownerIds.includes(memberId) ?? false);
+  return token !== undefined && ownsSeatToken(state, memberId, token);
 }
 
 /** Everyone ownsRow counts the row for: its character's owners, its creature's own and its creature's character's. */
@@ -1775,7 +1779,7 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
   const unseenRuler = (d: Drawing) => (d.anchors?.some((id) => id !== null) && onUnseen(d) ? d : null);
   return {
     // Their seat's and any they own outright, a creature the DM lent them included, as every owner may write to theirs.
-    token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && (t.ownerIds.includes(memberId) || (seatCharacter(state, t)?.ownerIds.includes(memberId) ?? false))),
+    token: copies("token", Object.values(state.tokens), (t) => floors.has(t.sceneId) && ownsSeatToken(state, memberId, t)),
     template: copies("template", Object.values(state.templates), (t) => floors.has(t.sceneId) && t.ownerId === memberId, unseenArea),
     drawing: copies("drawing", Object.values(state.drawings), (d) => floors.has(d.sceneId) && d.ownerId === memberId, unseenRuler),
     row: copies("row", state.encounter?.entries ?? [], (e) => ownsRow(state, memberId, e)),
