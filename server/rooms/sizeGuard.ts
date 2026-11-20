@@ -1,6 +1,6 @@
 import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
-import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type AreaTemplate, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
+import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type AreaTemplate, type BuildChunk, type Effect, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import type { HpLabel } from "#shared/rules/hp.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, FAR, farByteLine, farBytesOver, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
@@ -9,7 +9,7 @@ import { MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/p
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { movesAnyToken } from "#shared/permissions.ts";
-import { chunkPositions, heldGroundMap, ownsToken, perPlayerScene, seatView } from "#shared/project.ts";
+import { chunkPositions, heldClock, heldGroundMap, ownsToken, perPlayerScene, publicEffects, seatView } from "#shared/project.ts";
 import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { floorsOf, onPlayersScene } from "#shared/rules/floors.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
@@ -1812,12 +1812,12 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
 /**
  * The room's facts a field's width may read: the player and the creatures
  * they own, whether they move any creature, the creatures whose turn their
- * copy shows under way, the roster's ids and a list of them at its widest,
+ * copy shows under way, the clock their view holds, the roster's ids and a list of them at its widest,
  * the Per player scenes, which every player sees, and the characters the
  * player plays only through a creature of theirs. Each one moves only with
  * what their copy shows.
  */
-type WidthRoom = { readonly memberId: string; readonly movesAny: boolean; readonly turn: ReadonlySet<string>; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly movesAny: boolean; readonly turn: ReadonlySet<string>; readonly clockId: string | undefined; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly listWidth: number; readonly perPlayer: ReadonlySet<string>; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -1948,11 +1948,24 @@ const readersWidth = (room: WidthRoom) => {
   if (width === undefined) readersWidths.set(room, (width = 2 + Math.max(0, room.memberIds.length - 1) + sum(room.memberIds, (id) => utf8Bytes(JSON.stringify(id)))));
   return width;
 };
-/** The conditions an HP change put on or took off, those hidden from players or those shown. */
-const conditions = (revert: unknown, hidden: boolean) => {
-  const r = revert as { added?: Array<{ hiddenFromPlayers?: boolean }>; removed?: Array<{ hiddenFromPlayers?: boolean }> } | undefined;
-  return sum([...(r?.added ?? []), ...(r?.removed ?? [])], (e) => ((e.hiddenFromPlayers ?? false) === hidden ? valueBytes(e) + 1 : 0));
+/** The conditions an HP change put on or took off. */
+const changed = (revert: unknown): Effect[] => {
+  const r = revert as { added?: Effect[]; removed?: Effect[] } | undefined;
+  return [...(r?.added ?? []), ...(r?.removed ?? [])];
 };
+/** Those of them hidden from players, as stored. */
+const hiddenConditions = (revert: unknown) => sum(changed(revert), (e) => (e.hiddenFromPlayers ? valueBytes(e) + 1 : 0));
+/** What of a condition players may not be shown, at its widest: a save's DC and occurrence, a span's end and clock, a Ready action's trigger. */
+const SAVE_UNSHOWN_MOST = fieldBytes("dc") + String(LIMITS.rollDcMax).length + 1 + fieldBytes("due") + serializedBytes({ id: `${"9".repeat(18)}:${"9".repeat(6)}`, state: "dismissed" }) + 1;
+const ENDS_UNSHOWN_MOST = fieldBytes("at") + DIGITS.tick + 1 + fieldBytes("clock") + ID_MOST + 1;
+const TRIGGER_MOST = fieldBytes("label") + textMost(MAX_NAME) + 1;
+/**
+ * Those shown to players, as players get them (publicEffects), with what of
+ * each they may not be shown at its widest wherever what they are shown
+ * leaves room for it, so the width reads only what players see.
+ */
+const shownConditions = (revert: unknown, room: WidthRoom) =>
+  sum(publicEffects(changed(revert), () => false, room.clockId), (e) => valueBytes(e) + 1 + (e.save ? SAVE_UNSHOWN_MOST : 0) + (e.ends && e.ends.clock === undefined ? ENDS_UNSHOWN_MOST : 0) + (e.key === "readied" && e.label === undefined ? TRIGGER_MOST : 0));
 
 /**
  * Every field a player's own ops write beyond their copy, by the kind of
@@ -2053,9 +2066,9 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
       (line, room) => (PARTS_OF[(line.data as { type?: string } | undefined)?.type ?? ""] ?? 0) * (fieldBytes("label") + readersWidth(room) + 1) + fieldBytes("parts") + 2 + ownRolls(line, room),
       (parts, line, room) => (ownRolls(line, room) > 0 ? 0 : memberBytes("rolls", (parts as { rolls?: unknown } | undefined)?.rolls)),
     ),
-    // What an HP change replaced. The conditions it carried over count as they were on the creature: those shown to
-    // players at their bytes, as the creature's copy held them, and those hidden in the stepped part, as they were.
-    field("data", "revert", (data, _room, _line, stored) => (data.type === "hp" ? fieldBytes("revert") + REVERT_MOST + 1 + conditions(stored, false) : 0), (stored) => conditions(stored, true)),
+    // What an HP change replaced. The conditions it carried over count as players are shown them (D-261120-004), and
+    // those hidden from players stay in the stepped part, as they were.
+    field("data", "revert", (data, room, _line, stored) => (data.type === "hp" ? fieldBytes("revert") + REVERT_MOST + 1 + shownConditions(stored, room) : 0), (stored) => hiddenConditions(stored)),
     // An HP, rest, concentration or death save line's numbers and label, which only those who read the creature's HP get.
     lineField("amount", ["hp", "rest"], DIGITS.hp),
     lineField("left", ["hp", "rest"], HP_MOST),
@@ -2460,6 +2473,7 @@ function exactRoom(state: RoomState, memberId: string, view?: SeatView): { room:
     memberId,
     movesAny: movesAnyToken(state.meta.settings, memberId),
     turn: view ? view.turn() : widthsRoom(state).turn,
+    clockId: heldClock(state, viewer)?.id,
     owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),

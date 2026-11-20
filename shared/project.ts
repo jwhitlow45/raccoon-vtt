@@ -1274,7 +1274,7 @@ function effectCompanion(token: Pick<Token, "kind" | "companion">): boolean {
  * trigger was typed by its player and is the table's. `triggers` is asked
  * only of an actor that holds such a trigger, since it can scan the tokens.
  */
-function publicEffects(effects: Effect[], triggers: () => boolean, clockId: string | undefined): Effect[] {
+export function publicEffects(effects: Effect[], triggers: () => boolean, clockId: string | undefined): Effect[] {
   let shown: boolean | undefined;
   return effects.flatMap((e) => {
     if (e.hiddenFromPlayers) return [];
