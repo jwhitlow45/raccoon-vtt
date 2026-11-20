@@ -946,9 +946,10 @@ function RoomPage() {
     bar: barLeft !== null && barTop !== null ? { left: barLeft, top: barTop } : null,
   });
   const sheetFloor = toastRoom.floor;
-  // A bottom sheet stands on the toolbar or the keyboard and covers its own height above them, a sideways one its width, a full one all of it.
-  const sheetClear = !sheetOpen || wide || full ? { bottom: 0, right: 0 } : sheetModeNow === "side" ? { bottom: 0, right: sideWidth } : { bottom: sheetHeight + Math.max(TOOLBAR, sheetKeys?.inset ?? 0), right: 0 };
-  const gateClear = { top: insets.top * zoom, bottom: Math.max(insets.bottom, sheetClear.bottom) * zoom, right: sheetClear.right * zoom };
+  // A bottom sheet stands on the toolbar and the safe area under it, or on the keyboard, and covers its own height above them, a sideways one its width, a full one all of it. These are the chrome's px.
+  const sheetClear = !sheetOpen || wide || full ? { bottom: 0, right: 0 } : sheetModeNow === "side" ? { bottom: 0, right: sideWidth } : { bottom: sheetHeight + Math.max(safe.bottom + TOOLBAR, sheetKeys?.inset ?? 0), right: 0 };
+  // The map is not zoomed with the chrome. The bar insets are screen px already, so only the sheet's terms are scaled.
+  const gateClear = { top: insets.top, bottom: Math.max(insets.bottom, sheetClear.bottom * zoom), right: sheetClear.right * zoom };
   const optionsTop = chrome ? Math.min(height - chrome.bottom, toastFloor ?? Infinity) : 0;
   // The alerts column's width as it works it out (features/encounter/InitiativeStrip.tsx): it steps left of a phone's sideways sheet, and beside the side panel no right safe area is the map's.
   const columnSheet = !wide && width > height && sheetOpen ? sideWidth : 0;
@@ -1507,7 +1508,7 @@ function MapArea(props: {
   actionBar: boolean;
   insets: Insets;
   paneInsets: Insets;
-  /** What the bars and a phone's open sheet cover of the map from the top, the foot and the right, in screen px (the map is not zoomed with the chrome), for the words that stand in its middle. */
+  /** What the bars and a phone's open sheet cover of the map from the top, the foot and the right, in screen px, for the words that stand in its middle. */
   gateClear: { top: number; bottom: number; right: number };
   onSelect(id: string | null, add?: boolean): void;
   onOpenDetails(id: string): void;
