@@ -4,13 +4,13 @@ import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
 import { serializedBytes } from "#shared/limits.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { Effect, RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
 import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { entry, env, P1, randomDiceRoll, randomOp, randomState, rng, token } from "#shared/testutil.ts";
+import { effect, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, token } from "#shared/testutil.ts";
 import { PLAYER_OPS as FIXED, playerTable as table, rolled } from "./playerOpsTesting.ts";
 import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes } from "./sizeGuard.ts";
 
@@ -195,6 +195,35 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
     const hidden = roll("Roll 2", "ghost", 10);
     state.log = [{ id: "900:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "dice", by: "p1", to: "all", rolls: [roll("Roll 1", "hero", 18), hidden, roll("Roll 3", "hero", 16)] }, parts: { rolls: [null, [], null] } } as never];
     assert.equal(exactCopies(state, "p1").get(keys.log("900:0"))!.hidden, JSON.stringify(hidden).length + 1);
+  });
+
+  test("an HP line keeps in the stepped part only the conditions hidden from players, whatever players are not shown of the rest", () => {
+    // Its vitals at their widest and a dozen conditions of each shape, so no slack in the width covers a part left out.
+    const vitals = { hp: { cur: 100_000, max: 100_000, temp: 100_000 }, life: "stable" as const, deathSaves: { ok: 3, fail: 3 } };
+    const many = (make: (i: number) => Effect) => Array.from({ length: 12 }, (_, i) => make(i));
+    const shapes = {
+      "a save's DC and occurrence": many((i) => effect(`s${i}`, { key: "custom", label: "Held", save: { ability: "wis", dc: 50 }, due: { id: "123456789012345678:123456", state: "dismissed" } })),
+      "a span's end and clock": many((i) => effect(`e${i}`, { key: "blessed", ends: { span: 600, at: 9_007_199_254_740_991, clock: "c".repeat(64) } })),
+      "a Ready action's trigger": many((i) => effect(`r${i}`, { key: "readied", label: "\u20ac".repeat(80) })),
+    };
+    const hidden = effect("e-hidden", { key: "poisoned", hiddenFromPlayers: true });
+    for (const [what, shown] of Object.entries(shapes)) {
+      const state = table();
+      state.log = [{ id: "900:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", tokenId: "pet", seen: true, change: "damage", amount: 3, label: "Dying", left: vitals.hp, revert: { before: vitals, after: vitals, added: [...shown, hidden] } } as never }];
+      assert.equal(exactCopies(state, "p1").get(keys.log("900:0"))!.hidden, JSON.stringify(hidden).length + 1, what);
+    }
+  });
+
+  test("an HP line counts a span's end and clock as players are shown them: as stored while their view holds that clock, at their widest otherwise", () => {
+    const shownOf = (held: boolean) => {
+      const state = table();
+      state.clock = { id: "clk1", rev: 1, t: 0, shown: held, calendar: { kind: "days" } };
+      const vitals = { hp: { cur: 5, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
+      const ends = effect("e-ends", { key: "blessed", ends: { span: 600, at: 1000, clock: "clk1" } });
+      state.log = [{ id: "900:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", tokenId: "pet", seen: true, change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert: { before: vitals, after: vitals, removed: [ends] } } as never }];
+      return exactCopies(state, "p1").get(keys.log("900:0"))!.shown;
+    };
+    assert.ok(shownOf(false) - shownOf(true) > 300, `${shownOf(false)} against ${shownOf(true)}`);
   });
 
   test("a stored field past its width keeps the rest in the stepped part, so the exact part never counts less than it takes out", () => {
