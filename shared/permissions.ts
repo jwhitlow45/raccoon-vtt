@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
-import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, HIDDEN_ROW_REFUSED, LIMITS, stillFitsVideo } from "./limits.ts";
@@ -1925,22 +1925,35 @@ function climbAlso(c: Check, tokenId: string, value: unknown, climbed: (current:
 type Climb = NonNullable<OpOf<"sys.restore">["climb"]>;
 
 /**
+ * Whether the player's copy holds both ends of a pair now (FLR4-SOL-01,
+ * FLR4-OPUS-6). An edit of one end moves the rev of both, and a player gets
+ * neither end's rev or `made`. So a check that compares them runs only
+ * while the player holds both ends: whether an end is withheld is theirs
+ * to know, and an end they hold shows its own moves. Else a move of a
+ * fogged far end would answer through the end they see.
+ */
+function holdsBothEnds(c: Check, end: FloorLink): boolean {
+  const far = ownEntry(c.state.floorLinks, end.pair);
+  return far !== undefined && [end, far].every((e) => e.hidden !== true && c.visible(keys.floorLink(e.id)));
+}
+
+/**
  * Whether a player's undo or redo of a climb finds the stairs it took
- * (8, ASTRA-04, ASTRA-14), read on the climber's floor now alone: an undo
- * goes from `to` back to `from` by the end there whose pair is the end it
- * took, a redo from `from` to `to` by that end itself. Either way that end
- * is one the player gets, at the climb's rev and `made`, unlocked, with the
- * climber's snapped space inside its squares. A pair removed and placed
- * again with the same ids has a new `made`, so it fails too. Else "the
- * stairs changed", whatever changed, so no answer reads the far floor.
+ * (8, ASTRA-04, ASTRA-14), read on the climber's floor now: an undo goes
+ * from `to` back to `from` by the end there whose pair is the end it took,
+ * a redo from `from` to `to` by that end itself. Either way the player
+ * gets both ends (holdsBothEnds), and that end is at the climb's rev and
+ * `made`, unlocked, with the climber's snapped space inside its squares. A
+ * pair removed and placed again with the same ids has a new `made`, so it
+ * fails too. Else "the stairs changed", whatever changed.
  */
 function climbBackCheck(c: Check, climb: Climb, from: "undo" | "redo"): Decision {
   const token = ownEntry(c.state.tokens, climb.tokenId);
   const here = from === "undo" ? climb.to : climb.from;
   const there = from === "undo" ? climb.from : climb.to;
   const end = token === undefined || token.sceneId !== here ? undefined : from === "redo" ? ownEntry(c.state.floorLinks, climb.linkId) : linksOn(c.state, here).find((l) => l.pair === climb.linkId);
-  // Whether they get the end comes before any word about it: an end gone, hidden and withheld read alike, so the words never name the kind of an end they cannot see.
-  if (!token || !end || end.hidden === true || !c.visible(keys.floorLink(end.id))) return refuse("invalid", LINK_WORDS.changed("stairs"));
+  // Whether they get both ends comes before any word about either: an end gone, hidden and withheld read alike, so the words never name the kind of an end they cannot see.
+  if (!token || !end || !holdsBothEnds(c, end)) return refuse("invalid", LINK_WORDS.changed("stairs"));
   const changed = refuse("invalid", LINK_WORDS.changed(end.kind));
   if (end.sceneId !== here || end.to !== there || end.rev !== climb.rev || end.made !== climb.made || end.locked === true) return changed;
   // Its space alone: a later move, its height's included, is the restore's own guard to answer (MOVED_SINCE).
@@ -1965,19 +1978,20 @@ function climbMoves(climb: Climb | undefined, falls: readonly FallRecord[] | und
 
 /**
  * Whether a player's redo of a fall finds the hole it fell through
- * (phase 4, 4.5): the upper end by id at the record's rev and `made`, one
- * the player gets, unlocked, still an opening's upper end to the floor it
- * fell to, with the creature on the floor it fell from and the space the
- * redo puts back, set there on that end's ground, wholly inside it. Else
- * "the opening changed", or for an end gone or withheld the words of any
- * end they cannot see. The walk's own redo checks then run to that spot
- * (restorePoseCheck), so a wall built on the walk since refuses it.
+ * (phase 4, 4.5): the upper end by id at the record's rev and `made`,
+ * while the player gets both ends (holdsBothEnds), unlocked, still an
+ * opening's upper end to the floor it fell to, with the creature on the
+ * floor it fell from and the space the redo puts back, set there on that
+ * end's ground, wholly inside it. Else "the opening changed", or for an
+ * end gone or withheld the words of any end they cannot see. The walk's
+ * own redo checks then run to that spot (restorePoseCheck), so a wall
+ * built on the walk since refuses it.
  */
 function fallBackCheck(c: Check, record: FallRecord, value: unknown): Decision {
   const token = ownEntry(c.state.tokens, record.tokenId);
   const upper = ownEntry(c.state.floorLinks, record.linkId);
   const restored = value && typeof value === "object" ? (value as Token) : null;
-  if (!token || !restored || !upper || upper.hidden === true || !c.visible(keys.floorLink(upper.id))) return refuse("invalid", LINK_WORDS.changed("stairs"));
+  if (!token || !restored || !upper || !holdsBothEnds(c, upper)) return refuse("invalid", LINK_WORDS.changed("stairs"));
   const changed = refuse("invalid", LINK_WORDS.changed(upper.kind));
   if (token.sceneId !== record.from || upper.sceneId !== record.from || upper.to !== record.to || upper.rev !== record.rev || upper.made !== record.made || upper.locked === true || !isHole(c.state, upper)) return changed;
   return spaceOn(c.state, { ...restored, sceneId: record.from, elevation: upper.ground }, upper) ? OK : changed;
