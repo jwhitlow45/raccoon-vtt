@@ -182,10 +182,11 @@ export const UNHURT_FALL = "No damage from the fall, so not Prone";
 /** The bound and the sent plan include the same ask, trap or fall card that Apply settles. */
 /**
  * What the outcome settles beside its targets. A fall card's names the
- * creatures `settled` takes off it (FLR4INT-ASTRA-05), every row by
- * default, which is the widest the op can be.
+ * creatures `settled` takes off it (FLR4INT-ASTRA-05), every token the
+ * page started with by default, rows and their creatures' other tokens
+ * alike (FLR4INT-ASTRA-08), which is the widest the op can be.
  */
-function closingOf(page: Page, settled: readonly string[] = page.rows.map((r) => r.tokenId)): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
+function closingOf(page: Page, settled: readonly string[] = page.source.kind === "fall" ? page.source.tokenIds : []): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
   if (page.cast) return { cast: page.cast.ask.id };
   if (page.source.kind === "fall") return { fall: { fallId: page.source.fallId, tokenIds: [...settled] } };
   return page.source.kind === "trap" ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
@@ -352,6 +353,7 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   const seen = new Set<string>();
   // The creatures a fall card's outcome takes off it: each row it reached, skipped ones too, since the DM chose that.
   const settled: string[] = [];
+  const settledHolders = new Set<string>();
   for (const row of page.rows) {
     if (seen.has(row.holder)) continue;
     seen.add(row.holder);
@@ -363,11 +365,21 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     const state = stateOf(page, row);
     if (state.gone) continue;
     settled.push(row.tokenId);
+    settledHolders.add(row.holder);
     if (state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);
     if (outcome.error) return null;
     if (outcome.result === null || outcome.result === "skip") continue;
     rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted, types: outcome.types, ...(outcome.damage ? { damage: outcome.damage } : {}) });
+  }
+  // A row stands for its creature, so a card's other tokens of a creature it settled, as two riders that
+  // show one character, leave the card with it where the page reaches them. Left on, the card would apply
+  // that creature's fall again (FLR4INT-ASTRA-08). One the page does not reach stays, as a row's would.
+  if (page.source.kind === "fall") {
+    for (const id of page.source.tokenIds) {
+      const token = dice.view.tokens[id];
+      if (token && !settled.includes(id) && settledHolders.has(holderOf(token)) && onPageScene(page, token, dice)) settled.push(id);
+    }
   }
   const targets = planTargets(rows, ids.newId);
   // The outcome closes the player's ask it answers in the same op (docs/design/design-v1-player-save-spell.md 3.3).

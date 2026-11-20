@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState } from "#shared/model.ts";
+import type { Fall, RoomState } from "#shared/model.ts";
 import { opSchema } from "#shared/protocol.ts";
 import { actor, character, customMonster, room, scene, token } from "#shared/testutil.ts";
+import { GROUND, UPPER, fallCard, run, thornToken, tower as floorsTower, withFalls } from "#shared/floorLinksTestutil.ts";
 import type { DiceView } from "../creature.ts";
 import { mark, newPage, sourceIds, type Page, type Source } from "./chain.ts";
 import { fallFill, FALL_NAME } from "./fills.ts";
@@ -142,5 +143,121 @@ describe("a fall card's group save", () => {
     const { page } = fallPage(tower(), "thorn");
     const back = restoreChoices("p2", captureChoices(page));
     assert.deepEqual(back.source, { kind: "fall", fallId: "120:0", tokenIds: ["thorn"] });
+  });
+});
+
+describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () => {
+  const SIX = [{ amount: 6, type: "bludgeoning" as const }];
+  let n = 0;
+  /** Fresh ids for each Apply, as the panel makes them. */
+  const ids = () => ({ plan: `0192f0a8-6c1e-7a4b-9c3d-1${String(n++).padStart(11, "0")}`, newId: () => `0192f0a8-6c1e-7a4b-9c3d-2${String(n++).padStart(11, "0")}` });
+
+  /** The tower with a horse, two riders that show Thorn's one character, a goblin and Bree, and a card naming those `named`. */
+  function room4(named: string[], over: Record<string, string> = {}): RoomState {
+    const at = (id: string) => ({ sceneId: over[id] ?? GROUND, x: 6, y: 6 });
+    const base = floorsTower({
+      tokens: {
+        horse: token("horse", { name: "Horse", ...at("horse") }),
+        thorn: thornToken(at("thorn")),
+        thorn2: thornToken({ id: "thorn2", ...at("thorn2") }),
+        gob: token("gob", { name: "Goblin", ...at("gob") }),
+        bree: token("bree", { name: "Bree", ...at("bree") }),
+      },
+    });
+    const [first, ...riders] = named;
+    return withFalls(base, fallCard({ tokenId: first!, ...(riders.length > 0 ? { riders } : {}) }));
+  }
+
+  /** The page the card's Apply opens, every row failed, as the DM's copy holds it. */
+  function cardPage(view: RoomState, card: Fall): { page: Page; dice: DiceView } {
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view, srd: { monsters: [], rolls: {} } };
+    const source: Source = { kind: "fall", fallId: card.id, tokenIds: [card.tokenId, ...(card.riders ?? [])].filter((id) => view.tokens[id]) };
+    const test = { kind: "none" as const };
+    const rows = groupRows(dice, sourceIds(source, []), test, false, new Map());
+    let page: Page = {
+      ...newPage({
+        id: "p",
+        sceneId: sourceScene({ source }, view, GROUND),
+        source,
+        test,
+        dc: null,
+        secret: true,
+        spell: false,
+        switches: { dcShown: false, resultShown: true },
+        fill: { name: FALL_NAME, from: "From Fall: No save, 1d6 Bludgeoning, Prone.", damageType: "bludgeoning" },
+        outcome: { damage: "1d6 Bludgeoning", onPass: "none", conditions: ["prone"], lasts: { mode: "none", rounds: 10, anchor: "own" }, saveEnds: null },
+      }),
+      phase: "rolled",
+      rows,
+    };
+    for (const r of rows) page = mark(page, r.holder, "fail");
+    return { page, dice };
+  }
+
+  /** Applies the card through the reducer as the DM would, again from what it still names, until it goes or nothing applies. */
+  function applyAll(state: RoomState): { state: RoomState; applies: number } {
+    let applies = 0;
+    for (let card = state.falls?.["120:0"]; card && applies < 4; card = state.falls?.["120:0"]) {
+      const { page, dice } = cardPage(state, card);
+      const plan = buildPlan(page, dice, SIX, ids());
+      if (!plan) break;
+      assert.ok(opSchema.safeParse(plan).success);
+      state = run(state, plan);
+      applies++;
+    }
+    return { state, applies };
+  }
+
+  const hp = (state: RoomState, id: string) => {
+    const t = state.tokens[id]!;
+    return "inline" in t.actor ? t.actor.inline.hp?.cur : state.characters[t.actor.ref]?.actor.hp?.cur;
+  };
+
+  test("two riders that show one character take its 6 damage once, 20 to 14, and leave the card together", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page, dice } = cardPage(state, state.falls!["120:0"]!);
+    assert.equal(page.rows.length, 2, "a row for each creature");
+    const plan = buildPlan(page, dice, SIX, ids())!;
+    assert.deepEqual([...plan.fall!.tokenIds].sort(), ["horse", "thorn", "thorn2"]);
+    assert.deepEqual(plan.targets.map((t) => t.target), page.rows.map((r) => r.target), "each creature damaged once");
+    const after = applyAll(state);
+    assert.deepEqual([hp(after.state, "thorn"), hp(after.state, "horse"), after.applies], [14, 14, 1], "never 8");
+    assert.equal(after.state.falls?.["120:0"], undefined, "the card closes once every token it names is settled");
+  });
+
+  test("the card's own creature and a rider that share a character, beside a goblin, each take it once and the card goes", () => {
+    const after = applyAll(room4(["thorn", "gob", "thorn2"]));
+    assert.deepEqual([hp(after.state, "thorn"), hp(after.state, "gob"), after.applies], [14, 14, 1]);
+    assert.equal(after.state.falls?.["120:0"], undefined);
+  });
+
+  test("the character's other token on another floor leaves with it, and one on another scene stays, as another creature there does", () => {
+    const state = room4(["horse", "thorn", "thorn2", "bree"], { thorn2: UPPER, bree: "s2" });
+    const { page, dice } = cardPage(state, state.falls!["120:0"]!);
+    const plan = buildPlan(page, dice, SIX, ids())!;
+    assert.deepEqual([...plan.fall!.tokenIds].sort(), ["horse", "thorn", "thorn2"]);
+    const after = run(state, plan);
+    assert.deepEqual([after.falls?.["120:0"]?.tokenId, after.falls?.["120:0"]?.riders], ["bree", undefined], "Bree keeps her fall");
+    assert.equal(hp(after, "thorn"), 14);
+    const away = room4(["horse", "thorn", "thorn2"], { thorn2: "s2" });
+    const apart = cardPage(away, away.falls!["120:0"]!);
+    assert.deepEqual([...buildPlan(apart.page, apart.dice, SIX, ids())!.fall!.tokenIds].sort(), ["horse", "thorn"], "one the page does not reach stays on the card");
+  });
+
+  test("a skipped row's creature still leaves with all its tokens", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page, dice } = cardPage(state, state.falls!["120:0"]!);
+    const skipped = mark(page, page.rows.find((r) => r.tokenId === "thorn")!.holder, "skip");
+    const plan = buildPlan(skipped, dice, SIX, ids())!;
+    assert.deepEqual([...plan.fall!.tokenIds].sort(), ["horse", "thorn", "thorn2"]);
+    assert.deepEqual(plan.targets.map((t) => t.target), [{ tokenId: "horse" }]);
+  });
+
+  test("a token that shows another creature now stays on the card", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page } = cardPage(state, state.falls!["120:0"]!);
+    const swapped: RoomState = { ...state, tokens: { ...state.tokens, thorn2: { ...state.tokens.thorn2!, actor: { inline: actor() } } } };
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: swapped, srd: { monsters: [], rolls: {} } };
+    assert.deepEqual([...buildPlan(page, dice, SIX, ids())!.fall!.tokenIds].sort(), ["horse", "thorn"]);
   });
 });
