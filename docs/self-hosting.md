@@ -653,6 +653,17 @@ newest first.
 
 **Since v0.3.1**
 
+- **Rider seats and hex walks** ([design](design/design-v1-attach.md)):
+  change format 63. A move may carry where a rider was dropped. Creatures in
+  single file on hexes hold their height until the holder lands, step
+  straight onto the holder's start from beside it where the other way ends
+  out of reach, and step off their holder at a trap's stop where a clear
+  spot in reach is left. No data migrates, and changes saved before replay
+  as they ran. Until it reloads, an old page sends no seat, so a rider lands
+  on her usual seat. An older build cannot replay version 63 changes: it
+  serves a room with any after its last save read-only, as it stood before
+  the first of them. Going back needs the backups taken just before the
+  update for such a room.
 - **Single file hex by hex** ([design](design/design-v1-attach.md)):
   change format 62. A creature dragged in single file on hexes now walks
   onto the hex its holder sets out from and on along the holder's own hexes,
