@@ -8,6 +8,7 @@ import { shippedStamp } from "../builder/stamps/rules.ts";
 import { zoneBox } from "../traps/rules.ts";
 import { unionView } from "../vision/union.ts";
 import type { Labels } from "../../lib/labels.ts";
+import { otherFloorRows, sceneFloorIds } from "./otherFloors.ts";
 
 /**
  * The scene outliner's rows (docs/design/design-v1-dm-tools.md 3.2), as pure
@@ -27,7 +28,7 @@ import type { Labels } from "../../lib/labels.ts";
  * gets it.
  */
 
-export type OutlineGroup = "tokens" | "map" | "areas" | "drawings" | "doors" | "traps";
+export type OutlineGroup = "tokens" | "map" | "areas" | "drawings" | "doors" | "traps" | "other";
 
 export const GROUPS: readonly { id: OutlineGroup; title: string; chip: string }[] = [
   { id: "tokens", title: "Creatures and objects", chip: "Creatures" },
@@ -36,6 +37,7 @@ export const GROUPS: readonly { id: OutlineGroup; title: string; chip: string }[
   { id: "drawings", title: "Drawings", chip: "Drawings" },
   { id: "doors", title: "Doors", chip: "Doors" },
   { id: "traps", title: "Traps", chip: "Traps" },
+  { id: "other", title: "Other floors", chip: "Other floors" },
 ];
 
 export type OutlineKind = "token" | "stamp" | "label" | "pin" | "light" | "area" | "drawing" | "door" | "window" | "trap";
@@ -57,6 +59,10 @@ export type OutlineRow = {
   segment?: { a: { x: number; y: number }; b: { x: number; y: number } };
   /** The lowercase text the search reads. */
   search: string;
+  /** An Other floors row: the floor the creature stands on, which a press shows. */
+  floor?: string;
+  /** An Other floors row: that floor's place among the scene's floors, bottom first, so the group reads floor by floor. */
+  floorRank?: number;
 };
 
 /** A player who owns nothing: what anyone at the table may see. */
@@ -118,18 +124,25 @@ const SHAPE_WORD: Record<AreaTemplate["shape"], string> = {
  * A companion's detail and mark (docs/design/design-v1-combat-flow.md 3.6.10):
  * whose it is, in place of its kind word, so searching "companion" lists
  * them all, and "Away from Bree" when no token of its character stands on
- * the scene, as when the party moved on and left it behind.
+ * the scene, as when the party moved on and left it behind. A character one
+ * floor away is still on the scene, so `view` here is the whole copy and
+ * `floors` the scene's floors.
  */
-function companionOf(view: RoomState, t: Token, sceneId: string): { detail: string; away: string | null } | null {
+function companionOf(view: RoomState, floors: ReadonlySet<string>, t: Token): { detail: string; away: string | null } | null {
   if (!t.companion) return null;
   const characterId = t.companion.of;
   const name = view.characters[characterId]?.name ?? "a character";
-  const here = Object.values(view.tokens).some((o) => o?.sceneId === sceneId && "ref" in o.actor && o.actor.ref === characterId);
+  const here = Object.values(view.tokens).some((o) => o !== undefined && floors.has(o.sceneId) && "ref" in o.actor && o.actor.ref === characterId);
   return { detail: `Companion of ${name}`, away: here ? null : `Away from ${name}` };
 }
 
-/** Every row for the scene, in group order, each group sorted by name. */
-export function outlineRows(view: RoomState, sceneId: string, labels: Labels): OutlineRow[] {
+/**
+ * Every row for the scene, in group order, each group sorted by name. `view`
+ * is the cut of the floor shown, and `whole` the copy of every floor, which
+ * the Other floors group and a companion's character read (otherFloors.ts).
+ * A scene of one floor has them the same.
+ */
+export function outlineRows(view: RoomState, sceneId: string, labels: Labels, whole: RoomState = view): OutlineRow[] {
   const scene = view.scenes[sceneId];
   if (!scene) return [];
   const forPlayers = asPlayersScene(unionView(view), sceneId);
@@ -138,6 +151,7 @@ export function outlineRows(view: RoomState, sceneId: string, labels: Labels): O
   const memberName = (id: string) => view.members[id]?.name ?? "A former member";
   const feet = view.meta.settings.feetPerCell > 0 ? view.meta.settings.feetPerCell : 5;
   const rows: OutlineRow[] = [];
+  const floorIds = new Set(sceneFloorIds(whole, sceneId));
   const add = (row: Omit<OutlineRow, "search" | "key">) => rows.push({ ...row, key: `${row.kind}:${row.id}`, search: `${row.name} ${row.detail}`.toLowerCase() });
 
   const tokenMark = (t: Token): string | null => {
@@ -149,7 +163,7 @@ export function outlineRows(view: RoomState, sceneId: string, labels: Labels): O
   for (const t of Object.values(view.tokens)) {
     if (!t || t.sceneId !== sceneId) continue;
     const fp = footprint(t);
-    const companion = companionOf(view, t, sceneId);
+    const companion = companionOf(whole, floorIds, t);
     add({
       group: "tokens",
       kind: "token",
@@ -235,12 +249,16 @@ export function outlineRows(view: RoomState, sceneId: string, labels: Labels): O
     });
   }
 
+  rows.push(...otherFloorRows(whole, sceneId, labels));
+
   const order = new Map(GROUPS.map((g, i) => [g.id, i]));
   return rows.sort(
     (a, b) =>
       order.get(a.group)! - order.get(b.group)! ||
       // Secret doors first among the doors, hidden ones before found ones, as the DM looks for them most.
       (a.group === "doors" ? secretRank(a) - secretRank(b) : 0) ||
+      // Other floors read floor by floor, lowest first.
+      (a.floorRank ?? 0) - (b.floorRank ?? 0) ||
       a.name.localeCompare(b.name, undefined, { numeric: true }) ||
       (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
   );

@@ -36,4 +36,11 @@ describe("the outliner's list", () => {
     }
     assert.match(markup, /title="Show Goblin Boss on the map"/);
   });
+
+  test("an Other floors row carries its creature's id for the floors tests, and no other row does", () => {
+    const other: OutlineRow = { ...row("imp", "Imp"), group: "other", detail: "Upper floor", floor: "up", floorRank: 1 };
+    const items: ListItem[] = [{ kind: "row", row: row("g1", "Goblin") }, { kind: "row", row: other }];
+    const markup = renderToStaticMarkup(createElement(WindowedList, { items, onPick: () => {}, onToggle: () => {} }));
+    assert.deepEqual([...markup.matchAll(/data-other-floor="([^"]*)"/g)].map((m) => m[1]), ["imp"]);
+  });
 });

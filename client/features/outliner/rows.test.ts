@@ -3,6 +3,8 @@ import { describe, test } from "node:test";
 import type { BuildChunk, Drawing, Light, Pin, Stamp } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { character, reveal, room, scene, template, token, trap } from "#shared/testutil.ts";
+import { floorViewOf } from "../../state/floorView.ts";
+import { ATTIC, GROUND, UPPER, thornToken, tower } from "#shared/floorLinksTestutil.ts";
 import { filterRows, frameRect, listItems, outlineRows, ROW_PX, windowRange, type OutlineRow } from "./rows.ts";
 
 const stamp = (id: string, o: Partial<Stamp> = {}): Stamp => ({ id, rev: 0, sceneId: "s1", art: { key: "chest" }, x: 20, y: 20, w: 1, h: 1, rotation: 0, z: 0, visibility: "all", ...o });
@@ -211,5 +213,53 @@ describe("the scene outliner's rows", () => {
     assert.deepEqual(windowRange({ listTop: ROW_PX * 4.5, viewHeight: ROW_PX * 10, count: 5000, overscan: 0 }), { start: 0, end: 6 }, "a list lower in the panel");
     assert.deepEqual(windowRange({ listTop: -ROW_PX * 4990, viewHeight: ROW_PX * 20, count: 5000, overscan: 8 }), { start: 4982, end: 5000 });
     assert.deepEqual(windowRange({ listTop: ROW_PX * 20, viewHeight: ROW_PX * 10, count: 5000, overscan: 0 }), { start: 0, end: 0 }, "a list below the view");
+  });
+  test("Other floors (design-v1-floors.md 9.6): a row for each creature and object on another floor of the scene, the floor's name its detail, lowest floor first, none on a scene of one floor", () => {
+    const state = tower({
+      tokens: {
+        thorn: thornToken(),
+        imp: token("imp", { name: "Imp", sceneId: UPPER, x: 4, y: 4 }),
+        bat: token("bat", { name: "Bat", sceneId: ATTIC, x: 2, y: 2 }),
+        urn: token("urn", { name: "Urn", kind: "object", sceneId: UPPER, x: 8, y: 9, visibility: "dm" }),
+        away: token("away", { name: "Elsewhere", sceneId: "s2" }),
+      },
+    });
+    const cut = floorViewOf(state, GROUND) as typeof state;
+    const rows = outlineRows(cut, GROUND, new Map(), state);
+    const other = rows.filter((r) => r.group === "other");
+    assert.deepEqual(
+      other.map((r) => [r.id, r.name, r.detail, r.mark, r.floor]),
+      [
+        ["imp", "Imp", "Upper floor", null, UPPER],
+        ["urn", "Urn", "Upper floor", "Hidden", UPPER],
+        ["bat", "Bat", "Attic", null, ATTIC],
+      ],
+      "bottom floor first, then by name, the scene's own floor and other scenes left out",
+    );
+    assert.deepEqual(rows.filter((r) => r.group === "tokens").map((r) => r.id), ["thorn"], "the floor shown keeps its own group");
+    assert.deepEqual(filterRows(rows, "attic", null).map((r) => r.id), ["bat"], "searchable by the floor's name");
+    assert.deepEqual(filterRows(rows, "", "other").map((r) => r.id), ["imp", "urn", "bat"]);
+    assert.deepEqual(other[0]?.rect, { x: 4, y: 4, width: 1, height: 1 });
+    const headers = listItems(rows, new Set()).flatMap((i) => (i.kind === "header" ? [i.title] : []));
+    assert.equal(headers.at(-1), "Other floors", "the last group");
+    const up = outlineRows(floorViewOf(state, UPPER) as typeof state, UPPER, new Map(), state);
+    assert.deepEqual(up.filter((r) => r.group === "other").map((r) => r.id), ["thorn", "bat"], "from Upper, Ground's Thorn then the Attic's Bat");
+    const one = room({ tokens: { a: token("a"), b: token("b", { sceneId: "s2" }) } });
+    assert.deepEqual(outlineRows(one, "s1", new Map()).filter((r) => r.group === "other"), [], "a scene of one floor has no group");
+  });
+
+  test("a companion one floor from its character is not away from them (FLR4-SEEN-1)", () => {
+    const state = tower({
+      characters: { bree: character("bree", { name: "Bree" }) },
+      tokens: {
+        bt: token("bt", { kind: "pc", actor: { ref: "bree" }, sceneId: UPPER }),
+        ws: token("ws", { kind: "npc", name: "Wildfire Spirit", sceneId: GROUND, ownerIds: ["p1"], companion: { of: "bree", turn: "shared" } }),
+        owl: token("owl", { kind: "npc", name: "Owl", sceneId: "s2", ownerIds: ["p1"], companion: { of: "bree", turn: "own" } }),
+      },
+    });
+    const here = outlineRows(floorViewOf(state, GROUND) as typeof state, GROUND, new Map(), state).find((r) => r.id === "ws")!;
+    assert.deepEqual([here.detail, here.mark], ["Companion of Bree", null]);
+    const own = outlineRows(state, "s2", new Map()).find((r) => r.id === "owl")!;
+    assert.equal(own.mark, "Away from Bree", "another scene's character is still away");
   });
 });

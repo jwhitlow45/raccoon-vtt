@@ -16,6 +16,8 @@ import type { PanelProps } from "../panels.ts";
 import { focusOutlineRow } from "./focus.ts";
 import { filterRows, GROUPS, listItems, outlineRows, ROW_PX, windowRange, type ListItem, type OutlineGroup, type OutlineRow } from "./rows.ts";
 import { useLabels } from "../../state/labels.ts";
+import { OTHER_FLOOR_ROW_ATTR } from "../floors/ids.ts";
+import { hasOtherFloors } from "./otherFloors.ts";
 
 /**
  * The scene outliner (docs/design/design-v1-dm-tools.md 3.2): a searchable list of
@@ -35,10 +37,19 @@ export default function OutlinerPanel(props: PanelProps) {
   return <Outliner sceneId={sceneId} close={props.close} shown={props.shown} />;
 }
 
-/** The parts of the view the rows read. Each keeps its identity until it changes, so the rows are made again only then. */
-function useScenePieces(): RoomState | null {
+/**
+ * The parts of the view the rows read: the cut of the floor shown, and the
+ * whole copy for the Other floors group and a companion's character
+ * (otherFloors.ts). Each keeps its identity until it changes, so the rows are
+ * made again only then.
+ */
+function useScenePieces(): { view: RoomState; whole: RoomState } | null {
   const view = useRoomView((s) => s.floorView);
+  const whole = useRoomView((s) => s.view);
   const pieces = [
+    whole?.tokens,
+    whole?.scenes,
+    whole?.characters,
     view?.tokens,
     view?.stamps,
     view?.labels,
@@ -59,12 +70,12 @@ function useScenePieces(): RoomState | null {
     view ? viewMapsOf(view).exploredAny : undefined,
   ];
   // The view itself changes with any op, a log line included, so only these pieces decide when the rows are made again.
-  return useMemo(() => view, pieces);
+  return useMemo(() => (view && whole ? { view, whole } : null), pieces);
 }
 
 function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
   const labels = useLabels();
-  const view = useScenePieces();
+  const pieces = useScenePieces();
   const scope = useRoomScope();
   const ui = useRoomUi();
   const actions = useRoomActions();
@@ -101,7 +112,8 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
     searchRef.current?.select();
   }, [scope, props.shown, asked]);
 
-  const rows = useMemo(() => (view ? outlineRows(view, props.sceneId, labels) : []), [view, props.sceneId]);
+  const rows = useMemo(() => (pieces ? outlineRows(pieces.view, props.sceneId, labels, pieces.whole) : []), [pieces, props.sceneId]);
+  const floors = pieces ? hasOtherFloors(pieces.whole, props.sceneId) : false;
   const shown = useMemo(() => filterRows(rows, query, group), [rows, query, group]);
   // A search shows every match, folded groups included.
   const items = useMemo(() => listItems(shown, query.trim() ? new Set() : folded), [shown, query, folded]);
@@ -114,7 +126,9 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
   const pick = (row: OutlineRow) => {
     // On a phone the sheet closes first, so the item is not under it.
     if (!wide) props.close();
-    focusOutlineRow(row, { scope, ui, actions, sceneId: props.sceneId, tokens: view?.tokens ?? {} });
+    // A creature on another floor: that floor shows first, as the tracker's row does. Floors line up square for square, so the framing stands.
+    if (row.floor !== undefined) actions.showFloor(row.floor);
+    focusOutlineRow(row, { scope, ui, actions, sceneId: row.floor ?? props.sceneId, tokens: pieces?.whole.tokens ?? {} });
   };
   const toggle = (g: OutlineGroup) =>
     setFolded((prev) => {
@@ -142,7 +156,7 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
         <Chip count={rows.length === 0 ? null : filterRows(rows, query, null).length} pressed={group === null} onClick={() => setGroup(null)}>
           All
         </Chip>
-        {GROUPS.map((g) => (
+        {GROUPS.filter((g) => g.id !== "other" || floors).map((g) => (
           <Chip key={g.id} count={counts.get(g.id) ?? 0} pressed={group === g.id} onClick={() => setGroup(group === g.id ? null : g.id)}>
             {g.chip}
           </Chip>
@@ -231,6 +245,7 @@ export function WindowedList(props: { items: ListItem[]; onPick(row: OutlineRow)
             <button
               type="button"
               onClick={() => props.onPick(item.row)}
+              {...(item.row.floor !== undefined ? { [OTHER_FLOOR_ROW_ATTR]: item.row.id } : {})}
               title={`Show ${item.row.name} on the map`}
               style={{ ...LINE, gap: theme.space(3), background: "transparent", border: "none", color: theme.color.text, paddingLeft: theme.space(8) }}
             >
