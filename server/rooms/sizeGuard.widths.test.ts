@@ -7,7 +7,10 @@ import { opSchema, type Op } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { actor, character, DM, entry, env, P1, randomOp, randomState, rng, room, scene, template, token, trap } from "#shared/testutil.ts";
+import { FAR_TREATMENT } from "#shared/farLine.ts";
+import type { OpType } from "#shared/protocol.ts";
+import { actor, character, DM, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token, trap } from "#shared/testutil.ts";
+import { PLAYER_OPS, playerTable } from "./playerOpsTesting.ts";
 import { farRoomBytes, farWidths, measuredStateBytes, ownHeldBytes, PIT_TOKENS_RESERVE, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
@@ -86,26 +89,35 @@ function patchToken(s: RoomState, id: string, patch: Partial<Token>): void {
   s.tokens = { ...s.tokens, [id]: { ...s.tokens[id]!, ...patch } };
 }
 
-/** A random room with a hidden creature perched on a creature P1 owns, its own hidden area beside it, revs at 9. */
-function withHidden(state: RoomState, holder: Token): RoomState {
-  const s = structuredClone(state);
-  s.casts = {};
+/** A hidden creature perched on `holder`, a creature P1 owns, with its own hidden area, revs at 9. */
+function hide(s: RoomState, holder: Token): void {
   s.tokens.hz1 = token("hz1", { kind: "pc", size: "tiny", visibility: "dm", sceneId: holder.sceneId, x: holder.x, y: holder.y, elevation: holder.elevation, rev: 9, attached: { to: holder.id, kind: "perch" } });
   s.templates.hza = template("hza", { sceneId: holder.sceneId, attachedTo: "hz1", visibility: "dm", rev: 99 });
   if (s.encounter) s.encounter = { ...s.encounter, rev: 9 };
+}
+
+/** A random room with no asks and a hidden creature on `holder`. */
+function withHidden(state: RoomState, holder: Token): RoomState {
+  const s = structuredClone(state);
+  s.casts = {};
+  hide(s, holder);
   return s;
 }
 
-/** Field names a dimension's twin finds apart, with the first case of each. */
-type Found = Map<Dim, string>;
+/** How many times the twins took each op kind alike before it was compared. */
+const COMPARED = new Map<OpType, number>();
+
+/** The twins that found P1's stepped parts apart, with the first case of each. */
+type Found = Map<string, string>;
 
 /**
  * The same P1 op, its undo, its redo and a reload on `base` and on its twin
- * with `dim`: the first stage where P1's stepped parts move apart, or null.
+ * made by `twinOf`: the first stage where P1's stepped parts move apart, or
+ * null. A comparison counts for `kind`, the kind the player sent.
  */
-function apart(base: RoomState, dim: Dim, op: Op): string | null {
+function apart(base: RoomState, twinOf: (s: RoomState) => void, op: Op, kind: OpType = op.t): string | null {
   const twin = structuredClone(base);
-  HIDDEN_DIMS[dim](twin);
+  twinOf(twin);
   if (copyOf(twin) !== copyOf(base)) return null;
   const [a, b] = [apply(base, op), apply(twin, op)];
   if ((a === null) !== (b === null)) return `${op.t}: answered apart`;
@@ -116,6 +128,7 @@ function apart(base: RoomState, dim: Dim, op: Op): string | null {
   };
   // A change of what P1's copy holds (sight) moves what the exact part holds, as D-261119-003 accepts.
   if (copyOf(a.state) !== copyOf(b.state)) return null;
+  COMPARED.set(kind, (COMPARED.get(kind) ?? 0) + 1);
   const did = stage("op", [base, a.state], [twin, b.state]);
   if (did) return did;
   const undone = (step: { state: RoomState; inverse: unknown }) => (Array.isArray(step.inverse) && step.inverse.length > 0 ? apply(step.state, undoOf(step.inverse)) : null);
@@ -145,11 +158,11 @@ function findApart(seeds: number): Found {
       const h = state.tokens[holder.id];
       if (!h) break;
       const step = k % 4 === 0 ? 7 : -7;
-      const op: Op = k % 2 === 0 ? { t: "token.move", tokenId: h.id, x: h.x + step, y: h.y + step } : randomOp(r, state, P1);
+      const op: Op = k % 2 === 0 ? { t: "token.move", tokenId: h.id, x: h.x + step, y: h.y + step } : k === 5 ? randomDiceRoll(r, state, P1) : randomOp(r, state, P1);
       if (op.t === "encounter.next") continue;
       for (const dim of Object.keys(HIDDEN_DIMS) as Dim[]) {
         if (found.has(dim)) continue;
-        const why = apart(state, dim, op);
+        const why = apart(state, HIDDEN_DIMS[dim], op);
         if (why) found.set(dim, `seed ${seed}: ${why}`);
       }
       const next = apply(state, op);
@@ -159,21 +172,79 @@ function findApart(seeds: number): Found {
   return found;
 }
 
-/** The twin dimension that waits on a decision (D-261119-011). */
-const OPEN: ReadonlySet<Dim> = new Set(["an earlier path"]);
+/**
+ * Each op of PLAYER_OPS on its table, against the table with a hidden
+ * creature on Hero, and with that creature against each dimension's twin.
+ */
+function findApartFixed(): Found {
+  const found: Found = new Map();
+  const twins = { "a hidden creature on Hero": (s: RoomState) => hide(s, s.tokens.hero!), ...HIDDEN_DIMS };
+  for (const [kind, fixed] of Object.entries(PLAYER_OPS)) {
+    const plain = playerTable();
+    fixed.room?.(plain);
+    const hidden = structuredClone(plain);
+    hide(hidden, hidden.tokens.hero!);
+    for (const [name, twinOf] of Object.entries(twins)) {
+      if (found.has(name)) continue;
+      const base = name === "a hidden creature on Hero" ? plain : hidden;
+      const why = apart(base, twinOf, fixed.op(base), kind as OpType);
+      if (why) found.set(name, `${kind}: ${why}`);
+    }
+  }
+  return found;
+}
+
+/** A twin dimension of a residual the private log tracks (D-261119-016, D-261119-019). */
+const RESIDUAL: ReadonlySet<string> = new Set(["an earlier path"]);
 
 describe("D-261119-011: what a player's op writes on what they do not receive moves their stepped part alike, whatever it holds", () => {
   const found = findApart(120);
+  const foundFixed = findApartFixed();
 
   test("random rooms: every P1 op, its undo, its redo and a reload move P1's stepped parts alike in twins apart only in records P1 does not receive", () => {
-    const closed = [...found].filter(([dim]) => !OPEN.has(dim));
-    assert.deepEqual(closed, []);
+    assert.deepEqual([...found].filter(([dim]) => !RESIDUAL.has(dim)), []);
   });
 
-  test("a carried creature's earlier walk: P1's stepped parts move alike", { todo: "waits on a decision" }, () => {
-    assert.equal(found.get("an earlier path"), undefined);
+  test("one op of each kind a player may send, on a table of theirs: it, its undo, its redo and a reload move P1's stepped parts alike in the same twins", () => {
+    assert.deepEqual([...foundFixed].filter(([dim]) => !RESIDUAL.has(dim)), []);
+  });
+
+  test("every op kind a player may send that can write the room is compared on random twins often enough, or on fixed twins, or is the DM's alone", () => {
+    const unchecked: string[] = [];
+    for (const kind of Object.keys(FAR_TREATMENT) as OpType[]) {
+      if (FAR_TREATMENT[kind] === "deletion" || FAR_TREATMENT[kind] === "server" || kind === "encounter.next") continue;
+      const same = SAME_AS[kind];
+      const compared = (k: OpType) => (COMPARED.get(k) ?? 0) >= MIN_COMPARED || FIXED_TWINS.has(k);
+      if (compared(kind) || (same !== undefined && compared(same))) continue;
+      let decision: ReturnType<typeof canApply> | null = null;
+      try {
+        decision = canApply({ t: kind } as Op, P1, room(), DEPS);
+      } catch {
+        decision = null;
+      }
+      if (decision?.ok === false && decision.code === "forbidden") continue;
+      unchecked.push(`${kind} (${COMPARED.get(kind) ?? 0})`);
+    }
+    assert.deepEqual(unchecked, []);
   });
 });
+
+/** How many comparisons stand for an op kind. */
+const MIN_COMPARED = 5;
+
+/** The kinds the fixed twins below compare. */
+const FIXED_TWINS: ReadonlySet<OpType> = new Set(["token.climb", "token.move", "token.moveMany", "token.attach", "token.detach", "template.update", "encounter.add", "encounter.setValue", "door.set"]);
+
+/** Kinds another stands for, as in sizeGuard.exact.test.ts: they write what it writes. */
+const SAME_AS: Partial<Record<OpType, OpType>> = {
+  "roll.dice": "roll.answer",
+  "dice.roll": "sys.dice",
+  "actor.rechargeRoll": "actor.use",
+  "actor.prompt": "actor.use",
+  "roll.change": "roll.answer",
+  undo: "sys.restore",
+  redo: "sys.restore",
+};
 
 // ---------------------------------------------------------------------------
 // Fixed twins at a step's edge
@@ -315,6 +386,70 @@ describe("D-261119-011: fixed twins at a step's edge read alike through a player
     const top: Op = { t: "encounter.setValue", entryId: "rthorn", value: 100 };
     assertTwinsAlike([order(false), order(true)], top);
     assert.equal(run(order(true), top, P1).encounter!.entries.find((e) => e.id === "rghost")!.tieOrder, 10, "the hidden row's place crossed a digit");
+  });
+
+  /** Thorn with a tiny companion of P1's beside it, perched on it when `perched`, and a hidden owl on Thorn in one twin. */
+  const withPet = (perched: boolean, owl: boolean) => {
+    const s = owl ? hiddenRider(tower()) : tower();
+    s.tokens.pet = token("pet", { name: "Hoot", size: "tiny", ownerIds: ["p1"], sceneId: GROUND, x: 9, y: perched ? 9 : 10, rev: 9, ...(perched ? { attached: { to: "thorn", kind: "perch" as const } } : {}) });
+    return s;
+  };
+
+  test("a group move of Thorn and its companion, with a hidden rider on Thorn or none", () => {
+    const moves: Op = { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 10, y: 9 }, { tokenId: "pet", x: 10, y: 10 }] };
+    assertTwinsAlike([withPet(false, false), withPet(false, true)], moves);
+  });
+
+  test("a companion perched on Thorn and taken off it again, with a hidden rider on Thorn or none", () => {
+    const perch: Op = { t: "token.attach", tokenId: "pet", to: "thorn", kind: "perch", x: 9, y: 9, elevation: 0 };
+    assertTwinsAlike([withPet(false, false), withPet(false, true)], perch);
+    const off: Op = { t: "token.detach", tokenId: "pet", x: 9, y: 10 };
+    assertTwinsAlike([withPet(true, false), withPet(true, true)], off);
+  });
+
+  test("P1's area moved over a hidden creature or none", () => {
+    const area = (hidden: boolean) => {
+      const s = tower();
+      s.templates.a1 = template("a1", { sceneId: GROUND, ownerId: "p1", origin: { x: 2.5, y: 2.5, z: 0 }, size: 10, rev: 9 });
+      if (hidden) s.tokens.ghost = token("ghost", { visibility: "dm", sceneId: GROUND, x: 12, y: 12, rev: 9 });
+      return s;
+    };
+    assertTwinsAlike([area(false), area(true)], { t: "template.update", templateId: "a1", patch: { origin: { x: 12.5, y: 12.5, z: 0 } } });
+  });
+
+  test("P1's area riding Thorn, resized and carried along, with a hidden rider and its area on Thorn or none", () => {
+    const riding = (owl: boolean) => {
+      const s = owl ? hiddenRider(tower()) : tower();
+      s.templates.a1 = template("a1", { sceneId: GROUND, ownerId: "p1", attachedTo: "thorn", origin: { x: 9.5, y: 9.5, z: 0 }, size: 10, rev: 9 });
+      return s;
+    };
+    assertTwinsAlike([riding(false), riding(true)], { t: "template.update", templateId: "a1", patch: { size: 30 } });
+    assertTwinsAlike([riding(false), riding(true)], { t: "token.move", tokenId: "thorn", x: 12, y: 9 });
+    assert.equal(run(riding(true), { t: "token.move", tokenId: "thorn", x: 12, y: 9 }, P1).tokens.owl!.x, 12, "the rider went along");
+  });
+
+  test("P1's companion added to the top of the order, with a hidden row in tenth place or none", () => {
+    const order = (hidden: boolean) => {
+      const s = withPet(false, false);
+      const rows = Array.from({ length: 9 }, (_, i) => entry(`r${i}`, { tokenId: `m${i}`, value: 20 - i, tieOrder: i }));
+      for (let i = 0; i < 9; i++) s.tokens[`m${i}`] = token(`m${i}`, { sceneId: GROUND, x: 1, y: i });
+      if (hidden) {
+        s.tokens.ghost = token("ghost", { visibility: "dm", sceneId: GROUND, x: 15, y: 15 });
+        rows.push(entry("rghost", { tokenId: "ghost", value: 11, tieOrder: 9, hidden: true }));
+      }
+      return { ...s, encounter: { rev: 9, round: 1, activeEntryId: null, entries: rows } } as RoomState;
+    };
+    assertTwinsAlike([order(false), order(true)], { t: "encounter.add", entries: [{ id: "rpet", tokenId: "pet", value: 100 }] } as Op);
+  });
+
+  test("a door Thorn opens, with a hidden creature behind it or none", () => {
+    const door = (hidden: boolean) => {
+      const s = tower();
+      s.buildChunks = { [`${GROUND}:0,0`]: { sceneId: GROUND, cx: 0, cy: 0, rev: 9, cells: {}, edges: { "9,9,w": { kind: "door", state: "closed", secret: false, discovered: false } } } };
+      if (hidden) s.tokens.ghost = token("ghost", { visibility: "dm", sceneId: GROUND, x: 8, y: 9, rev: 9 });
+      return s;
+    };
+    assertTwinsAlike([door(false), door(true)], { t: "door.set", sceneId: GROUND, door: { edge: "9,9,w" }, state: "open", by: "thorn" } as Op);
   });
 
   test("a walk onto an armed pit, with a hidden creature on its lid or none", () => {

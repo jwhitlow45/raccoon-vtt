@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { resolveDiceOp, type DiceOp } from "#shared/dice/resolve.ts";
+import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { readEntity, type EntityKey } from "#shared/keys.ts";
 import type { RoomState } from "#shared/model.ts";
@@ -8,7 +8,8 @@ import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
-import { actor, character, drawing, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, template, token } from "#shared/testutil.ts";
+import { entry, env, P1, randomDiceRoll, randomOp, randomState, rng, token } from "#shared/testutil.ts";
+import { PLAYER_OPS as FIXED, playerTable as table, rolled } from "./playerOpsTesting.ts";
 import { exactCopies, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes } from "./sizeGuard.ts";
 
 /*
@@ -135,75 +136,6 @@ describe("LP44-PRIV-1: a player's own op never moves their stepped part", () => 
     assert.ok(checked > 5 * sight, `${checked} ops checked, ${sight} changed what P1's copy holds`);
     assert.ok(accepted.length < checked / 50, `${accepted.length} ops carried hidden bytes into other scenes`);
   });
-
-  /** A room where P1 plays Hero (c1) with a companion, a creature the DM lent them, an area, a line, a row and a door, every rev at 9. */
-  function table(): RoomState {
-    const state = room();
-    state.characters.c1 = character("c1", { ownerIds: ["p1"], rev: 9, actor: actor({ notes: "", dmNotes: "" }) });
-    state.tokens.hero = token("hero", { kind: "pc", rev: 9, actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
-    state.tokens.pet = token("pet", { rev: 9, companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 3, y: 2, actor: { inline: actor({ dmNotes: "" }) } });
-    state.tokens.lent = token("lent", { rev: 9, ownerIds: ["p1"], x: 4, y: 2, actor: { inline: actor({ dmNotes: "" }) } });
-    state.templates.a1 = template("a1", { rev: 9 });
-    state.drawings.d1 = drawing("d1", { rev: 9 });
-    state.members.p1 = { ...state.members.p1!, rev: 9 };
-    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("rhero", { tokenId: "hero" })] };
-    state.buildChunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 9, cells: {}, edges: { "3,2,w": { kind: "door", state: "closed", secret: false, discovered: false } } } };
-    return state;
-  }
-
-  /** A server's dice for a player's ask, each the die's highest face. */
-  const rolled = (state: RoomState, op: DiceOp): Op => {
-    const resolved = resolveDiceOp(op, state, { draw: (sides) => sides, batch: "AbCdEfGhIjKlMnOp" });
-    assert.ok(resolved.ok, resolved.ok ? "" : resolved.message);
-    return resolved.op;
-  };
-
-  const FIXED: Partial<Record<OpType, { op: (state: RoomState) => Op; room?: (state: RoomState) => void }>> = {
-    "member.update": { op: () => ({ t: "member.update", memberId: "p1", name: "Pat the Bold" }) as Op },
-    "character.create": { op: () => ({ t: "character.create", character: { id: "c9", name: "Cade", size: "medium", ownerIds: ["p1"], actor: actor({ notes: "A second hero", dmNotes: "" }) } }) as Op },
-    "character.update": { op: () => ({ t: "character.update", characterId: "c1", patch: { actor: { notes: "n".repeat(400), sheetUrl: "https://example.com/sheet" } } }) as Op },
-    "template.create": { op: () => ({ t: "template.create", template: { id: "a2", sceneId: "s1", shape: "sphere", size: 10, origin: { x: 2.5, y: 2.5, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: "p1", visibility: "all", label: "Bless" } }) as Op },
-    "template.update": { op: () => ({ t: "template.update", templateId: "a1", patch: { label: "Spirit Guardians", attachedTo: "hero" } }) as Op },
-    "encounter.add": { op: () => ({ t: "encounter.add", entries: [{ id: "rpet", tokenId: "pet" }] }) as Op },
-    "encounter.setValue": { op: () => ({ t: "encounter.setValue", entryId: "rhero", value: 100 }) as Op },
-    "actor.effect.update": {
-      room: (s) => (s.characters.c1 = { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, effects: [{ id: "e1", key: "custom", label: "short" }] } }),
-      op: () => ({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "e1", patch: { label: "a much longer label for the effect" } }) as Op,
-    },
-    "actor.effect.remove": {
-      room: (s) => (s.characters.c1 = { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, effects: [{ id: "e1", key: "custom", label: "short" }] } }),
-      op: () => ({ t: "actor.effect.remove", target: { characterId: "c1" }, effectId: "e1" }) as Op,
-    },
-    "actor.deathSave": {
-      room: (s) => (s.characters.c1 = { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, hp: { cur: 0, max: 20, temp: 0 }, life: "dying" } }),
-      op: () => ({ t: "actor.deathSave", target: { characterId: "c1" }, ok: 1, fail: 2 }) as Op,
-    },
-    "actor.deathRoll": {
-      room: (s) => (s.characters.c1 = { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, hp: { cur: 0, max: 20, temp: 0 }, life: "dying" } }),
-      op: (s) => rolled(s, { t: "actor.deathRoll", tag: "t1", target: { characterId: "c1" } } as DiceOp),
-    },
-    "dice.roll": { op: (s) => rolled(s, { t: "dice.roll", tag: "t1", to: "all", rolls: [{ formula: "1d20", label: "Bite", creature: { tokenId: "pet" } }] } as DiceOp) },
-    "token.moveMany": { op: () => ({ t: "token.moveMany", moves: [{ tokenId: "pet", x: 13, y: 12 }, { tokenId: "lent", x: 14, y: 12 }] }) as Op },
-    "token.update": { op: () => ({ t: "token.update", tokenId: "lent", patch: { notes: "A borrowed wolf" } }) as Op },
-    "door.set": { op: () => ({ t: "door.set", sceneId: "s1", door: { edge: "3,2,w" }, state: "open", by: "hero" }) as Op },
-    // An HP change that drops their companion to 0, ending its concentrations, some hidden from players, into its line.
-    "actor.hp": {
-      room: (s) => {
-        const conc = (id: string, hiddenFromPlayers?: true) => ({ id, key: "concentrating" as const, spell: `${id} `.repeat(60), ...(hiddenFromPlayers ? { hiddenFromPlayers } : {}) });
-        const pet = s.tokens.pet!;
-        if ("inline" in pet.actor) s.tokens.pet = { ...pet, actor: { inline: { ...pet.actor.inline, effects: [conc("c1"), conc("c2"), conc("c3"), conc("h1", true), conc("h2", true)] } } };
-      },
-      op: () => ({ t: "actor.hp", target: { tokenId: "pet" }, change: { kind: "damage", amount: 50 } }) as Op,
-    },
-    // A Long Rest stamps their character by the room's clock.
-    "actor.rest": {
-      room: (s) => (s.clock = { id: "k1", rev: 0, t: 86_400, shown: true, calendar: { kind: "days" } }),
-      op: () => ({ t: "actor.rest", target: { characterId: "c1" }, kind: "long" }) as Op,
-    },
-    "token.create": { op: () => ({ t: "token.create", token: { id: "pet2", sceneId: "s1", kind: "npc", layer: "token", name: "Hoot", size: "small", x: 1, y: 2, companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], actor: { inline: actor({ hp: { cur: 5, max: 5, temp: 0 }, dmNotes: "" }) } } }) as Op },
-    // A player's Undo of their line's delete, as the server builds it from their own history (design 7.7).
-    "sys.restore": { op: () => ({ t: "sys.restore", from: "undo", deps: true, entries: [{ key: "drawing:d2", value: drawing("d2", { points: [1, 1, 4, 4, 6, 2] }), expectRev: null }] }) as Op },
-  };
 
   for (const [kind, fixed] of Object.entries(FIXED)) {
     test(`${kind}: moves P1's stepped part by nothing it adds`, () => {
