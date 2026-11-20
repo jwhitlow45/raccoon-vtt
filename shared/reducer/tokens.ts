@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, playerLimitsOps, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes, walksThatReturn } from "../migrate.ts";
+import { attaches, floorLinksOps, healRevivesDead, keepsLairTick, meetsNumbers, oneLinkPerActor, opensOps, playerLimitsOps, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes, walksThatReturn } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { gridOfToken, inSightOfNonOwners, seatView, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
@@ -561,9 +561,13 @@ export function withPath(
   carried?: Pick<MovedToken, "route" | "trace" | "carried">,
   cost?: number,
   climb?: { moved: number; cost: number },
+  landed?: true,
 ): Token {
   const floors = after.sceneId !== before.sceneId;
   if (floors && !(floorLinksOps(tx.env.opVersion) && sameScene(tx.state, before.sceneId, after.sceneId))) return withoutPath(after);
+  // From op version 64 a creature a move carries, or a fall or trapdoor lands (`landed`), keeps the path it had outside its
+  // turn, which no viewer reads, so a player's move writes nothing of a hidden passenger's but its pose (D-261119-016).
+  const keepsOld = opensOps(tx.env.opVersion) && (carried !== undefined || landed === true);
   const from = footprintSize(before);
   const to = footprintSize(after);
   const sinceV6 = resizeStop(tx.env.opVersion);
@@ -582,14 +586,14 @@ export function withPath(
     const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
     if (active?.tokenId === after.id) return after;
     const hidden = hiddenTurnOf(encounter, before);
-    if (!hidden) return withoutPath(after);
+    if (!hidden) return keepsOld ? after : withoutPath(after);
     turn = hidden;
   }
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
   // A mount's path this turn outlives a move that shares no turn, which records nothing, so a remount the same turn goes on with it (7.2).
   // On another floor its stops would lie on the floor it left, so a change of floor drops it, as a change of scene does.
-  if (turn.tokenId !== after.id && !mount) return !floors && attaches(tx.env.opVersion) && before.path?.turn === turn.seq ? after : withoutPath(after);
+  if (turn.tokenId !== after.id && !mount) return keepsOld || (!floors && attaches(tx.env.opVersion) && before.path?.turn === turn.seq) ? after : withoutPath(after);
   // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).
   if (!mount && attaches(tx.env.opVersion) && marksTime(encounter, turn.entryId)) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
