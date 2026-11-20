@@ -163,6 +163,80 @@ describe("raccoon-vtt: a DM device whose scene was deleted with the players on i
     await shots.take(other, "bugss-scene-back-open");
   });
 
+  /*
+   * A phone's half open sheet covers the middle of the map, where the words stand centered in the whole stage, so with a
+   * panel open (BUGSS-PHONE-SHEET) they must stand in what the bars and the sheet leave clear.
+   */
+  test("fu7-1. on a phone with a panel open over the map, the words ask for a scene where the sheet does not hide them, at 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const hidden: string[] = [];
+    try {
+      // One load of the page for each interface size and a resize for each window, since every load is one more join the server counts.
+      const hall = async () => {
+        const id = uuidv7();
+        await ops.send({ t: "scene.create", scene: { id, name: "Hall", bounds: { w: 20, h: 14 }, fogEnabled: false } });
+        await ops.send({ t: "room.setPlayerScene", sceneId: id });
+        return id;
+      };
+      for (const scale of [1, 1.3]) {
+        // A page that loads lands on the players' scene. Once that is deleted, the device on nothing opens the next one the players get.
+        let scene = await hall();
+        await dm.setViewportSize({ width: 390, height: 844 });
+        await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await dm.goto(`${server.origin}/r/${run.roomId}`);
+        await dm.getByRole("button", { name: /^Panels/ }).waitFor();
+        for (const [n, size] of [{ width: 390, height: 844 }, { width: 320, height: 568 }].entries()) {
+          const at = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+          await dm.setViewportSize(size);
+          if (n > 0) scene = await hall();
+          // Generous: the page can be reconnecting for a while after the ops before it.
+          await waitFor(`the phone on the Hall at ${at}`, () => (dmSocket.you?.sceneId === scene ? true : null), 60_000);
+          await dm.locator(".konvajs-content").first().waitFor();
+          if ((await dm.getByText("No fight is running.").count()) === 0) {
+            await dm.getByRole("button", { name: /^Panels/ }).click();
+            await dm.getByRole("button", { name: "Initiative", exact: true }).click();
+          }
+          await dm.getByText("No fight is running.").waitFor();
+          await ops.send({ t: "scene.delete", sceneId: scene, leavePlayers: true });
+          const words = dm.getByText(PICK, { exact: true });
+          await words.waitFor();
+          // Each end of the words' own text, which is read from the text node: the element is the whole stage.
+          const clear = await waitFor(
+            `the words clear of the sheet at ${at}`,
+            async () => {
+              const hits = await words.evaluate((el) => {
+                const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): { left: number; right: number; top: number; bottom: number } }; elementFromPoint(x: number, y: number): unknown } }).document;
+                const range = doc.createRange();
+                range.selectNodeContents(el);
+                const r = range.getBoundingClientRect();
+                const y = (r.top + r.bottom) / 2;
+                return [r.left + 2, (r.left + r.right) / 2, r.right - 2].map((x) => doc.elementFromPoint(x, y) === el);
+              });
+              return hits.every(Boolean) ? true : null;
+            },
+            5_000,
+          ).catch(() => false);
+          if (!clear) {
+            const r = await words.evaluate((el) => {
+              const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): { top: number; bottom: number; left: number; right: number } } } }).document;
+              const range = doc.createRange();
+              range.selectNodeContents(el);
+              const b = range.getBoundingClientRect();
+              return `${b.top.toFixed(0)} to ${b.bottom.toFixed(0)}, ${b.left.toFixed(0)} to ${b.right.toFixed(0)}`;
+            });
+            hidden.push(`${at}: the words at ${r}`);
+          }
+          await shots.take(dm, `fu7-scene-gone-sheet-${size.width}-${Math.round(scale * 100)}`);
+        }
+      }
+    } finally {
+      // Best effort, so a failure above is the one the run reports.
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.keep }).catch(() => undefined);
+      await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1")).catch(() => undefined);
+      await dm.setViewportSize(DESKTOP);
+    }
+    assert.deepEqual(hidden, [], "the words stood under the open sheet");
+  });
+
   test("bugss-4. no console errors", () => {
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(otherConsole.errors, []);

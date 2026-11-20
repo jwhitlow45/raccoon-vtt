@@ -946,6 +946,9 @@ function RoomPage() {
     bar: barLeft !== null && barTop !== null ? { left: barLeft, top: barTop } : null,
   });
   const sheetFloor = toastRoom.floor;
+  // A bottom sheet stands on the toolbar or the keyboard and covers its own height above them, a sideways one its width, a full one all of it.
+  const sheetClear = !sheetOpen || wide || full ? { bottom: 0, right: 0 } : sheetModeNow === "side" ? { bottom: 0, right: sideWidth } : { bottom: sheetHeight + Math.max(TOOLBAR, sheetKeys?.inset ?? 0), right: 0 };
+  const gateClear = { top: insets.top * zoom, bottom: Math.max(insets.bottom, sheetClear.bottom) * zoom, right: sheetClear.right * zoom };
   const optionsTop = chrome ? Math.min(height - chrome.bottom, toastFloor ?? Infinity) : 0;
   // The alerts column's width as it works it out (features/encounter/InitiativeStrip.tsx): it steps left of a phone's sideways sheet, and beside the side panel no right safe area is the map's.
   const columnSheet = !wide && width > height && sheetOpen ? sideWidth : 0;
@@ -1161,7 +1164,7 @@ function RoomPage() {
       <BarWidthProbe zoom={zoom} />
       {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
       <div style={{ position: "relative", flex: 1, minWidth: 0, background: MAP_GROUND, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
-        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} paneInsets={paneInsets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
+        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} paneInsets={paneInsets} gateClear={gateClear} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
         {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. Unlike other places focus lands, it keeps its ring under keys (data-rvtt-ring, globals.css), and after a pointer it draws neither ring nor halo, as the rest do (D-261102-538). */}
         <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" {...MAP_FOCUS_ATTRS} style={MAP_FOCUS_STYLE} />
         <TopBar
@@ -1504,6 +1507,8 @@ function MapArea(props: {
   actionBar: boolean;
   insets: Insets;
   paneInsets: Insets;
+  /** What the bars and a phone's open sheet cover of the map from the top, the foot and the right, in screen px (the map is not zoomed with the chrome), for the words that stand in its middle. */
+  gateClear: { top: number; bottom: number; right: number };
   onSelect(id: string | null, add?: boolean): void;
   onOpenDetails(id: string): void;
   tokenPanelShown: boolean;
@@ -1532,7 +1537,10 @@ function MapArea(props: {
   }
   // Fail closed: until the gate opens, nothing from any scene is drawn.
   const message = gate.kind === "blackout" ? "The DM has paused the game." : gate.kind === "noScene" ? noSceneText(role, anyScene) : "Loading the scene…";
-  return <div style={SCENE_GATE_STYLE}>{gate.kind === "wait" ? <Loading text={message} /> : message}</div>;
+  // Centered in what the bars and a phone's open sheet leave clear: under a half open sheet the middle of the whole stage hides the words (BUGSS-PHONE-SHEET).
+  const { top, bottom, right } = props.gateClear;
+  const pad = theme.space(6);
+  return <div style={{ ...SCENE_GATE_STYLE, padding: `${top}px ${right + pad}px ${bottom}px ${pad}px` }}>{gate.kind === "wait" ? <Loading text={message} /> : message}</div>;
 }
 
 /**

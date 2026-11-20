@@ -111,6 +111,6 @@ describe("the scene gate", () => {
     assert.equal(SCENE_GATE_STYLE.background, theme.color.stage);
     assert.equal(SCENE_GATE_STYLE.color, theme.color.textMuted);
     assert.ok(contrast(PALETTES.dark.textMuted, theme.color.stage) >= 4.5, "the dark muted text reads on black");
-    assert.match(room, /return <div style=\{SCENE_GATE_STYLE\}>/);
+    assert.match(room, /return <div style=\{\{ \.\.\.SCENE_GATE_STYLE, padding:/);
   });
 });
