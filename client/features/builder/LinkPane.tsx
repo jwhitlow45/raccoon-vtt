@@ -25,6 +25,7 @@ import { trapScreenBox } from "../traps/paneBox.ts";
 import { boxCenter, zoneBox } from "../traps/rules.ts";
 import { paneEscape, panePlacement, sheetPanAnchor, SHEET_BELOW_PX } from "./labelEdit.ts";
 import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
+import { HANDLE_PX, judgeChange, lineUpWords, otherSquaresLine, sameRect } from "./linkTap.ts";
 import { linkPaneSlot } from "./store.ts";
 
 const KINDS = PANE_KINDS.map((value) => ({ value, label: KIND_NAMES[value] }));
@@ -35,7 +36,9 @@ const KINDS = PANE_KINDS.map((value) => ({ value, label: KIND_NAMES[value] }));
  * (phase 4, 8.1), where players stand with the floor it leads to, Go to
  * that floor, and Remove. An opening's pane has no Kind, Locked or Hidden
  * (phase 4, 3): the server turns no opening into stairs or the reverse, and
- * an opening is never locked or hidden. It hangs beside the squares on a
+ * an opening is never locked or hidden. Where the far end of stairs or a
+ * ladder lies on other squares (phase 4, 8.2), it says so and offers to line
+ * this end up with it. It hangs beside the squares on a
  * wide screen and is a bottom sheet on a phone, as the label pane is
  * (labelEdit.ts panePlacement).
  *
@@ -83,7 +86,9 @@ export default function LinkPane(props: { link: FloorLink; camera: Camera; viewp
 
   const grid = sceneGrid({ gridShape: scene?.gridShape });
   const trapLike = { zone: { cells: [link.rect] }, sceneId: link.sceneId };
-  const box = trapScreenBox(grid, trapLike, chunks ?? {}, camera);
+  // The pane keeps clear of the corner handle that hangs off the end's bottom right (linkTap.ts handleOf), so it never covers the handle.
+  const squares = trapScreenBox(grid, trapLike, chunks ?? {}, camera);
+  const box = { ...squares, x1: squares.x1 + HANDLE_PX, y1: squares.y1 + HANDLE_PX };
   const sheet = props.viewport.width < SHEET_BELOW_PX;
   const dock = usePaneDock(sheet, paneDockFits({ viewport: props.viewport, insets: props.insets }), paneRef);
   const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
@@ -132,6 +137,9 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
   const dir = useRoomView((s) => (s.view ? linkDir(s.view, link) : null)) ?? "up";
   const at = useRoomView((s) => (s.view && far ? playersAt(s.view, far) : null));
   const farName = far?.floor?.name ?? far?.name ?? "the other floor";
+  const view = useRoomView((s) => s.view);
+  const pair = view?.floorLinks?.[link.pair];
+  const apart = pair !== undefined && !sameRect(pair.rect, link.rect);
 
   // The pane opens on Kind, and an opening's, which has none, on Go to. A phone would throw its keyboard up over the map for a text field, but a choice takes none, so only a mouse's focus is moved, to keep a touch from a ring.
   useEffect(() => {
@@ -146,6 +154,11 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
     // The other end, on the floor now shown, is the one whose pane stays open.
     scope.get(linkPaneSlot).setState({ linkId: link.pair });
   };
+  const lineUp = () => {
+    if (pair) actions.dispatch({ t: "floorLink.update", linkId: link.id, patch: { rect: { ...pair.rect } } });
+  };
+  // The rules may refuse the far end's squares for this floor, as a drag onto them is refused: the reason shows and the button waits.
+  const lineUpWhy = apart && view && pair ? judgeChange(view, link, { rect: pair.rect }) : null;
   const remove = () => {
     actions.dispatch({ t: "floorLink.delete", linkId: link.id });
     props.onClose();
@@ -165,6 +178,15 @@ function LinkEditor(props: { link: FloorLink; sheet: boolean; onClose(): void; c
           <Switch label={HIDDEN_SWITCH} help={hiddenHelp(link.kind)} checked={link.hidden === true} onChange={(hidden) => update({ hidden })} />
         </>
       )}
+      {apart ? (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+          <Help>{otherSquaresLine(farName)}</Help>
+          <Button size="sm" variant="secondary" onClick={lineUp} disabled={lineUpWhy !== null}>
+            {lineUpWords(farName)}
+          </Button>
+          {lineUpWhy !== null ? <Help>{lineUpWhy}</Help> : null}
+        </div>
+      ) : null}
       {at === "not" ? <Help>{notReachedLine(farName, dir, link.kind)}</Help> : null}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: theme.space(2), marginTop: theme.space(1) }}>
         <ConfirmButton label={removeWords(link.kind)} confirm={REMOVE_BOTH} onConfirm={remove} wrap />
