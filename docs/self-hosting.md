@@ -566,12 +566,15 @@ Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
 within a few seconds and lose nothing. The stop itself takes a few seconds:
-a phone that has not answered the close within 2 seconds is cut off, and so
-is any request still on its way then, an upload included. Its log lines run
-from `shutting down` to `shut down`, each step with the milliseconds since
-the stop began. The restart clears every DM's and player's undo history,
-which is never stored, so nothing that was undoable before an update can be
-undone after it.
+a phone that has not answered the close within 2 seconds is cut off, and
+once every WebSocket has closed, often at once, so is any request still on
+its way, an upload included. Its log lines run from `shutting down` to
+`shut down`, each step with the milliseconds since the stop began. A stop
+that could not save a room, or lost anything else on the way, still runs
+every step, then logs `shutdown failed` with each step's loss and the rooms
+it did not save, and exits with code 1. The restart clears every DM's and
+player's undo history, which is never stored, so nothing that was undoable
+before an update can be undone after it.
 
 After any update, reload every page left open across it, table displays
 included. No version check makes an open page reload, so until it does, it
@@ -616,11 +619,12 @@ server cleanly first, with
 `docker compose -f docker-compose.server.yml stop raccoon` or an ordinary
 update, because that saves a snapshot of every room. Then rebuild the commit
 you ran before, and every room loads. A clean stop's last log line is
-`shut down`. A server that crashed, was killed, or ran out of its 25 seconds
-to stop (its last line `shutdown did not finish in time: forced exit`, exit
-code 1) can leave changes an older build refuses, and it then refuses to
-open those rooms. Restore the backup taken just before the update instead,
-and every room loses what changed after it.
+`shut down`. A server that crashed or was killed can leave changes an older
+build refuses, and it then refuses to open those rooms. So can a stop whose
+last line is `shutdown failed` or, after 25 seconds,
+`shutdown did not finish in time: forced exit`, both with exit code 1.
+Restore the backup taken just before the update instead, and every room
+loses what changed after it.
 
 **The published image.** The release you ran before takes the place of the
 commit. Set `RACCOON_VERSION` in `.env` to it, download its `compose.yml` as
