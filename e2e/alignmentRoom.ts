@@ -9029,7 +9029,7 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           await wire.apply({ t: "character.create", character: { id: characterId, name: "Bree, keeper of the western beacon and the lanterns along the harbor", size: "medium", ownerIds: [], actor: actor() } });
           await wire.apply({ t: "character.update", characterId, patch: { actor: { ac: 19 } } });
           await wire.apply({ t: "actor.hp", target: { characterId }, change: { kind: "damage", amount: 4 } });
-          // The op socket's batches reach the page after their answers, and their badges fit the tab row again, which closes More's menu.
+          // The op socket's batches reach the page after their answers, and their badges fit the tab row again, so the wait is for the row to settle before the history sheet opens.
           const wireSeq = ([...wire.received].reverse().find((m) => m.t === "ev") as { seq?: number } | undefined)?.seq ?? 0;
           await waitFor("the page sent the op socket's batches", () => (pageSeq >= wireSeq ? true : null), SHOWS_MS);
           await tabRowSettled(page);
