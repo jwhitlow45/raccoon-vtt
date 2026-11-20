@@ -459,8 +459,8 @@ export class HexWalkWorld {
    * from beside the walker at the piece's start to beside it at its end.
    * One whose seat stays put along the piece walks it as the walker's own
    * steps have it (`#towedStep`), so only one whose seat moves on it needs
-   * the leg of its own (review DP34-ASTRA-01). A piece that stands up or
-   * squeezes on its last step moves the walker's box by more than its
+   * the leg of its own (review DP34-ASTRA-01). A piece that changes size on
+   * its first or last step moves the walker's box by more than its
    * hexes, so a creature kept beside the box goes off the line its steps
    * walked and needs its leg too (live play 44: a squeezed warhorse out of
    * a corridor one hex wide took its captive through the rock).
