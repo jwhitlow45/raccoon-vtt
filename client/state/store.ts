@@ -1,5 +1,4 @@
 import { CorrectionAnnouncements, ownCorrection, type OwnCorrection } from "../features/log/corrections.ts";
-import { UNDO_NOTICE, undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -466,7 +465,6 @@ export type RoomStoreOptions = {
   clock?: Clock;
   random?: () => number;
   clientId?: string;
-  undoNotice?: Pick<UndoNotice, "claim">;
 };
 
 /**
@@ -765,8 +763,6 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     changed: (value) => {
       store.setState({ history: value });
       if (!value.summary || get().you?.role !== "dm") return;
-      // An announcement, not a lasting condition: it passes like any toast, so it never holds a band of the map or pushes later toasts onto it.
-      if (value.summary.setup && (options.undoNotice ?? undoNotice).claim()) pushToast(UNDO_NOTICE, "info", undefined, { label: "Setup history", run: () => ui.openHistory?.({ scope: "setup" }) });
       for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) {
         const head = value.summary[scope]?.[direction].head;
         const key = `${scope}:${direction}`;

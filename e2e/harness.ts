@@ -11,7 +11,6 @@ import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
-import { UNDO_NOTICE_KEY } from "../client/state/historyNotice.ts";
 import { coverBrowser, coverContext } from "./coverage.ts";
 
 /**
@@ -279,27 +278,6 @@ export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
   );
 }
 
-/**
- * Every browser context an e2e file opens is a device that already saw the
- * one-time "Undo now separates play from setup" toast
- * (client/state/historyNotice.ts), set before the page's own scripts run.
- * Until its rollout window ends, the toast greets every new DM device for
- * 12 seconds over the map's top, where a suite's first taps land, so no
- * suite meets it unasked. Only a test of the notice itself opts out, with
- * freshDeviceContext. The flag means nothing to a player's page.
- */
-async function undoNoticeSeen(context: BrowserContext): Promise<void> {
-  await context.addInitScript((key) => {
-    try {
-      localStorage.setItem(key, "1");
-    } catch {
-      // A page with no storage, such as about:blank, shows no room.
-    }
-  }, UNDO_NOTICE_KEY);
-}
-
-const unmarkedContext = new WeakMap<Browser, Browser["newContext"]>();
-
 /** Set, the browser's JavaScript coverage is saved into this folder for `pnpm coverage --e2e` (e2e/coverage.ts). */
 const COVERAGE_DIR = process.env.E2E_COVERAGE_DIR;
 
@@ -308,30 +286,14 @@ const launch = chromium.launch.bind(chromium);
 chromium.launch = async (...args: Parameters<typeof chromium.launch>) => {
   const browser = await launch(...args);
   if (COVERAGE_DIR) coverBrowser(browser, COVERAGE_DIR);
-  const newContext = browser.newContext.bind(browser);
-  unmarkedContext.set(browser, newContext);
-  // Browser.newPage opens its context through newContext, so it is marked too.
-  browser.newContext = async (...options: Parameters<Browser["newContext"]>) => {
-    const context = await newContext(...options);
-    await undoNoticeSeen(context);
-    return context;
-  };
   return browser;
 };
 const launchPersistent = chromium.launchPersistentContext.bind(chromium);
 chromium.launchPersistentContext = async (...args: Parameters<typeof chromium.launchPersistentContext>) => {
   const context = await launchPersistent(...args);
   if (COVERAGE_DIR) await coverContext(context, COVERAGE_DIR);
-  await undoNoticeSeen(context);
   return context;
 };
-
-/** A context for a device that has not seen the undo notice yet: for the notice's own tests only. */
-export function freshDeviceContext(browser: Browser, ...options: Parameters<Browser["newContext"]>): Promise<BrowserContext> {
-  const newContext = unmarkedContext.get(browser);
-  assert(newContext, "the browser was not launched through this harness's chromium");
-  return newContext(...options);
-}
 
 type Json = Record<string, unknown>;
 

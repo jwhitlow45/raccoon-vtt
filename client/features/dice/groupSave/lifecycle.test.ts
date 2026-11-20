@@ -58,7 +58,7 @@ function asking(): Page {
 const ask = (): RollRequest => ({ id: "fresh", rev: 1, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 15, dcShown: true, resultShown: true, at: "2026-10-31T00:00:00.000Z", targets: [{ tokenId: "g1" }] });
 
 function fixture(initial: SaveSession | null = session(), ledger: SaveOutcomeLedger = { [PLAN]: record("applied", 1) }) {
-  const room = createRoomStore({ roomId: "room", you: DM, clock: new FakeClock(), undoNotice: { claim: () => false } });
+  const room = createRoomStore({ roomId: "room", you: DM, clock: new FakeClock() });
   const game = testRoom({ tokens: { g1: token("g1") } });
   const snapshot = (outcomes: SaveOutcomeLedger, seq = 10) => room.applySnapshot({ t: "snapshot", seq, watermark: 0, state: { ...projectState(game, DM, { sceneId: "s1" }), saveOutcomes: outcomes }, you: { ...DM, sceneId: "s1" } });
   room.setConnection("open");
@@ -290,7 +290,7 @@ test("live refusal waits for its confirmed sequence before restoring Apply choic
  * new answers, or Ask again retires it without the answered creature.
  */
 function restoredAsk(bobFirst?: number) {
-  const room = createRoomStore({ roomId: "room", you: DM, clock: new FakeClock(), undoNotice: { claim: () => false } });
+  const room = createRoomStore({ roomId: "room", you: DM, clock: new FakeClock() });
   const game = testRoom({ tokens: { a: token("a"), b: token("b") } });
   const request = (alice: number | undefined, bob: number | undefined, rev = 1): RollRequest => ({ id: "old", rev, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 15, dcShown: true, resultShown: true, at: "2026-10-31T00:00:00.000Z", targets: [{ tokenId: "a", ...(alice === undefined ? {} : { total: alice }) }, { tokenId: "b", ...(bob === undefined ? {} : { total: bob }) }] });
   const snapshot = (outcomes: SaveOutcomeLedger, rolls: Record<string, RollRequest>, seq: number) => room.applySnapshot({ t: "snapshot", seq, watermark: 0, state: { ...projectState({ ...game, rolls }, DM, { sceneId: "s1" }), saveOutcomes: outcomes }, you: { ...DM, sceneId: "s1" } });
@@ -351,7 +351,7 @@ test("the room learns how far the server's clock is from a fast device's as log 
   const stamped = Date.parse("2026-10-31T00:00:00.000Z");
   const clock = new FakeClock();
   clock.t = stamped + 10 * 60 * 1000;
-  const room = createRoomStore({ roomId: "room", you: DM, clock, undoNotice: { claim: () => false } });
+  const room = createRoomStore({ roomId: "room", you: DM, clock });
   room.setConnection("open");
   room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" } });
   assert.equal(room.store.getState().serverOffset, undefined, "a snapshot's old lines say nothing of the clock");
@@ -445,7 +445,7 @@ test("a device ten minutes slow whose clock is then set right still mints a firs
   const stamped = Date.parse("2026-10-31T12:00:00.000Z");
   const clock = new FakeClock();
   clock.t = stamped - 10 * 60 * 1000;
-  const room = createRoomStore({ roomId: "room", you: DM, clock, undoNotice: { claim: () => false } });
+  const room = createRoomStore({ roomId: "room", you: DM, clock });
   room.setConnection("open");
   room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" } });
   const line = (id: string, at: number) => ({ key: `log:${id}`, value: { id, at: new Date(at).toISOString(), kind: "event", text: "Torch lit." } });

@@ -11,7 +11,7 @@ import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, companionBlock } from "#shared/testutil.ts";
 import type { CorrectionLogEvent, HistoryMessage } from "#shared/undoContract.ts";
-import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, freshDeviceContext, startServer, untilReady, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, startServer, untilReady, waitFor, type Server } from "./harness.ts";
 import { UndoWire, historyOf, openMenu, playControl, setupHistory } from "./helpers/undoScope.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 4;
@@ -594,56 +594,6 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
       await settle();
       assert.ok(dm().watch.state!.log.some((line) => line.text === "The old queue continued."));
     } finally { old.close(); }
-  });
-
-  test("undo-scope-notice: a DM device's first visit through November 13 UTC says once, as a passing toast, that Undo now separates play from setup, and from November 14 it says nothing", async () => {
-    const notice = "Undo now separates play from setup. Earlier undo history was cleared. Setup history is in the menu.";
-    const sizes = [{ width: 390, height: 844, label: "390x844" }, { width: 320, height: 568, label: "320x568" }];
-    for (const [i, { width, height, label }] of [...sizes, { width: 390, height: 844, label: "after" }].entries()) {
-      const late = i === sizes.length;
-      // A device that has not seen the notice, which the harness otherwise marks every context as.
-      const context = await freshDeviceContext(browser, { viewport: { width, height }, isMobile: true, hasTouch: true });
-      try {
-        await context.addCookies(await dm().context.cookies(server.origin));
-        const page = await context.newPage();
-        page.setDefaultTimeout(10_000);
-        const watch = new SocketWatch(`notice ${label}`);
-        await watch.attach(context, page);
-        await page.clock.setFixedTime(new Date(late ? "2026-11-14T00:00:00Z" : "2026-11-13T23:00:00Z"));
-        await page.goto(`${server.origin}/r/${roomId}`);
-        await page.getByRole("status", { name: "Connected" }).first().waitFor();
-        await page.locator(".konvajs-content").first().waitFor();
-        // The notice is claimed as the first scoped history arrives, and drawn on the next render.
-        const told = async () => { await waitFor("the page's history", () => historyOf(watch)?.setup); await page.waitForTimeout(300); };
-        const toast = page.locator("[data-toast]").filter({ hasText: notice });
-        if (late) {
-          await told();
-          assert.equal(await toast.count(), 0, "no notice after the rollout window");
-          continue;
-        }
-        await toast.first().waitFor();
-        assert.equal(await toast.count(), 1);
-        const open = toast.getByRole("button", { name: "Setup history", exact: true });
-        const box = (await open.boundingBox())!;
-        assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= width && box.y + box.height <= height, `Setup history is a whole 44 px target at ${label}`);
-        await shots.take(page, `undo-scope-notice-${label}`);
-        await open.click();
-        const sheet = page.getByRole("dialog", { name: "Setup history", exact: true });
-        await sheet.waitFor();
-        await shots.take(page, `undo-scope-notice-history-${label}`);
-        await page.keyboard.press("Escape");
-        await sheet.waitFor({ state: "detached" });
-        assert.equal(await toast.count(), 0, "its button takes the notice away");
-        const frames = watch.received.length;
-        await page.reload();
-        await page.getByRole("status", { name: "Connected" }).first().waitFor();
-        await waitFor("the reloaded page's history", () => watch.received.slice(frames).some((raw) => raw.includes('"t":"history"')));
-        await page.waitForTimeout(300);
-        assert.equal(await page.locator("[data-toast]").filter({ hasText: notice }).count(), 0, "the same device is told once");
-      } finally {
-        await context.close();
-      }
-    }
   });
 
   test("undo-scope-console: no unexpected browser errors", () => {
