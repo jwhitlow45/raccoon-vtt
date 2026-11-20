@@ -1,9 +1,9 @@
-import type { Actor, FloorLink, RoomState, SceneId, Token } from "#shared/model.ts";
+import type { Actor, FloorLink, ProjectedFloorLink, RoomState, SceneId, Token } from "#shared/model.ts";
 import { MAX_RULER_ENDS, MAX_RULER_STOPS, type EphEvent, type RulerPrior, type RulerPriorIn } from "#shared/protocol.ts";
 import { sharedGround } from "#shared/project.ts";
 import { ownEntry } from "#shared/records.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
-import { climbKeepsSqueeze, linkDir, linkHeight, linksOn, standsOn, type LinkEnd } from "#shared/rules/floorLinks.ts";
+import { climbKeepsSqueeze, landingShift, linkDir, linkHeight, linksOn, standsOn, type LinkEnd } from "#shared/rules/floorLinks.ts";
 import { footprintSize, storedCenter, type CellRange } from "#shared/rules/footprint.ts";
 import { zoneFogged } from "#shared/rules/traps.ts";
 import { validEph } from "../../state/actions.ts";
@@ -32,8 +32,12 @@ export type Carry = { prior: RulerPriorIn; floor: SceneId; shared: boolean; toke
 /** Where a known walk leaves its walker, with its 5-10-5 count and its feet so far, the prior's included. */
 export type WalkEnd = { walker: Token; counter: DiagonalCounter; ft: number };
 
-/** The stairs a ruler's walker stands on, which its row offers: the end, the floor it reaches, the way and the far floor's name. */
-export type StairsOffer = { link: LinkEnd; to: SceneId; dir: "up" | "down"; kind: FloorLink["kind"]; floor: string };
+/**
+ * The stairs a ruler's walker stands on, which its row offers: the end, the
+ * floor it reaches, the way, the far floor's name, and the offset in cells
+ * the far end lies at where this device knows it (`farShift`).
+ */
+export type StairsOffer = { link: LinkEnd; to: SceneId; dir: "up" | "down"; kind: FloorLink["kind"]; floor: string; shift: { dx: number; dy: number } | null };
 
 /** Whether `carry` still describes `stops`: the ruler starts on the landing. */
 export function stillCarried(carry: Carry | null, stops: readonly RulerStop[]): Carry | null {
@@ -89,7 +93,8 @@ export function publicEnd(view: RoomState, link: Pick<LinkEnd, "sceneId" | "rect
  * not locked, or null. A shared ruler counts only ends players can see,
  * and the DM's private one every end. A ruler that has crossed
  * MAX_RULER_ENDS ends, or would name more than MAX_RULER_STOPS creatures,
- * takes no more.
+ * takes no more. An opening is never offered: the walking ruler is not
+ * carried through one (docs/design/design-v1-floors.md phase 4, 5).
  */
 export function stairsOffer(input: {
   view: RoomState;
@@ -105,15 +110,34 @@ export function stairsOffer(input: {
   if ((input.carry?.prior.ends.length ?? 0) >= MAX_RULER_ENDS || input.anchors.length > MAX_RULER_STOPS) return null;
   const viewer = { memberId: "", role: input.role };
   for (const link of linksOn(view, end.walker.sceneId) as LinkEnd[]) {
-    if (link.locked === true || link.to === undefined || !input.held.includes(link.to)) continue;
+    if (link.kind === "opening" || link.locked === true || link.to === undefined || !input.held.includes(link.to)) continue;
     if (standsOn(view, viewer, end.walker, link) !== "on") continue;
     if (input.shared && !publicEnd(view, link)) continue;
     const dir = linkDir(view, link);
     const floor = ownEntry(view.scenes, link.to)?.floor?.name;
     if (dir === null || floor === undefined) continue;
-    return { link, to: link.to, dir, kind: link.kind, floor };
+    return { link, to: link.to, dir, kind: link.kind, floor, shift: farShift(view, link) };
   }
   return null;
+}
+
+/**
+ * Where the far end of stairs or a ladder lies from this one, in cells
+ * (phase 4, 8.2), as this device knows it: a player's end carries it as
+ * `shift` only while the far end itself is projected to them
+ * (D-261119-008), and the DM's copy holds the pair. Null where the device
+ * cannot tell, and the ruler then lands on the same squares, as the server
+ * lands a creature at the stored end.
+ */
+export function farShift(view: Pick<RoomState, "floorLinks">, link: LinkEnd): { dx: number; dy: number } | null {
+  const projected = (link as Partial<ProjectedFloorLink>).shift;
+  if (projected !== undefined) return projected;
+  const pairId = (link as Partial<FloorLink>).pair;
+  const far = pairId === undefined ? undefined : ownEntry(view.floorLinks, pairId);
+  if (far === undefined) return null;
+  // Ends on the same squares land in place, and need no rule to say so.
+  if (far.rect.x === link.rect.x && far.rect.y === link.rect.y) return null;
+  return landingShift(link, far);
 }
 
 /** A creature's actor: its own, or its character's. */
@@ -160,8 +184,9 @@ const count = (n: number) => Math.min(COUNT_MAX, Math.max(0, n));
  * What a press of the stairs button carries: the next carry, with its
  * prior (the feet so far and the climb, the count, the landed shape, the
  * creatures and the ends crossed, this one last), and the landing stop,
- * free, at the walker's middle on the same squares, standing on the ground
- * this device reads there (`ground`).
+ * free, at the walker's middle on the same squares, or moved by the far
+ * end's offset where the offer knows it (phase 4, 8.2), standing on the
+ * ground this device reads there (`ground`).
  */
 export function carryOver(input: {
   view: Pick<RoomState, "scenes" | "characters">;
@@ -183,7 +208,8 @@ export function carryOver(input: {
     anchors: [...input.anchors],
     ends: [...(input.carry?.prior.ends ?? []), offer.link.id],
   };
-  const mid = storedCenter(end.walker);
+  const center = storedCenter(end.walker);
+  const mid = offer.shift ? { x: center.x + offer.shift.dx, y: center.y + offer.shift.dy } : center;
   const z = input.ground({ x: Math.floor(mid.x), y: Math.floor(mid.y) });
   const stop: RulerStop = z === 0 ? { x: mid.x, y: mid.y } : { x: mid.x, y: mid.y, z };
   return {
