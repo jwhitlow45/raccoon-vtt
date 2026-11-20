@@ -231,9 +231,13 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const seat = occupiedHexes(g, s.tokens.horse!)[1]!;
       s.tokens.brom = onHex(g, "brom", "medium", seat, { name: "Brom", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });
       s.tokens.gob = onHex(g, "gob", "medium", hexNeighbors(g, seat)[0]!, { name: "Goblin", ownerIds: ["p1"], attached: { to: "brom", kind: "drag" } });
-      // Nudged a little off his seat's anchor, across the grid's rows or columns, Brom still rides and still drags the goblin.
+      // Nudged a little off his seat's anchor, across the grid's rows or columns, Brom still rides and still drags the goblin. The
+      // nudge is an op stored before change format 64, which took the goblin along off its grid: from 64 it lands on its own hex
+      // (D-261120-006), and a room saved before keeps it off.
       const [nx, ny] = g.orient === "rows" ? [0.3, 0.4] : [0.4, 0.3];
-      s = apply(s, { t: "token.update", tokenId: "brom", patch: { x: s.tokens.brom!.x + nx, y: s.tokens.brom!.y + ny } }, DM);
+      const nudged = applyOp(s, { t: "token.update", tokenId: "brom", patch: { x: s.tokens.brom!.x + nx, y: s.tokens.brom!.y + ny } }, DM, { ...env(1), opVersion: 63 });
+      assert.ok(nudged.ok);
+      s = nudged.state;
       assert.equal(s.tokens.brom!.attached?.to, "horse");
       assert.equal(s.tokens.gob!.attached?.to, "brom");
       const horse = s.tokens.horse!;

@@ -11,7 +11,7 @@ import { carriedGroup, footprintInScene, hexPlacements, linkHolds, onHolder, ove
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { routeWorld } from "../rules/hexWalk.ts";
-import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt } from "../rules/route.ts";
+import { compareAlong, fileHeightsAlong, followerTrace, hexFileClasses, hexFileRoutes, pointAt, type FileAlong, type RoutePoint } from "../rules/route.ts";
 import { COLUMNS, onHex, ROWS } from "../rules/hexWalls.testkit.ts";
 import { planWalks, walkedIn, wayOf, type MovedToken } from "../rules/moveLeg.ts";
 import { sweptAlong } from "./areaTriggers.ts";
@@ -102,7 +102,9 @@ function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
   const cutWalked = walkedIn(cutWalks, undefined);
   for (const m of cutWalks) {
     if (m.file !== true || m.pass !== "public" || !cutWalked(m)) continue;
-    for (let i = 1; i < m.route.length; i++) assert.equal(movementRules.legBlocker(s, m.trace[i - 1]!, { ...m.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);
+    // Its way, as the permission rule walks it (moveLeg.ts wayOf): where it cannot end there it arrives on a spot beside (dragEnd).
+    const way = wayOf(m);
+    for (let i = 1; i < way.route.length; i++) assert.equal(movementRules.legBlocker(s, way.trace[i - 1]!, { ...way.route[i]!, squeeze: false }), null, `${at}: ${m.tokenId} leg ${i}`);
   }
   assert.ok(walks.every((m) => walked(m) || m.carriedBy !== undefined));
   const r = applyOp(s, op, P1, env(5));
@@ -116,7 +118,8 @@ function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
     const t: Token = r.state.tokens[id]!;
     assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
   }
-  linksKept(g, s, landed, r.state, at, new Set(walks.filter((m) => m.pass === "private").map((m) => m.tokenId)));
+  // A drag with no spot to end on in reach is let go where the move leaves it (moveLeg.ts dragEnd).
+  linksKept(g, s, landed, r.state, at, new Set([...walks.filter((m) => m.pass === "private"), ...cutWalks.filter((m) => m.letGo === true)].map((m) => m.tokenId)));
   seatsKept(s, landed, r.state, at);
   tally.shared += seatsApart(g, s, op, at);
   const holderHexes = new Set(occupiedHexes(g, r.state.tokens.horse!).map(hexKey));
@@ -124,11 +127,12 @@ function checkedMove(g: HexGrid, made: Case, at: string, tally: Tally): void {
   // hex step from the one before.
   for (const m of [...walks, ...cutWalks]) {
     if (m.file !== true) continue;
-    for (const [i, p] of m.route.entries()) {
+    const way = wayOf(m).route;
+    for (const [i, p] of way.entries()) {
       const t = { ...s.tokens[m.tokenId]!, x: p.x, y: p.y };
       const there = placedOnHex(g, t, occupiedHexes(g, t)[0]!);
       if (i > 0) assert.ok(Math.abs(there.x - p.x) < 1e-9 && Math.abs(there.y - p.y) < 1e-9, `${at}: ${m.tokenId} at ${p.x}, ${p.y} off its anchors`);
-      if (i > 0 && s.tokens[m.tokenId]!.size !== "large") assert.ok(hexDistance(g, occupiedHexes(g, { ...t, ...m.route[i - 1]! })[0]!, occupiedHexes(g, t)[0]!) <= 1, `${at}: ${m.tokenId} leg ${i} one hex step`);
+      if (i > 0 && s.tokens[m.tokenId]!.size !== "large") assert.ok(hexDistance(g, occupiedHexes(g, { ...t, ...way[i - 1]! })[0]!, occupiedHexes(g, t)[0]!) <= 1, `${at}: ${m.tokenId} leg ${i} one hex step`);
     }
   }
   // None every player sees in the file ends under the holder where the whole walk leaves it (LP40-HEXFILE-2). A trap that stops a
@@ -305,6 +309,16 @@ function levelWithHolders(s: RoomState, cut: Op, after: RoomState, actor: Viewer
     checked++;
   }
   return checked;
+}
+
+/**
+ * Where the move has a walk hex by hex at the moment `p`: on its way
+ * (moveLeg.ts wayOf), and as the move ends (`end`) where it arrives, which
+ * a drag that cannot end on its way's end moves (dragEnd).
+ */
+function moveAt(m: MovedToken, p: FileAlong, end: FileAlong): RoutePoint {
+  if (m.carried && compareAlong(p, end) >= 0) return { x: m.to.x, y: m.to.y, elevation: m.to.elevation };
+  return pointAt(wayOf(m).route, p, m.along!);
 }
 
 /** The holder raised 40 ft and brought down to the ground or to 25 ft, or climbing from the ground to 30 ft, as feet up and down. */
@@ -710,6 +724,7 @@ for (const [name, g] of [
                 const heights = trapSpotHeights(op, s, actor, {});
                 const all = trapped.flatMap((w) => w.spots.map((p) => p.progress));
                 const walked = walkedIn(walks, undefined);
+                const end: FileAlong = [walks.find((m) => m.tokenId === op.tokenId)!.route.length - 2, 1, 1];
                 for (const m of walks) {
                   if (!m.along || !walked(m)) continue;
                   const token = s.tokens[m.tokenId]!;
@@ -732,13 +747,14 @@ for (const [name, g] of [
                     if (yes) count(name);
                   }
                   // The first point of the run it ends on, where it reaches its last place, its start for one that never leaves it.
-                  let k = m.route.length - 1;
-                  while (k > 0 && m.route[k - 1]!.x === m.route[k]!.x && m.route[k - 1]!.y === m.route[k]!.y) k--;
+                  const way = wayOf(m).route;
+                  let k = way.length - 1;
+                  while (k > 0 && way[k - 1]!.x === way[k]!.x && way[k - 1]!.y === way[k]!.y) k--;
                   const reached = m.along[k]!;
                   const own = new Set(m.along.map((p) => p.join("/")));
                   const where = (p: readonly number[]) => `${kind}seed ${seed}, ${variant}${up} to ${down} ft, ${who}, ${m.tokenId} at ${p.join("/")}`;
                   for (const p of all) {
-                    const want = pointAt(m.route, p, m.along);
+                    const want = moveAt(m, p, end);
                     const t = at(p)[m.tokenId]!;
                     moments++;
                     if (Math.abs(t.elevation - want.elevation) > 1e-9) differ(`${where(p)}: the trap step at ${t.elevation} ft, the move at ${want.elevation} ft`);
@@ -755,7 +771,8 @@ for (const [name, g] of [
                   const mine = trapped.find((w) => w.tokenId === m.tokenId)!;
                   mine.spots.forEach((spot, j) => {
                     spots++;
-                    const want = pointAt(m.route, spot.progress, m.along).elevation;
+                    // Its last spot is where it arrives.
+                    const want = (m.carried && j === mine.spots.length - 1 ? m.to : moveAt(m, spot.progress, end)).elevation;
                     const height = heights.get(m.tokenId)?.[j];
                     if (height === undefined || Math.abs(height - want) > 1e-9) differ(`${where(spot.progress)}: its triggers read spot ${j} at ${height} ft, the move has it at ${want} ft`);
                   });

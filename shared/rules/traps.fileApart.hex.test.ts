@@ -63,8 +63,10 @@ describe("a stop steps each creature in single file off its holder where a clear
     assert.deepEqual(hexesOf(g, after, "horse"), horse, "the warhorse stops where it did");
     assert.ok(!hexesOf(g, after, "tow0").some((h) => horse.includes(h)), `the Tiny goblin off the warhorse, on ${hexesOf(g, after, "tow0")}`);
     assert.ok(linkHolds(g, after.meta.settings, "drag", after.tokens.tow0!, after.tokens.horse!), "and still dragged");
-    // Only the one hex behind the warhorse is in its reach, so the other keeps the stop's spot, as before.
-    assert.deepEqual(hexesOf(g, after, "tow1"), horse, "the other keeps its spot");
+    // Only the one hex behind the warhorse is in its reach, so at op 63 the other keeps the stop's spot, as before.
+    assert.deepEqual(hexesOf(g, moved(made, P1, 63), "tow1"), horse, "the other keeps its spot");
+    // From change format 64 no drag ends on its holder's hexes (D-261120-006): the other leaves the warhorse too.
+    assert.ok(!hexesOf(g, after, "tow1").some((h) => horse.includes(h)), `the other off the warhorse, on ${hexesOf(g, after, "tow1")}`);
   });
 
   test("hex columns, a full-size warhorse stopped at the corridor's mouth: the goblin it drags steps back beside it, where op 62 left three under it", () => {
@@ -117,7 +119,8 @@ describe("a stop steps each creature in single file off its holder where a clear
                 for (const [i, a] of ids.entries()) for (const b of ids.slice(i + 1)) if (hexesOf(g, state, a).some((h) => hexesOf(g, state, b).includes(h))) out.add(`${a}+${b}`);
                 return out;
               };
-              const [old, now] = [shared(62), shared()];
+              // At op 63 itself: from 64 a drag that cannot end on its spot lands beside its holder (moveLeg.ts dragEnd, D-261120-006).
+              const [old, now] = [shared(62), shared(63)];
               for (const pair of now) assert.ok(old.has(pair), `${at}: ${pair} share a hex only at op 63`);
               if (now.size < old.size) fewer++;
             }

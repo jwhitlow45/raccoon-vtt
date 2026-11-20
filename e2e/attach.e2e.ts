@@ -1520,7 +1520,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     });
     assert.deepEqual([out.x, out.y, out.squeeze], [5, 5, undefined], "full size on the stand that seats Bree on 5, 5");
     assert.deepEqual([token(patSocket, keep.bree)?.x, token(patSocket, keep.bree)?.y, token(patSocket, keep.bree)?.attached?.to], [5, 5, keep.horse], "Bree under the finger, still riding");
-    await waitFor("the goblin beside Bree", () => (token(patSocket, keep.gob)?.x === 6 && token(patSocket, keep.gob)?.y === 5 && token(patSocket, keep.gob)?.attached?.to === keep.bree ? true : null));
+    // Off the warhorse's squares, which its place on 6, 5 lay on before change format 64 (D-261120-006).
+    await waitFor("the goblin beside Bree", () => (token(patSocket, keep.gob)?.x === 6 && token(patSocket, keep.gob)?.y === 4 && token(patSocket, keep.gob)?.attached?.to === keep.bree ? true : null));
     await shots.take(pat, "lp40fix-rider-under-the-finger");
     // An orc stands in the corridor down column 13, so Wren, in room A, has no way into room B.
     await ops.send({ t: "token.create", token: { id: keep.orc, sceneId: keep.scene, kind: "monster", name: "Orc", size: "medium", x: 13, y: 7, disposition: "hostile", visibility: "all", actor: { inline: actor() } } });

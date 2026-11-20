@@ -386,12 +386,19 @@ describe("squares: what a holder drags follows it in single file where its move 
     s.traps.t1 = trap("t1", { zone: { cells: [{ x: 4, y: 5, w: 1, h: 2 }] }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
     s.traps.t2 = trap("t2", { zone: { cells: [{ x: 5, y: 5, w: 1, h: 1 }] }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } });
     const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 9.5, y: 5.5, squeeze: true, route: [[4, 5, 1, 0], [4.5, 5.5, 1, 0], [9.5, 5.5, 2, 0]] };
-    const after = served(s, op);
+    const after = served(s, op, P1, 63);
     assert.deepEqual([after.tokens.horse!.x, after.tokens.horse!.y], [3, 5], "stopped on the trap");
     const ogre = after.tokens.ogre!;
     assert.deepEqual([ogre.x, ogre.y, ogre.elevation], [4, 5, 5], "not yet walked, so where and as high as it stood");
-    assert.deepEqual(trapLandings(op, s, P1, {}).get("ogre"), { x: 4, y: 5, elevation: 5 }, "as the trap step had it");
+    assert.deepEqual(trapLandings(op, s, P1, { opVersion: 63 }).get("ogre"), { x: 4, y: 5, elevation: 5 }, "as the trap step had it");
     assert.equal(after.traps.t2!.state, "armed", "so the floor trap below it stays armed, as the trap step saw it");
+    // From change format 64 a drag that would end on its holder's squares lands beside it (D-261120-006): the ogre stood on the
+    // horse's, so it takes the nearest full stand off them, on the ground a drag takes it to, and the trap step has it there too.
+    const now = served(s, op);
+    assert.deepEqual([now.tokens.horse!.x, now.tokens.horse!.y], [3, 5], "stopped on the trap");
+    assert.deepEqual([now.tokens.ogre!.x, now.tokens.ogre!.y, now.tokens.ogre!.elevation, now.tokens.ogre!.attached?.to], [4, 3, 0, "horse"], "beside the horse, still in tow");
+    assert.deepEqual(trapLandings(op, s, P1, {}).get("ogre"), { x: 4, y: 3, elevation: 0 }, "as the trap step had it");
+    assert.equal(now.traps.t2!.state, "armed");
   });
 
   test("what carries one in the file is walked with it, moved or not, so the file is one trap group and a trap stops the horse (review FU45B-ASTRA-07)", () => {

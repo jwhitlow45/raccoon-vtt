@@ -7,7 +7,7 @@ import { projectState, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { footprintInScene, linkHolds, overlaps } from "../rules/attach.ts";
-import { footprintSize, occupiedHexes, snapStep } from "../rules/footprint.ts";
+import { footprintSize, occupiedHexes, placedOnHex, snapStep, tokenRefHex } from "../rules/footprint.ts";
 import type { Point } from "../rules/geom.ts";
 import { isHex, SQUARES, type Grid } from "../rules/grid.ts";
 import { footprintGround } from "../rules/heights.ts";
@@ -55,6 +55,21 @@ function twinned(s: RoomState, op: OpOf<"token.move">, where: string): RoomState
   assert.ok(r.ok && t.ok, where);
   assert.equal(stableStringify(projectState(r.state, P1, { sceneId: "s1" })), stableStringify(projectState(t.state, P1, { sceneId: "s1" })), `${where}: Pat's copy`);
   return r.state;
+}
+
+/**
+ * The goblin as change format 64 leaves it (D-261120-006): on its own squares or hexes inside the scene, off the warhorse, and
+ * where it is still dragged, in Bree's reach. Whether it is still dragged.
+ */
+function endHolds(g: Grid, s: RoomState, where: string): boolean {
+  const gob = s.tokens.gob!;
+  assert.ok(footprintInScene(g, s.scenes.s1!.bounds, gob), `${where}: the goblin inside the scene, on ${gob.x}, ${gob.y}`);
+  const own = isHex(g) ? placedOnHex(g, gob, tokenRefHex(g, gob)) : { x: Math.round(gob.x / snapStep(gob)) * snapStep(gob), y: Math.round(gob.y / snapStep(gob)) * snapStep(gob) };
+  assert.ok(Math.abs(own.x - gob.x) < 1e-9 && Math.abs(own.y - gob.y) < 1e-9, `${where}: the goblin on its own grid, on ${gob.x}, ${gob.y}`);
+  assert.ok(!overlaps(g, gob, s.tokens.horse!), `${where}: off the warhorse`);
+  if (gob.attached?.to !== "bree") return false;
+  assert.ok(linkHolds(g, s.meta.settings, "drag", gob, s.tokens.bree!), `${where}: in her reach`);
+  return true;
 }
 
 /** The goblin inside the scene, and where it is still dragged, off the warhorse and in Bree's reach. */
@@ -325,18 +340,26 @@ describe("the spot beside her seat is found wherever her reach holds one, whatev
       let checked = 0;
       let moved = 0;
       let stayed = 0;
+      let held = 0;
+      let letGo = 0;
       const places = new Map<Size, Point[]>();
       for (const { s, to, seats, where: ride } of rides(g)) {
         const gob = s.tokens.gob!;
         if (!places.has(gob.size as Size)) places.set(gob.size as Size, placesOf(g, s, gob));
-        const plain = applyOp(s, { t: "token.move", tokenId: "horse", x: to.x, y: to.y }, P1, env(1));
+        // The oracle reads the seat's search as op 63 ran it. From 64 every end holds besides (`endHolds`).
+        const old = { ...env(1), opVersion: 63 };
+        const plain = applyOp(s, { t: "token.move", tokenId: "horse", x: to.x, y: to.y }, P1, old);
         if (!plain.ok || plain.state.tokens.gob!.attached?.to !== "bree") continue;
         const end = { x: plain.state.tokens.gob!.x, y: plain.state.tokens.gob!.y };
         for (const seat of seats) {
           const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: to.x, y: to.y, seat: { tokenId: "bree", x: seat.x, y: seat.y } };
           if (!canApply(op, P1, s, deps).ok) continue;
-          const r = applyOp(s, op, P1, env(1));
+          const r = applyOp(s, op, P1, old);
           assert.ok(r.ok);
+          const now = applyOp(s, op, P1, env(1));
+          assert.ok(now.ok);
+          if (endHolds(g, now.state, `${ride}, seat ${seat.x}, ${seat.y}, from 64`)) held++;
+          else letGo++;
           // A place that is no seat of the stand is ignored, and she keeps her own.
           if (at(r.state, "bree").join() === at(plain.state, "bree").join()) continue;
           const where = `${ride}, seat ${seat.x}, ${seat.y}`;
@@ -354,6 +377,7 @@ describe("the spot beside her seat is found wherever her reach holds one, whatev
         }
       }
       assert.ok(checked >= (isHex(g) ? 600 : 2000) && moved >= (isHex(g) ? 400 : 1000) && stayed >= 100, `checked ${checked}, moved ${moved}, stayed where its walk ends ${stayed}`);
+      assert.ok(held >= (isHex(g) ? 600 : 1000) && letGo >= 100, `from 64: still dragged ${held}, let go ${letGo}`);
     });
   }
 });

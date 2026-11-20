@@ -5,7 +5,7 @@ import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "#shared/rules/aoe.ts";
-import { describeMove, type MovedToken } from "#shared/rules/moveLeg.ts";
+import { describeMove, wayOf, type MovedToken } from "#shared/rules/moveLeg.ts";
 import { pieceReach, type RoutePoint } from "#shared/rules/route.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { DM, chance, env, int, pick, rng, template, token } from "#shared/testutil.ts";
@@ -98,9 +98,12 @@ function lerp(a: RoutePoint, b: RoutePoint, f: number): RoutePoint {
   return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, elevation: a.elevation + (b.elevation - a.elevation) * f };
 }
 
-/** A token at a point of its walk with the footprint the rule gives it there, read from the walk's points and its start, never its trace. */
+/**
+ * A token at a point of its walk with the footprint the rule gives it there, read from the walk's points and its start, never its
+ * trace: its way (moveLeg.ts wayOf), which from change format 64 a drag that cannot end there leaves only as it arrives.
+ */
 function oracleAt(walk: MovedToken, before: Token, after: Token, routed: boolean, piece: number, f: number): Token {
-  const points = walk.route;
+  const points = wayOf(walk).route;
   const last = points.length - 1;
   const [spot, p, end] = !routed ? [lerp(points[0]!, points[last]!, f), 0, f >= 1] : piece > last ? [points[last]!, last - 1, true] : [lerp(points[piece - 1]!, points[piece]!, f), piece - 1, f >= 1];
   if ((end ? p + 1 : p) >= last) return after;

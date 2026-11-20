@@ -7,6 +7,7 @@ import { projectState, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { SQUARES } from "../rules/grid.ts";
+import { planMove, wayOf } from "../rules/moveLeg.ts";
 import { seatShift } from "../rules/route.ts";
 import { env, member, P1, P2, room, scene, token } from "../testutil.ts";
 
@@ -50,9 +51,12 @@ const pose = (s: RoomState, id: string) => [s.tokens[id]!.x, s.tokens[id]!.y, s.
 describe("squares: a mount full size off its grid carries its riders by its snapped box (RIDER-LED-HALF-SEAT)", () => {
   test("Brom keeps the left column on a walk by half a square, and the prisoner he leads stays in tow", () => {
     const s = leading(field([["brom", 2, 9]]), "brom", 0.5, 9);
-    const after = moved(s, STEP);
+    const after = moved(s, STEP, 63);
     assert.deepEqual(pose(after, "brom"), [6, 9, "horse"], "on the left column of the box at 6, 8 to 8, 10");
     assert.deepEqual(pose(after, "led"), [4.5, 9, "brom"], "beside him as before, in reach");
+    // From change format 64 the prisoner, half a square off its grid, lands on the nearest square of its own in his reach (D-261120-006).
+    const now = moved(s, STEP);
+    assert.deepEqual([pose(now, "brom"), pose(now, "led")], [[6, 9, "horse"], [5, 9, "brom"]]);
   });
 
   test("a rider on the right column stays on the mount, which the stored box rounded it off", () => {
@@ -75,12 +79,14 @@ describe("squares: a mount full size off its grid carries its riders by its snap
 
   test("a device's route search and cut read the reducer's seat for the rider and what he leads (route.ts seatShift)", () => {
     const s = leading(field([["brom", 2, 9]]), "brom", 0.5, 9);
-    const after = moved(s, STEP);
+    // Where each one's walk ends (moveLeg.ts wayOf), which from change format 64 a drag that cannot end there leaves on arriving.
+    const walks = planMove(STEP, s, P1, {});
     const horse = { ...s.tokens.horse!, id: "horse" };
     for (const id of ["brom", "led"]) {
       const by = seatShift(SQUARES, horse, (m) => s.tokens[m], id, { x: 6, y: 8 }, false);
       const start = s.tokens[id]!;
-      assert.deepEqual([6 + start.x - 1.5 + by.x, 8 + start.y - 8 + by.y], [after.tokens[id]!.x, after.tokens[id]!.y], id);
+      const way = wayOf(walks.find((m) => m.tokenId === id)!).route;
+      assert.deepEqual([6 + start.x - 1.5 + by.x, 8 + start.y - 8 + by.y], [way.at(-1)!.x, way.at(-1)!.y], id);
     }
   });
 

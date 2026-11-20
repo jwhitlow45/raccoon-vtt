@@ -1513,7 +1513,9 @@ export const opMigrations: MigrationStep[] = [
     // stored op changes shape and the step is the identity. From this version (opensOps) a creature an op leaves standing
     // wholly over an opening falls to the floor below, a public trapdoor drops what stands on it, and every landing sets
     // off the landing floor's arrival traps and reminds for its areas. Ops stored before met no opening and replay as
-    // they ran: no arrival springing or reminder after a climb.
+    // they ran: no arrival springing or reminder after a climb. From this version too a creature a move drags along ends on
+    // its own squares or hexes, inside the scene and off its holder's space, or on the nearest such spot in reach, or is let
+    // go (`dragsEndClear`). Ops stored before replay as they ran.
     // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
     // the backup for any room this version saved, since its first commit writes a v48 snapshot that an older build
     // refuses.
@@ -2218,6 +2220,21 @@ export const OPENINGS_SNAPSHOT_VERSION = 48;
  * and replay so. Live ops carry no stored version and take today's rule.
  */
 export function opensOps(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < OPENINGS_OP_VERSION);
+}
+
+/**
+ * Whether a creature a move drags along ends where it can stand
+ * (D-261120-006, rules/moveLeg.ts settledDrag): on its own squares or hexes,
+ * inside the scene and off the space of its holder and of what that holder
+ * rides, or else on the nearest such spot in its holder's reach, or let go
+ * at the last such spot of its walk. A walk by its place could end past
+ * the scene's edge, half a square or a hex corner off its grid where its
+ * holder comes out of a squeeze, or on its rider's hex inside the mount.
+ * Ops stored before version 64 left it there, and replay so. Live ops
+ * carry no stored version and take today's rule.
+ */
+export function dragsEndClear(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < OPENINGS_OP_VERSION);
 }
 

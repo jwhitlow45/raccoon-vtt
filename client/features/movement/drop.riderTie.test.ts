@@ -136,7 +136,9 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
   test("open floor: from the corridor's row onto 5, 5, the warhorse stands on 5, 5 with Bree on it, not on 4, 4", () => {
     const { plan, after } = dropBree(keep({ x: 9, y: 4 }, { x: 10, y: 4 }), { x: 5.5, y: 5.5 }, SQUARE_LIFTS);
     assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y, m.squeeze]), [["horse", 5, 5, undefined]]);
-    assert.deepEqual([at(after, "bree"), at(after, "gob"), after.tokens.gob!.attached?.to], [[5, 5], [6, 5], "bree"], "Bree under the finger, the goblin in tow beside her");
+    // From change format 64 the goblin stands off the warhorse (D-261120-006). Its place by the squeezed box put it on 6, 5, on the
+    // warhorse's squares (LP45-DRAG-1).
+    assert.deepEqual([at(after, "bree"), at(after, "gob"), after.tokens.gob!.attached?.to], [[5, 5], [6, 4], "bree"], "Bree under the finger, the goblin in tow beside her");
   });
 
   test("the mouth: onto 14, 10 Bree still lands on 13, 10, since on the stand that seats her on 14, 10 the goblin would stand in the rock (lp39fix-1)", () => {
@@ -185,13 +187,13 @@ describe("squares: a rider dragged out of a squeezed mount lands under the finge
     for (const m of plan.moves) assert.ok(m.x + 2 <= 12, `held short of the orc: ${JSON.stringify(sent(plan))}`);
   });
 
-  test("a flying warhorse, Bree and the goblin she drags 5 ft up, a rise 2 ft high on 6, 5: onto 5, 5 she lands there, the goblin over the rise at 5 ft (review LP40FIX-SOL-01)", () => {
+  test("a flying warhorse, Bree and the goblin she drags 5 ft up, a rise 2 ft high on 6, 4 and 6, 5: onto 5, 5 she lands there, the goblin over the rise at 5 ft (review LP40FIX-SOL-01)", () => {
     const s = keep({ x: 9, y: 4 }, { x: 10, y: 4 });
-    heights(s, { x: 6, y: 5, w: 1, h: 1 }, 2);
+    heights(s, { x: 6, y: 4, w: 1, h: 2 }, 2);
     s.tokens.horse = { ...s.tokens.horse!, elevation: 5, actor: { inline: actor({ speeds: { walk: 60, fly: 60 } }) } };
     for (const id of ["bree", "gob"]) s.tokens[id] = { ...s.tokens[id]!, elevation: 5 };
     const { after } = dropBree(s, { x: 5.5, y: 5.5 }, SQUARE_LIFTS);
-    assert.deepEqual([at(after, "horse"), at(after, "bree"), at(after, "gob")], [[5, 5], [5, 5], [6, 5]]);
+    assert.deepEqual([at(after, "horse"), at(after, "bree"), at(after, "gob")], [[5, 5], [5, 5], [6, 4]]);
     assert.deepEqual([after.tokens.bree!.elevation, after.tokens.gob!.elevation], [5, 5], "still 5 ft up");
   });
 

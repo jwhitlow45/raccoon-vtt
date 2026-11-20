@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRec
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsLandNamed, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize, stopsStepApartInReach } from "../migrate.ts";
+import { dragsEndClear, fileStandsSnapped, followsInSingleFileOnHexes, stopsByCoveredSquares, stopsFileApart, stopsLandNamed, stopsOnPublicGround, stopsOnTrap, stopsStandClear, stopsStandFullSize, stopsStepApartInReach } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
@@ -10,7 +10,7 @@ import type { Rect } from "./geom.ts";
 import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { pendingGround } from "./held.ts";
-import { planWalks, walkedIn, wayOf, withTrapCut, type MovedToken } from "./moveLeg.ts";
+import { dragEnd, planWalks, walkedIn, wayOf, withTrapCut, type HolderEnd, type MovedToken } from "./moveLeg.ts";
 import { groundUnder, hexStandHexes, storedBuild, type HexWalls } from "./movement.ts";
 import { compareAlong, fileOrder, onTrace, routeLattice, routeStands, routeWalk, walkAt, type FileAlong, type PublicGround, type RoutePiece, type RoutePoint, type RouteSpot, type StandGroup, type StandRule, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
@@ -604,6 +604,8 @@ type Walk = {
   grid: Grid;
   /** Its elevation at each spot, worked out only where a trap needs it. */
   elevation: (j: number) => number;
+  /** From change format 64, whether it arrives off its way's end (`seatedEnd`), where it stands from its last spot as it lands. */
+  arrives: boolean;
 };
 
 /** Whether every player sees a token as the op finds the room: on the players' scene and received by a player who owns nothing (5.3). */
@@ -775,6 +777,11 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       const ownSpots = shared ? null : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine);
       // A walk hex by hex is read at its group's moments by how far along the lead's walk each of its points is reached.
       const byHex = ownSpots && e.along && e.how !== "teleport" ? e.along : null;
+      const timed = ownSpots ? (byHex ? ownSpots.map((spot) => ({ ...spot, progress: alongProgress(byHex, spot.progress) })) : ownSpots) : base(mine);
+      // From change format 64 one whose way ends before the move does and that lands off its way's end, as a drag that cannot end
+      // there (moveLeg.ts dragEnd), waits where its way ends and arrives as the move ends, a spot of its own.
+      const ends = base(mine).at(-1)?.progress;
+      const later = dragsEndClear(opVersion) && e.carried !== undefined && ends !== undefined && timed.length > 0 && compareProgress(timed.at(-1)!.progress, ends) < 0;
       const walk: Walk = {
         token,
         entry: e,
@@ -784,8 +791,8 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         carriedOn: linkSeen && kind !== undefined && onHolder(kind),
         ...(holder ? { holder } : {}),
         // A member on a route of its own is a creature its holder drags beside it, which walks as itself (moveLeg.ts stoppedAtWalls).
-        spots: seatedEnd(e, ownSpots ? (byHex ? ownSpots.map((spot) => ({ ...spot, progress: alongProgress(byHex, spot.progress) })) : ownSpots) : base(mine), shared ? ox : 0, shared ? oy : 0),
-        ...(byHex && ownSpots ? { ownProgress: ownSpots.map((spot) => spot.progress) } : {}),
+        spots: later ? [...timed, { ...timed.at(-1)!, x: e.to.x - (shared ? ox : 0), y: e.to.y - (shared ? oy : 0), elevation: e.to.elevation, progress: ends! }] : seatedEnd(e, timed, shared ? ox : 0, shared ? oy : 0),
+        ...(byHex && ownSpots ? { ownProgress: [...ownSpots.map((spot) => spot.progress), ...(later ? [ownSpots.at(-1)!.progress] : [])] } : {}),
         own: !shared,
         seatsSeen: seats.has(e.tokenId),
         ox: shared ? ox : 0,
@@ -797,6 +804,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         size: footprintSize(token),
         grid,
         elevation: () => 0,
+        arrives: e.carried !== undefined && dragsEndClear(opVersion),
       };
       walk.squeezedAt = squeezeRule(walk, endsAs(op, token, e === head && squeeze));
       walk.elevation = elevationRule(walk, before, shared);
@@ -991,7 +999,9 @@ function placedAt(walk: Walk, j: number): Token {
   const last = placed.get(walk);
   if (last?.j === j) return last.token;
   const at = lightAt(walk, j);
-  const out: Token = { ...walk.token, x: at.x, y: at.y, elevation: walk.elevation(j) };
+  // Where it arrives off its way's end, exactly as the move lands it, not its offset taken off and put back (`seatedEnd`).
+  const lands = walk.arrives && j === walk.spots.length - 1;
+  const out: Token = { ...walk.token, x: lands ? walk.entry.to.x : at.x, y: lands ? walk.entry.to.y : at.y, elevation: walk.elevation(j) };
   if (at.squeeze) out.squeeze = true;
   else if (out.squeeze !== undefined) delete out.squeeze;
   placed.set(walk, { j, token: out });
@@ -1425,12 +1435,25 @@ export function trapLandings(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const parts = trapMoveParts(op, before, actor, env);
   if (!parts) return out;
   const pose = (t: Token) => out.set(t.id, { x: t.x, y: t.y, elevation: t.elevation });
+  // Where a stop leaves each walk of its group, before a dragged one settles onto a spot it can end on (`settledStop`).
+  const stopPoseOf = (walk: Walk, stop: Stop): Token => stop.at?.get(walk) ?? stoppedAt(walk, stopIndex(walk, stop), readOf(stop));
+  // A drag a stop leaves where it cannot end, and what it takes along, land where the cut op's walks take them (moveLeg.ts dragEnd).
+  let cutPlan: Map<string, MovedToken> | null = null;
+  const cutTo = (id: string) => (cutPlan ??= new Map(planWalks(parts.op, before, actor, env).map((m) => [m.tokenId, m]))).get(id)?.to;
+  const settles = (w: Walk, stop: Stop): boolean => dragsEndClear(env.opVersion) && w.token.attached?.kind === "drag" && w.holder !== undefined && endMoves(before, w, stopPoseOf(w, stop), (h) => stopPoseOf(h, stop), env);
+  const landedAt = (walk: Walk, stop: Stop): Token => {
+    const at = stopPoseOf(walk, stop);
+    for (let up: Walk | undefined = walk; up; up = up.holder) {
+      if (!settles(up, stop)) continue;
+      const to = cutTo(walk.token.id);
+      return to ? { ...at, x: to.x, y: to.y, elevation: to.elevation } : at;
+    }
+    return at;
+  };
   for (const walk of parts.walks.all) {
     if (!walk.isPublic) continue;
     const stop = parts.stops.get(walk.group.named);
-    const moved = stop?.at?.get(walk);
-    if (moved) out.set(walk.token.id, { x: moved.x, y: moved.y, elevation: moved.elevation });
-    else pose(stop ? stoppedAt(walk, stopIndex(walk, stop), readOf(stop)) : placedAt(walk, walk.spots.length - 1));
+    pose(stop ? landedAt(walk, stop) : placedAt(walk, walk.spots.length - 1));
   }
   for (const walk of (parts.rest ?? parts.walks).all) if (!walk.isPublic) pose(placedAt(walk, walk.spots.length - 1));
   // A stop that stands the named token squeezed short of its walk's end lands it on the ground under its squeezed footprint, as
@@ -1439,6 +1462,21 @@ export function trapLandings(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const named = cut.t === "token.move" && cut.squeeze === true && cut.elevation !== undefined && parts.stops.has(cut.tokenId) ? out.get(cut.tokenId) : undefined;
   if (named && cut.t === "token.move" && cut.elevation !== undefined) out.set(cut.tokenId, { ...named, elevation: cut.elevation });
   return out;
+}
+
+/**
+ * Whether a dragged creature a stop leaves at `at` cannot end there, from
+ * change format 64 (moveLeg.ts dragEnd), its holders up its chain where
+ * the stop leaves them.
+ */
+function endMoves(before: RoomState, walk: Walk, at: Token, stopped: (w: Walk) => Token, env: { opVersion?: number }): boolean {
+  const chain: HolderEnd[] = [];
+  for (let h: Walk | undefined = walk.holder; h; h = h.holder) {
+    const there = stopped(h);
+    // Only the named token's own move leaves it squeezed (moveLeg.ts HolderEnd).
+    chain.push({ move: h.entry, at: { sceneId: h.entry.to.sceneId, x: there.x, y: there.y, elevation: there.elevation }, squeezed: !h.holder && there.squeeze === true });
+  }
+  return dragEnd(before, walk.token, { x: at.x, y: at.y, elevation: at.elevation }, walk.entry.to.sceneId, chain, env) !== null;
 }
 
 /** The trap step's plan of a move with the walks it read and its stops, or null where it reads none. `rest` is null with no private pass. */
@@ -1859,7 +1897,10 @@ function movedIn(m: Moment, walk: Walk): Token | undefined {
 function placedIn(m: Moment, walk: Walk): Token {
   const stop = m.stops.get(walk.group.named);
   if (stop && compareProgress(m.p, stop.until) > 0) return stoppedAt(walk, stopIndex(walk, stop), readOf(stop));
-  const at = placedAt(walk, latestIndex(walk.spots, m.p));
+  const j = latestIndex(walk.spots, m.p);
+  const at = placedAt(walk, j);
+  // One that arrives off its way's end stands there as it lands, at the height it lands at (`Walk.arrives`).
+  if (walk.arrives && j === walk.spots.length - 1) return at;
   return walk.ownProgress ? { ...at, elevation: walkAt(walk.entry, m.p).elevation } : at;
 }
 

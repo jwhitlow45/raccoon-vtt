@@ -871,9 +871,12 @@ describe("the trap step reads a walk the move takes along by its holder's moment
   for (const [name, g] of GRIDS) {
     test(`${name}: a hidden ogre the goblin drags behind the warhorse coming down from 40 ft into the keep is hit by a sphere over the corridor's hex 1 at the height the move has it as the warhorse sets the trap off`, () => {
       for (const [who, actor] of [["Pat", P1], ["the DM", DM]] as const) {
+        // From change format 64, on hex columns the DM's move leaves the ogre on the goblin's hex, so with no stand clear of it by the
+        // corridor it is let go at its start (moveLeg.ts dragEnd, D-261120-006). The random rooms of hexFile.random.test.ts read the
+        // trap step's moments from 64.
         for (const v of [61, 62, 63]) {
           const at = `${who}, op ${v}`;
-          const version = v === 63 ? {} : { opVersion: v };
+          const version = { opVersion: v };
           const { s, path } = keepOf(g, 1, 0, "horse");
           s.tokens.horse = { ...s.tokens.horse!, elevation: 40 };
           s.tokens.gob = { ...s.tokens.gob!, elevation: 40 };
@@ -1099,8 +1102,10 @@ describe("a creature in single file whose way by the one ahead ends out of reach
             for (const [i, [a, ha]] of hexes.entries()) for (const [b, hb] of hexes.slice(i + 1)) if (ha.some((h) => hb.includes(h))) out.add(`${a}+${b}`);
             return out;
           };
+          // At op 63 itself: from 64 a drag that cannot end on its spot lands beside its holder, and one every player sees may take a
+          // hex a hidden one ends on (moveLeg.ts dragEnd, D-261120-006).
           const old = shared(62);
-          for (const pair of shared()) assert.ok(old.has(pair), `${name} seed ${seed}: ${pair} share a hex only at op 63`);
+          for (const pair of shared(63)) assert.ok(old.has(pair), `${name} seed ${seed}: ${pair} share a hex only at op 63`);
           checked++;
         }
       }

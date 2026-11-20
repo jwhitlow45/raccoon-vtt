@@ -11,7 +11,7 @@ import { offGridWallThrough, ownWalk, walkEnd } from "../rules/movement.ts";
 import { linkHolds, onHolder } from "../rules/attach.ts";
 import { footprintRect } from "../rules/footprint.ts";
 import { SQUARES } from "../rules/grid.ts";
-import { planWalks, walkedIn } from "../rules/moveLeg.ts";
+import { planWalks, walkedIn, wayOf } from "../rules/moveLeg.ts";
 import { planTrapMove, trapLandings, trapWalks } from "../rules/traps.ts";
 import { chance, env, int, member, P1, P2, pick, rng, room, scene, token, trap } from "../testutil.ts";
 
@@ -128,11 +128,11 @@ function standsClear(before: RoomState, after: RoomState, at: string): void {
  * the trap step leaves them (`trapLandings`) still holds after the move
  * (review FU45B-ASTRA-11).
  */
-function linksKept(before: RoomState, landed: ReadonlyMap<string, { x: number; y: number; elevation: number }>, after: RoomState, at: string): void {
+function linksKept(before: RoomState, landed: ReadonlyMap<string, { x: number; y: number; elevation: number }>, after: RoomState, at: string, letGo: ReadonlySet<string> = new Set()): void {
   const poseOf = (id: string): Token => ({ ...before.tokens[id]!, ...landed.get(id) });
   for (const t of Object.values(before.tokens)) {
     const link = t?.attached;
-    if (!t || !link || t.visibility === "dm" || before.tokens[link.to]!.visibility === "dm") continue;
+    if (!t || !link || t.visibility === "dm" || before.tokens[link.to]!.visibility === "dm" || letGo.has(t.id)) continue;
     if (!linkHolds(SQUARES, before.meta.settings, link.kind, poseOf(t.id), poseOf(link.to))) continue;
     assert.equal(after.tokens[t.id]!.attached?.to, link.to, `${at}: ${t.id} still held by ${link.to}`);
   }
@@ -166,7 +166,8 @@ function copies(s: RoomState, viewers: readonly Viewer[] = [P1, P2]): string[] {
 
 /** The plan's walks as plain points, to compare two rooms' plans. */
 function walksOfPlan(op: Op, s: RoomState): string {
-  return JSON.stringify(planWalks(op, s, P1, {}).map((m) => [m.tokenId, m.pass, m.route.map((p) => [p.x, p.y, p.elevation])]));
+  // Its way too, which the trap step reads where a drag arrives off its way's end (moveLeg.ts wayOf, dragEnd).
+  return JSON.stringify(planWalks(op, s, P1, {}).map((m) => [m.tokenId, m.pass, m.route.map((p) => [p.x, p.y, p.elevation]), wayOf(m).route.map((p) => [p.x, p.y, p.elevation])]));
 }
 
 /** The tokens players see that a holder they cannot see carries, drags or seats, at any depth up the chain of holders. */
@@ -241,7 +242,7 @@ function pairedTwin(state: RoomState, op: Op, r: () => number, at: string): Twin
     const twin = structuredClone(base);
     for (let k = 0, n = int(r, 1, 3); k < n; k++) {
       const m = pick(r, hidden);
-      const p = pick(r, m.route);
+      const p = pick(r, wayOf(m).route);
       const x = q(p.x + (r() * 2 - 0.5));
       const y = q(p.y + (r() * 2 - 0.5));
       const len = pick(r, [0.25, 0.375, 0.5]);
@@ -324,7 +325,9 @@ describe("squares: random loops and cuts in single file (review FU45B-ASTRA-06 t
         assert.deepEqual([t.x, t.y, t.elevation], [pose.x, pose.y, pose.elevation], `${at}: ${id} where the trap step left it`);
       }
       standsClear(s, r.state, at);
-      linksKept(s, landed, r.state, at);
+      // A drag with no spot to end on in reach is let go where the move leaves it (moveLeg.ts dragEnd).
+      const letGo = new Set(cutWalks.filter((m) => m.letGo === true).map((m) => m.tokenId));
+      linksKept(s, landed, r.state, at, letGo);
       seatsKept(s, landed, r.state, at);
       const paired = pairedTwin(s, op, rng(seed * 104729 + 3), at);
       if (paired.kept) twins++;
@@ -333,7 +336,7 @@ describe("squares: random loops and cuts in single file (review FU45B-ASTRA-06 t
       // Every link the public pass walks holds: one under a holder players cannot see may let go, unread (D-261101-397).
       for (const m of walks) {
         const link = s.tokens[m.tokenId]!.attached;
-        if (!link || m.pass !== "public") continue;
+        if (!link || m.pass !== "public" || letGo.has(m.tokenId)) continue;
         assert.equal(r.state.tokens[m.tokenId]!.attached?.to, link.to, `${at}: ${m.tokenId} still held`);
       }
     }

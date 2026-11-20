@@ -5,7 +5,8 @@ import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { occupiedHexes } from "#shared/rules/footprint.ts";
+import { linkHolds, overlaps } from "#shared/rules/attach.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
 import { hexCenter, hexDistance, hexKey, sceneHexes, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { hexStandPlace } from "#shared/rules/movement.ts";
@@ -133,7 +134,13 @@ for (const [name, g] of [
           assert.equal(hexOf(g, after, "horse"), hexKey(target), `${where}: the warhorse under the finger`);
           assert.equal(after.tokens.horse!.squeeze, undefined, `${where}: full size`);
           assert.equal(after.tokens.gob!.attached?.to, "horse", `${where}: the captive still in tow`);
-          assert.ok(on(g, occupiedHexes(g, after.tokens.gob!)[0]!).col <= 15, `${where}: the captive out of the corridor with it, on ${hexOf(g, after, "gob")}`);
+          // From change format 64 it ends on a hex of its own off the warhorse, in reach (D-261120-006). Before, the half
+          // hex the warhorse's box grows by as it stands up left it on a hex corner over the warhorse's hexes (LP45-DRAG-1).
+          const gob = after.tokens.gob!;
+          const own = placedOnHex(g, gob, tokenRefHex(g, gob));
+          assert.ok(Math.abs(own.x - gob.x) < 1e-9 && Math.abs(own.y - gob.y) < 1e-9, `${where}: the captive on its own hex, on ${gob.x}, ${gob.y}`);
+          assert.ok(!overlaps(g, gob, after.tokens.horse!), `${where}: the captive off the warhorse, on ${hexOf(g, after, "gob")}`);
+          assert.ok(linkHolds(g, after.meta.settings, "drag", gob, after.tokens.horse!), `${where}: the captive in reach`);
         }
       }
     });

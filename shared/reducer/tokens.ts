@@ -343,6 +343,8 @@ export function carriedAlong(tx: Tx, op: Op): Carried[] {
     const next: Token = { ...token, sceneId: plan.to.sceneId, x: plan.to.x, y: plan.to.y, elevation: plan.to.elevation };
     // A squeeze is where the token stood at its size, and only its own move takes one.
     delete next.squeeze;
+    // A drag with no spot to end on in its holder's reach is let go where the walk leaves it (moveLeg.ts settledDrag).
+    if (plan.letGo) delete next.attached;
     out.push({ token, next, plan });
   }
   return out;

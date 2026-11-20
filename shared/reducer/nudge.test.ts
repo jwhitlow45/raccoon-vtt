@@ -133,10 +133,16 @@ describe("what a move takes along keeps a placement where it still holds (5.3)",
     allValid(s);
   });
 
-  test("a holder held off its grid drags its goblin off the goblin's grid, which clears its nudge", () => {
-    const s = run(stable(), { t: "token.move", tokenId: "horse", x: 10.5, y: 6 });
-    assert.equal(s.tokens.gob!.x % 1 === 0, false, "dragged by the holder's own move");
-    assert.equal(nudgeOf(s, "gob"), undefined);
+  test("a holder held off its grid drags its goblin off the goblin's grid at op 63, which clears its nudge, and from 64 onto its own grid off the holder, nudge and all (D-261120-006)", () => {
+    const op = opSchema.parse({ t: "token.move", tokenId: "horse", x: 10.5, y: 6 });
+    const old = applyOp(stable(), op, DM, { ...env(seq++), opVersion: 63 });
+    assert.ok(old.ok);
+    assert.equal(old.state.tokens.gob!.x % 1 === 0, false, "dragged by the holder's own move");
+    assert.equal(nudgeOf(old.state, "gob"), undefined);
+    allValid(old.state);
+    const s = run(stable(), op);
+    assert.deepEqual([s.tokens.gob!.x, s.tokens.gob!.y], [13, 6], "the nearest square of its own off the warhorse");
+    assert.deepEqual(nudgeOf(s, "gob"), { x: -2, y: 0 });
     allValid(s);
   });
 

@@ -10,7 +10,7 @@ import { handoutPages } from "./handouts.ts";
 import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "./rules/distance.ts";
-import { checkSetReach, planMove, planWalks, walkedIn, wayOf } from "./rules/moveLeg.ts";
+import { checkSetReach, planMove, planWalks, walkedIn, wayOf, type MovedToken } from "./rules/moveLeg.ts";
 import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hexAt, hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
@@ -2124,7 +2124,10 @@ function draggedWalls(c: Check, op: Op): Decision {
     const rider = ownEntry(c.state.tokens, m.tokenId);
     return m.carriedBy === first && m.pass === "public" && rider?.attached && onHolder(rider.attached.kind) ? [rider] : [];
   });
-  const far = fileOutOfReach(gridOfToken(c.state, token), c.state.meta.settings, token, lead.to, (id) => ownEntry(c.state.tokens, id), new Map(filed.map((m) => [m.tokenId, m.to])), riders);
+  // Each where its walk ends, as the device that sends the move reads it, before a drag that cannot end there lands beside its
+  // holder or is let go (rules/moveLeg.ts wayOf, dragEnd).
+  const walkedTo = (m: MovedToken) => (m.carried ? { ...m.to, ...m.carried.route[m.carried.route.length - 1]! } : m.to);
+  const far = fileOutOfReach(gridOfToken(c.state, token), c.state.meta.settings, token, lead.to, (id) => ownEntry(c.state.tokens, id), new Map(filed.map((m) => [m.tokenId, walkedTo(m)])), riders);
   const left = far !== null ? ownEntry(c.state.tokens, far) : undefined;
   return left ? refuse("forbidden", `${shownName(left)} can't follow through there.`) : OK;
 }
