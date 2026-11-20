@@ -88,20 +88,52 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
  * Takes every walk off its creature at a turn's end, from op version 65
  * (walksEndWithTurn), so the room keeps no walk past its turn, as no
  * player's copy does. Returns those of the turn `ended` names, for its
- * Next's step (`EncounterSnapshot.walks`), in id order. One from an earlier
- * turn, stored before op version 64, goes without a trace, since no turn
- * can resume to read it.
+ * Next's step (`EncounterSnapshot.walks`), in id order. A walk of
+ * `resumes`, the turn a Previous resumes, stays: only a Next from before
+ * op version 65 leaves one, since a turn's seq is never reused. Any other
+ * walk a room kept from before 65 goes into the history step that ended
+ * its turn (keepOlderWalks), so Previous can still put it back.
  */
-function endWalks(tx: Tx, ended: number | undefined): SavedWalk[] {
+function endWalks(tx: Tx, ended: number | undefined, resumes?: number): SavedWalk[] {
   if (!walksEndWithTurn(tx.env.opVersion)) return [];
   const saved: SavedWalk[] = [];
+  const older = new Map<number, SavedWalk[]>();
   for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : 1))) {
-    if (token.path === undefined) continue;
+    if (token.path === undefined || token.path.turn === resumes) continue;
     const { path, ...rest } = token;
     tx.write(keys.token(token.id), rest);
-    if (path.turn === ended) saved.push({ tokenId: token.id, sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation, path: withoutSeenBy(path) });
+    const walk: SavedWalk = { tokenId: token.id, sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation, path: withoutSeenBy(path) };
+    if (path.turn === ended) saved.push(walk);
+    else older.set(path.turn, [...(older.get(path.turn) ?? []), walk]);
   }
+  if (older.size > 0) keepOlderWalks(tx, older);
   return saved;
+}
+
+/**
+ * Keeps each walk a room held from before op version 65 in the history
+ * step whose Next ended its turn, one saved before 65, which holds no
+ * `walks` (D-261120-105). A step from 65 on always holds them, so it never
+ * takes one. Kept only while the history stays within HISTORY_BYTES. A walk
+ * no step ended goes without a trace, since no Previous can resume its
+ * turn.
+ */
+function keepOlderWalks(tx: Tx, older: ReadonlyMap<number, SavedWalk[]>): void {
+  const history = tx.state.encounterHistory;
+  let bytes = history.reduce((total, step) => total + stepBytes(step), 0);
+  let changed = false;
+  const kept = history.map((step) => {
+    const seq = step.encounter.turnStart?.seq;
+    const walks = step.walks === undefined && seq !== undefined ? older.get(seq) : undefined;
+    if (!walks) return step;
+    const next = { ...step, walks };
+    const grown = stepBytes(next) - stepBytes(step);
+    if (bytes + grown > HISTORY_BYTES) return step;
+    bytes += grown;
+    changed = true;
+    return next;
+  });
+  if (changed) tx.write(keys.encounterHistory, kept);
 }
 
 /**
@@ -577,9 +609,9 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
     tx.putActor(landingActor, { ...landingActor.actor, legendary: { ...landingActor.actor.legendary, actionsUsed: 0 } });
   }
 
-  // The turn's walks end with it, kept in its step for Previous (walksEndWithTurn).
-  const walks = endWalks(tx, turnUnderWay(encounter)?.seq);
-  if (walks.length > 0) snapshot.walks = walks;
+  // The turn's walks end with it, kept in its step for Previous (walksEndWithTurn). From 65 every step holds the list,
+  // empty too, so one without it is a step from before 65 (keepOlderWalks).
+  if (walksEndWithTurn(tx.env.opVersion)) snapshot.walks = endWalks(tx, turnUnderWay(encounter)?.seq);
 
   // After the reveal, so a creature this turn reveals has its starting spot marked as its turn line is.
   let turned = withTurn(tx, { ...encounter, round, entries }, step.landing);
@@ -771,9 +803,10 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
     undoStep(tx, step);
   }
   tx.write(keys.encounterHistory, history.slice(0, history.length - steps.length));
-  // The turn taken back ends its walks, and the one that resumes gets its own back (walksEndWithTurn).
+  // The turn taken back ends its walks, and the one that resumes gets its own back (walksEndWithTurn). A step from before
+  // 65 saved none, and left the resumed turn's walk on its creature, where it stays.
   if (walksEndWithTurn(tx.env.opVersion)) {
-    endWalks(tx, undefined);
+    endWalks(tx, undefined, turnUnderWay(tx.state.encounter)?.seq);
     walksBack(tx, deepest);
   }
   if (taken) {

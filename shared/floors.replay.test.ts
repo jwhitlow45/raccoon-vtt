@@ -111,9 +111,10 @@ const SEQUENCES: Sequence[] = [
     ],
     steps: ["9d2de72fcf2cdb5756afe5de4e9a8b07", "179781c4dec72efc3db17df8a562a415", "3d4b03654936ec100c64f46ddabfc386", "762a0c35094565b095d947bdbcec2c56", "82d00e63def2854136551c9bccd1e083", "5a060229706c7c8eaf45c61e84fee585", "b1f6c14157b794fbd0700ea8d1c03bfe", "03924e19450b63ad8b5527cc02d6c297"],
     copies: ["ecca28346456f4affa1aefb7525a104e", "f98a2a3091c1868cfca23643ce5a91c0", "0ed3c50624402f56e6bbed36fcc0dabe"],
-    // From change format 64 a turn's end takes its walks off (D-261120-100), so sent today the second Next on differs.
+    // From change format 65 every Next keeps its turn's walks in its step and a turn's end takes them off (D-261120-100,
+    // 105), so sent today the first Next on differs.
     live: {
-      steps: ["9d2de72fcf2cdb5756afe5de4e9a8b07", "179781c4dec72efc3db17df8a562a415", "3d4b03654936ec100c64f46ddabfc386", "917d0583fa096f150c915df32c162891", "48e8e7ab834ffb01d4062b54e10a4ca1", "8d1b9dadf297d1200705045ac942c7b7", "143ff658b7edbc5908c97862b0e93767", "68570befe5739316f788ac49fa3d0e11"],
+      steps: ["9d2de72fcf2cdb5756afe5de4e9a8b07", "cb90ec8814b965c7080e18702b9a86db", "e81dc1bb5fbe1fdc353aedc6cb452549", "553acf5e8edf3d61898c261c4a424070", "38b47eaa8cefe03160fbc6a0117ea486", "d96095b63654b416a81acc8c3e76a94a", "099996769a568aee10fee031543a5c09", "68570befe5739316f788ac49fa3d0e11"],
       // Players' copies of the end are as they were: only the DM's held the walks past their turns.
       copies: ["ecca28346456f4affa1aefb7525a104e", "f98a2a3091c1868cfca23643ce5a91c0", "fc06939e6cb1c8163873198706b41802"],
     },

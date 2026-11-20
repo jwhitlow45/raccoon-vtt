@@ -30,26 +30,28 @@ const undoNow = (state: RoomState, entries: readonly RestoreEntry[]): Op => ({
 
 /**
  * The wolf's turn, named 7, with P1's hero next: the wolf, the DM's, at
- * 9,9. Each op gets the next seq. With `opVersion`, every op runs as one
- * stored at that version.
+ * 9,9. With `goblin`, the DM's goblin acts between them. Each op gets the
+ * next seq. With `opVersion`, every op runs as one stored at that version,
+ * unless `run` names another.
  */
-function fight(opVersion?: number) {
-  const state = room({ tokens: { wolf: token("wolf", { x: 9, y: 9 }), hero: token("hero", { kind: "pc", ownerIds: ["p1"], x: 2, y: 2 }) } });
+function fight(opVersion?: number, goblin = false) {
+  const state = room({ tokens: { wolf: token("wolf", { x: 9, y: 9 }), gob: token("gob", { x: 15, y: 15 }), hero: token("hero", { kind: "pc", ownerIds: ["p1"], x: 2, y: 2 }) } });
   state.meta.settings = { ...state.meta.settings, playersMoveAny: "all" };
   state.encounter = {
     rev: 0,
     round: 1,
     activeEntryId: "rwolf",
-    entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rhero", { tokenId: "hero", value: 5 })],
+    entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), ...(goblin ? [entry("rgob", { tokenId: "gob", value: 10 })] : []), entry("rhero", { tokenId: "hero", value: 5 })],
     turnStart: { entryId: "rwolf", tokenId: "wolf", sceneId: "s1", x: 9, y: 9, elevation: 0, seen: true, seq: 7 },
   };
   const f = {
     state,
     seq: 10,
     inverse: null as RestoreEntry[] | null,
-    run(op: Op, who: Viewer = DM) {
+    // `version` null runs the op live.
+    run(op: Op, who: Viewer = DM, version: number | null | undefined = opVersion) {
       f.seq++;
-      const result = applyOp(f.state, op, who, { seq: f.seq, at: AT, ...(opVersion !== undefined ? { opVersion } : {}) });
+      const result = applyOp(f.state, op, who, { seq: f.seq, at: AT, ...(version != null ? { opVersion: version } : {}) });
       assert.ok(result.ok, result.ok ? "" : `${op.t}: ${result.message}`);
       f.state = result.state;
       f.inverse = result.inverse;
@@ -103,12 +105,49 @@ describe("a walk ends with its turn (D-261120-100)", () => {
     assert.ok(f.path("wolf"));
   });
 
-  test("an older walk a room kept from before op version 64 goes at the next turn's end, and no step keeps it", () => {
+  test("an older walk a room kept from before op version 65 goes at the next turn's end, and a step of a turn it did not walk keeps none", () => {
     const f = fight();
     f.state.tokens.hero = { ...f.state.tokens.hero!, path: { turn: 3, stops: [{ x: 1, y: 2, elevation: 0, seen: true }, { x: 2, y: 2, elevation: 0, seen: true }] } };
     f.run(NEXT);
     assert.equal(f.path("hero"), undefined);
-    assert.equal(f.state.encounterHistory.at(-1)!.walks, undefined);
+    assert.deepEqual(f.state.encounterHistory.at(-1)!.walks, [], "every step from 65 holds its walks, none here");
+  });
+
+  /** Feet walked on a walk, as movement used reads them. */
+  const feet = (path: TokenPath | undefined) => (path?.stops ?? []).reduce((total, stop) => total + (stop.moved ?? 0), 0);
+
+  test("Previous at 65 over a step saved at 64 keeps the resumed turn's walk where 64 left it (FLR4INT-ASTRA-07)", () => {
+    const f = fight(64).run(move("wolf", 11, 9), P1).run(move("wolf", 9, 9), P1);
+    const walked = f.path("wolf");
+    assert.equal(feet(walked), 20, "10 ft out and 10 ft back");
+    f.run(NEXT);
+    assert.equal(f.state.encounterHistory.at(-1)!.walks, undefined, "a step saved at 64 holds no walks");
+    f.run(PREV, DM, null);
+    assert.deepEqual(f.path("wolf"), walked);
+    assert.equal(feet(pathThisTurn(f.state.encounter, f.state.tokens.wolf!) ?? undefined), 20, "Moved 20 ft, used 20 ft");
+  });
+
+  test("a turn's end at 65 keeps a walk from before 65 in the step saved at 64 that ended its turn, so Previous still brings it back", () => {
+    const f = fight(64, true).run(move("wolf", 11, 9), P1).run(move("wolf", 9, 9), P1);
+    const walked = f.path("wolf")!;
+    f.run(NEXT);
+    assert.equal(f.state.encounter?.activeEntryId, "rgob");
+    f.run(NEXT, DM, null);
+    assert.equal(f.path("wolf"), undefined, "the goblin's turn's end at 65 takes the wolf's walk off");
+    assert.deepEqual(f.state.encounterHistory.map((step) => step.walks?.map((w) => w.tokenId)), [["wolf"], []], "into the wolf's step, and the goblin's step holds none");
+    f.run(PREV, DM, null).run(PREV, DM, null);
+    assert.equal(f.state.encounter?.activeEntryId, "rwolf");
+    assert.deepEqual(f.path("wolf"), walked, "the wolf's turn resumes with its walk");
+    assert.equal(feet(f.path("wolf")), 20);
+  });
+
+  test("Previous at 65 over a step whose turn left no walks takes the taken-back turn's walk off (FLR4-OPUS-12)", () => {
+    const f = fight().run(NEXT).run(move("hero", 3, 2), P1);
+    assert.ok(f.path("hero"), "the hero walks on its turn");
+    assert.deepEqual(f.state.encounterHistory.at(-1)!.walks, []);
+    f.run(PREV);
+    assert.equal(f.state.encounter?.activeEntryId, "rwolf");
+    assert.deepEqual(Object.values(f.state.tokens).filter((t) => t.path !== undefined).map((t) => t.id), [], "no walk is left");
   });
 
   test("a step keeps no list of who saw a stop", () => {
