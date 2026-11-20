@@ -513,8 +513,22 @@ export function hexFileClasses<T extends PlacedToken>(shown: readonly T[], hidde
  * follow, `fileHeightsAlong`), so without it a goblin a warhorse brings
  * down from 40 ft reached the ground on its last hex while the warhorse
  * was still 20 ft up.
+ *
+ * With `directWhereFar`, from op version 63 (HEXFILE-OPUS-3, migrate.ts
+ * fileGoesDirectWhereFar), one a hex step or less from the holder's start
+ * whose way by the one ahead ends more than a hex step from its holder's
+ * end steps straight onto the holder's start where that way ends clear and
+ * within a hex step of it. A longer straight way could cut the rock the
+ * way by the one ahead walks round. Its holder is the
+ * holder at the walk's end, its full footprint as the link pass reads it,
+ * or one ahead of it in the file on its last hex. In a corridor that folds
+ * back, the tie toward the one ahead sent a second goblin round the first
+ * and left it two hexes from the warhorse that drags it, so the move was
+ * held for reach where the straight way kept it beside the warhorse. A hex
+ * step is drag reach on hexes (attach.ts withinReach): the choice reads no
+ * height, and the reach check that judges the walk after it still does.
  */
-export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[], byHex = false, endsWithHolder = byHex): Map<string, FilePoint[]> {
+export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Point[], classes: readonly (readonly (PlacedToken & { id: string })[])[], byHex = false, endsWithHolder = byHex, directWhereFar = byHex): Map<string, FilePoint[]> {
   const out = new Map<string, FilePoint[]>();
   const n = points.length - 1;
   if (n < 1) return out;
@@ -528,25 +542,49 @@ export function hexFileRoutes(g: HexGrid, lead: PlacedToken, points: readonly Po
     const end: FileAlong = [n - 1, steps(n - 1), steps(n - 1)];
     // Those ahead in the file, the holder first: the hex each starts on and its hexes from there onto the holder's start.
     const ahead: { hex: Hex; onto: readonly Hex[] }[] = [{ hex: fileHex(0), onto: [] }];
+    // Where each holder the file reads ends: the holder's full footprint at its last point, and each one placed in the file on its
+    // last hex (`directWhereFar`).
+    const leadId = (lead as { id?: string }).id;
+    const leadEnd = occupiedHexes(g, { size: lead.size, x: points[n]!.x, y: points[n]!.y, ...(lead.w !== undefined ? { w: lead.w } : {}), ...(lead.h !== undefined ? { h: lead.h } : {}) });
+    const ends = new Map<string, Hex>();
     for (const members of classes) {
       for (const member of fileOrder(lead, members)) {
         const start = tokenRefHex(g, member);
-        // Onto the holder's start by the nearest start ahead of it, the latest in the file on a tie, then that one's way on from there.
-        const by = ahead.reduce((best, a) => (hexDistance(g, start, a.hex) <= hexDistance(g, start, best.hex) ? a : best));
-        const onto = [...hexLine(g, start, by.hex).slice(1), ...by.onto];
-        ahead.push({ hex: start, onto });
-        // Up to the holder's first corner its hexes are reached evenly over the holder's first piece, as the straight walk there
-        // was, so a stop early on finds it near its start, and past it each hex as the holder's own hex there is reached.
-        const first = [...onto, ...lines[0]!];
-        const walked: { hex: Hex; along: FileAlong }[] = [{ hex: start, along: [0, 0, Math.max(1, first.length)] }];
-        first.forEach((hex, t) => walked.push({ hex, along: [0, t + 1, first.length] }));
-        lines.slice(1).forEach((line, i) => line.forEach((hex, k) => walked.push({ hex, along: [i + 1, k + 1, steps(i + 1)] })));
-        let last = 0;
-        for (let k = walked.length - 1; k > 0; k--) {
-          if (taken.has(hexKey(walked[k]!.hex))) continue;
-          last = k;
-          break;
+        // Its walk onto the holder's start by `by`, then that one's way on from there. Up to the holder's first corner its hexes
+        // are reached evenly over the holder's first piece, as the straight walk there was, so a stop early on finds it near its
+        // start, and past it each hex as the holder's own hex there is reached. It ends on its latest hex nobody has taken.
+        const walkBy = (by: { hex: Hex; onto: readonly Hex[] }) => {
+          const onto = [...hexLine(g, start, by.hex).slice(1), ...by.onto];
+          const first = [...onto, ...lines[0]!];
+          const walked: { hex: Hex; along: FileAlong }[] = [{ hex: start, along: [0, 0, Math.max(1, first.length)] }];
+          first.forEach((hex, t) => walked.push({ hex, along: [0, t + 1, first.length] }));
+          lines.slice(1).forEach((line, i) => line.forEach((hex, k) => walked.push({ hex, along: [i + 1, k + 1, steps(i + 1)] })));
+          let last = 0;
+          for (let k = walked.length - 1; k > 0; k--) {
+            if (taken.has(hexKey(walked[k]!.hex))) continue;
+            last = k;
+            break;
+          }
+          return { onto, walked, last, ends: walked[last]!.hex };
+        };
+        // Onto the holder's start by the nearest start ahead of it, the latest in the file on a tie.
+        let way = walkBy(ahead.reduce((best, a) => (hexDistance(g, start, a.hex) <= hexDistance(g, start, best.hex) ? a : best)));
+        // Where that way ends more than a hex step from its holder's end, and the straight way onto the holder's start ends clear
+        // within one, it goes straight. Only from a hex a step or less from that start: the step lies between two hexes creatures
+        // stand on, where a longer straight way may cut the rock the way by the one ahead walks round. A holder the file has not
+        // placed, or outside it, keeps the way by the one ahead.
+        if (directWhereFar && hexDistance(g, start, ahead[0]!.hex) <= 1) {
+          const to = (member as { attached?: { to: string } }).attached?.to;
+          const holder = to === undefined ? null : to === leadId ? leadEnd : ends.has(to) ? [ends.get(to)!] : null;
+          const far = (end: Hex) => holder !== null && holder.every((h) => hexDistance(g, h, end) > 1);
+          if (far(way.ends)) {
+            const straight = walkBy(ahead[0]!);
+            if (!far(straight.ends) && !taken.has(hexKey(straight.ends))) way = straight;
+          }
         }
+        const { onto, walked, last } = way;
+        ahead.push({ hex: start, onto });
+        ends.set(member.id, way.ends);
         const walk: FilePoint[] = walked.slice(0, last + 1).map((w, k) => ({ ...(k === 0 ? { x: member.x, y: member.y } : placedOnHex(g, member, w.hex)), along: w.along }));
         const there = walk[walk.length - 1]!;
         while (walk.length < n + 1) walk.push({ x: there.x, y: there.y, along: end });

@@ -1487,7 +1487,8 @@ export const opMigrations: MigrationStep[] = [
   {
     // Hex walks in single file that settle (DROP_SEAT_OP_VERSION): no stored op changes shape, so the step is the identity.
     // From this version a walk in single file on hexes that reaches its last hex before its holder ends holds that hex to the
-    // holder's end (`fileEndsWithHolder`). Ops stored before replay as they ran.
+    // holder's end (`fileEndsWithHolder`), and one whose way by the one ahead ends out of a hex step of its holder goes straight
+    // onto the holder's start where that ends within one (`fileGoesDirectWhereFar`). Ops stored before replay as they ran.
     // Deploy: back up the database just before, and reload open pages. Rollback needs the backup only for a room with
     // version 63 ops after its last snapshot, which an older build refuses.
     from: 62,
@@ -2131,6 +2132,21 @@ export const DROP_SEAT_OP_VERSION = 63;
  * take today's rule.
  */
 export function fileEndsWithHolder(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
+}
+
+/**
+ * Whether, on hexes, a creature in single file whose way onto its holder's
+ * start by the nearest one ahead of it (D-261114-051) ends more than a hex
+ * step from its holder's end steps straight onto the holder's start
+ * instead, from a hex a step or less from it, where that way ends clear and
+ * within a hex step (HEXFILE-OPUS-3, route.ts hexFileRoutes). In a corridor
+ * folded back, a second goblin then stays beside the warhorse that drags
+ * it, where the move was held for reach. Ops stored before version 63
+ * always went by the one ahead, and replay so. Live ops carry no stored
+ * version and take today's rule.
+ */
+export function fileGoesDirectWhereFar(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < DROP_SEAT_OP_VERSION);
 }
 

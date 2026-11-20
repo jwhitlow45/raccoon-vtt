@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { CreatureSize, RoomState, Token } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
-import { DROP_SEAT_OP_VERSION, fileEndsWithHolder, followsHexByHex, HEX_FILE_OP_VERSION, OP_VERSION, opMigrations, runMigrations, stopsLandNamed } from "../migrate.ts";
+import { DROP_SEAT_OP_VERSION, fileEndsWithHolder, fileGoesDirectWhereFar, followsHexByHex, HEX_FILE_OP_VERSION, OP_VERSION, opMigrations, runMigrations, stopsLandNamed } from "../migrate.ts";
 import { applyOp } from "../reducer.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { DM, entry, env, P1, template, token, trap } from "../testutil.ts";
@@ -15,7 +15,9 @@ import { checkSetReach, planMove, planWalks } from "./moveLeg.ts";
 import { hexStandAt, hexStandHexes, hexStandPlace, ownWalk } from "./movement.ts";
 import { compareAlong, fileHeightsAlong, hexFileClasses, hexFileRoutes, pieceReach, pointAt, routeWalkers, seatShift } from "./route.ts";
 import { planTrapMove, trapLandings, trapMoments, trapSpotHeights, trapWalks } from "./traps.ts";
-import { intoCorridor, keepOf } from "../reducer/hexFile.testkit.ts";
+import { insideCaseOf, intoCorridor, keepOf, withImpAhead, withMouse } from "../reducer/hexFile.testkit.ts";
+import { routeWorld } from "./hexWalk.ts";
+import { groupWalkWorld } from "./walkWorld.ts";
 
 /**
  * Single file on hexes (RIDE-SINGLE-FILE-HEX, D-261107-172, D-261107-252,
@@ -1026,6 +1028,87 @@ describe("a trap's cut keeps how far along the cut lead's walk each point of a w
   }
 });
 
+/**
+ * hexfile's fold (HEXFILE-OPUS-3): open ground two hexes round 15, 15, and a corridor one hex wide from three hexes on along the
+ * lattice's direction 0, four hexes that way, then four more turned two sixths, rock everywhere else. The warhorse stands squeezed
+ * on the corridor's hex `at`, and a goblin and a grik stand on the hexes `gob` and `grik`, each dragged by the warhorse.
+ */
+function foldOf(g: HexGrid, at: number, gob: number, grik: number): { s: RoomState; corridor: Hex[] } {
+  const C: Hex = { col: 15, row: 15 };
+  const step = (h: Hex, d: number) => hexNeighbors(g, h)[d % 6]!;
+  let h = step(step(step(C, 0), 0), 0);
+  const corridor: Hex[] = [h];
+  for (let k = 1; k < 8; k++) corridor.push((h = step(h, k < 4 ? 0 : 2)));
+  const open = new Set(corridor.map(hexKey));
+  const s = hexWallRoom(g.orient === "rows" ? "hexRows" : "hexColumns", 32, 32, wallsRound(g, { w: 32, h: 32 }, (q) => hexDistance(g, q, C) > 2 && !open.has(hexKey(q))));
+  const horse = onHex(g, "horse", "large", corridor[at]!, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+  s.tokens.horse = { ...horse, ...hexStandPlace(g, horse, { size: "medium", ref: corridor[at]!, squeezed: true }), squeeze: true };
+  s.tokens.gob = onHex(g, "gob", "medium", corridor[gob]!, { name: "Goblin", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+  s.tokens.grik = onHex(g, "grik", "medium", corridor[grik]!, { name: "Grik", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+  return { s, corridor };
+}
+
+describe("a creature in single file whose way by the one ahead ends out of reach goes straight onto the holder's start (route.ts hexFileRoutes, HEXFILE-OPUS-3)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: in a fold, the one the way round the goblin leaves two hexes from the warhorse goes straight and stays beside it, Pat's move taken, where op 62 holds it for reach`, () => {
+      // The warhorse a hex back from the fold's hex 2 with the goblin and the grik behind it in either order, and on from hex 4 past them.
+      for (const [at, gob, grik, to, far] of [
+        [2, 3, 4, 1, "grik"],
+        [2, 4, 3, 1, "gob"],
+        [4, 3, 2, 5, "grik"],
+      ] as const) {
+        const where = `the warhorse on ${at} to ${to}, the goblin on ${gob}, the grik on ${grik}`;
+        const { s, corridor } = foldOf(g, at, gob, grik);
+        const op = intoCorridor(g, s, corridor[to]!);
+        const ended = (opVersion?: number) => {
+          const walks = planWalks(op, s, P1, opVersion === undefined ? {} : { opVersion });
+          const pose = (id: string): Token => ({ ...s.tokens[id]!, ...walks.find((m) => m.tokenId === id)!.to });
+          return { walks, holds: linkHolds(g, s.meta.settings, "drag", pose(far), pose("horse")) };
+        };
+        assert.equal(ended(62).holds, false, `${where}: op 62 leaves the ${far} out of reach`);
+        const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message}`);
+        const { walks, holds } = ended();
+        assert.ok(holds, `${where}: the ${far} ends in reach`);
+        const ends = walks.map((m) => refOf(g, { ...s.tokens[m.tokenId]!, ...m.to }));
+        assert.equal(new Set(ends).size, ends.length, `${where}: each on a hex of its own, ${ends.join(" ")}`);
+        // The device's own check of the warhorse's way lets the drag go too.
+        const points = [{ x: s.tokens.horse!.x, y: s.tokens.horse!.y }, ...op.route!.map(([x, y]) => ({ x, y }))];
+        assert.equal(routeWorld(groupWalkWorld(s, ownWalk(s.tokens.horse!), { role: "player" }).input).fileBlocked(points), null, `${where}: the device lets it go`);
+      }
+    });
+  }
+
+  test("the straight way is never taken onto a hex another in the file ends on: over the random corridors, no two in the file share a hex at op 63 that did not at op 62", () => {
+    // Rows seed 513: the straight way would take the goblin onto the hex the third one ends on, so it keeps the way by the one ahead.
+    const seen = insideCaseOf(513, ROWS)!;
+    const ends = (opVersion?: number) => new Map(planWalks(seen.op, seen.state, P1, opVersion === undefined ? {} : { opVersion }).map((m) => [m.tokenId, refOf(ROWS, { ...seen.state.tokens[m.tokenId]!, ...m.to })]));
+    assert.deepEqual([ends().get("tow0"), ends().get("tow2")], ["14,12", "15,12"]);
+    assert.equal(ends().get("tow0"), ends(62).get("tow0"), "as at op 62");
+    let checked = 0;
+    for (const [name, g] of GRIDS) {
+      for (let seed = 1; seed <= 800; seed++) {
+        const room = insideCaseOf(seed, g);
+        if (!room) continue;
+        for (const made of [room, withImpAhead(room, seed), withMouse(room, seed)]) {
+          if (!made) continue;
+          const shared = (opVersion?: number): Set<string> => {
+            const filed = planWalks(made.op, made.state, P1, opVersion === undefined ? {} : { opVersion }).filter((m) => m.file === true);
+            const hexes = filed.map((m) => [m.tokenId, occupiedHexes(g, { ...made.state.tokens[m.tokenId]!, ...m.to }).map(hexKey)] as const);
+            const out = new Set<string>();
+            for (const [i, [a, ha]] of hexes.entries()) for (const [b, hb] of hexes.slice(i + 1)) if (ha.some((h) => hb.includes(h))) out.add(`${a}+${b}`);
+            return out;
+          };
+          const old = shared(62);
+          for (const pair of shared()) assert.ok(old.has(pair), `${name} seed ${seed}: ${pair} share a hex only at op 63`);
+          checked++;
+        }
+      }
+    }
+    assert.ok(checked >= 2000, `${checked} moves`);
+  });
+});
+
 describe("change format 62 (HEX_FILE_OP_VERSION)", () => {
   test("the step is the identity, the rule is gated at 62, and a build at 61 refuses a room from this one", () => {
     const op = { t: "token.move", tokenId: "horse", x: 1, y: 2, squeeze: true, route: [[1, 2, 1, 0]] };
@@ -1045,6 +1128,7 @@ describe("change format 63 (DROP_SEAT_OP_VERSION)", () => {
     assert.ok(OP_VERSION >= 63);
     assert.equal(runMigrations(op, 62, 63, opMigrations), op);
     assert.deepEqual([fileEndsWithHolder(1), fileEndsWithHolder(62), fileEndsWithHolder(63), fileEndsWithHolder(undefined)], [false, false, true, true]);
+    assert.deepEqual([fileGoesDirectWhereFar(1), fileGoesDirectWhereFar(62), fileGoesDirectWhereFar(63), fileGoesDirectWhereFar(undefined)], [false, false, true, true]);
     assert.throws(() => runMigrations(op, 63, 62, opMigrations), /down/);
   });
 });
