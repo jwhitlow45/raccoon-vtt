@@ -155,7 +155,7 @@ export class SizeGuard {
    */
   #caps: string | null = null;
   #refusedScene: string | null = null;
-  #refusedFar = false;
+  #refusedFarRoom = false;
   /** By how many bytes the room is past the far line at its widest, at the last exact reading (overFarLine). */
   #over = 0;
 
@@ -185,9 +185,13 @@ export class SizeGuard {
     return this.#refusedScene;
   }
 
-  /** Whether the far line refused the last check, so a fight's start says what it needs (actor.ts, FIGHT_HISTORY_FULL). */
-  get refusedFar(): boolean {
-    return this.#refusedFar;
+  /**
+   * Whether the room's far line refused the last check, so a fight's start
+   * says what it needs (actor.ts, FIGHT_HISTORY_FULL). A scene's reading
+   * counts the history as empty, so a scene's line never refuses it for that.
+   */
+  get refusedFarRoom(): boolean {
+    return this.#refusedFarRoom;
   }
 
   /** The share a reserve reads a sharing layer at beside its own cap (layerCap): a whole cap, since marked scenes' shares are fixed. */
@@ -256,11 +260,11 @@ export class SizeGuard {
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false, player?: string): LimitCheck {
     this.#refusedScene = null;
-    this.#refusedFar = false;
+    this.#refusedFarRoom = false;
     const near = role === "player" || exempt ? this.#account(next, sceneIds, growth, before) : this.#near(next, sceneIds, growth, before, role);
     if (!near.ok || far === "none") return near;
     const answer = this.#far(next, before, far, exempt ? "exempt" : "meets", player);
-    this.#refusedFar = !answer.ok;
+    this.#refusedFarRoom = !answer.ok && this.#refusedScene === null;
     return answer;
   }
 
@@ -751,8 +755,8 @@ export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
 export const PER_PLAYER_FULL = "The room is too full for per-player sight on this scene: each player's map and the paths this fight recorded need room. Delete unused scenes to free space.";
 
 /**
- * The refusal of a fight's start that the far line refuses, which counts
- * the fight's history at its bound from its start (D-261120-091).
+ * The refusal of a fight's start that the room's far line refuses, which
+ * counts the fight's history at its bound from its start (D-261120-091, 092).
  */
 export const FIGHT_HISTORY_FULL = `The room has no space left for the ${HISTORY_BYTES / 1024 / 1024} MiB a fight sets aside for its turn history. Delete unused scenes to free space.`;
 

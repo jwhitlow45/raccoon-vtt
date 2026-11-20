@@ -5,7 +5,7 @@ import { BOOKKEEPING_RESERVE, FAR, farByteLine } from "#shared/limits.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
-import { farRoomBytes, FIGHT_HISTORY_FULL } from "./sizeGuard.ts";
+import { farRoomBytes, FIGHT_HISTORY_FULL, sceneFullWords } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /*
@@ -95,6 +95,17 @@ describe("a fight's start the far line refuses", () => {
     const dm = await h.connect(f.dm);
     assert.equal(answer(await dm.send({ t: "token.update", tokenId: f.goblin, patch: { notes: "m".repeat(4_000) } })), "taken", "a growing edit");
     assert.equal(answer(await dm.send(start(f))), `quota: ${FIGHT_HISTORY_FULL}`);
+  });
+
+  test("one a scene's line refuses keeps the scene's words, since a scene's reading holds no history", async (t) => {
+    const f = scopeFixture();
+    f.state.scenes.big = scene("big", { order: 10 });
+    for (let i = 0; i * 4_000 < FAR.sceneBytes; i++) f.state.tokens[`n${i}`] = token(`n${i}`, { sceneId: "big", notes: "n".repeat(4_000) });
+    // The room far short of the DM's line even with the history, so only the scene's line answers.
+    assert.ok(farRoomBytes(f.state, true) + 1.5 * MIB < farByteLine("meets", "room", "dm")!, `${farRoomBytes(f.state, true)} short of the DM's line`);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.equal(answer(await dm.send(start(f))), `quota: ${sceneFullWords(FAR.sceneBytes)}`);
   });
 
   test("one the near line refuses keeps the room-full words", async (t) => {

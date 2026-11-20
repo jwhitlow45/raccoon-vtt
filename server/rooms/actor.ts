@@ -2285,7 +2285,7 @@ export class RoomActor {
     const size = this.#bytesMeet(op, kind, viewer, measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched));
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
     if (!size.ok) {
-      const refused = withFightWords(op, withFloorWords(op, this.#staged.state, size, this.#sizes.refusedScene), this.#sizes.refusedFar);
+      const refused = withFightWords(op, withFloorWords(op, this.#staged.state, size, this.#sizes.refusedScene), this.#sizes.refusedFarRoom);
       return isBlockSave(op) ? { ...refused, message: BLOCKS_ROOM_TOO_FULL } : refused;
     }
     // Only the DM's ops grow players' memory by what they build: a player's door is touched, which drops its entries.
@@ -3845,9 +3845,9 @@ function takesPlayersFloor(before: RoomState, entries: readonly RestoreEntry[]):
   return entries.some((entry) => entry.key === key && entry.value == null);
 }
 
-/** A fight's start the far line refused, which says the room its history needs (FIGHT_HISTORY_FULL), and any other refusal as it is. */
-function withFightWords(op: Op, refused: Extract<LimitCheck, { ok: false }>, far: boolean): Extract<LimitCheck, { ok: false }> {
-  return op.t === "encounter.start" && far ? { ...refused, message: FIGHT_HISTORY_FULL } : refused;
+/** A fight's start the room's far line refused, which says the room its history needs (FIGHT_HISTORY_FULL), and any other refusal as it is. */
+function withFightWords(op: Op, refused: Extract<LimitCheck, { ok: false }>, farRoom: boolean): Extract<LimitCheck, { ok: false }> {
+  return op.t === "encounter.start" && farRoom ? { ...refused, message: FIGHT_HISTORY_FULL } : refused;
 }
 
 /** A size refusal as the DM reads it: an add of a floor that the scene's own budget refused (`scene`, SizeGuard.refusedScene) says so, and any other stays. */
