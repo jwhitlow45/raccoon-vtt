@@ -57,17 +57,29 @@ function sightChanged(before: RoomState, after: RoomState, was: ReadonlyMap<Enti
 
 /**
  * Whether a thing still in the room that came into P1's exact part or left
- * it is a creature P1 does not own, or a line naming one: the sight residual
- * the private log tracks (D-261116-069), whose bytes are the DM's and which
- * P1 sees come or go.
+ * it is one the private log tracks as a residual (D-261116-069): a creature
+ * P1 does not own, which P1 sees come or go and whose bytes are the DM's
+ * (the sight residual), or a roll request the DM made for a creature P1's op
+ * deleted, which leaves once with it (residual 3). A shared line never
+ * leaves (D-261120-010).
  */
-function othersInSight(before: RoomState, after: RoomState, key: string): boolean {
+function residualMove(before: RoomState, after: RoomState, key: string): boolean {
   if (!there(before, key) || !there(after, key)) return false;
-  const others = (id: unknown) => typeof id === "string" && before.tokens[id] !== undefined && !ownedBy(before, "p1", before.tokens[id]!);
-  if (key.startsWith("token:")) return others(key.slice("token:".length));
-  if (!key.startsWith("log:")) return false;
-  const data = (readEntity(before, key as EntityKey) as { data?: { tokenId?: unknown; rolls?: { tokenId?: unknown }[] } } | null)?.data;
-  return others(data?.tokenId) || (data?.rolls?.some((roll) => others(roll.tokenId)) ?? false);
+  if (key.startsWith("token:")) {
+    const token = before.tokens[key.slice("token:".length)];
+    return token !== undefined && !ownedBy(before, "p1", token);
+  }
+  return namesDeleted(before, after, key);
+}
+
+/** Whether the op deleted a creature. */
+const deletes = (before: RoomState, after: RoomState) => Object.keys(before.tokens).some((id) => after.tokens[id] === undefined);
+
+/** Whether a roll request names a creature the op deleted. */
+function namesDeleted(before: RoomState, after: RoomState, key: string): boolean {
+  if (!key.startsWith("roll:")) return false;
+  const targets = (readEntity(before, key as EntityKey) as { targets?: { tokenId?: string }[] } | null)?.targets ?? [];
+  return targets.some((target) => target.tokenId !== undefined && before.tokens[target.tokenId] !== undefined && after.tokens[target.tokenId] === undefined);
 }
 
 /**
@@ -97,19 +109,25 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
   const is = exactCopies(after, "p1");
   const out: string[] = [];
   const moved = new Map<string, { hidden: number; walks: number }>();
-  const sighted = new Map<string, number>();
+  const residual = new Map<string, number>();
   for (const key of new Set([...was.keys(), ...is.keys()])) {
-    if (was.has(key) !== is.has(key) && othersInSight(before, after, key)) {
+    if (was.has(key) !== is.has(key) && residualMove(before, after, key)) {
       // What it takes out of the stepped part: its bytes and, for a creature, its fields' widths (farWidthsByFloor).
       const taken = (copies: ReadonlyMap<EntityKey, ExactCopy>, state: RoomState) =>
         (copies.get(key as EntityKey)?.sub ?? 0) + (copies.has(key as EntityKey) ? sum([...farWidthsByFloor(state, (k) => k === key).values()], (bytes) => bytes) : 0);
       const on = (is.get(key) ?? was.get(key))!.on;
-      sighted.set(on, (sighted.get(on) ?? 0) + taken(was, before) - taken(is, after));
-      accepted.push(`${key} ${is.has(key) ? "came into" : "left"} P1's sight`);
+      residual.set(on, (residual.get(on) ?? 0) + taken(was, before) - taken(is, after));
+      accepted.push(`${key} ${is.has(key) ? "came into" : "left"} P1's exact part`);
       continue;
     }
     const gain = (is.get(key)?.hidden ?? 0) - (was.get(key)?.hidden ?? 0);
     if (gain === 0) continue;
+    if (gain > 0 && namesDeleted(before, after, key)) {
+      // Residual 3: the answer for a creature the op deleted leaves the copy of a roll request the DM made, once.
+      residual.set("room", (residual.get("room") ?? 0) + gain);
+      accepted.push(`${key} keeps ${gain} bytes for a creature the op deleted`);
+      continue;
+    }
     const walks = gain > 0 ? Math.max(0, Math.min(gain, walkUnseen(after, key) - walkUnseen(before, key))) : 0;
     if (walks > 0) accepted.push(`${key} keeps ${walks} bytes of its walk P1's copy leaves out`);
     const on = is.get(key)?.on ?? was.get(key)!.on;
@@ -120,6 +138,7 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
   }
   const [b, a] = [steppedParts(before), steppedParts(after)];
   const whole = sum([...moved.values()], (bytes) => bytes.hidden);
+  const deleted = deletes(before, after);
   for (const [scope, after] of a) {
     const where = scope === "room" ? "the room" : `scene ${scope}`;
     const floors = scope === "room" ? null : new Set(floorsOf(before, scope).map((f) => f.id));
@@ -131,12 +150,14 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
       hidden += bytes.hidden;
       allowed += bytes.walks;
     }
-    for (const [on, bytes] of sighted) if (holds(on)) allowed += bytes;
+    for (const [on, bytes] of residual) if (holds(on)) allowed += bytes;
     const carried = Math.max(0, Math.min(hidden, hidden - whole));
     if (carried > 0) accepted.push(`${carried} hidden bytes carried into ${where}`);
     if (hidden - carried > 0 || (still && hidden !== carried)) out.push(`${hidden - carried} hidden bytes in ${where}`);
     const outside = after - (b.get(scope) ?? after) - hidden - allowed;
-    if (outside !== 0) out.push(`${outside} bytes outside P1's exact part in ${where}`);
+    // Residual 3: a deletion takes what names the creature it deleted off things outside P1's exact part, which only falls.
+    if (outside < 0 && deleted) accepted.push(`${-outside} bytes naming what the op deleted taken away in ${where}`);
+    else if (outside !== 0) out.push(`${outside} bytes outside P1's exact part in ${where}`);
   }
   return out;
 }
@@ -170,7 +191,8 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
       for (let k = 0; k < 8; k++) {
         // Now and then a roll of several dice whose rolls reach different readers.
         const op = k % 4 === 3 ? randomDiceRoll(r, state, P1) : randomOp(r, state, P1);
-        if (FAR_TREATMENT[op.t] === "deletion" || FAR_TREATMENT[op.t] === "server" || !canApply(op, P1, state, DEPS).ok) continue;
+        // A deletion too (LP44FIX item d): it takes away what it deletes, and nothing else of P1's may leave the exact part.
+        if (FAR_TREATMENT[op.t] === "server" || !canApply(op, P1, state, DEPS).ok) continue;
         // Late line ids, so the op's lines are the newest, as a live op's are.
         const result = applyOp(state, op, P1, env(1_000_000 + seed * 10 + k));
         if (!result.ok) continue;
@@ -286,10 +308,10 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     assert.equal(far.shown, near.shown, "and it counts alike");
   });
 
-  /** P1's ops in order on `state`, each taken, with the same line ids whatever the room holds. */
-  const played = (state: RoomState, ops: readonly Op[], check?: (before: RoomState, after: RoomState, op: Op) => void): RoomState => {
+  /** P1's ops in order on `state`, each taken, numbered from `from`, so their line ids are the same whatever the room holds. */
+  const played = (state: RoomState, ops: readonly Op[], check?: (before: RoomState, after: RoomState, op: Op) => void, from = 2_000_000): RoomState => {
     ops.forEach((op, i) => {
-      const result = applyOp(state, op, P1, env(2_000_000 + i));
+      const result = applyOp(state, op, P1, env(from + i));
       assert.ok(result.ok, result.ok ? "" : `${op.t}: ${result.message}`);
       check?.(state, result.state, op);
       state = result.state;
@@ -398,6 +420,84 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
       const moved = (before: RoomState, after: RoomState) => [...steppedParts(after)].map(([scope, bytes]) => [scope, bytes - steppedParts(before).get(scope)!]);
       assert.deepEqual(moved(hidden, hiddenDown), moved(deleted, deletedDown), `${id}: the climb moves P1's stepped parts alike`);
     }
+  });
+
+  /** P1's companion Hoot, made by P1's own op. */
+  const hoot = (): Op => FIXED["token.create"]!.op(table());
+
+  test("P1's lines about their companion stay in their exact part as they read them when P1 dismisses it, whatever their labels", () => {
+    for (const label of ["L", "L".repeat(80)]) {
+      const state = played(table(), [hoot()], still);
+      const roll = rolled(state, { t: "dice.roll", tag: "hoot", to: "all", rolls: [{ formula: "1d20", label, creature: { tokenId: "pet2" } }] } as DiceOp);
+      const rolledState = played(state, [roll], still, 2_100_000);
+      const line = rolledState.log.at(-1)!.id;
+      const gone = played(rolledState, [{ t: "token.delete", tokenId: "pet2" } as Op], still, 2_200_000);
+      assert.equal(projectState(gone, P1, { sceneId: null }).log.some((entry) => entry.id === line), false, "P1's copy no longer holds the line");
+      assert.ok(exactCopies(gone, "p1").has(keys.log(line)), "P1's exact part still does");
+    }
+  });
+
+  test("P1's own deletions leave the lines naming what they deleted in P1's exact part as P1 read them: a row's turn, an area's line and a use", () => {
+    const state = table();
+    const at = "2026-10-12T20:00:00.000Z";
+    state.log = [
+      { id: "900:0", at, kind: "event", data: { type: "turn", entryId: "rhero", round: 1, seen: true } },
+      { id: "900:1", at, kind: "event", data: { type: "area", templateId: "a1", tokenId: "hero", trigger: "enter", area: "Bless", seen: true } },
+      { id: "900:2", at, kind: "event", data: { type: "use", tokenId: "pet", seen: true, what: "ability", name: "Breath", cost: 1, left: 2, max: 3 } },
+    ] as never;
+    const held = (st: RoomState) => [...exactCopies(st, "p1")].filter(([key]) => key.startsWith("log:"));
+    assert.equal(held(state).length, 3, "P1 holds the three lines");
+    for (const op of [{ t: "encounter.remove", entryIds: ["rhero"] }, { t: "template.delete", templateId: "a1" }, { t: "token.delete", tokenId: "pet" }] as Op[]) {
+      const after = played(state, [op], still);
+      assert.deepEqual(held(after), held(state), op.t);
+    }
+  });
+
+  test("a DM's hide of a creature a shared line names leaves the line in P1's exact part as P1 read it", () => {
+    const state = table();
+    state.tokens.gob = token("gob", { x: 5, y: 5, actor: { inline: actor({ dmNotes: "" }) } });
+    const hp = applyOp(state, { t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount: 3 } } as Op, DM, env(1_970_000));
+    assert.ok(hp.ok, hp.ok ? "" : hp.message);
+    const line = hp.state.log.at(-1)!.id;
+    const hidden = applyOp(hp.state, { t: "token.update", tokenId: "gob", patch: { visibility: "dm" } } as Op, DM, env(1_970_001));
+    assert.ok(hidden.ok, hidden.ok ? "" : hidden.message);
+    assert.equal(projectState(hidden.state, P1, { sceneId: null }).log.some((entry) => entry.id === line), false, "P1's copy no longer holds the line");
+    assert.deepEqual(exactCopies(hidden.state, "p1").get(keys.log(line)), exactCopies(hp.state, "p1").get(keys.log(line)));
+  });
+
+  test("a blackout leaves the shared lines in P1's exact part as P1 read them, a line of the fight's among them", () => {
+    const ended = applyOp(table(), { t: "encounter.end" } as Op, DM, env(1_974_000));
+    assert.ok(ended.ok, ended.ok ? "" : ended.message);
+    const dark = applyOp(ended.state, { t: "view.blackout", blackout: true } as Op, DM, env(1_975_000));
+    assert.ok(dark.ok, dark.ok ? "" : dark.message);
+    const lines = (state: RoomState) => [...exactCopies(state, "p1")].filter(([key]) => key.startsWith("log:"));
+    assert.ok(lines(ended.state).some(([key]) => (readEntity(ended.state, key) as { data?: { type?: string } }).data?.type === "encounter"), "P1 holds the fight's line");
+    assert.deepEqual(lines(dark.state), lines(ended.state));
+  });
+
+  test("a member who joins later holds exactly only the shared lines written since, as they read them then", () => {
+    const state = table();
+    const before = applyOp(state, { t: "log.chat", text: "x".repeat(300) } as Op, DM, env(1_980_000));
+    assert.ok(before.ok, before.ok ? "" : before.message);
+    const joined = applyOp(before.state, { t: "sys.memberJoin", member: { id: "p3", name: "Pip", color: "#3366ff", kind: "player", createdAt: "2026-10-12T20:00:00.000Z" } } as Op, DM, env(1_980_001));
+    assert.ok(joined.ok, joined.ok ? "" : joined.message);
+    const after = applyOp(joined.state, { t: "log.chat", text: "y".repeat(300) } as Op, DM, env(1_980_002));
+    assert.ok(after.ok, after.ok ? "" : after.message);
+    const [old, recent] = [before.state.log.at(-1)!.id, after.state.log.at(-1)!.id];
+    assert.ok(projectState(after.state, { memberId: "p3", role: "player" }, { sceneId: null }).log.some((entry) => entry.id === old), "P3's copy holds the older line");
+    const held = exactCopies(after.state, "p3");
+    assert.equal(held.has(keys.log(old)), false, "which their exact part leaves in the stepped part");
+    assert.ok(held.has(keys.log(recent)), "and holds the newer one");
+    assert.ok(exactCopies(after.state, "p1").has(keys.log(old)), "P1, on the roster then, holds both");
+    // Removed and back: a line written while they were away stays in the stepped part.
+    const away = applyOp(after.state, { t: "sys.memberRemove", memberId: "p3" } as Op, DM, env(1_980_003));
+    assert.ok(away.ok, away.ok ? "" : away.message);
+    const between = applyOp(away.state, { t: "log.chat", text: "z".repeat(300) } as Op, DM, env(1_980_004));
+    assert.ok(between.ok, between.ok ? "" : between.message);
+    const back = applyOp(between.state, { t: "sys.memberJoin", member: { id: "p3", name: "Pip", color: "#3366ff", kind: "player", createdAt: "2026-10-12T20:00:00.000Z" } } as Op, DM, env(1_980_005));
+    assert.ok(back.ok, back.ok ? "" : back.message);
+    const again = exactCopies(back.state, "p3");
+    assert.deepEqual([old, recent, between.state.log.at(-1)!.id].map((id) => again.has(keys.log(id))), [false, true, false]);
   });
 
   test("a drawing the DM makes under P1's id and hides from players is not in P1's exact part (D-261120-012)", () => {
