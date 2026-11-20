@@ -90,6 +90,7 @@ import { chromium, type BrowserContext, type CDPSession, type Page } from "playw
 import sharp from "sharp";
 import WebSocket from "ws";
 import { pickOption, pickTool, ROOT, startServer } from "../e2e/harness.ts";
+import { uuidv7 } from "../shared/ids.ts";
 import { hexCenter, sceneHexes } from "../shared/rules/hex.ts";
 
 /** A low-zoom diagonal tether across the largest map. This CPU row needs no browser or database. */
@@ -147,9 +148,15 @@ function actor(hp = 7) {
 
 type Op = Record<string, unknown>;
 
-/** Ids by a count, not at random, so tokens draw in the same order on every run and the parity images can match. */
+/**
+ * Ids by a count, not at random, so tokens draw in the same order on every
+ * run and the parity images can match. A new thing's id is a version 7 one
+ * dated near the server's clock (server/rooms/createIds.ts), so each takes
+ * the time it is made and ends in its count: later ids sort later, and
+ * ids made in one millisecond by their count.
+ */
 let made = 0;
-const benchId = (kind: string) => `bench-${kind}-${String(++made).padStart(4, "0")}`;
+const benchId = (_kind: string) => `${uuidv7().slice(0, 24)}${String(++made).padStart(12, "0")}`;
 
 function token(sceneId: string, name: string, x: number, y: number, extra: Op = {}): Op {
   return { id: benchId("token"), sceneId, kind: "monster", name, size: "medium", x, y, disposition: "hostile", visibility: "all", actor: { inline: actor() }, ...extra };
