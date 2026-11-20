@@ -292,7 +292,7 @@ export function partySightOf(state: RoomState, sceneId: string): PartySight {
   const tiles = sightOf(state);
   const perPlayer = perPlayerScene(ownEntry(state.scenes, sceneId));
   if (tiles !== undefined) return visionRules.sightFromTiles(perPlayer ? (viewMapsOf(state).sightAll ?? {}) : tiles, sceneId);
-  return perPlayer ? visionRules.holderSight(state, sceneId, null) : visionRules.partySight(state, sceneId);
+  return visionRules.sightFor(state, sceneId, "shared");
 }
 
 /**
@@ -302,7 +302,7 @@ export function partySightOf(state: RoomState, sceneId: string): PartySight {
  */
 export function unionSightOf(state: RoomState, sceneId: string): PartySight {
   const tiles = sightOf(state);
-  return tiles !== undefined ? visionRules.sightFromTiles(tiles, sceneId) : visionRules.partySight(state, sceneId);
+  return tiles !== undefined ? visionRules.sightFromTiles(tiles, sceneId) : visionRules.sightFor(state, sceneId, "union");
 }
 
 /**
@@ -314,8 +314,9 @@ export function unionSightOf(state: RoomState, sceneId: string): PartySight {
 function viewerSightOf(state: RoomState, viewer: Viewer, sceneId: string): PartySight {
   const tiles = sightOf(state);
   if (tiles !== undefined) return visionRules.sightFromTiles(tiles, sceneId);
-  if (viewer.role === "dm" || !perPlayerScene(ownEntry(state.scenes, sceneId))) return visionRules.partySight(state, sceneId);
-  return visionRules.holderSight(state, sceneId, holdsSight(state, sceneId, viewer.memberId) ? viewer.memberId : null);
+  if (viewer.role === "dm") return visionRules.sightFor(state, sceneId, "union");
+  if (!perPlayerScene(ownEntry(state.scenes, sceneId))) return visionRules.sightFor(state, sceneId, "shared");
+  return visionRules.sightFor(state, sceneId, holdsSight(state, sceneId, viewer.memberId) ? { holder: viewer.memberId } : "shared");
 }
 
 /** The grid of a scene, squares for a scene the state lacks. */
@@ -2768,7 +2769,7 @@ function viewersPerPlayerScene(ctx: Ctx, sceneId: string): boolean {
 
 function projectSightAllCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): SightTile | null {
   if (!viewersPerPlayerScene(ctx, sceneId) || !visionOn(ownEntry(ctx.state.scenes, sceneId))) return null;
-  return visionRules.holderSight(ctx.state, sceneId, null).tiles.get(`${tx},${ty}`) ?? null;
+  return visionRules.sightFor(ctx.state, sceneId, "shared").tiles.get(`${tx},${ty}`) ?? null;
 }
 
 function projectFogAllCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): FogTile | null {
@@ -4859,7 +4860,7 @@ function perPlayerMapsCtx(ctx: Ctx): Pick<ProjectedState, "sightAll" | "fogAll" 
   const sightAll: SightMap = {};
   for (const sceneId of floors) {
     if (!visionOn(ownEntry(ctx.state.scenes, sceneId))) continue;
-    for (const [at, tile] of visionRules.holderSight(ctx.state, sceneId, null).tiles) sightAll[`${sceneId}:${at}`] = tile;
+    for (const [at, tile] of visionRules.sightFor(ctx.state, sceneId, "shared").tiles) sightAll[`${sceneId}:${at}`] = tile;
   }
   if (Object.keys(sightAll).length > 0) out.sightAll = sightAll;
   const tiles = (each: (sceneId: string, tx: number, ty: number) => FogTile | null, keyed: Iterable<{ sceneId: string; tx: number; ty: number }>) => {
@@ -5501,15 +5502,19 @@ export function changedSightKeys(before: RoomState, after: RoomState, sceneIds: 
     // of mode or of the holder list re-projects everything anyway (Tx global).
     if (perPlayerScene(ownEntry(before.scenes, sceneId)) && perPlayerScene(ownEntry(after.scenes, sceneId))) {
       const shared = new Set<string>();
-      diffSight(visionRules.holderSight(before, sceneId, null).tiles, visionRules.holderSight(after, sceneId, null).tiles, shared);
+      diffSight(visionRules.sightFor(before, sceneId, "shared").tiles, visionRules.sightFor(after, sceneId, "shared").tiles, shared);
       for (const at of shared) {
         sight.add(at);
         const [tx, ty] = at.split(",").map(Number) as [number, number];
         out.push(keys.sightAll(sceneId, tx, ty));
       }
       for (const id of new Set([...sightHolders(before, sceneId), ...sightHolders(after, sceneId)])) {
-        diffSight(visionRules.holderSight(before, sceneId, id).tiles, visionRules.holderSight(after, sceneId, id).tiles, sight);
+        diffSight(visionRules.sightFor(before, sceneId, { holder: id }).tiles, visionRules.sightFor(after, sceneId, { holder: id }).tiles, sight);
       }
+    } else if (sharedApart(before, sceneId) || sharedApart(after, sceneId)) {
+      // Players on a whole-party floor read its shared sight, which a join to a per-player floor raises by that floor's
+      // shared sight alone (docs/design/design-v1-floors.md phase 4, 7.2): it can change while the union does not.
+      diffSight(visionRules.sightFor(before, sceneId, "shared").tiles, visionRules.sightFor(after, sceneId, "shared").tiles, sight);
     }
     for (const at of sight) {
       const [tx, ty] = at.split(",").map(Number) as [number, number];
@@ -5517,6 +5522,11 @@ export function changedSightKeys(before: RoomState, after: RoomState, sceneIds: 
     }
   }
   return out;
+}
+
+/** Whether a floor's shared sight is another answer than its union: only where a join lends the classes different sight. */
+function sharedApart(state: RoomState, sceneId: string): boolean {
+  return visionOn(ownEntry(state.scenes, sceneId)) && visionRules.sightFor(state, sceneId, "shared") !== visionRules.sightFor(state, sceneId, "union");
 }
 
 /** Adds to `into` the places whose tile differs between two sights. A tile the vision cache kept is the same object in both. */

@@ -189,12 +189,12 @@ const NONE: Layer = () => null;
  * floor players see (docs/design/design-v1-floors.md 8.3), on a scene
  * without floors the players', with party vision on. A holder's own
  * on a per-player scene, the shared sight for everyone else there, and the
- * party's on a whole-party scene.
+ * party's on a whole-party scene, each joined through the floor's
+ * openings (phase 4, 7.2).
  */
 export function classSight(state: RoomState, scene: Scene, holder: string | null): PartySight | null {
   if (scene.vision?.on !== true || !playersSee(state, scene.id)) return null;
-  if (scene.vision.perPlayer === true) return visionRules.holderSight(state, scene.id, holder);
-  return visionRules.partySight(state, scene.id);
+  return visionRules.sightFor(state, scene.id, scene.vision.perPlayer === true && holder !== null ? { holder } : "shared");
 }
 
 /**

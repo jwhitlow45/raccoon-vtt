@@ -4,7 +4,8 @@ import type { FogTile, RoomState, Scene, SightTile, Token } from "#shared/model.
 import { perPlayerScene, sightHolders } from "#shared/project.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import { floorsOf, playersSee, startFloor } from "#shared/rules/floors.ts";
-import { visionRules } from "#shared/ruleHooks.ts";
+import { visionRules, type PendingJoins } from "#shared/ruleHooks.ts";
+import { ownEntry } from "#shared/records.ts";
 import { decodeTile, encodeTile } from "#shared/rules/fog.ts";
 import { seenFogBits, visionReport, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
@@ -31,14 +32,8 @@ import { sceneWalls } from "#shared/rules/walls.ts";
  * hold, into theirs (perPlayerExplore).
  */
 export function exploreOp(state: RoomState, sceneId: string | null = startFloor(state)): OpOf<"sys.explore"> | null {
-  if (sceneId === null || !playersSee(state, sceneId)) return null;
-  const scene = state.scenes[sceneId];
-  if (!scene) return null;
-  if (perPlayerScene(scene)) return perPlayerExplore(state, scene);
-  if (scene.vision?.on !== true || !scene.fogEnabled) return null;
-  const tiles = partyTiles(state, sceneId, visionRules.partySight(state, sceneId).tiles);
-  if (tiles.length === 0) return null;
-  return { t: "sys.explore", sceneId, tiles };
+  if (sceneId === null) return null;
+  return opOf(state, sceneId, pendingOf(state, [sceneId]));
 }
 
 /**
@@ -47,10 +42,35 @@ export function exploreOp(state: RoomState, sceneId: string | null = startFloor(
  * to the holder lists (joinsOf), then builds each floor's op with them all
  * as pending, so a player a later floor adds borrows sight into an earlier
  * floor in the same pass, whatever the floors' order. With no opening the
- * ops equal those the actor reads floor by floor today.
+ * ops equal those the actor reads floor by floor today, since without a
+ * join no floor's op reads another floor.
  */
 export function exploreOps(_state: RoomState, _floors: readonly string[]): OpOf<"sys.explore">[] {
   throw new Error("not built: exploreOps");
+}
+
+/** Each per-player floor's joins to its holder list, among the floors explored, by floor (ruleHooks.ts PendingJoins). */
+function pendingOf(state: RoomState, floors: readonly string[]): Record<string, { memberId: string; on: boolean }[]> {
+  const pending: Record<string, { memberId: string; on: boolean }[]> = {};
+  for (const sceneId of floors) {
+    const scene = ownEntry(state.scenes, sceneId);
+    if (!scene || !perPlayerScene(scene) || scene.vision?.on !== true || !playersSee(state, sceneId)) continue;
+    const join = joinsOf(state, scene);
+    if (join.length > 0) pending[sceneId] = join;
+  }
+  return pending;
+}
+
+function opOf(state: RoomState, sceneId: string, pending: PendingJoins): OpOf<"sys.explore"> | null {
+  if (!playersSee(state, sceneId)) return null;
+  const scene = ownEntry(state.scenes, sceneId);
+  if (!scene) return null;
+  if (perPlayerScene(scene)) return perPlayerExplore(state, scene, pending);
+  if (scene.vision?.on !== true || !scene.fogEnabled) return null;
+  // On a whole-party floor every player reads the shared sight, joined through its openings (7.2).
+  const tiles = partyTiles(state, sceneId, visionRules.sightFor(state, sceneId, "shared", pending).tiles);
+  if (tiles.length === 0) return null;
+  return { t: "sys.explore", sceneId, tiles };
 }
 
 /**
@@ -92,20 +112,22 @@ function partyTiles(state: RoomState, sceneId: string, sight: ReadonlyMap<string
  * projection asks the point query of each holder's sight until its raster
  * is drawn (review PV3-OPUS-4).
  */
-function perPlayerExplore(state: RoomState, scene: Scene): OpOf<"sys.explore"> | null {
+function perPlayerExplore(state: RoomState, scene: Scene, pending: PendingJoins): OpOf<"sys.explore"> | null {
   if (scene.vision?.on !== true) return null;
-  const join = joinsOf(state, scene);
+  const join = Object.hasOwn(pending, scene.id) ? [...pending[scene.id]!] : [];
   const tiles: ExploredTiles = [];
   const members: { memberId: string; tiles: ExploredTiles }[] = [];
-  const shared = visionRules.holderSight(state, scene.id, null);
+  const shared = visionRules.sightFor(state, scene.id, "shared", pending);
   const holders = [...sightHolders(state, scene.id), ...join.flatMap((j) => (j.on ? [j.memberId] : []))];
+  // A holder joining in this op sees for themselves at once, so their own view is read as a ticked one's.
+  const ownOf = (memberId: string) => visionRules.sightFor(state, scene.id, { holder: memberId }, pending);
   if (!scene.fogEnabled) {
     void shared.tiles;
-    for (const memberId of holders) void visionRules.holderSight(state, scene.id, memberId).tiles;
+    for (const memberId of holders) void ownOf(memberId).tiles;
   } else {
     tiles.push(...partyTiles(state, scene.id, shared.tiles));
     for (const memberId of holders) {
-      const own = visionRules.holderSight(state, scene.id, memberId);
+      const own = ownOf(memberId);
       // A holder lent only what everyone is lent has nothing of their own to remember.
       if (own === shared) continue;
       const mine: ExploredTiles = [];

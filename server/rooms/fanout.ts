@@ -205,7 +205,7 @@ export function perPlayerClasses(state: RoomState, sceneId: string, memberId: st
   const holder = sightHolders(state, sceneId).includes(memberId);
   let sight = "none";
   if (state.scenes[sceneId]?.vision?.on === true) {
-    const view = visionRules.holderSight(state, sceneId, holder ? memberId : null);
+    const view = visionRules.sightFor(state, sceneId, holder ? { holder: memberId } : "shared");
     let n = sights.get(view);
     if (n === undefined) sights.set(view, (n = sights.size));
     sight = String(n);
