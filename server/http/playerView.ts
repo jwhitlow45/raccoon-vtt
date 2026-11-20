@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { BuildChunk, FogTile, Label, RoomState, Scene, Stamp, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { playersSee } from "#shared/rules/floors.ts";
+import { floorsOf, playersSee } from "#shared/rules/floors.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { accessErrors, type AuthKit, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 import { ActorClosedError } from "../rooms/actor.ts";
@@ -108,14 +108,17 @@ export function playerView(state: RoomState, sceneId: string): PlayerView | null
 /**
  * The room as if the players started on the scene with nobody looking: a
  * display projects only floors of the players' scene, and only outside a
- * blackout, and with the floor's creatures gone its party sight is empty. Its ground
- * is then the one the real room gives a scene the players are not on
- * (rules/held.ts classSight), labels and stamps included. Only the scene
- * and the four collections are read from the projection, so nothing else
- * the copy changes reaches the answer.
+ * blackout, and with the creatures of every floor of its scene gone its
+ * party sight is empty, since a floor next to it would otherwise lend
+ * live sight through an opening (docs/design/design-v1-floors.md phase 4,
+ * 9.3, D-261119-087). Its ground is then the one the real room gives a
+ * scene the players are not on (rules/held.ts classSight), labels and
+ * stamps included. Only the scene and the four collections are read from
+ * the projection, so nothing else the copy changes reaches the answer.
  */
 function unwatched(state: RoomState, sceneId: string): RoomState {
+  const floors = new Set(floorsOf(state, sceneId).map((floor) => floor.id));
   const tokens: RoomState["tokens"] = {};
-  for (const [id, token] of Object.entries(state.tokens)) if (token.sceneId !== sceneId) tokens[id] = token;
+  for (const [id, token] of Object.entries(state.tokens)) if (token.sceneId !== sceneId && !floors.has(token.sceneId)) tokens[id] = token;
   return { ...state, meta: { ...state.meta, playerSceneId: sceneId, view: { ...state.meta.view, blackout: false } }, tokens };
 }
