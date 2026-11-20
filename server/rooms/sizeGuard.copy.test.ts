@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
-import type { RoomState, Viewer } from "#shared/model.ts";
-import { projectState, stableStringify } from "#shared/project.ts";
+import type { Effect, RoomState, Viewer } from "#shared/model.ts";
+import { heldClock, projectState, publicEffects, seatView, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
@@ -298,8 +298,8 @@ describe("D-261120-003: rooms whose copies are equal give a player equal exact p
     const compared = new Map<string, number>();
     for (let seed = 1; seed <= 150; seed++) {
       for (const [name, omit] of Object.entries(OMITTED)) {
-        // A residual the private log tracks: an HP line counts the conditions its change put on or took off that
-        // players saw then, which their copy of the line does not carry. It may move only that line.
+        // Residual 9 (D-261120-004): an HP line counts what players are shown of the conditions its change put on or took
+        // off, which their copy of the line does not carry. It may move only that line, and only with those.
         const residual = name === "the conditions an HP change on a creature P1 saw put on";
         const base = twinBase(seed);
         // Both twins behind the blackout, or neither: only what it hides differs.
@@ -310,8 +310,9 @@ describe("D-261120-003: rooms whose copies are equal give a player equal exact p
           if (copyOf(base, id) !== copyOf(twin, id)) continue;
           compared.set(name, (compared.get(name) ?? 0) + 1);
           const [a, b] = [shownBy(base, id), shownBy(twin, id)];
+          const shownThen = residual ? [shownChanges(base, id), shownChanges(twin, id)] : undefined;
           for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-            if (a[key] === b[key] || (residual && key === "log:hp-seen")) continue;
+            if (a[key] === b[key] || (shownThen && key === "log:hp-seen" && shownThen[0]![key] !== shownThen[1]![key])) continue;
             found.push(`seed ${seed}, ${name}, ${id}'s ${key}: ${a[key] ?? "none"} against ${b[key] ?? "none"}`);
           }
         }
@@ -319,5 +320,191 @@ describe("D-261120-003: rooms whose copies are equal give a player equal exact p
     }
     assert.deepEqual(found.slice(0, 10), []);
     for (const name of Object.keys(OMITTED)) assert.ok((compared.get(name) ?? 0) >= 20, `${name}: ${compared.get(name) ?? 0} twins compared`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Twins generated from every field a player's copy leaves out (LP44R4-OPUS-1)
+
+type Step = string | number;
+/** A change to a stored room: a value put at `path`, or an element added to the list there. */
+type Change = { path: Step[]; to: unknown; append?: true };
+
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const same = (a: unknown, b: unknown) => stableStringify(a) === stableStringify(b);
+
+/** A stored value changed past what a copy may hold of it: a longer string, a number across a digit, a flag the other way. */
+function bumped(value: unknown): unknown {
+  if (typeof value === "string") return `${value}zz`;
+  if (typeof value === "number") return Number.isInteger(value) ? (value >= 0 ? value + 10 ** String(value).length : value - 10 ** String(-value).length) : value * 10;
+  if (typeof value === "boolean") return !value;
+  return undefined;
+}
+
+/** One more of a list's elements, a record under an id of its own. */
+const another = (item: unknown) => (isRecord(item) && typeof item.id === "string" ? { ...structuredClone(item), id: `${item.id}-twin` } : structuredClone(item));
+
+/** Every change to `value` and all it holds: each leaf changed, each list one longer. */
+function everyChange(value: unknown, path: Step[], out: Change[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => everyChange(item, [...path, i], out));
+    if (value.length > 0) out.push({ path, to: another(value.at(-1)), append: true });
+  } else if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) if (key !== "id") everyChange(item, [...path, key], out);
+  } else {
+    const to = bumped(value);
+    if (to !== undefined) out.push({ path, to });
+  }
+}
+
+/** The changes to what `copy` leaves out of `stored` or holds otherwise, walked as sizeGuard.ts hiddenOf walks them. */
+function omittedChanges(stored: unknown, copy: unknown, path: Step[], out: Change[]): void {
+  if (copy === undefined || copy === null) return everyChange(stored, path, out);
+  if (Array.isArray(stored)) {
+    const copies = Array.isArray(copy) ? copy : [];
+    stored.forEach((item, i) => {
+      const match = isRecord(item) && typeof item.id === "string" ? copies.find((c) => isRecord(c) && c.id === item.id) : copies.find((c) => same(c, item));
+      if (match === undefined) {
+        everyChange(item, [...path, i], out);
+        out.push({ path, to: another(item), append: true });
+      } else if (!same(item, match)) omittedChanges(item, match, [...path, i], out);
+    });
+  } else if (isRecord(stored)) {
+    const held = isRecord(copy) ? copy : {};
+    for (const [key, item] of Object.entries(stored)) {
+      if (key === "id") continue;
+      if (!(key in held)) everyChange(item, [...path, key], out);
+      else if (!same(item, held[key])) omittedChanges(item, held[key], [...path, key], out);
+    }
+  } else if (!same(stored, copy)) {
+    const to = bumped(stored);
+    if (to !== undefined) out.push({ path, to });
+  }
+}
+
+/** Every thing stored, where it is and as `memberId`'s copy holds it. */
+function storedThings(state: RoomState, memberId: string): Array<{ path: Step[]; stored: unknown; copy: unknown }> {
+  const view = seatView(state, memberId);
+  const out: Array<{ path: Step[]; stored: unknown; copy: unknown }> = [];
+  const records = [["tokens", "token"], ["templates", "template"], ["drawings", "drawing"], ["casts", "cast"], ["rolls", "roll"], ["characters", "character"], ["companionBlocks", "companionBlock"], ["members", "member"], ["buildChunks", "chunk"]] as const;
+  for (const [name, kind] of records) for (const [id, stored] of Object.entries(state[name] as Record<string, unknown>)) out.push({ path: [name, id], stored, copy: view.copy(kind, id) });
+  state.log.forEach((line, i) => out.push({ path: ["log", i], stored: line, copy: view.copy("log", line.id) }));
+  state.encounter?.entries.forEach((row, i) => out.push({ path: ["encounter", "entries", i], stored: row, copy: view.copy("row", row.id) }));
+  return out;
+}
+
+function applied(state: RoomState, change: Change): RoomState {
+  const twin = structuredClone(state);
+  let at: Record<string | number, unknown> = twin as never;
+  for (const step of change.path.slice(0, -1)) at = at[step] as never;
+  const last = change.path.at(-1)!;
+  if (change.append) (at[last] as unknown[]).push(change.to);
+  else at[last] = change.to;
+  return twin;
+}
+
+/** What players are shown of the conditions each HP line's change put on or took off: residual 9 (D-261120-004). */
+function shownChanges(state: RoomState, memberId: string): Record<string, string> {
+  const clock = heldClock(state, { memberId, role: "player" })?.id;
+  const out: Record<string, string> = {};
+  for (const line of state.log) {
+    const revert = (line.data as { type?: string; revert?: { added?: Effect[]; removed?: Effect[] } } | undefined)?.revert;
+    if (revert) out[`log:${line.id}`] = stableStringify(publicEffects([...(revert.added ?? []), ...(revert.removed ?? [])], () => false, clock));
+  }
+  return out;
+}
+
+/** Which of `memberId`'s kept rulers their copy does not hold, which count as stored, since a ruler never changes (D-261119-021). */
+const heldRulers = (state: RoomState, memberId: string) => {
+  const view = seatView(state, memberId);
+  return new Set(Object.values(state.drawings).filter((d) => d.ownerId === memberId && view.copy("drawing", d.id) === null).map((d) => `drawing:${d.id}`));
+};
+
+/** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
+function namedBase(seed: number): RoomState {
+  const state = randomState(rng(seed * 41 + 11));
+  const scene = state.meta.playerSceneId ?? Object.keys(state.scenes)[0]!;
+  state.meta = { ...state.meta, view: { ...state.meta.view, blackout: false }, settings: { ...state.meta.settings, playersMoveAny: "all", playersApplyDamage: true } };
+  delete state.clock;
+  const effects = [
+    effect("e-hidden", { key: "poisoned", hiddenFromPlayers: true }),
+    effect("e-ready", { key: "readied", label: "When the door opens" }),
+    effect("e-save", { key: "custom", label: "Held", save: { ability: "wis", dc: 15 }, due: { id: "12:0", state: "pending" } }),
+    effect("e-ends", { key: "blessed", ends: { span: 600, at: 1000, clock: "clk1" } }),
+  ];
+  state.tokens.seen1 = token("seen1", { sceneId: scene, x: 1, y: 1, hpVisibility: "label", actor: { inline: actor({ hp: { cur: 7, max: 20, temp: 0 }, effects }) } });
+  state.tokens.ghost = token("ghost", { sceneId: scene, x: 2, y: 2, visibility: "dm" });
+  state.templates.ac = template("ac", { sceneId: scene, ownerId: "p1", attachedTo: "seen1", casterId: "ghost", label: "Faerie Fire" });
+  state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor() });
+  state.tokens.hero = token("hero", { kind: "pc", sceneId: scene, actor: { ref: "c1" }, ownerIds: ["p1"], x: 3, y: 1 });
+  state.rolls.r1 = { id: "r1", rev: 3, test: { kind: "save", ability: "dex", choices: [] }, dc: 15, dcShown: false, resultShown: false, at: "2026-10-12T20:00:00.000Z", targets: [{ tokenId: "hero", total: 17, by: "p1", result: "pass" }] } as never;
+  state.buildChunks[`${scene}:0,0`] = { sceneId: scene, cx: 0, cy: 0, rev: 9, cells: {}, edges: { "3,2,w": { kind: "door", state: "closed", secret: true, discovered: false }, "5,2,w": { kind: "door", state: "closed", secret: false, discovered: false } } } as never;
+  const vitals = { hp: { cur: 7, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
+  const revert = { before: vitals, after: vitals, added: [effects[2]!, effects[0]!], removed: [effects[3]!] };
+  state.log = [...state.log, { id: "hp-named", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert, tokenId: "seen1", seen: true } } as never];
+  return state;
+}
+
+/** The examples the review named, by the stored place a change touched. */
+const NAMED: Record<string, RegExp> = {
+  "a creature's conditions hidden from players": /^tokens\.seen1\.actor\.inline\.effects\.0\b/,
+  "HP numbers under a label": /^tokens\.seen1\.actor\.inline\.hp\b/,
+  "an unseen caster's id": /^templates\.ac\.casterId$/,
+  "a readied action's trigger": /^tokens\.seen1\.actor\.inline\.effects\.1\.label$/,
+  "a save's DC or its occurrence": /^tokens\.seen1\.actor\.inline\.effects\.2\.(save\.dc|due\b)/,
+  "a hidden clock's end": /^tokens\.seen1\.actor\.inline\.effects\.3\.ends\.(at|clock)$/,
+  "a hidden roll answer": /^rolls\.r1\.(targets\.0\.result|dc)$/,
+  "a secret door's flags": /^buildChunks\.[^.]+\.edges\.3,2,w\./,
+  "an HP line's hidden parts of conditions shown": /^log\.\d+\.data\.revert\.(added\.0\.(save\.dc|due\b)|removed\.0\.ends\.(at|clock))/,
+};
+
+describe("LP44R4-OPUS-1: twins apart in any field a player's copy leaves out give them equal exact parts", () => {
+  test("every field the copy leaves out or holds otherwise, changed, on rooms with what a review named and random ones", () => {
+    const found: string[] = [];
+    const named = new Map<string, number>();
+    let compared = 0;
+    for (let seed = 1; seed <= 16; seed++) {
+      const base = namedBase(seed);
+      const r = rng(seed * 43 + 1);
+      for (const memberId of ["p1", "p2"]) {
+        if (!base.members[memberId]) continue;
+        const candidates: Change[] = [];
+        for (const thing of storedThings(base, memberId)) omittedChanges(thing.stored, thing.copy, thing.path, candidates);
+        // A floor changes to another of the room's scenes, as a floor that is not one makes no room.
+        const changes = candidates.flatMap((c): Change[] => {
+          if (c.path.at(-1) !== "sceneId" || c.append) return [c];
+          const other = Object.keys(base.scenes).find((id) => `${id}zz` !== c.to && id !== (c.to as string).slice(0, -2));
+          return other === undefined ? [] : [{ ...c, to: other }];
+        });
+        // Every change at a named place, and a sample of the rest.
+        const forced = changes.filter((c) => Object.values(NAMED).some((re) => re.test(c.path.join("."))));
+        const rest = changes.filter((c) => !forced.includes(c)).sort(() => r() - 0.5).slice(0, 30);
+        const [copy, shown, conditions, rulers] = [copyOf(base, memberId), shownBy(base, memberId), shownChanges(base, memberId), heldRulers(base, memberId)];
+        for (const change of [...forced, ...rest]) {
+          const twin = applied(base, change);
+          // A change no stored room could hold, such as a word outside its list, makes no twin.
+          let twinCopy: string;
+          try {
+            twinCopy = copyOf(twin, memberId);
+          } catch {
+            continue;
+          }
+          if (twinCopy !== copy) continue;
+          compared++;
+          const where = change.path.join(".");
+          for (const [name, re] of Object.entries(NAMED)) if (re.test(where)) named.set(name, (named.get(name) ?? 0) + 1);
+          const [after, conditionsAfter] = [shownBy(twin, memberId), shownChanges(twin, memberId)];
+          for (const key of new Set([...Object.keys(shown), ...Object.keys(after)])) {
+            if (shown[key] === after[key] || rulers.has(key)) continue;
+            // Residual 9: an HP line moves only with what players are shown of its conditions.
+            if (key.startsWith("log:") && conditions[key] !== conditionsAfter[key]) continue;
+            found.push(`seed ${seed}, ${memberId}, ${where}${change.append ? " one longer" : ""}: ${key} ${shown[key] ?? "none"} against ${after[key] ?? "none"}`);
+          }
+        }
+      }
+    }
+    assert.deepEqual(found.slice(0, 10), []);
+    assert.ok(compared > 400, `${compared} twins compared`);
+    for (const name of Object.keys(NAMED)) assert.ok((named.get(name) ?? 0) > 0, `${name}: no twin compared`);
   });
 });
