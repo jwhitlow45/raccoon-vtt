@@ -9,6 +9,7 @@ import { outboundEph, serverMessageSchema, type Change, type EphEvent, type Op, 
 import { solid } from "../assets/testImages.ts";
 import { encodeWebm, webmWithSecrets } from "../assets/video/videoTestutil.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
+import type { RoomActor } from "./actor.ts";
 import { Connection } from "./connection.ts";
 import { buildSnapshot } from "./fanout.ts";
 import { Socket, startEngine, type Engine, type TestClient } from "./testing.ts";
@@ -27,10 +28,19 @@ const inline = (senses = "") => ({
   inline: { hp: { cur: 12, max: 12, temp: 0 }, life: "alive", ac: 14, speeds: { walk: 30 }, initBonus: 2, passivePerception: 12, senses, effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" },
 });
 
-/** Every frame the socket receives from now on, as the text that crossed the wire. */
+/**
+ * The longest a seat waits for a frame it is owed. Long, since a CI runner can stall for seconds and a late frame is
+ * not a wrong one. A frame that never comes still fails the test, only later.
+ */
+const OWED_MS = 30_000;
+
+/** Every frame the socket receives from now on, as the text that crossed the wire, but the pongs of the test's own pings (`drained`). */
 function wire(socket: Socket): string[] {
   const frames: string[] = [];
-  socket.ws.on("message", (data) => frames.push(data.toString()));
+  socket.ws.on("message", (data) => {
+    const text = data.toString();
+    if (!text.startsWith('{"t":"pong"')) frames.push(text);
+  });
   return frames;
 }
 
@@ -46,20 +56,61 @@ async function seat(name: string, socket: Socket, who: Who, clientId = name): Pr
   return { name, socket, who, view: snap.state as ProjectedState, you: snap.you, frames };
 }
 
-/** Folds every `ev` the seat was sent into its view, in order, up to the one that moves the marker to `x`. */
-async function catchUp(s: Seat, markerId: string, x: number): Promise<void> {
-  const moved = (m: ServerMessage) => m.t === "ev" && m.changes.some((c) => c.key === `token:${markerId}` && "value" in c && (c.value as { x?: number } | null)?.x === x);
+type Ev = Extract<ServerMessage, { t: "ev" }>;
+
+/** Folds every `ev` the seat was sent into its view, in order, up to the first that `last` matches. */
+async function foldUntil(s: Seat, last: (m: Ev) => boolean): Promise<void> {
   for (;;) {
-    const msg = s.socket.received.shift() ?? (await s.socket.next("ev"));
-    if (msg.t === "ev") s.view = applyChanges(s.view, msg.changes as Change[]);
-    if (moved(msg)) return;
+    const msg = s.socket.received.shift() ?? (await s.socket.next("ev", () => true, OWED_MS));
+    if (msg.t !== "ev") continue;
+    s.view = applyChanges(s.view, msg.changes as Change[]);
+    if (last(msg)) return;
   }
 }
 
-/** Folds whatever the seat holds now, after a wait long enough for one batch, for a seat the marker cannot reach (a blackout). */
-async function settle(s: Seat): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  for (let msg = s.socket.received.shift(); msg; msg = s.socket.received.shift()) if (msg.t === "ev") s.view = applyChanges(s.view, msg.changes as Change[]);
+/** Folds every `ev` the seat was sent into its view, in order, up to the one that moves the marker to `x`. */
+function catchUp(s: Seat, markerId: string, x: number): Promise<void> {
+  return foldUntil(s, (m) => m.changes.some((c) => c.key === `token:${markerId}` && "value" in c && (c.value as { x?: number } | null)?.x === x));
+}
+
+let pinged = 0;
+
+/** Waits until the seat holds every frame the server sent it so far: the pong of a ping comes behind each of them. */
+async function drained(s: Seat): Promise<void> {
+  const k = ++pinged;
+  s.socket.send({ t: "ping", k });
+  await s.socket.next("pong", (m) => m.k === k, OWED_MS);
+}
+
+/**
+ * Holds the room's queue with a deletion step that deletes nothing, until the call it returns. Commands sent
+ * meanwhile wait in the queue, which then takes them in one turn, so ops sent together join one batch whatever
+ * the batch clock reads when they land.
+ */
+async function holdQueue(actor: RoomActor): Promise<() => Promise<void>> {
+  let running!: () => void;
+  const started = new Promise<void>((resolve) => (running = resolve));
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const step = actor.deletionStep(async () => {
+    running();
+    await gate;
+    return { deleted: [], result: undefined };
+  });
+  await started;
+  return async () => {
+    open();
+    await step;
+  };
+}
+
+/** Waits until `n` commands wait in the room's queue. */
+async function queued(actor: RoomActor, n: number): Promise<void> {
+  const end = Date.now() + OWED_MS;
+  while (actor.queueLength < n) {
+    assert.ok(Date.now() < end, `${n} commands never reached the room's queue`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 const silent = { readyState: 1, OPEN: 1, CONNECTING: 0, send: () => undefined, close: () => undefined, terminate: () => undefined };
@@ -122,8 +173,9 @@ async function newRoom(t: Engine, name: string): Promise<Room> {
   return { roomId, dm, ana, bree, tv, dmId, anaId, breeId, ground, dmSocket, dmKey };
 }
 
-async function ok(socket: Socket, op: Op): Promise<Extract<ServerMessage, { t: "ev" }>> {
-  const ev = await socket.apply(op);
+async function ok(socket: Socket, op: Op): Promise<Ev> {
+  const n = socket.op(op);
+  const ev = await socket.next("ev", (m) => (m.acks?.includes(n) ?? false) || (m.rejects?.some((r) => r.n === n) ?? false), OWED_MS);
   assert.deepEqual(ev.rejects ?? [], [], `${op.t} was refused`);
   return ev;
 }
@@ -569,7 +621,8 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     // An update that has nothing to do with the floors: the anchor stays null, `blackout ? null : playerSceneId`.
     await ok(r.dmSocket, { t: "room.update", name: "Blackout, renamed" } as Op);
     for (const x of all) {
-      await settle(x);
+      // The marker cannot reach a seat behind the blackout, so the rename's own frame is the one to wait for.
+      await foldUntil(x, (m) => m.changes.some((c) => c.key === "meta" && "value" in c && (c.value as { name?: string }).name === "Blackout, renamed"));
       assert.equal(x.view.meta.view.blackout, true, `${x.name}'s copy still reads the blackout, so its anchor stays null`);
       assert.deepEqual(Object.keys(x.view.scenes), []);
     }
@@ -725,10 +778,9 @@ function leaks(x: Compared, when: string): void {
   }
 }
 
-/** Waits until no seat of the rooms has been sent a frame for a moment, so a history line that trails its `ev` is in before frames are compared. */
+/** Waits until every seat of the rooms holds each frame the server sent it so far, so a history line that trails its `ev` is in before frames are compared. */
 async function quiet(...rooms: Compared[]): Promise<void> {
-  const count = () => rooms.reduce((n, x) => n + x.seats.ana.frames.length + x.seats.bree.frames.length + x.seats.tv.frames.length, 0);
-  for (let last = -1, now = count(); now !== last; last = now, now = count()) await new Promise((resolve) => setTimeout(resolve, 120));
+  await Promise.all(rooms.flatMap((x) => [x.seats.ana, x.seats.bree, x.seats.tv]).map(drained));
 }
 
 /** Every seat of both rooms was sent nothing hidden, holds the same room and was sent the same frames, whole (FL2-SOL-04). */
@@ -747,19 +799,39 @@ async function alike(a: Compared, b: Compared, when: string): Promise<void> {
   same(a, b, when);
 }
 
-/** The answer Ana's op `n` got, from her frames since she last connected (`from`): refused with its code and words, or applied with the toast's words, if any. */
+/**
+ * The answer Ana's op `n` got, from her frames since she last connected (`from`): refused with its code and words, or
+ * applied with the toast's words, if any. Read from the frames, not taken from the socket, so `catchUp` still folds it.
+ */
 async function answered(s: Seat, n: number, from: number): Promise<string> {
-  for (let i = 0; i < 100; i++) {
-    for (const frame of s.frames.slice(from)) {
-      const m = JSON.parse(frame) as ServerMessage;
-      if (m.t !== "ev") continue;
-      const no = m.rejects?.find((x) => x.n === n);
-      if (no) return `refused ${no.code}: ${no.message}`;
-      if (m.acks?.includes(n)) return `applied: ${m.restored?.find((x) => x.n === n)?.what ?? ""}`;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  const answer = (frame: string): string | null => {
+    const m = JSON.parse(frame) as ServerMessage;
+    if (m.t !== "ev") return null;
+    const no = m.rejects?.find((x) => x.n === n);
+    if (no) return `refused ${no.code}: ${no.message}`;
+    return m.acks?.includes(n) ? `applied: ${m.restored?.find((x) => x.n === n)?.what ?? ""}` : null;
+  };
+  for (const frame of s.frames.slice(from)) {
+    const got = answer(frame);
+    if (got !== null) return got;
   }
-  return "no answer";
+  return new Promise<string>((resolve) => {
+    const onFrame = (data: unknown) => {
+      const got = answer(String(data));
+      if (got === null) return;
+      stop();
+      resolve(got);
+    };
+    const timer = setTimeout(() => {
+      stop();
+      resolve("no answer");
+    }, OWED_MS);
+    const stop = () => {
+      clearTimeout(timer);
+      s.socket.ws.off("message", onFrame);
+    };
+    s.socket.ws.on("message", onFrame);
+  });
 }
 
 /** Ana's device drops and comes back in both rooms: her new snapshot is the same room, her next ops go on it, and what she was sent before stays compared. */
@@ -1261,9 +1333,15 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     await alike(a, b, "Bree measures on Attic");
     for (const x of [a, b]) assert.ok(x.seats.ana.view.log.some((l) => JSON.stringify(l).includes(x.gargoyle)), "Ana reads the gargoyle's line");
     for (const x of [a, b]) {
+      const room = await t.manager.acquire(x.roomId);
+      const release = await holdQueue(room);
       const height = x.dmSocket.op({ t: "scene.update", sceneId: x.loft, patch: { floor: { height: 30 } } } as Op);
+      // The second op goes only once the first waits in the queue, so the batch holds both however far apart they land.
+      await queued(room, 1);
       const hide = x.dmSocket.op({ t: "floor.open", sceneId: x.attic, open: false } as Op);
-      const ev = await x.dmSocket.next("ev", (m) => (m.acks ?? []).includes(hide));
+      await queued(room, 2);
+      await release();
+      const ev = await x.dmSocket.next("ev", (m) => (m.acks ?? []).includes(hide), OWED_MS);
       assert.deepEqual([ev.acks?.includes(height), ev.rejects ?? []], [true, []], "both ops in one batch");
       await x.sync("Loft set to 30 ft and Attic hidden in one batch");
       assert.deepEqual(ephs(x.seats.ana).at(-1)?.e, { k: "rulerEnd", id: "attic-ruler" }, "Ana's screen drops the ruler");
