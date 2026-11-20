@@ -437,6 +437,72 @@ describe("the supervisor's channel (IPC)", () => {
     }
   });
 
+  /** The server as the supervisor starts it, not yet answering. */
+  async function spawnServer(): Promise<{ child: ChildProcess; output: () => string; exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }> }> {
+    const port = await freePort();
+    const child = spawn(process.execPath, ["server/main.ts"], { cwd: ROOT, env: childEnv(localEnv("127.0.0.1", port)), stdio: ["ignore", "pipe", "pipe", "ipc"] });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+    child.stderr?.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+    return { child, output: () => output, exited };
+  }
+
+  // Each way the supervisor stops its server, sent the moment the server starts and again once it listens. Sent at
+  // once, the message lands while the server binds (its "shutting down" comes before "Server listening"), the
+  // channel's close before it binds, and SIGTERM before its handler, which Node's default ends.
+  const stops = { shutdown: (c: ChildProcess) => c.send({ type: "shutdown" }), disconnect: (c: ChildProcess) => c.disconnect(), SIGTERM: (c: ChildProcess) => c.kill("SIGTERM") };
+  for (const [name, stop] of Object.entries(stops)) {
+    for (const when of ["at once", "once listening"] as const) {
+      test(`${name} ${when} ends the process`, async () => {
+        const s = await spawnServer();
+        try {
+          if (when === "once listening") await until(() => /listening/i.test(s.output()), 30_000, "the server to listen");
+          stop(s.child);
+          const exit = await within(s.exited, 30_000, "the exit");
+          if (name === "SIGTERM" && when === "at once") assert.ok(exit.code === 0 || exit.signal === "SIGTERM", JSON.stringify(exit));
+          else assert.deepEqual(exit, { code: 0, signal: null }, s.output());
+        } finally {
+          if (s.child.exitCode === null && s.child.signalCode === null) s.child.kill("SIGKILL");
+        }
+      });
+    }
+  }
+
+  // The supervisor killed outright, as the shell e2e does: its channel closes and so does the pipe it read the
+  // server's output from. A stop that then logged its last steps used to block on that pipe at its exit forever.
+  for (const when of ["at once", "once listening"] as const) {
+    test(`a supervisor killed ${when} leaves no server running`, async () => {
+      const port = await freePort();
+      const middle = spawn(
+        process.execPath,
+        ["-e", 'const c = require("node:child_process").spawn(process.execPath, ["server/main.ts"], { stdio: ["ignore", "pipe", "pipe", "ipc"] }); process.stdout.write(`pid ${c.pid}\\n`); c.stdout.pipe(process.stdout); c.stderr.pipe(process.stdout);'],
+        { cwd: ROOT, env: childEnv(localEnv("127.0.0.1", port)), stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let output = "";
+      middle.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+      let pid = 0;
+      const alive = (): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      try {
+        await until(() => /^pid \d+$/m.test(output), 10_000, "the server's pid");
+        pid = Number(/^pid (\d+)$/m.exec(output)?.[1]);
+        if (when === "once listening") await until(() => /listening/i.test(output), 30_000, "the server to listen");
+        middle.kill("SIGKILL");
+        await until(() => !alive(), 30_000, `server ${pid} to exit after its supervisor's death`);
+      } finally {
+        if (middle.exitCode === null && middle.signalCode === null) middle.kill("SIGKILL");
+        if (pid > 0 && alive()) process.kill(pid, "SIGKILL");
+      }
+    });
+  }
+
   test("the channel closing, as when the supervisor dies, runs the same graceful shutdown", async () => {
     const c = await startChild();
     try {

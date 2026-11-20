@@ -28,6 +28,7 @@ import { registerSecurity } from "./http/security.ts";
 import { registerStatic } from "./http/static.ts";
 import { registerXCardRoutes } from "./http/xcard.ts";
 import { dropForeignPeer, originPolicy, type OriginPolicy } from "./local/guard.ts";
+import { localLogOutput } from "./local/logOutput.ts";
 import { network, type LocalNetwork } from "./local/network.ts";
 import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
@@ -86,7 +87,8 @@ const LOG_METADATA_CONNECT_MS = 5_000;
  */
 export async function buildApp({ config, pool, gateway, hasher, access, rooms, ws, export: exportOptions, cleanup, ddb, assets, log, network: localNet = network }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
+    // Local mode writes to stdout through Node's own stream, which a dead supervisor can never stall (server/local/logOutput.ts).
+    logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug", ...(config.local ? { stream: localLogOutput() } : {}) },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
     // keep-alive makes it reuse sockets Node already closed, which shows up
     // as sporadic 502s on uploads (design section 10.7).
