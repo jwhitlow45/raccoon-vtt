@@ -67,7 +67,7 @@ import {
 import { handoutPages } from "./handouts.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { inLiveLog, lineAudience, liveStart, neverRead } from "./logRings.ts";
-import { clipsByHeldWalls, revealSeenAnywhere } from "./migrate.ts";
+import { clipsByHeldWalls, companionByCopy, revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
 import { lengthAs, type FiredEffect, type MusicRun, type Playing, type Playlist, type Sound, type SoundId } from "./sound.ts";
 import type { Env } from "./reducer/tx.ts";
@@ -682,6 +682,13 @@ type Ctx = {
    * the room now applies.
    */
   written?: true;
+  /**
+   * A line's readers fixed, or a projection an op decides by, for an op
+   * stored before version 65, which read a creature's HP, life and life
+   * lines by its stored companion link (shared/migrate.ts companionByCopy),
+   * and replay so.
+   */
+  storedCompanion?: true;
 };
 
 function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts, held = true): Ctx {
@@ -1272,18 +1279,18 @@ function ownersWalkCtx(ctx: Ctx, token: Token, path: TokenPath): TokenPath | nul
  * player plays is the party's, so its HP follows the party's rule rather
  * than its own `hpVisibility` (docs/design/design-v1-combat-flow.md 3.6.5).
  */
-export function hpAccess(state: RoomState, viewer: Viewer, holder: { token?: Token; character?: Character }): HpAccess {
+export function hpAccess(state: RoomState, viewer: Viewer, holder: { token?: Token; character?: Character }, byCopy = true): HpAccess {
   if (viewer.role === "dm") return "exact";
   if (holder.character) {
     if (ownsCharacter(viewer, holder.character)) return "exact";
     if (holder.token && ownsToken(state, viewer, holder.token)) return "exact";
-    if (hpLess(holder.character.actor, holder.token)) return "none";
+    if (hpLess(holder.character.actor, holder.token && shownLink(state, holder.token, byCopy))) return "none";
     return state.meta.settings.pcHpVisibleToParty ? "exact" : "label";
   }
   const token = holder.token;
   if (!token) return "none";
   if (ownsToken(state, viewer, token)) return "exact";
-  if ("inline" in token.actor && hpLess(token.actor.inline, token)) return "none";
+  if ("inline" in token.actor && hpLess(token.actor.inline, shownLink(state, token, byCopy))) return "none";
   if (token.companion && playersToken(state, token)) return state.meta.settings.pcHpVisibleToParty ? "exact" : "label";
   return token.hpVisibility === "hidden" ? "none" : token.hpVisibility;
 }
@@ -1294,8 +1301,25 @@ export function hpAccess(state: RoomState, viewer: Viewer, holder: { token?: Tok
  * creature made an effect keeps its life underneath, and no device without
  * its `companion` field may be told it is dead.
  */
-function effectCompanion(token: Pick<Token, "kind" | "companion">): boolean {
-  return token.companion !== undefined && token.kind === "object";
+function effectCompanion(state: RoomState, token: Token, byCopy = true): boolean {
+  return shownCompanion(state, token, byCopy) !== undefined && token.kind === "object";
+}
+
+/**
+ * A creature's companion link as a player's copy holds it: only on a token
+ * the party plays (projectTokenCtx), so a companion of a character no player
+ * plays reads to players as a plain token in every HP, life and life line
+ * rule, as its projection does. `byCopy` false is the stored link, which a
+ * line's readers fixed before op version 65 read (shared/migrate.ts
+ * companionByCopy).
+ */
+function shownCompanion(state: RoomState, token: Token, byCopy = true): Token["companion"] {
+  return !byCopy || playersToken(state, token) ? token.companion : undefined;
+}
+
+/** The token as hpLess reads it for a player: its kind and the companion link their copy holds. */
+function shownLink(state: RoomState, token: Token, byCopy: boolean): { kind: Token["kind"]; companion?: Token["companion"] } {
+  return { kind: token.kind, companion: shownCompanion(state, token, byCopy) };
 }
 
 /**
@@ -1478,7 +1502,15 @@ function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
     actor:
       "ref" in token.actor
         ? token.actor
-        : { inline: projectActorPublic(token.actor.inline, hpAccess(ctx.state, ctx.viewer, { token }), () => playerPlays(ctx.state, { token }), heldClock(ctx.state, ctx.viewer)?.id, effectCompanion(token)) },
+        : {
+            inline: projectActorPublic(
+              token.actor.inline,
+              hpAccess(ctx.state, ctx.viewer, { token }, !ctx.storedCompanion),
+              () => playerPlays(ctx.state, { token }),
+              heldClock(ctx.state, ctx.viewer)?.id,
+              effectCompanion(ctx.state, token, !ctx.storedCompanion),
+            ),
+          },
     aboveFog,
   };
   if (token.image !== undefined) out.image = token.image;
@@ -3787,7 +3819,7 @@ function both(a: Reach, b: Reach): Reach {
  * it could not have reached then, a player who comes to own its creature
  * later included.
  */
-export function eventReach(state: RoomState, data: LogEvent): Reach {
+export function eventReach(state: RoomState, data: LogEvent, byCopy = true): Reach {
   if (neverRead(data)) return [];
   switch (data.type) {
     case "correction":
@@ -3805,7 +3837,7 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
       return creatureReach(state, data, false);
     case "deathSave":
     case "life":
-      return creatureReach(state, data, true);
+      return creatureReach(state, data, true, byCopy);
     case "turn": {
       const row = state.encounter?.entries.find((e) => e.id === data.entryId);
       if (!row) return [];
@@ -3863,15 +3895,15 @@ function creaturePlayers(state: RoomState, ref: { tokenId?: string; characterId?
  * character, or a token that players who do not own it could see when it
  * happened, else the token's players and, on a per-player scene, the sight
  * holders its list names (docs/design/design-v1-per-player-vision.md 6.5). An
- * effect companion's life (`lifeOnly`) reaches only its players however it
- * was seen.
+ * effect companion's life (`lifeOnly`), by the link players' copies hold
+ * (shownCompanion), reaches only its players however it was seen.
  */
-function creatureReach(state: RoomState, data: { tokenId?: string; characterId?: string; seen?: true; seenBy?: string[] }, lifeOnly: boolean): Reach {
+function creatureReach(state: RoomState, data: { tokenId?: string; characterId?: string; seen?: true; seenBy?: string[] }, lifeOnly: boolean, byCopy = true): Reach {
   if (data.characterId !== undefined && !ownEntry(state.characters, data.characterId)) return [];
   if (data.tokenId === undefined) return "all";
   const token = ownEntry(state.tokens, data.tokenId);
   if (!token) return [];
-  const companionLife = lifeOnly && effectCompanion(token);
+  const companionLife = lifeOnly && effectCompanion(state, token, byCopy);
   if (data.seen && !companionLife) return "all";
   return companionLife || data.seenBy === undefined ? ownersOf(state, token) : [...ownersOf(state, token), ...data.seenBy];
 }
@@ -3923,14 +3955,16 @@ export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data
  * so an op of many lines judges them all against the same room for about
  * the cost of reading each. The reach is stored, so it takes the op's
  * version: one stored before op version 37 reads a creature's outline on
- * hexes by the build's walls (clipsByHeldWalls).
+ * hexes by the build's walls (clipsByHeldWalls), and one stored before 65 a
+ * creature's companion link as stored (companionByCopy).
  */
 export function lineReader(state: RoomState, opVersion?: number): (entry: Pick<LogEntry, "kind" | "data">) => LineReach {
   // Each reader with their own sight and fog, which on a per-player scene are theirs alone, and any player the shared
   // ones (docs/design/design-v1-per-player-vision.md 6.5). Any player stands for a member who owns nothing, so it reads a dice
   // line as members do.
   const held = clipsByHeldWalls(opVersion);
-  const ctxOfReader = (viewer: Viewer): Ctx => ({ ...ctxOf(state, viewer, { sceneId: null }, held), member: true });
+  const storedCompanion = companionByCopy(opVersion) ? {} : { storedCompanion: true as const };
+  const ctxOfReader = (viewer: Viewer): Ctx => ({ ...ctxOf(state, viewer, { sceneId: null }, held), member: true, ...storedCompanion });
   const players = Object.values(state.members)
     .filter((m) => m.kind === "player")
     .map((m) => m.id)
@@ -4082,13 +4116,13 @@ function holderFor(ctx: Ctx, data: { tokenId?: string; characterId?: string }): 
 
 /** The HP numbers a read gives: those the viewer may read now, or, for a line read as written, all its parts left them. */
 function accessFor(ctx: Ctx, holder: { token?: Token; character?: Character }): HpAccess {
-  return ctx.written ? "exact" : hpAccess(ctx.state, ctx.viewer, holder);
+  return ctx.written ? "exact" : hpAccess(ctx.state, ctx.viewer, holder, !ctx.storedCompanion);
 }
 
 function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | null {
   // A copy of a secret roll of someone else's, read as the bare line then, names no roll or creature to check again.
   if (copy && data.type === "dice" && data.to === "dm" && data.rolls.length === 0) return ctx.member && data.by !== ctx.viewer.memberId ? data : null;
-  if (!ctx.written && !reaches(eventReach(ctx.state, data), ctx.viewer.memberId)) return null;
+  if (!ctx.written && !reaches(eventReach(ctx.state, data, !ctx.storedCompanion), ctx.viewer.memberId)) return null;
   data = withoutLists(data, ctx.viewer.memberId);
   switch (data.type) {
     case "hp": {
@@ -4458,9 +4492,11 @@ export function projectEntity(key: EntityKey, state: RoomState, viewer: Viewer, 
  * changed what a player sees (reducer.ts). Their answers are stored or
  * decide what is, so each takes the op's envelope, and an op stored before
  * op version 37 projects by the build's walls it was applied under
- * (clipsByHeldWalls). The envelope is a required argument, so no reducer
- * caller can fall back to the live rule. The rest of the module's exports
- * project live, for sockets, previews and devices.
+ * (clipsByHeldWalls), and one stored before 65 reads a creature's HP and
+ * life by its stored companion link (companionByCopy). The envelope is a
+ * required argument, so no reducer caller can fall back to the live rule.
+ * The rest of the module's exports project live, for sockets, previews and
+ * devices.
  */
 
 /*
@@ -4473,15 +4509,21 @@ export function projectEntity(key: EntityKey, state: RoomState, viewer: Viewer, 
 /** projectEntity for the op `env` stores. */
 export function projectEntityForOp(key: EntityKey, state: RoomState, viewer: Viewer, opts: ProjectOpts, env: Pick<Env, "opVersion">): unknown {
   const held = clipsByHeldWalls(env.opVersion);
-  const out = projectEntityCtx(ctxOf(state, viewer, opts, held), key);
+  const out = projectEntityCtx(ctxForOp(state, viewer, opts, env), key);
   return held || out === null || parseKey(key)?.kind !== "token" ? out : unmarked(out as ProjectedToken);
 }
 
 /** projectState for the op `env` stores. */
 export function projectStateForOp(state: RoomState, viewer: Viewer, opts: ProjectOpts, env: Pick<Env, "opVersion">): ProjectedState {
   const held = clipsByHeldWalls(env.opVersion);
-  const out = projectStateCtx(ctxOf(state, viewer, opts, held));
+  const out = projectStateCtx(ctxForOp(state, viewer, opts, env));
   return held ? out : { ...out, tokens: Object.fromEntries(Object.entries(out.tokens).map(([id, t]) => [id, unmarked(t)])) };
+}
+
+/** The projection's context for the op `env` stores: its walls rule (clipsByHeldWalls) and its companion rule (companionByCopy). */
+function ctxForOp(state: RoomState, viewer: Viewer, opts: ProjectOpts, env: Pick<Env, "opVersion">): Ctx {
+  const ctx = ctxOf(state, viewer, opts, clipsByHeldWalls(env.opVersion));
+  return companionByCopy(env.opVersion) ? ctx : { ...ctx, storedCompanion: true };
 }
 
 /** A projected token without the `seenAll` mark: the same object when it has none. */

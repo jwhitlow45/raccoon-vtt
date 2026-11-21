@@ -4,14 +4,14 @@ import { describe, test } from "node:test";
 import { lineAudience } from "./logRings.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
-import { hash128, projectState, stableStringify, type ProjectedState } from "./project.ts";
+import { hash128, projectStateForOp, stableStringify, type ProjectedState } from "./project.ts";
 import { readEntity } from "./keys.ts";
 import { guardHash } from "./reducer/tx.ts";
 import { asPlayerCopy } from "./rankTestutil.ts";
 import { storedFogOff } from "./secretDoorTestutil.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { seenWhole } from "./rules/path.ts";
-import { DOOR_COVER_OP_VERSION, NUMBERING_OP_VERSION } from "./migrate.ts";
+import { DOOR_COVER_OP_VERSION, NUMBERING_OP_VERSION, WALK_TRIM_OP_VERSION } from "./migrate.ts";
 import { DM, P1, P2, env, randomOp, randomState, rng } from "./testutil.ts";
 
 /**
@@ -69,9 +69,12 @@ function stored(state: RoomState): string {
  * copies are cut from held ground since D-261110-530: those are read with
  * their chunks and rule as the stored build gave them (storedFogOff).
  */
-/** A viewer's projection as the fixture hashes it: a player's in the form this build sends it (rankTestutil.ts). */
+/**
+ * A viewer's projection as the fixture hashes it: a player's in the form this build sends it (rankTestutil.ts), a
+ * creature's companion link read as stored, as the build before change format 65 read it (companionByCopy).
+ */
 function copyOf(state: RoomState, viewer: Viewer, sceneId: string): ProjectedState {
-  const view = asNumberedBefore(state, viewer, projectState(state, viewer, { sceneId }));
+  const view = asNumberedBefore(state, viewer, projectStateForOp(state, viewer, { sceneId }, { opVersion: WALK_TRIM_OP_VERSION - 1 }));
   return viewer.role === "dm" ? view : storedFogOff(state, asPlayerCopy(view));
 }
 
