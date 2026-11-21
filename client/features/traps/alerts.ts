@@ -119,8 +119,10 @@ function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes">, vi
   const sceneId = cards[0]!.sceneId;
   if (!cards.every((card) => card.sceneId === sceneId)) return { text: `${count} fell to the floors below.` };
   const scene = ownEntry(state.scenes, sceneId);
-  const floor = scene?.floor?.name ?? scene?.name;
-  return { text: floor ? `${count} fell to ${floor}.` : `${count} fell to the floors below.`, ...(scene && sceneId !== viewing ? { show: { sceneId } } : {}) };
+  if (!scene) return { text: `${count} fell to another floor.` };
+  // Another scene's floor is named with its scene, as each creature's toast names it.
+  const away = scene.floor !== undefined && scene.name.trim() !== "" && (viewing === null || !sameScene(state, sceneId, viewing)) ? ` on ${scene.name.trim()}` : "";
+  return { text: `${count} fell to ${scene.floor?.name ?? scene.name}${away}.`, ...(sceneId !== viewing ? { show: { sceneId } } : {}) };
 }
 
 function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {

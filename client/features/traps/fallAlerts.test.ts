@@ -76,6 +76,11 @@ describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
     assert.deepEqual(fallAlerts(mixed, view(), "ground", NO_LABELS), [{ text: "4 creatures fell to the floors below." }]);
   });
 
+  test("another scene's floor is named with its scene, and an unknown one as another floor (PUB46-O-7)", () => {
+    assert.deepEqual(fallAlerts(crowd(4, 130, { sceneId: "crypt" }), view(), "ground", NO_LABELS), [{ text: "4 creatures fell to Vault on Crypt.", show: { sceneId: "crypt" } }]);
+    assert.deepEqual(fallAlerts(crowd(4, 130, { sceneId: "gone" }), view(), "ground", NO_LABELS), [{ text: "4 creatures fell to another floor." }]);
+  });
+
   test("an opening placed under 12 creatures keeps 10 cards, and the toast says 10 or more (PUB46-SOL-02)", () => {
     const imps = Array.from({ length: 12 }, (_, i) => token(`imp${i}`, { sceneId: UPPER, kind: "monster", name: `Imp ${i}`, x: 6 + (i % 4), y: 6 + Math.floor(i / 4) }));
     const before = tower({ tokens: Object.fromEntries(imps.map((t) => [t.id, t])) });
