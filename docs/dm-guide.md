@@ -414,7 +414,7 @@ A fall happens where a change ends, not where a walk passes. A creature dragged 
 
 While a fall is on a drag, the label beside the distance says "Falls to Ground floor", or "Falls through the opening" where the device does not hold that floor, so you see it before you let go. **Move to floor…** is off over a hole ("Over an opening on Upper floor"), since the creature would fall at once, so move the creature off the hole first or let it fall.
 
-A player's **Undo** takes their creature's fall back, with its areas, and **Redo** drops it again without a new card, so damage you already applied is never asked for twice. A fall is a step of its own and never merges with the move before it. Your own **Undo** restores every card the step made or removed.
+A player's **Undo** takes their creature's fall back, with its areas, and an undo of a fall you have not applied also removes its card, and **Redo** brings the same card back. A card you already applied never comes back, so damage is never asked for twice. A fall is a step of its own and never merges with the move before it. Your own **Undo** restores every card the step made or removed.
 
 **Landing.** Any landing, whether a climb, a flight, a fall or a trapdoor, sets off the traps and reminders of the floor it lands on. A creature that lands on a snare whose trap goes off when a creature enters, or inside an aura that reminds on entering, meets it as if it had walked in. A creature that lands in the air sets off no trap on the floor, and a creature never enters its own aura by landing. A creature that falls through two floors in one move meets only what lies where it ends. Move to floor places a creature and sets off neither.
 
