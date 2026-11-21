@@ -406,6 +406,26 @@ describe("D-261121-120 and 125: no fight's start or end, and no walk, moves a re
     }
   });
 
+  test("FABLE-3 past the line: under Players move any token, P1's move that brings a creature into view adds nothing to their exact part and is taken in both twins", () => {
+    for (const past of ["room", "scene"] as const) {
+      const state = fightTable();
+      state.meta.settings = { ...state.meta.settings, playersMoveAny: "all" };
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: true, light: "dark" } };
+      state.tokens.hero = { ...state.tokens.hero!, light: { bright: 10, dim: 10 } };
+      state.tokens.lurker = token("lurker", { x: 16, y: 2, name: "L".repeat(80), visibility: "all", notes: "x".repeat(2_000), actor: { inline: actor({ dmNotes: "" }) } });
+      const twins = twinOf(state, (s) => {
+        const lurker = s.tokens.lurker!;
+        if ("inline" in lurker.actor) s.tokens.lurker = { ...lurker, actor: { inline: { ...lurker.actor.inline, dmNotes: "d".repeat(9_000) } } };
+      });
+      parked(twins, past, "s1", FAR.byteStep / 2);
+      const move: Op = { t: "token.move", tokenId: "hero", x: 12, y: 2 };
+      const [a, b] = [answer(twins[0], move), answer(twins[1], move)];
+      assert.ok(a.next, a.said);
+      assert.ok(exactCopies(a.next, "p1").has(keys.token("lurker")) && !exactCopies(twins[0], "p1").has(keys.token("lurker")), "the lurker came into P1's copy");
+      assert.deepEqual([a.said, b.said], ["taken", "taken"], past);
+    }
+  });
+
   test("FABLE-3: under Players move any token, P1's torch lit with a creature entering view, within one op under the scene's line, is taken in both twins", () => {
     for (const past of ["room", "scene"] as const) {
       const state = fightTable();
