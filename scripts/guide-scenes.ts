@@ -16,9 +16,6 @@
  * GUIDE_OUT     where the webp pictures go (default: GUIDE_WORK/out). Point it at
  *               docs/dm-guide to replace the guide's pictures in place.
  * GUIDE_ONLY    comma list of picture names to write (default: all).
- * GUIDE_FROM    first step number to run and GUIDE_TO the last (default: all).
- *               Steps build on each other, so a later start needs the room
- *               an earlier run kept: use GUIDE_ONLY on the whole run instead.
  *
  * GUIDE_WAIT   when set, a failing step does not end the run. The run waits
  *               for a file named `go` in GUIDE_WORK (touch it), then runs
@@ -45,8 +42,6 @@ const WORK = process.env.GUIDE_WORK ?? mkdtempSync(path.join(tmpdir(), "raccoon-
 const RAW = path.join(WORK, "raw");
 const OUT = process.env.GUIDE_OUT ?? path.join(WORK, "out");
 const ONLY = process.env.GUIDE_ONLY === undefined ? null : new Set(process.env.GUIDE_ONLY.split(",").map((n) => n.trim()));
-const FROM = Number(process.env.GUIDE_FROM ?? 0);
-const TO = Number(process.env.GUIDE_TO ?? Infinity);
 const VERBOSE = process.env.GUIDE_VERBOSE !== undefined;
 const WAIT = process.env.GUIDE_WAIT !== undefined;
 const SKIP = new Set((process.env.GUIDE_SKIP ?? "").split(",").filter((n) => n !== ""));
@@ -66,8 +61,7 @@ function stepOrder(file: string): [number, string] {
 
 const steps = readdirSync(STEPS_DIR)
   .filter((f) => /^s\d+[a-z]?-.*\.ts$/.test(f))
-  .sort((a, b) => stepOrder(a)[0] - stepOrder(b)[0] || a.localeCompare(b))
-  .filter((f) => stepOrder(f)[0] >= FROM && stepOrder(f)[0] <= TO);
+  .sort((a, b) => stepOrder(a)[0] - stepOrder(b)[0] || a.localeCompare(b));
 
 // The server rolls and mints ids from a fixed stream (guide-scenes/seed.ts), so a second run gives the same pictures.
 const inheritedOptions = process.env.NODE_OPTIONS;
