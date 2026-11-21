@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HARD, LIMITS, serializedBytes } from "#shared/limits.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, FALL_RIDERS_MOST, SKILL_KEYS } from "#shared/model.ts";
 import {
   actorTargetSchema,
   castSchemas,
@@ -99,8 +99,10 @@ const source = z.discriminatedUnion("kind", [
   // An area's page holds the floors an opening joins to its own (docs/design/design-v1-floors.md phase 4, 9.2).
   z.strictObject({ kind: z.literal("area"), templateId: id, floors: z.array(z.string().max(64)).min(2).max(LIMITS.floorsPerScene).optional() }),
   z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens) }),
-  // A fall card's page holds its one creature (docs/design/design-v1-floors.md phase 4, 4.4).
-  z.strictObject({ kind: z.literal("fall"), fallId: fallSchemas.fallId, tokenIds: z.array(id).max(1) }),
+  // A fall card's page holds the creature that fell and the riders that fell with it (docs/design/design-v1-floors.md
+  // phase 4, 4.4, D-261120-007), as the card names them. A character's other tokens it settles are among those, so
+  // the bound is the card's own, the same the outcome op checks its settled creatures by.
+  z.strictObject({ kind: z.literal("fall"), fallId: fallSchemas.fallId, tokenIds: z.array(id).max(FALL_RIDERS_MOST + 1) }),
 ]) satisfies z.ZodType<Page["source"]>;
 
 const fill = z.strictObject({

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { HARD } from "#shared/limits.ts";
+import { FALL_RIDERS_MOST } from "#shared/model.ts";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
 import { castSeen, closeSettled, closeTheAsk, newPage, setDc, type Page } from "./chain.ts";
 import { castAsk } from "#shared/testutil.ts";
@@ -311,4 +312,43 @@ test("a saved page keeps a selection of every token a scene can hold with player
   };
   assert.equal(saveDraftSchema.safeParse(withSelection(many(HARD.groupSaveTokens))).success, true);
   assert.equal(saveDraftSchema.safeParse(withSelection(many(HARD.groupSaveTokens + 1))).success, false);
+});
+
+describe("a fall card's page names its creature, its riders and a settled character's other tokens (LP46A-FALL-1)", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `019a3df0-2000-7000-8000-${String(i).padStart(12, "0")}`);
+  const fallPage = (tokenIds: string[], rows: string[] = tokenIds): Page => {
+    const base = page();
+    return {
+      ...base,
+      source: { kind: "fall", fallId: "12:1", tokenIds },
+      rows: rows.map((tokenId) => ({ holder: `token:${tokenId}`, tokenId, target: { tokenId }, name: tokenId, ways: ["fails"], bonus: null, skip: false })),
+      states: Object.fromEntries(rows.map((tokenId) => [`token:${tokenId}`, { way: "fails" as const }])),
+      rolls: [],
+      requests: [],
+    };
+  };
+  const applies = (p: Page) => prepareSave({ page: p, reopen: null }, plan(), authority());
+
+  test("a card with the most riders applies", () => {
+    const sent = applies(fallPage(many(FALL_RIDERS_MOST + 1)));
+    assert.equal(sent.error, undefined);
+    assert.equal(sent.send.length > 0, true);
+    assert.equal(saveDraftSchema.safeParse(draftOf(sent)).success, true);
+  });
+
+  test("a character that shows two tokens applies with its one row", () => {
+    const [mount, first, second] = many(3) as [string, string, string];
+    const sent = applies(fallPage([mount, first, second], [mount, first]));
+    assert.equal(sent.error, undefined);
+    assert.equal(sent.send.length > 0, true);
+  });
+
+  test("one over the most a card names is refused and kept from storage", () => {
+    const over = fallPage(many(FALL_RIDERS_MOST + 2));
+    const sent = applies(over);
+    assert.deepEqual(sent.send, []);
+    assert.match(sent.error ?? "", /could not be kept/u);
+    const saved = start();
+    assert.equal(saveDraftSchema.safeParse(draftOf({ ...saved, page: { ...saved.page, source: over.source } })).success, false);
+  });
 });
