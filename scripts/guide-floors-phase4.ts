@@ -6,8 +6,9 @@
  * the production build so they always show the app as it is:
  *
  * - floors-opening-builder.webp, floors-opening-window.webp,
- *   floors-fly-strip.webp, floors-fall-card.webp, floors-trapdoor-pane.webp,
- *   floors-line-up.webp, floors-outliner-other.webp,
+ *   floors-fly-strip.webp, floors-fly-up.webp, floors-fall-card.webp,
+ *   floors-trapdoor-pane.webp, floors-line-up.webp, floors-outliner-other.webp,
+ *   floors-opening-isometric.webp, floors-fight-every-floor.webp,
  *   floors-export-every.webp and floors-several-files.webp.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes a
@@ -184,6 +185,20 @@ try {
   await dm.getByRole("region", { name: "Fall: Thorn" }).waitFor();
   await picture(dm, "floors-fall-card");
   for (const id of Object.keys(dmSocket.state?.falls ?? {})) await ops.send({ t: "fall.settle", fallId: id });
+
+  // Shot 4b: Thorn in the air over the hole's lower end on Ground floor, with Fly up. Ana's screen follows him down.
+  await ops.send({ t: "token.move", tokenId: tThorn, x: OVER.x, y: OVER.y, elevation: 5 });
+  await waitFor("Thorn in the air below", () => (dmSocket.state?.tokens[tThorn]?.elevation === 5 ? true : null));
+  await onFloor(ana, "Ground floor");
+  await sleep(500);
+  await tapCell(ana, BOUNDS, OVER);
+  const lowBar = ana.getByRole("dialog", { name: "Thorn actions", exact: true });
+  await lowBar.waitFor();
+  if ((await ana.locator('[data-climb="up"]:visible').count()) === 0) await expandBar(lowBar);
+  await ana.locator('[data-climb="up"]:visible').first().waitFor();
+  await picture(ana, "floors-fly-up");
+  await key(ana, "Escape");
+  await ops.send({ t: "token.move", tokenId: tThorn, x: OVER.x, y: OVER.y, elevation: 0 });
   await ops.send({ t: "token.move", tokenId: tThorn, x: 3, y: 2 });
   // The fall's toast waits for a tap, so a reload clears it from the pictures that follow.
   await dm.reload();
@@ -227,12 +242,34 @@ try {
   await pickTool(dm, "Select");
   await onFloor(dm, "Upper floor");
 
+  // Shot 6b: the opening in Isometric, a drop in the boards with the hall below it, beside the Initiative panel. The view is set back after.
+  await panel(dm, "Initiative");
+  await key(dm, "i");
+  await dm.getByRole("button", { name: /^View: Isometric/ }).waitFor();
+  await quiet(dm);
+  await sleep(1500);
+  await picture(dm, "floors-opening-isometric");
+  await key(dm, "i");
+  await dm.getByRole("button", { name: /^View: Top-down/ }).waitFor();
+
   // Shot 7: the outliner's Other floors.
   const outliner = await panel(dm, "Outliner");
   await outliner.getByRole("group", { name: "Show one group" }).getByRole("button", { name: /^Other floors/ }).click();
   await outliner.locator("[data-other-floor]").first().waitFor();
   await quiet(dm);
   await picture(dm, "floors-outliner-other");
+
+  // Shot 7c: New fight with Every floor chosen, the buttons counting the creatures of all three floors.
+  const tracker = await panel(dm, "Initiative");
+  const newFight = tracker.locator("section").filter({ has: dm.locator('[data-search="tracker.new-fight"]') }).last();
+  const fightFloors = newFight.getByRole("radiogroup", { name: "Floors", exact: true });
+  await fightFloors.waitFor();
+  await fightFloors.getByRole("radio", { name: "Every floor", exact: true }).check();
+  await newFight.getByRole("button", { name: /^Everyone on every floor \(\d+\)$/ }).waitFor();
+  await newFight.evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+  await quiet(dm);
+  await picture(dm, "floors-fight-every-floor");
+  await fightFloors.getByRole("radio", { name: "This floor", exact: true }).check();
 
   // Shot 8: Export as image on Every floor, the player view.
   const scenes = await panel(dm, "Scenes");
