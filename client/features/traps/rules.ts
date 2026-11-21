@@ -669,7 +669,7 @@ export function intoOf(rig: Pick<TrapRig, "pit" | "below">): "pit" | "below" | n
 }
 
 type Damage = NonNullable<TrapRig["damage"]>;
-type IntoPatch = { pit: { floor: number } | null; below: true | null; damage?: Damage | null; note?: null };
+type IntoPatch = { pit: { floor: number } | null; below: true | null; damage?: Damage | null; note?: string | null };
 
 const damageKey = (d: TrapRig["damage"]) => (d ?? []).map((p) => `${p.formula} ${p.type}`).join(",");
 
@@ -691,31 +691,31 @@ function pitBands(preset: string | undefined): { band: LevelBand; falling: Damag
  * a rig never holds both (protocol.ts PIT_OR_BELOW).
  *
  * One drop deals its falling damage once, from the fall card
- * (D-261121-101). So the floor below takes a pit preset's falling part off
- * the stored rig while its damage is still exactly its level's preset list
- * (as presetLine reads it, at the level the preset's note names while the
- * rig still holds it), and the pit's words while they are the preset's.
- * Anything the DM added or changed, before or after, stays and is asked as
- * written. Back to a pit, a trap from a pit preset that holds no
- * Bludgeoning part gets its level's falling part again. Trapdoors stored
- * before this keep the damage they hold.
+ * (D-261121-101). So the floor below takes a pit preset's falling part and
+ * its pit words off the stored rig, but only while both its damage and its
+ * note are still one level's preset, as made. The rig stores no level, so
+ * anything the DM changed in either leaves the whole trap as written.
+ * Back to a pit, a trap from a pit preset that holds no Bludgeoning part
+ * becomes the 10 ft pit it starts as: the 10 ft drop's falling part, and
+ * the levels 1-4 pit words where it holds none, whatever its level was
+ * (SOL-03). Trapdoors stored before v0.4.0 keep the damage they hold.
  */
 export function intoPatch(choice: "pit" | "below", ground: number, rig?: Pick<TrapRig, "preset" | "damage" | "note" | "save">): IntoPatch {
   const bands = pitBands(rig?.preset);
   if (choice === "below") {
     const patch: IntoPatch = { pit: null, below: true };
-    // The note, while still the preset's, says which level the trap was made at, so a level's dice typed over
-    // another's (3d6 on a levels 1-4 pit) read as the DM's own. Without it, any level's exact list counts.
-    const made = bands.filter((b) => b.note !== undefined && b.note === rig?.note);
-    const level = (made.length > 0 ? made : bands).find((b) => b.dc === rig?.save?.dc && damageKey([b.falling, ...b.rest]) === damageKey(rig?.damage));
-    if (level) patch.damage = level.rest.length > 0 ? level.rest.map((d) => ({ ...d })) : null;
-    if (rig?.note !== undefined && bands.some((b) => b.note === rig.note)) patch.note = null;
+    const level = bands.find((b) => b.note !== undefined && b.note === rig?.note && b.dc === rig?.save?.dc && damageKey([b.falling, ...b.rest]) === damageKey(rig?.damage));
+    if (level) {
+      patch.damage = level.rest.length > 0 ? level.rest.map((d) => ({ ...d })) : null;
+      patch.note = null;
+    }
     return patch;
   }
   const patch: IntoPatch = { pit: { floor: pitFloor(ground, 10) }, below: null };
-  if (bands.length > 0 && !(rig?.damage ?? []).some((d) => d.type === "bludgeoning")) {
-    const level = bands.find((b) => damageKey(b.rest) === damageKey(rig?.damage)) ?? bands[0]!;
-    patch.damage = [{ ...level.falling }, ...(rig?.damage ?? []).map((d) => ({ ...d }))];
+  const ten = bands[0];
+  if (ten && !(rig?.damage ?? []).some((d) => d.type === "bludgeoning")) {
+    patch.damage = [{ ...ten.falling }, ...(rig?.damage ?? []).map((d) => ({ ...d }))];
+    if (rig?.note === undefined && ten.note !== undefined) patch.note = ten.note;
   }
   return patch;
 }

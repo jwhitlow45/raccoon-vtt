@@ -408,43 +408,60 @@ describe("a pit preset's falling damage at each Into choice: one drop deals it o
       const door = pick(preset("hidden-pit", band), "below");
       assert.equal(door.message, "The floor gives way!");
       assert.deepEqual(door.find, preset("hidden-pit", band).find);
+      assert.deepEqual(intoPatch("below", 0, preset("spiked-pit", band)).damage, trapPreset("spiked-pit", band)!.rig.damage!.slice(1), `${band}: the spikes stay`);
     }
-    assert.deepEqual(intoPatch("below", 0, preset("spiked-pit", "11-16")).damage, [{ formula: "8d8", type: "piercing" }], "the spikes stay");
   });
 
   test("A pit keeps the pit's falling damage and its words", () => {
     assert.deepEqual(intoPatch("pit", 5, preset("hidden-pit")), { pit: { floor: -5 }, below: null });
   });
 
-  test("damage added before the choice, or a level's dice edited, is kept whole and asked as written", () => {
+  test("an edited damage or an edited note alone leaves the whole trap as the DM wrote it", () => {
     const added = { ...preset("hidden-pit"), damage: [{ formula: "1d6", type: "bludgeoning" as const }, { formula: "1d6", type: "bludgeoning" as const }] };
-    assert.equal(intoPatch("below", 0, added).damage, undefined, "Add damage before Into");
+    assert.deepEqual(intoPatch("below", 0, added), { pit: null, below: true }, "Add damage before Into");
     const edited = { ...preset("hidden-pit"), damage: [{ formula: "3d6", type: "bludgeoning" as const }] };
-    assert.equal(intoPatch("below", 0, edited).damage, undefined, "a 3d6 edit at levels 1-4 is the DM's");
+    assert.deepEqual(intoPatch("below", 0, edited), { pit: null, below: true }, "a 3d6 edit at levels 1-4 is the DM's, whatever level lists 3d6");
     const noted = { ...preset("hidden-pit"), note: "Rusty hinges." };
-    assert.equal(intoPatch("below", 0, noted).note, undefined, "a changed note stays");
-    assert.equal(intoPatch("below", 0, noted).damage, null, "while the damage is still the level's");
+    assert.deepEqual(intoPatch("below", 0, noted), { pit: null, below: true }, "a changed note alone keeps the 1d6 too");
+  });
+
+  test("3d6 with Rusty hinges at levels 1-4 keeps both (PUB46-SOL-01)", () => {
+    const both = { ...preset("hidden-pit"), damage: [{ formula: "3d6", type: "bludgeoning" as const }], note: "Rusty hinges." };
+    assert.deepEqual(intoPatch("below", 0, both), { pit: null, below: true });
+  });
+
+  test("a 3d6 edit survives the floor below, A pit and the floor below again (PUB46-SOL-01)", () => {
+    const edited = { ...preset("hidden-pit"), damage: [{ formula: "3d6", type: "bludgeoning" as const }] };
+    const again = pick(pick(pick(edited, "below"), "pit"), "below");
+    assert.deepEqual(again.damage, [{ formula: "3d6", type: "bludgeoning" }]);
+    assert.equal(again.note, preset("hidden-pit").note);
+    assert.equal(again.below, true);
   });
 
   test("damage added after the choice is stored and kept, and presetLine still names a spiked pit's level", () => {
     const door = pick(preset("hidden-pit"), "below");
     assert.equal(door.damage, undefined);
     const after = { ...door, damage: [{ formula: "1d6", type: "bludgeoning" as const }] };
-    assert.deepEqual(after.damage, [{ formula: "1d6", type: "bludgeoning" }], "nothing reads it away");
+    assert.deepEqual(intoPatch("below", 0, after), { pit: null, below: true }, "choosing it again takes nothing the DM added");
     assert.equal(presetLine(door), "From Hidden Pit", "a plain pit's stripped trapdoor names no level");
     assert.equal(presetLine(pick(preset("spiked-pit", "5-10"), "below")), "From Spiked Pit, levels 5–10");
     assert.equal(presetLine({ ...preset("hidden-pit", "5-10"), below: true }), "From Hidden Pit, levels 5–10", "an old trapdoor keeps its stored damage");
   });
 
-  test("back to a pit puts the level's falling part back where no Bludgeoning part is left", () => {
-    const plain = pick(pick(preset("hidden-pit"), "below"), "pit");
-    assert.deepEqual(plain.damage, [{ formula: "1d6", type: "bludgeoning" }]);
+  test("back to a pit makes the 10 ft pit with the 10 ft drop's 1d6, whatever the level was (PUB46-SOL-03)", () => {
+    for (const band of LEVEL_BANDS) {
+      const back = pick(pick(preset("hidden-pit", band), "below"), "pit");
+      assert.deepEqual(back.damage, [{ formula: "1d6", type: "bludgeoning" }], band);
+      assert.equal(back.note, preset("hidden-pit").note, `${band}: the 10 ft pit's words`);
+      assert.deepEqual(pick(back, "below").damage, undefined, `${band}: the floor below again takes it off`);
+    }
     const spiked = pick(pick(preset("spiked-pit", "11-16"), "below"), "pit");
-    assert.deepEqual(spiked.damage, [{ formula: "6d6", type: "bludgeoning" }, { formula: "8d8", type: "piercing" }]);
-    const own = { ...pick(preset("hidden-pit"), "below"), damage: [{ formula: "2d6", type: "bludgeoning" as const }] };
-    assert.equal(intoPatch("pit", 0, own).damage, undefined, "a Bludgeoning part the DM set stays alone");
+    assert.deepEqual(spiked.damage, [{ formula: "1d6", type: "bludgeoning" }, { formula: "8d8", type: "piercing" }]);
+    const own = { ...pick(preset("hidden-pit"), "below"), damage: [{ formula: "2d6", type: "bludgeoning" as const }], note: "Mine." };
+    assert.deepEqual(intoPatch("pit", 0, own), { pit: { floor: -10 }, below: null }, "a Bludgeoning part the DM set stays alone");
     const blank = { ...preset("hidden-pit"), preset: undefined, damage: undefined };
     assert.equal(intoPatch("pit", 0, blank).damage, undefined, "no preset, nothing added");
     assert.equal(intoPatch("below", 0, { ...preset("collapsing-roof") }).damage, undefined, "a preset with no pit");
   });
+
 });
