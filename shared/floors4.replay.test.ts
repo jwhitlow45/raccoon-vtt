@@ -105,6 +105,11 @@ function resultHash(state: RoomState, s: Stored, opVersion: number | undefined):
   return { hash: hash128(stableStringify({ state: r.state, touched: r.touched, global: r.global, marks, inverse: r.inverse })), state: r.state };
 }
 
+/** The state with no history step's `walks`, which a Next writes from change format 65. */
+function withoutStepWalks(state: RoomState): RoomState {
+  return { ...state, encounterHistory: state.encounterHistory.map(({ walks: _walks, ...step }) => step) };
+}
+
 function replay(t: Tail, opVersion: number | undefined): string[] {
   let state = t.initial;
   return t.ops.map((s) => {
@@ -150,7 +155,10 @@ describe("stored ops of change formats 62 and 63 replay to what they made (OPENI
       let state = t.initial;
       for (const [k, s] of t.ops.entries()) {
         const at63 = resultHash(state, s, 63);
-        if (resultHash(state, s, undefined).hash !== at63.hash) differs.push(`${i}:${k}`);
+        const live = resultHash(state, s, undefined);
+        // From 65 every Next's step holds its turn's walks, an empty list here, and the room is otherwise as at 63 (D-261120-105).
+        const stepWalks = s.op.t === "encounter.next" && stableStringify(withoutStepWalks(live.state)) === stableStringify(at63.state);
+        if (live.hash !== at63.hash && !stepWalks) differs.push(`${i}:${k}`);
         state = at63.state;
       }
     }
