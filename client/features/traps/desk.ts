@@ -144,7 +144,8 @@ export function deskFalls(falls: Readonly<Record<string, Fall | undefined>> | un
  * How the DM's copy reads a card: `here` where it holds the creature,
  * `elsewhere` where the creature landed on another scene, whose tokens the
  * copy does not hold until the DM goes there, and `gone` where it landed on
- * the scene shown and is no longer on the map, as after a player dismissed
+ * the scene shown and is not on it now: moved to another scene, where the
+ * card reads `here` again, or off the map, as after a player dismissed
  * their companion (4.4), which leaves its card for the DM.
  */
 export type FallRead = {
@@ -183,26 +184,64 @@ export function fallNames(view: Pick<RoomState, "tokens">, ids: readonly string[
   return nameList(view, ids.slice(0, FALL_NAMES_SHOWN), labels, Math.max(0, ids.length - FALL_NAMES_SHOWN));
 }
 
+/** The most creatures' names a device keeps for fall cards whose creature left the scene shown: a room's cards name at most 10 times 20. */
+const FALL_NAMES_KEPT = 200;
+
+/**
+ * The names a device last read off the creatures its fall cards name, so a
+ * card whose creature left the scene shown, as one the DM moved to another
+ * scene, still names it (LP46A-FALL-2). The DM's copy holds the shown
+ * scene's tokens alone and no room-wide list of where each one is, so
+ * nothing else names it, and after a reload such a card reads "A creature".
+ */
+export type FallNames = Map<string, string>;
+
+function keepName(known: FallNames, id: string, name: string): void {
+  known.delete(id);
+  known.set(id, name);
+  if (known.size > FALL_NAMES_KEPT) known.delete(known.keys().next().value!);
+}
+
+/** "Giant", "Horse and Thorn": a gone card's names as `known` last read them. */
+function knownNames(known: FallNames | undefined, ids: readonly string[]): { name: string; count: number } | null {
+  const names = ids.flatMap((id) => {
+    const name = known?.get(id);
+    return name === undefined ? [] : [name];
+  });
+  if (names.length === 0) return null;
+  const shown = names.slice(0, FALL_NAMES_SHOWN);
+  if (names.length > FALL_NAMES_SHOWN) shown.push(`${names.length - FALL_NAMES_SHOWN} more`);
+  return { name: shown.length === 1 ? shown[0]! : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`, count: names.length };
+}
+
 /**
  * The card's line (4.4): "Thorn fell 10 ft to Ground floor: 1d6
  * Bludgeoning, Prone.", with riders "Horse and Thorn fell 10 ft to Ground
  * floor: each 1d6 Bludgeoning, Prone.", under 10 ft "Thorn fell 5 ft to
  * Ground floor: no damage.", "A creature fell 10 ft to Ground floor on
- * Tower." for another scene, and "A creature no longer on the map fell 10
- * ft to Ground floor." No name is stored on the card, so each is read off
- * its creature.
+ * Tower." for another scene, and "Giant fell 10 ft to Ground floor and is
+ * not on this scene now." for one whose creature left the scene shown,
+ * moved to another or gone, by the name `known` last read, else "A
+ * creature". No name is stored on the card, so each is read off its
+ * creature.
  */
-export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall, shown: string | null, labels: Labels): FallRead {
+export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall, shown: string | null, labels: Labels, known?: FallNames): FallRead {
   const floor = landedOn(view, card);
   const tokenIds = fallers(view, card);
   if (tokenIds.length > 0) {
+    if (known) for (const id of tokenIds) keepName(known, id, nameOf(view, id, labels));
     const name = fallNames(view, tokenIds, labels);
     const dice = fallDice(card.ft);
     const hurt = dice > 0 ? `${tokenIds.length > 1 ? "each " : ""}${dice}d6 Bludgeoning, Prone` : "no damage";
     return { kind: "here", name, tokenIds, dice, line: `${name} fell ${card.ft} ft to ${floor}: ${hurt}.`, region: `Fall: ${name}`, whose: `${name}'s fall` };
   }
   const here = shown !== null && sameScene(view, card.sceneId, shown);
-  if (here) return { kind: "gone", name: null, tokenIds, dice: 0, line: `A creature no longer on the map fell ${card.ft} ft to ${floor}.`, region: "Fall: a creature", whose: "this fall" };
+  if (here) {
+    // A DM's delete takes the card with its creatures (dropGoneCards), so most such cards' creatures were moved to another scene, where Apply works.
+    const left = knownNames(known, [card.tokenId, ...(card.riders ?? [])]);
+    const who = left ? `${left.name} fell ${card.ft} ft to ${floor} and ${left.count > 1 ? "are" : "is"}` : `A creature fell ${card.ft} ft to ${floor} and is`;
+    return { kind: "gone", name: left?.name ?? null, tokenIds, dice: 0, line: `${who} not on this scene now.`, region: `Fall: ${left?.name ?? "a creature"}`, whose: left ? `${left.name}'s fall` : "this fall" };
+  }
   const scene = ownEntry(view.scenes, card.sceneId)?.name.trim();
   return { kind: "elsewhere", name: null, tokenIds, dice: 0, line: `A creature fell ${card.ft} ft to ${floor} ${scene ? `on ${scene}` : "on another scene"}.`, region: "Fall: a creature", whose: "this fall" };
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Fall, RoomState } from "#shared/model.ts";
 import { character, room, scene, token } from "#shared/testutil.ts";
-import { deskFalls, fallRead, foldedWithFalls } from "./desk.ts";
+import { deskFalls, fallRead, foldedWithFalls, type FallNames } from "./desk.ts";
 
 const { fallStart, FallCard } = await import("./FallCard.tsx");
 const { createElement } = await import("react");
@@ -68,8 +68,33 @@ describe("fall cards on the DM desk", () => {
     const away = fallRead(view(), card({ tokenId: "imp", sceneId: "crypt" }), "upper", NO_LABELS);
     assert.deepEqual([away.kind, away.line, away.region], ["elsewhere", "A creature fell 10 ft to Vault on Crypt.", "Fall: a creature"]);
     const gone = fallRead(view(), card({ tokenId: "wolf" }), "upper", NO_LABELS);
-    assert.deepEqual([gone.kind, gone.line, gone.whose], ["gone", "A creature no longer on the map fell 10 ft to Ground floor.", "this fall"]);
+    assert.deepEqual([gone.kind, gone.line, gone.whose], ["gone", "A creature fell 10 ft to Ground floor and is not on this scene now.", "this fall"]);
     assert.equal(fallRead(view(), card({ tokenId: "wolf" }), "crypt2", NO_LABELS).kind, "elsewhere", "from Crypt, Tower's creatures are not in the copy");
+  });
+
+  test("a creature moved to another scene keeps the name this device read off it, and Apply comes back once its scene shows (LP46A-FALL-2)", () => {
+    const known: FallNames = new Map();
+    const giant = card({ tokenId: "giant" });
+    const onTower = view({ tokens: { ...view().tokens, giant: token("giant", { sceneId: "ground", name: "Giant" }) } });
+    assert.equal(fallRead(onTower, giant, "upper", NO_LABELS, known).kind, "here");
+    const { giant: _moved, ...left } = onTower.tokens;
+    const moved = fallRead(view({ tokens: left }), giant, "upper", NO_LABELS, known);
+    assert.deepEqual([moved.kind, moved.line, moved.region, moved.whose], ["gone", "Giant fell 10 ft to Ground floor and is not on this scene now.", "Fall: Giant", "Giant's fall"]);
+    assert.deepEqual(moved.tokenIds, [], "no Apply where the group save cannot reach it");
+    const onCave = view({ tokens: { giant: token("giant", { sceneId: "cave", name: "Giant" }) } });
+    const there = fallRead(onCave, giant, "cave", NO_LABELS, known);
+    assert.deepEqual([there.kind, there.tokenIds], ["here", ["giant"]], "named with Apply on its scene");
+    const unread = fallRead(view({ tokens: left }), giant, "upper", NO_LABELS, new Map());
+    assert.equal(unread.line, "A creature fell 10 ft to Ground floor and is not on this scene now.", "a device that never read it, as after a reload");
+  });
+
+  test("a mount and its rider moved away read as both, by the names last read", () => {
+    const known: FallNames = new Map();
+    const both = card({ tokenId: "horse", riders: ["bree"] });
+    const held = view({ tokens: { ...view().tokens, horse: token("horse", { sceneId: "ground", name: "Horse" }), bree: token("bree", { sceneId: "ground", name: "Bree" }) } });
+    fallRead(held, both, "upper", NO_LABELS, known);
+    const away = fallRead(view(), both, "upper", NO_LABELS, known);
+    assert.equal(away.line, "Horse and Bree fell 10 ft to Ground floor and are not on this scene now.");
   });
 
   test("riders that fell with it (D-261120-007): each named, Apply's rows each one the copy holds, the first still there leading", () => {

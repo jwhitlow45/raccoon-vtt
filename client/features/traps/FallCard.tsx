@@ -15,7 +15,10 @@ import { useStartGroupSave, type StartInput } from "../dice/groupSave/start.ts";
 import { FALL_CARD_ATTR } from "../floors/ids.ts";
 import { cardStyle } from "../rolls/parts.tsx";
 import { Note } from "../tokens/ui.tsx";
-import { fallRead } from "./desk.ts";
+import { fallRead, type FallNames } from "./desk.ts";
+
+/** The names this device read off fall cards' creatures, so one moved to another scene stays named (desk.ts FallNames). */
+const KNOWN: FallNames = new Map();
 
 /**
  * The group save a fall card's Apply starts (docs/design/design-v1-floors.md
@@ -69,7 +72,7 @@ export function FallCard(props: { card: Fall; open: boolean; onToggle(): void; t
     if (arrived) focusMap(scope.get(mapFocusSlot));
   }, [arrived, left, scope]);
   if (!view) return null;
-  const read = fallRead(view, card, shown, labels);
+  const read = fallRead(view, card, shown, labels, KNOWN);
 
   const dismiss = () => {
     if (busy !== null) return;
