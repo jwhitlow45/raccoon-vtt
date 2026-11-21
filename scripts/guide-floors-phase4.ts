@@ -76,6 +76,18 @@ async function quiet(page: Page): Promise<void> {
   await waitFor("no toast", async () => ((await page.locator("[data-toast]").count()) === 0 ? true : null), 20_000);
 }
 
+/** Scrolls only the side panel so `target` stands at its top, and puts the page itself back at the top. */
+async function scrollPanelTo(page: Page, target: Locator): Promise<void> {
+  await target.evaluate((el) => {
+    type Box = { scrollTop: number; scrollHeight: number; clientHeight: number; parentElement: Box | null; getBoundingClientRect(): { top: number } };
+    let box = (el as unknown as { closest(s: string): Box | null }).closest('[role="tabpanel"]');
+    while (box && !(box.scrollHeight > box.clientHeight + 5)) box = box.parentElement;
+    if (box) box.scrollTop += (el as unknown as Box).getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+    (globalThis as unknown as { scrollTo(x: number, y: number): void }).scrollTo(0, 0);
+  });
+  await page.waitForTimeout(300);
+}
+
 const work = mkdtempSync(path.join(tmpdir(), "raccoon-guide-floors4-"));
 const server = await startServer({ port: PORT, assetDir: path.join(work, "assets"), databaseUrl: DATABASE_URL });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -224,6 +236,19 @@ try {
   await key(dm, "Escape");
   await pickTool(dm, "Select");
 
+  // Shot 5b: New fight with Every floor chosen, the buttons counting the creatures of all three floors. It comes before the
+  // stairs, so the opening is the only pair on the map and its chip stands clear.
+  const tracker = await panel(dm, "Initiative");
+  const newFight = tracker.locator("section").filter({ has: dm.locator('[data-search="tracker.new-fight"]') }).last();
+  const fightFloors = newFight.getByRole("radiogroup", { name: "Floors", exact: true });
+  await fightFloors.waitFor();
+  await fightFloors.getByRole("radio", { name: "Every floor", exact: true }).check();
+  await newFight.getByRole("button", { name: /^Everyone on every floor \(\d+\)$/ }).waitFor();
+  await scrollPanelTo(dm, newFight);
+  await quiet(dm);
+  await picture(dm, "floors-fight-every-floor");
+  await fightFloors.getByRole("radio", { name: "This floor", exact: true }).check();
+
   // Shot 6: stairs whose ends lie on other squares, with Line up.
   await onFloor(dm, "Ground floor");
   const down = randomUUID();
@@ -258,18 +283,6 @@ try {
   await outliner.locator("[data-other-floor]").first().waitFor();
   await quiet(dm);
   await picture(dm, "floors-outliner-other");
-
-  // Shot 7c: New fight with Every floor chosen, the buttons counting the creatures of all three floors.
-  const tracker = await panel(dm, "Initiative");
-  const newFight = tracker.locator("section").filter({ has: dm.locator('[data-search="tracker.new-fight"]') }).last();
-  const fightFloors = newFight.getByRole("radiogroup", { name: "Floors", exact: true });
-  await fightFloors.waitFor();
-  await fightFloors.getByRole("radio", { name: "Every floor", exact: true }).check();
-  await newFight.getByRole("button", { name: /^Everyone on every floor \(\d+\)$/ }).waitFor();
-  await newFight.evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
-  await quiet(dm);
-  await picture(dm, "floors-fight-every-floor");
-  await fightFloors.getByRole("radio", { name: "This floor", exact: true }).check();
 
   // Shot 8: Export as image on Every floor, the player view.
   const scenes = await panel(dm, "Scenes");
