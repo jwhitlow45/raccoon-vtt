@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { idTime, uuidv7 } from "../shared/ids.ts";
-import { LEAVE_PLAYERS_ASK, overNotice, SEAT_FULL } from "../shared/limits.ts";
+import { KEPT_FOR_PLAYERS_FULL, LEAVE_PLAYERS_ASK, overNotice, ROOM_FULL, SCENE_FULL, SEAT_FULL, sizeRemedy } from "../shared/limits.ts";
 import type { RoomState } from "../shared/model.ts";
 import { actor } from "../shared/testutil.ts";
 import { ConsoleWatch, dragCells, OpSocket, openSideTab, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -400,6 +400,75 @@ describe("raccoon-vtt player limits on a device", { timeout: 600_000 }, () => {
       assert.equal(await toasts(page).filter({ hasText: overNotice(13) }).count(), 0, "said once");
     } finally {
       await page.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("lim-7b. each byte line's words, as a player and as the DM read them, fit and line up in the toast on a phone at 100% and 130%", async () => {
+    const off: string[] = [];
+    // What the toast says: the refusal capitalized after Not saved. (client/state/store.ts refusalText).
+    const shown = (message: string) => `Not saved. ${message[0]!.toUpperCase()}${message.slice(1)}.`;
+    const lines = [
+      { who: "player", core: ROOM_FULL },
+      { who: "player", core: SCENE_FULL },
+      { who: "dm", core: ROOM_FULL },
+      { who: "dm", core: KEPT_FOR_PLAYERS_FULL },
+      { who: "dm", core: SCENE_FULL },
+    ] as const;
+    const dmPage = await dmContext.newPage();
+    consoles.dm.attach(dmPage);
+    const dmWire = await wire(dmPage);
+    try {
+      for (const scale of ["1", "1.3"]) {
+        for (const page of [ana, dmPage]) await page.setViewportSize(PHONE);
+        for (const { who, core } of lines) {
+          const page = who === "player" ? ana : dmPage;
+          const w = who === "player" ? ana_ : dmWire;
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await page.evaluate((v) => localStorage.setItem("rvtt.uiScale", v), scale);
+          const seen = snapshotsOf(w);
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await waitFor("the snapshot", () => (snapshotsOf(w) > seen ? true : null), 30_000);
+          await page.locator(".konvajs-content").first().waitFor();
+          await pickTool(page, "Draw");
+          // The DM's bar is longer than a phone's width and may scroll under the pick, so the tool is checked, not assumed.
+          const draw = page.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Draw", exact: true });
+          await waitFor("the Draw tool active", async () => {
+            if ((await draw.first().getAttribute("data-active")) === "true") return true;
+            await draw.first().click();
+            return null;
+          }, 10_000);
+          const message = sizeRemedy(core, who);
+          // The server never sees the op: the page is sent the refusal in its place, so only the toast is under test.
+          let swapped = false;
+          w.toServer = (frame) => {
+            if (swapped || frame.t !== "op") return frame;
+            swapped = true;
+            const seq = Math.max(0, ...w.got.flatMap((f) => (typeof f.seq === "number" ? [f.seq] : [])));
+            w.open!.page.send(JSON.stringify({ t: "ev", seq, changes: [], rejects: [{ n: frame.n, code: "quota", message }] }));
+            return null;
+          };
+          await dragCells(page, BOUNDS, { x: 3, y: 11 }, { x: 5, y: 12 });
+          const toast = toasts(page).filter({ hasText: shown(message) });
+          await toast.waitFor();
+          w.toServer = null;
+          const label = `${who} ${core} at ${scale}`;
+          const box = (await toast.boundingBox())!;
+          assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${label}: the toast fits across ${PHONE.width} px: ${JSON.stringify(box)}`);
+          assert.ok(box.y >= 0 && box.y + box.height <= PHONE.height, `${label}: the toast fits down ${PHONE.height} px: ${JSON.stringify(box)}`);
+          assert.equal(await toast.evaluate((el) => el.scrollWidth <= el.clientWidth), true, `${label}: its words wrap rather than run out`);
+          // Centered across the phone, to within a pixel.
+          assert.ok(Math.abs(box.x + box.width / 2 - PHONE.width / 2) <= 1, `${label}: centered ${JSON.stringify(box)}`);
+          off.push(...alignmentLines(await measureAlignment(toast), `${label} at 390 x 844`));
+          await shots.take(page, `lim-7b-${who}-${core === ROOM_FULL ? "room" : core === SCENE_FULL ? "scene" : "kept"}-${scale === "1" ? "100" : "130"}`);
+        }
+      }
+    } finally {
+      ana_.toServer = null;
+      await dmPage.close();
+      await ana.setViewportSize(DESKTOP);
+      await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await openAna();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
