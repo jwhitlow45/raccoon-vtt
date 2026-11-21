@@ -671,20 +671,43 @@ export function sideTabName(title: string): RegExp {
  * row holds it, else More (the tab with a menu) and its item in More's
  * list. Then waits for the tab panel named by it. `page` may be a part of
  * the page, such as "view as a player"'s dialog with its own side panel.
+ *
+ * The row fits its tabs again as a badge lands or the room loads, and a
+ * new fit can move the panel between the row and More's menu, or move the
+ * menu, under a click that then waits for an item no longer there. So each
+ * try reads the row again, and a click that lost its target is one try.
  */
 export async function openSideTab(page: Page | Locator, title: string): Promise<void> {
   const name = sideTabName(title);
   const list = page.getByRole("tablist", { name: "Panels" });
   const tab = list.getByRole("tab", { name });
-  if ((await tab.count()) === 0 || (await tab.getAttribute("aria-selected")) !== "true") {
-    if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup")) === null) await tab.click();
-    else {
-      await list.locator('[role="tab"][aria-haspopup="menu"]').click();
-      await page.getByRole("menu", { name: "More panels" }).getByRole("menuitemradio", { name }).click();
-    }
+  const menu = page.getByRole("menu", { name: "More panels" });
+  const chosen = page.getByRole("tabpanel", { name });
+  let lost: unknown = null;
+  try {
+    await waitFor(`the ${title} tab panel`, async () => {
+      if (await chosen.isVisible()) return true;
+      try {
+        if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup", { timeout: SIDE_TAB_TRY_MS })) === null) await tab.click({ timeout: SIDE_TAB_TRY_MS });
+        else {
+          // A try before may have left the menu open, and More's tab would close it.
+          if (!(await menu.isVisible())) await list.locator('[role="tab"][aria-haspopup="menu"]').click({ timeout: SIDE_TAB_TRY_MS });
+          await menu.getByRole("menuitemradio", { name }).click({ timeout: SIDE_TAB_TRY_MS });
+        }
+        await chosen.waitFor({ timeout: SIDE_TAB_TRY_MS });
+        return true;
+      } catch (err) {
+        lost = err;
+        return null;
+      }
+    }, 30_000);
+  } catch (err) {
+    throw new Error(`${(err as Error).message}, the last try: ${lost instanceof Error ? lost.message : String(lost)}`);
   }
-  await page.getByRole("tabpanel", { name }).waitFor();
 }
+
+/** One try of openSideTab's: long enough for a click on a loaded machine, short enough to read the row again within its wait. */
+const SIDE_TAB_TRY_MS = 5_000;
 
 /** A group of the scene settings page, its header's fold (docs/design/design-v1-scenes-reorg.md 3): one of SCENE_GROUP_NAMES (helpers/sceneGroups.ts), or New scene. */
 export function sceneGroupFold(panel: Locator, name: string): Locator {
@@ -739,6 +762,17 @@ export async function wholeInReach(target: Locator): Promise<boolean> {
   );
 }
 
+/**
+ * The map canvas's box on the page. The stage remounts on a new stage key
+ * (canvas/Stage.tsx), which a window resize can bring, and a read between
+ * the old canvas's destroy and the new one's mount finds no canvas: the
+ * box is read until there is one.
+ */
+export async function mapCanvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+  const canvas = page.locator(".konvajs-content").first();
+  return waitFor("the map canvas on the page", () => canvas.boundingBox());
+}
+
 export function readCamera(page: Page): Promise<StageCamera | null> {
   return page.evaluate(() => {
     const konva = (globalThis as unknown as { Konva?: { stages: { x(): number; y(): number; scaleX(): number }[] } }).Konva;
@@ -754,8 +788,7 @@ export function readCamera(page: Page): Promise<StageCamera | null> {
  * is read until it has held still for 300 ms.
  */
 export async function pagePoint(page: Page, _bounds: { w: number; h: number }, world: { x: number; y: number }): Promise<{ x: number; y: number }> {
-  const box = await page.locator(".konvajs-content").first().boundingBox();
-  if (!box) throw new Error("The map canvas is not on the page");
+  const box = await mapCanvasBox(page);
   let cam = await readCamera(page);
   let still = 0;
   for (let i = 0; i < 60 && still < 6; i++) {
