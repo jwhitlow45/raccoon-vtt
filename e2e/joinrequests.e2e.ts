@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Route } from "playwright-core";
 import { ConsoleWatch, openSideTab, sideTabName, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
@@ -605,7 +605,15 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     for (const b of buttons) await b.waitFor();
     const answers: number[] = [];
     for (const p of [dm, coDm.page]) p.on("response", (res) => void (/\/let-in$/.test(new URL(res.url()).pathname) && answers.push(res.status())));
+    // The two taps land on two pages one after the other. A let-in the server has begun holds the other device's row busy, which takes no tap (features/dm/JoinRequests.tsx), so the first is held here until the second is sent too: both then reach the server together.
+    const held: Route[] = [];
+    const letIn = (url: URL) => /\/let-in$/.test(url.pathname);
+    const hold = (route: Route) => void held.push(route);
+    for (const p of [dm, coDm.page]) await p.route(letIn, hold);
     await Promise.all(buttons.map((b) => b.evaluate((el) => (el as unknown as { click(): void }).click())));
+    await waitFor("both let-ins sent", () => (held.length === 2 ? true : null));
+    await Promise.all(held.map((route) => route.continue()));
+    for (const p of [dm, coDm.page]) await p.unroute(letIn, hold);
     await sage.page.getByRole("status", { name: "Connected" }).first().waitFor();
     await waitFor("Sage on the roster", () => (membersNamed("Sage") === 1 ? true : null));
     await requestRow(dm, "Sage").waitFor({ state: "detached" });
