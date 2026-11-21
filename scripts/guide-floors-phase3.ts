@@ -28,7 +28,7 @@
  * GUIDE_COPY_DIR, when set, also gets each picture as guide-<name>.png, which
  * it never overwrites, for looking at the pictures at full quality.
  */
-import { randomUUID } from "node:crypto";
+import { uuidv7 as randomUUID } from "../shared/ids.ts";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -160,7 +160,7 @@ try {
   // Stairs go in after the DM's pictures, since they turn off Add a floor above Ground floor.
   // Players hold only floors they have reached, and the ruler offers stairs to a floor the device holds.
   await ops.send({ t: "floor.open", sceneId: upper, open: true });
-  await ops.send({ t: "floorLink.put", link: { id: `s${randomUUID().slice(0, 8)}`, pairId: `s${randomUUID().slice(0, 8)}`, sceneId: ground, to: upper, rect: { ...STAIRS, w: 1, h: 1 }, kind: "stairs" } });
+  await ops.send({ t: "floorLink.put", link: { id: randomUUID(), pairId: randomUUID(), sceneId: ground, to: upper, rect: { ...STAIRS, w: 1, h: 1 }, kind: "stairs" } });
   await waitFor("both ends in the DM's copy", () => (Object.keys(dmSocket.state?.floorLinks ?? {}).length === 2 ? true : null));
 
   // Ana's phone: the Walking ruler to the stairs, then carried up.
