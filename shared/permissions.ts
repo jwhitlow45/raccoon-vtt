@@ -1633,7 +1633,7 @@ function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, va
   // start's seq, so a start line the DM's ring dropped still ends it. A fight from before it ends at its start line, and a start the log no
   // longer holds is older than every line it holds.
   const startSeq = state.encounter?.startSeq;
-  const lines = ownLines(state.log, memberId);
+  const lines = ownLines(state, memberId);
   for (let i = lines.length - 1; i >= 0; i--) {
     const data = lines[i]!.data;
     if (startSeq !== undefined && Number(lines[i]!.id.slice(0, lines[i]!.id.indexOf(":"))) < startSeq) return false;

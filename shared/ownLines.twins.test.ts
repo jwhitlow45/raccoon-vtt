@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { DM_LINE_BASE, partyIndex, rosterRanks } from "./logRings.ts";
+import { DM_LINE_BASE, liveStart, memberRing, ownLines, partyIndex, rosterRanks } from "./logRings.ts";
 import type { DiceRoll, LogEntry, RoomState } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
+import { projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { P1, castTable, damageRoll, diceLine, entry, env } from "./testutil.ts";
 
@@ -93,5 +94,50 @@ describe("a cast's damage from the asker's own lines (9)", () => {
   test("a shared roll reads alike before and from 65", () => {
     const state = castTable({ log: [diceLine("40:0", "dmg", [damageRoll()])] });
     assert.deepEqual(rolled(state, 64).state.casts.k1!.rolled, rolled(state).state.casts.k1!.rolled);
+  });
+});
+
+/*
+ * ASTRA-02: the lines a player holds start where their live log does
+ * (shared/logRings.ts liveStart), as their own projection keeps them. With
+ * p1's party ring full of newer copies, a shared roll older than its start
+ * reads on the server as it does on p1's copy.
+ */
+describe("a player's own lines start where their live log does", () => {
+  /** p1's party ring filled: as many copies of DM lines made for them as the ring keeps, at seqs 60 on. */
+  function ringFull(state: RoomState): RoomState {
+    const keep = memberRing("party", Object.keys(state.members).length).lines;
+    const rank = rosterRanks(state.members).get("p1")!;
+    const copies = Array.from({ length: keep }, (_, i): LogEntry => ({ ...diceLine(`${60 + i}:${partyIndex(rank, 0)}`, `seen-${i}`, [damageRoll({ label: "A seen roll" })]), to: ["p1"], copyOf: `${60 + i}:${DM_LINE_BASE}` }));
+    return { ...state, log: [...state.log, ...copies] };
+  }
+  /** p1's copy of the room, as their device holds it and runs the same checks on. */
+  const onDevice = (state: RoomState) => projectState(state, P1, { sceneId: null }) as unknown as RoomState;
+
+  test("initiative from a shared roll before p1's live start is refused on the server as on p1's copy, and taken with the ring not full", () => {
+    const state = castTable();
+    state.meta.settings.playersTypeTotals = false;
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, startSeq: 30, entries: [entry("n1", { tokenId: "thorn", value: null })] };
+    const shared = { ...state, log: [diceLine("40:0", "t-init", [{ formula: "1d20+2", faces: [12], total: 14, label: "Initiative", tokenId: "thorn", initiative: true }])] };
+    const set: Op = { t: "encounter.setValue", entryId: "n1", value: 14, roll: "t-init" };
+    const answer = (s: RoomState) => canApply(set, P1, s, { canUseAsset: () => true }).ok;
+    assert.deepEqual([answer(shared), answer(onDevice(shared))], [true, true]);
+    const full = ringFull(shared);
+    assert.ok(liveStart(full, P1) !== null, "p1's live log starts past the roll");
+    assert.deepEqual([answer(full), answer(onDevice(full))], [false, false]);
+    assert.deepEqual(ownLines(full, "p1").map((e) => e.id), ownLines(onDevice(full), "p1").map((e) => e.id));
+  });
+
+  test("a cast's damage from a shared roll before p1's live start is none from 65, as on p1's copy, and an op stored at 64 replays as it ran", () => {
+    const ask: Op = { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", damage: { tag: "dmg", parts: 1 } } };
+    const full = ringFull(castTable({ log: [diceLine("40:0", "dmg", [damageRoll()])] }));
+    const rolled = (s: RoomState, opVersion?: number) => {
+      const r = applyOp(s, ask, P1, { ...env(150), ...(opVersion !== undefined ? { opVersion } : {}) });
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      return r.state.casts.k1!.rolled;
+    };
+    assert.equal(rolled(full), undefined);
+    assert.equal(rolled(onDevice(full)), undefined);
+    assert.deepEqual(rolled(full, 64), [{ formula: "8d6", total: 28, type: "fire" }], "64 reads eventLines, as it ran");
   });
 });

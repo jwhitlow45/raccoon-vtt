@@ -566,13 +566,16 @@ export function eventLines(log: readonly LogEntry[]): LogEntry[] {
 /**
  * The lines one player holds of the log, for the reads that judge what is
  * theirs: the shared lines and the copies of party lines made for them
- * (`to`, the reader alone), in id order. Never a DM line, a party line's
- * own included, and never another's copy or a whisper. On a player's own
- * projection, which holds only what they read, it keeps the shared lines
- * and their copies too, so the read answers as the server's does.
+ * (`to`, the reader alone), from where their live log starts (liveStart),
+ * in id order. Never a DM line, a party line's own included, and never
+ * another's copy or a whisper. On a player's own projection, which holds
+ * only their live log, it keeps the same lines, so the read answers as the
+ * server's does.
  */
-export function ownLines(log: readonly LogEntry[], memberId: string): LogEntry[] {
-  return log.filter((e) => {
+export function ownLines(room: LogRoom, memberId: string): LogEntry[] {
+  const start = liveStart(room, { memberId, role: "player" });
+  return room.log.filter((e) => {
+    if (start !== null && compareLogIds(e.id, start) < 0) return false;
     const audience = lineAudience(e);
     return audience === "shared" || (audience === "party" && e.to?.[0] === memberId);
   });

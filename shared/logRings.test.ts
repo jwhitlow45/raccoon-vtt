@@ -797,12 +797,12 @@ describe("the lines a player holds (shared/logRings.ts ownLines)", () => {
     state = write(state, [mount], 2).state;
     state = write(state, [{ kind: "whisper", from: "p2", to: ["p1"], text: "psst" }], 3).state;
     const ids = (lines: readonly LogEntry[]) => lines.map((e) => e.id);
-    const audiences = (memberId: string) => ownLines(state.log, memberId).map((e) => (lineAudience(e) === "party" ? `party ${e.to!.join()}` : lineAudience(e)));
+    const audiences = (memberId: string) => ownLines(state, memberId).map((e) => (lineAudience(e) === "party" ? `party ${e.to!.join()}` : lineAudience(e)));
     assert.deepEqual(audiences("p1"), ["shared", "party p1", "party p1"]);
     assert.deepEqual(audiences("p2"), ["shared", "party p2"]);
-    assert.ok(ownLines(state.log, "p1").every((e) => !dmNumbered(e.id) && e.kind !== "whisper"));
-    assert.deepEqual(ids(ownLines(state.log, "p1")), ids(state.log.filter((e) => ownLines(state.log, "p1").includes(e))), "in the log's order");
-    assert.deepEqual(ownLines(state.log, "dm1"), state.log.filter((e) => lineAudience(e) === "shared"), "a member with no copies holds the shared lines alone");
+    assert.ok(ownLines(state, "p1").every((e) => !dmNumbered(e.id) && e.kind !== "whisper"));
+    assert.deepEqual(ids(ownLines(state, "p1")), ids(state.log.filter((e) => ownLines(state, "p1").includes(e))), "in the log's order");
+    assert.deepEqual(ownLines(state, "dm1"), state.log.filter((e) => lineAudience(e) === "shared"), "a member with no copies holds the shared lines alone");
   });
 
   test("on a player's own projection it keeps what they read of the same lines", () => {
@@ -814,10 +814,10 @@ describe("the lines a player holds (shared/logRings.ts ownLines)", () => {
         state = "lines" in step ? write(state, step.lines, seq).state : churn(state, step, seq).state;
       }
       for (const viewer of [P1, P2]) {
-        const held = new Set(ownLines(state.log, viewer.memberId).map((e) => e.id));
+        const held = ownLines(state, viewer.memberId).map((e) => e.id);
         const copy = liveLog(state, viewer);
-        const own = ownLines(copy, viewer.memberId);
-        assert.ok(own.every((e) => held.has(e.id)), `seed ${seed}: ${viewer.memberId}'s copy holds no line beyond theirs`);
+        const own = ownLines({ log: copy, members: state.members }, viewer.memberId);
+        assert.deepEqual(own.map((e) => e.id), held, `seed ${seed}: ${viewer.memberId}'s copy holds the server's lines`);
         assert.deepEqual(own.map((e) => e.id), copy.filter((e) => e.kind !== "whisper").map((e) => e.id), `seed ${seed}: every line of the copy but a whisper`);
       }
     }

@@ -95,7 +95,7 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   if (!damage || !caster) return undefined;
   const parts = new Map<number, Extract<LogEvent, { type: "dice" }>>();
   const askers = logsByAudience(tx.env.opVersion);
-  const lines = rollsFromOwnLines(tx.env.opVersion) ? ownLines(tx.state.log, ask.by) : eventLines(tx.state.log);
+  const lines = rollsFromOwnLines(tx.env.opVersion) ? ownLines(tx.state, ask.by) : eventLines(tx.state.log);
   for (const entry of lines) {
     const data = entry.data;
     if (data?.type !== "dice" || data.tag !== damage.tag || (askers && data.by !== ask.by)) continue;
