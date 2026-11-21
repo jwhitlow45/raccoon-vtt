@@ -431,7 +431,7 @@ export class SizeGuard {
     const scenes = this.#sceneMeasures(before ?? next);
     for (const floors of sceneGroups(next)) {
       const main = floors[0]!.floor?.of ?? floors[0]!.id;
-      const reserved = this.#sceneReserves(next, floors);
+      const reserved = sceneReserves(next, floors);
       const measures = floors.map((scene) => scenes.get(scene.id));
       const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
       if (measures.every((measure) => measure !== undefined) && SHELL_BYTES + room + measured + reserved + FAR.byteStep <= sceneLine) continue;
@@ -446,14 +446,6 @@ export class SizeGuard {
     return { ok: true };
   }
 
-  /** What a scene's far reading counts beyond its measures on its floors: sight, explored ground, players' maps and the widths. */
-  #sceneReserves(state: RoomState, floors: readonly Scene[]): number {
-    const sight = sum(floors, (scene) => sightReserve(scene) + perPlayerSceneReserve(state, scene));
-    const explored = sum(floors, (scene) => exploredReserve(state, scene.id));
-    const maps = sum(floors, (scene) => discoveryReserve(state, scene, MEMORY_CAP));
-    return sight + explored + maps + farWidths(state, new Set(floors.map((scene) => scene.id)));
-  }
-
   /**
    * A player's op at the far line (D-261121-060, 074, 121): at the room's
    * line and every scene's, refused when it grew and their reading after,
@@ -463,50 +455,19 @@ export class SizeGuard {
    * what their exact part held before and what the op made that their copy
    * holds after, so nothing that enters their copy and nothing hidden that
    * leaves the room decides an answer, except where hidden bytes carry the
-   * stepped part across a step. Both copies are built on every op, and
-   * the stepped part's bounds only spare an exact measure where the answer
-   * is the same.
+   * stepped part across a step. Every op builds both copies and reads both
+   * sides' stepped parts exactly, the room's and every scene's
+   * (farReadings), with no bound carried from one op to the next
+   * (D-261121-017). The guard's bounds, which the near check keeps
+   * counting, serve the DM's ops alone.
    */
   #farPlayer(next: RoomState, before: RoomState | undefined, widest: boolean, kind: "meets" | "exempt", player: string): LimitCheck {
-    const parts = exactOver(before, next, player);
-    const after = copyBytesOf(parts.after);
-    const was = copyBytesOf(parts.before);
-    const state = this.#state;
-    const reserves = farReserves(next, widest);
-    const roomLine = farByteLine(kind, "room", "players")!;
-    const held = heldIn(next, after);
-    if (!state || farReading(state.bytes + state.growth - held.sub + reserves, held.shown) > roomLine) {
-      const bytes = measuredStateBytes(next);
-      const reading = { stepped: bytes - held.sub + reserves, exact: held.shown };
-      const grew = () => {
-        if (before === undefined) return true;
-        const prior = heldIn(before, was);
-        return readingGrew({ stepped: measuredStateBytes(before) - prior.sub + farReserves(before, widest), exact: prior.shown }, reading);
-      };
-      if (farBytesOver("room", kind, "players", reading.stepped, reading.exact, true) && grew()) return roomFull();
-      this.#state = { bytes, growth: 0 };
-    }
-    const sceneLine = farByteLine(kind, "scene", "players")!;
-    const room = roomLevelBytes(next);
-    const scenes = this.#sceneMeasures(before ?? next);
-    for (const floors of sceneGroups(next)) {
-      const main = floors[0]!.floor?.of ?? floors[0]!.id;
-      const ids = new Set(floors.map((scene) => scene.id));
-      const reserved = this.#sceneReserves(next, floors);
-      const here = heldIn(next, after, ids);
-      const measures = floors.map((scene) => scenes.get(scene.id));
-      const measured = sum(measures, (measure) => (measure ? measure.bytes + measure.growth : 0));
-      if (measures.every((measure) => measure !== undefined) && farReading(SHELL_BYTES + room + measured + reserved - here.sub, here.shown) <= sceneLine) continue;
-      const need = SHELL_BYTES + room + sum(floors, (scene) => sceneOwnBytes(next, scene.id)) + reserved;
-      const reading = { stepped: need - here.sub, exact: here.shown };
-      if (!farBytesOver("scene", kind, "players", reading.stepped, reading.exact, true)) continue;
-      if (before?.scenes[main]) {
-        const floorsBefore = floorsOf(before, main);
-        const prior = heldIn(before, was, new Set(floorsBefore.map((scene) => scene.id)));
-        const needBefore = neededBefore(before, main, MEMORY_CAP, "dm") + farWidths(before, new Set(floorsBefore.map((scene) => scene.id)));
-        if (!readingGrew({ stepped: needBefore - prior.sub, exact: prior.shown }, reading)) continue;
-      }
-      this.#refusedScene = main;
+    for (const [scope, { before: was, after }] of farReadings(before, next, player, widest)) {
+      const room = scope === "room";
+      if (!farBytesOver(room ? "room" : "scene", kind, "players", after.stepped, after.exact, true)) continue;
+      if (was !== undefined && !readingGrew(was, after)) continue;
+      if (room) return roomFull();
+      this.#refusedScene = scope;
       return sceneFull();
     }
     return { ok: true };
@@ -575,6 +536,14 @@ export function touchedScenes(before: RoomState, after: RoomState, touched: read
  * it adds to it. A scene the op made has none. Only asked of a scene over
  * its limit, which a room reaches rarely.
  */
+/** What a scene's far reading counts beyond its measures on its floors: sight, explored ground, players' maps and the widths. */
+function sceneReserves(state: RoomState, floors: readonly Scene[]): number {
+  const sight = sum(floors, (scene) => sightReserve(scene) + perPlayerSceneReserve(state, scene));
+  const explored = sum(floors, (scene) => exploredReserve(state, scene.id));
+  const maps = sum(floors, (scene) => discoveryReserve(state, scene, MEMORY_CAP));
+  return sight + explored + maps + farWidths(state, new Set(floors.map((scene) => scene.id)));
+}
+
 function neededBefore(before: RoomState, sceneId: string, share: number, role: Viewer["role"]): number {
   return before.scenes[sceneId] ? projectedSceneBytes(before, sceneId, share, role) : 0;
 }
@@ -3068,6 +3037,13 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
  */
 export const exactBuilds = { count: 0 };
 
+/**
+ * How many stepped parts the far check has read exactly (farReadings): the
+ * room's and each scene's, on each side of a player's op. A test reads it
+ * to hold that count alike in twin rooms (sizeGuard.timing.test.ts).
+ */
+export const exactReads = { count: 0 };
+
 /** Whether a state stores the thing a key in an exact part names (exactCopies). */
 function storedIn(state: RoomState, key: EntityKey): boolean {
   if (key.startsWith("row:")) return state.encounter?.entries.some((e) => e.id === key.slice("row:".length)) ?? false;
@@ -3128,28 +3104,45 @@ export type FarParts = { stepped: number; exact: number };
  * A player's far readings of the room and of each scene by its main floor,
  * exactly, before and after their op over one membership (exactOver), at
  * the widest per-player reserves unless `widest` is false: what the far
- * check reads (SizeGuard #farPlayer), without the bounds that spare it a
- * measure where the answer is the same. A scene the room did not hold
- * before has no reading before.
+ * check reads (SizeGuard #farPlayer). Each stepped part is read exactly on
+ * both sides, the room's from the sizes kept per entity (exactMeasure). A
+ * scene the room did not hold before, or any scope with no state before,
+ * has no reading before.
  */
-export function playerReadings(before: RoomState, after: RoomState, memberId: string, widest = true): Map<string, { before?: FarParts; after: FarParts }> {
+export function farReadings(before: RoomState | undefined, after: RoomState, memberId: string, widest = true): Map<string, { before?: FarParts; after: FarParts }> {
   const parts = exactOver(before, after, memberId);
   const [was, now] = [copyBytesOf(parts.before), copyBytesOf(parts.after)];
   const room = (state: RoomState, own: OwnCopyBytes): FarParts => {
     const held = heldIn(state, own);
-    return { stepped: measuredStateBytes(state) - held.sub + farReserves(state, widest), exact: held.shown };
+    return { stepped: exactMeasure(state) - held.sub + farReserves(state, widest), exact: held.shown };
   };
   const scene = (state: RoomState, own: OwnCopyBytes, main: string): FarParts => {
+    exactReads.count++;
     const floors = new Set(floorsOf(state, main).map((floor) => floor.id));
     const held = heldIn(state, own, floors);
     return { stepped: projectedSceneBytes(state, main, MEMORY_CAP, "dm") + farWidths(state, floors) - held.sub, exact: held.shown };
   };
-  const out = new Map<string, { before?: FarParts; after: FarParts }>([["room", { before: room(before, was), after: room(after, now) }]]);
+  const out = new Map<string, { before?: FarParts; after: FarParts }>([["room", { ...(before ? { before: room(before, was) } : {}), after: room(after, now) }]]);
   for (const floors of sceneGroups(after)) {
     const main = floors[0]!.floor?.of ?? floors[0]!.id;
-    out.set(main, { ...(before.scenes[main] ? { before: scene(before, was, main) } : {}), after: scene(after, now, main) });
+    out.set(main, { ...(before?.scenes[main] ? { before: scene(before, was, main) } : {}), after: scene(after, now, main) });
   }
   return out;
+}
+
+/** farReadings with a state before, as the twin tests read it. */
+export function playerReadings(before: RoomState, after: RoomState, memberId: string, widest = true): Map<string, { before?: FarParts; after: FarParts }> {
+  return farReadings(before, after, memberId, widest);
+}
+
+/**
+ * The room's measure read exactly, as measuredStateBytes counts it, from
+ * the sizes kept per entity and per collection (storedBytes), so it costs
+ * about what the op wrote. Each read counts in exactReads.
+ */
+function exactMeasure(state: RoomState): number {
+  exactReads.count++;
+  return measuredFromStored(storedBytes(state), state);
 }
 
 /**
