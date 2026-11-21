@@ -1496,6 +1496,7 @@ function sceneOfEntry(name: SceneLevel, key: string, value: unknown): string | u
  * holds (docs/design/design-v1-per-player-vision.md 6.8).
  */
 export function sceneOwnBytes(state: RoomState, sceneId: string): number {
+  const commas = commasOf(state, sceneId);
   let bytes = pitReserve(state, sceneId) + (linkBytesByFloor(state).get(sceneId) ?? 0);
   const widest = widestPartyLayer(state, sceneId);
   for (const name of SCENE_LEVEL) {
@@ -1511,9 +1512,21 @@ export function sceneOwnBytes(state: RoomState, sceneId: string): number {
         inside += fieldBytes(key) + entryBytes(name, value);
       }
     }
-    bytes += fieldBytes(name) + 2 + inside + Math.max(0, count - 1);
+    bytes += fieldBytes(name) + 2 + inside + commas(count);
   }
   return bytes;
+}
+
+/**
+ * The commas a scene's collection of `count` entries counts: one between
+ * each two, or on a floor of a scene one for each entry (FLR4-FABLE-5). A
+ * DM's projection holds a scene's floors' entries in one collection, so
+ * where an entry stands among them never moves the scene's measure, and a
+ * creature, an area or a ruler crossing floors moves it by nothing, whatever
+ * else either floor holds.
+ */
+function commasOf(state: RoomState, sceneId: string): (count: number) => number {
+  return state.scenes[sceneId]?.floor === undefined ? (count) => Math.max(0, count - 1) : (count) => count;
 }
 
 /**
@@ -1590,7 +1603,8 @@ function allScenesOwnBytes(state: RoomState): Map<string, number> {
     const count = counts.get(id)!;
     const size = sizes.get(id)!;
     let bytes = pitReserve(state, id) + (links.get(id) ?? 0);
-    SCENE_LEVEL.forEach((name, i) => (bytes += fieldBytes(name) + 2 + size[i]! + Math.max(0, count[i]! - 1)));
+    const commas = commasOf(state, id);
+    SCENE_LEVEL.forEach((name, i) => (bytes += fieldBytes(name) + 2 + size[i]! + commas(count[i]!)));
     out.set(id, bytes);
   }
   return out;
@@ -2929,13 +2943,14 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
  * in the reading's scope. An entity's comma in its collection counts once
  * the collection holds another, so the stepped part keeps one comma for
  * each such collection, whoever's its entities are, and a player's first
- * add to an empty one never moves it.
+ * add to an empty one never moves it. A floor of a scene counts a comma
+ * for every entry (commasOf), so it keeps none.
  */
 function collectionCommas(state: RoomState, floors?: ReadonlySet<string>): number {
   const any = (things: Iterable<{ sceneId: string }>) => {
     if (!floors) return [...things].length > 0 ? 1 : 0;
     const on = new Set<string>();
-    for (const thing of things) if (floors.has(thing.sceneId)) on.add(thing.sceneId);
+    for (const thing of things) if (floors.has(thing.sceneId) && state.scenes[thing.sceneId]?.floor === undefined) on.add(thing.sceneId);
     return on.size;
   };
   const floorParts = any(Object.values(state.tokens)) + any(Object.values(state.templates)) + any(Object.values(state.drawings));

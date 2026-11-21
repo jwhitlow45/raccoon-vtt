@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { describe, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { BOOKKEEPING_RESERVE, FAR, farByteLine } from "#shared/limits.ts";
+import { GROUND, UPPER, thornToken, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
+import type { RoomState } from "#shared/model.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
+import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { scene, token } from "#shared/testutil.ts";
 import { farRoomBytes, FIGHT_HISTORY_FULL, sceneFullWords } from "./sizeGuard.ts";
@@ -234,5 +237,59 @@ describe("a damage roll's tag on an ask", () => {
     assert.equal(answer(await player.send(roll(own))), "taken");
     assert.equal(answer(await player.send(ask(own))), "taken", "their own roll");
     assert.equal(answer(await player.send(ask(own))), used, "the roll went with the first ask");
+  });
+});
+
+/*
+ * FLR4-FABLE-5: a scene's measure counts a comma for each entry on a floor,
+ * so a creature crossing floors moves it by nothing whatever else either
+ * floor holds. Past the tower's line, Ana's fall, flight, fall undo and
+ * climb answer alike whether a creature she cannot see stands on the floor
+ * Thorn leaves or the one he reaches.
+ */
+describe("a creature crossing floors past a scene's line answers alike whatever hidden creatures the floors hold (FLR4-FABLE-5)", () => {
+  /** The tower with Thorn, the DM's hidden notes filling `pad` past the scene's line, and a hidden goblin on `goblin` or none. */
+  const world = (base: RoomState, goblin: string | null, pad: string): RoomState => {
+    const out = { ...base, tokens: { ...base.tokens } };
+    if (goblin !== null) out.tokens.gob = token("gob", { sceneId: goblin, name: "Goblin", x: 12, y: 12, visibility: "dm" });
+    for (let i = 0; i * 4_000 < FAR.sceneBytes; i++) out.tokens[`n${i}`] = token(`n${i}`, { sceneId: pad, visibility: "dm", x: 15, y: 15, notes: "n".repeat(4_000) });
+    return out;
+  };
+  const copyOf = (state: RoomState) => stableStringify(projectState(state, { memberId: "p1", role: "player" }, { sceneId: null }));
+  const said = (event: { rejects?: { message: string }[] | undefined }) => event.rejects?.[0]?.message ?? "taken";
+
+  /** Ana's answers to `steps` on each world, which must look alike to her. */
+  async function answers(t: TestContext, worlds: RoomState[], steps: (ana: ScopeClient) => Promise<string[]>): Promise<string[][]> {
+    assert.ok(worlds.every((w) => copyOf(w) === copyOf(worlds[0]!)), "Ana's copies are alike");
+    const out: string[][] = [];
+    for (const state of worlds) {
+      const h = await scopeActor(t, state, { idGate: false, sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+      out.push(await steps(await h.connect(state.members.p1!, "player")));
+    }
+    return out;
+  }
+
+  test("Thorn alone on Upper floor walks onto the hole, or flies down through it", async (t) => {
+    for (const [thorn, op] of [[{}, { t: "token.move", tokenId: "thorn", x: 6, y: 6 }], [{ x: 6, y: 6, elevation: 5 }, { t: "token.climb", tokenId: "thorn", linkId: "o1" }]] as const) {
+      const base = withOpening(tower({ tokens: { thorn: thornToken({ sceneId: UPPER, x: 4, y: 6, ...thorn }) } }));
+      const got = await answers(t, [null, UPPER, "at"].map((goblin) => world(base, goblin, GROUND)), async (ana) => [said(await ana.send(op as never))]);
+      assert.ok(got.every((g) => g[0] === got[0]![0]), `${op.t}: ${JSON.stringify(got)}`);
+    }
+  });
+
+  test("Ana's undo of Thorn's fall, with a hidden creature on Ground floor or none", async (t) => {
+    const base = withOpening(tower({ tokens: { thorn: thornToken({ sceneId: UPPER, x: 4, y: 6 }) } }));
+    const got = await answers(t, [null, GROUND, UPPER].map((goblin) => world(base, goblin, UPPER)), async (ana) => {
+      const fall = said(await ana.send({ t: "token.move", tokenId: "thorn", x: 6, y: 6 } as never));
+      const head = ana.history().play?.undo?.head;
+      return [fall, head ? said(await ana.send({ t: "undo", scope: "play", head: head.id } as never)) : "no step"];
+    });
+    assert.ok(got.every((g) => JSON.stringify(g) === JSON.stringify(got[0])), JSON.stringify(got));
+  });
+
+  test("Thorn climbs the stairs up, with a hidden creature on either floor or none", async (t) => {
+    const base = withStairs(tower({ tokens: { thorn: thornToken() } }));
+    const got = await answers(t, [null, GROUND, UPPER].map((goblin) => world(base, goblin, UPPER)), async (ana) => [said(await ana.send({ t: "token.climb", tokenId: "thorn", linkId: "l1" } as never))]);
+    assert.ok(got.every((g) => g[0] === got[0]![0]), JSON.stringify(got));
   });
 });
