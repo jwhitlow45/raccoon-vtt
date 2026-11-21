@@ -1224,7 +1224,7 @@ With no fight running, **New fight** offers you a choice of who is in it:
 
 On a scene with floors, **Floors** appears above those buttons with **This floor** and **Every floor**. This floor is the one on your screen, and Every floor changes the buttons to "Everyone on every floor (12)" and "Visible to players (7)". Each creature is judged where it stands, by that floor's own fog and sight, so a fight that spans a staircase starts in one step. The choice belongs to New fight alone.
 
-![New fight on a scene with floors, with Every floor chosen: Floors reads This floor and Every floor, and the buttons read Selected token, Everyone on every floor (5), Visible to players (4) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/floors-fight-every-floor.webp)
+![New fight on a scene with floors, with Every floor chosen: the choice above the buttons reads This floor and Every floor, and the buttons read Selected token, Everyone on every floor (5), Visible to players (4) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/floors-fight-every-floor.webp)
 
 If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
@@ -1709,7 +1709,7 @@ Drag a token and drop it where the creature goes. As you drag, the app draws the
 
 The token walks the cheapest way to where you drop it. While **Walls and ledges block players' moves** is on, a wall, a closed door or a ledge makes the line bend along the way the creature would walk, through an open door or up the stairs, with a dot at each corner. With that setting off, walks ignore those barriers. Either way, the line goes around a patch of rubble when that costs less than wading through it. The label at the end of the line reads what the walk costs, and under that, what cost extra.
 
-![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground,.](dm-guide/movement.webp)
+![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground.](dm-guide/movement.webp)
 
 Mara's Speed is 30 ft, so the 45 ft walk in the picture needs a Dash, and its line is yellow. [Difficult ground](#difficult-ground) lists everything that costs extra.
 
