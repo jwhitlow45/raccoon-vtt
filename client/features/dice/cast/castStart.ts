@@ -10,6 +10,8 @@ import { creatureKey } from "../options.ts";
 import { areaPresetOf, byName, sameSpell, spellLevel } from "./cast.ts";
 import type { Labels } from "../../../lib/labels.ts";
 import { displayName } from "../../../lib/scene.ts";
+import { sameScene } from "#shared/rules/floors.ts";
+import { placeName } from "../../floors/words.ts";
 import { areaContext, caughtTokens } from "../../areas/coverage.ts";
 import type { ThroughInputs } from "../../areas/through.ts";
 
@@ -174,10 +176,11 @@ export function askCaught(view: RoomState, template: AreaTemplate, through: Thro
 
 /**
  * The card's words (3.3, 6). The DM's view holds only the scene on screen,
- * so an ask on another scene names its scene and counts its targets, and
- * only an ask on this scene reads its area or caster as gone. `caught` is
- * the area's caught creatures as the DM's page counts them, hidden ones
- * included.
+ * so an ask elsewhere names where it is and counts its targets: its floor,
+ * "Ground floor", on another floor of the scene on screen, else its place,
+ * "Crypt · Vault". Only an ask on this floor reads its area or caster as
+ * gone. `caught` is the area's caught creatures as the DM's page counts
+ * them, hidden ones included.
  */
 export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templates" | "scenes">, ask: CastAsk, input: { viewing: string | null; caught: number | null; labels: Labels }): CastCardText {
   const who = castWho(view, ask, input.labels);
@@ -190,8 +193,10 @@ export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templ
   if (!scene) gone = "Its scene is gone";
   else if (here && ask.area !== undefined && !view.templates[ask.area]) gone = "Its area is gone";
   else if (here && !view.tokens[ask.caster]) gone = "Its caster is gone";
+  // Go to only switches floors within the scene on screen, so naming the scene there would send the DM where they already are (D-261120-104).
+  const place = scene && input.viewing !== null && sameScene(view, ask.sceneId, input.viewing) ? (scene.floor?.name ?? scene.name) : placeName(view, ask.sceneId);
   let where: string;
-  if (!here) where = scene ? `On ${scene.name}` : "";
+  if (!here) where = scene ? `On ${place}` : "";
   else if (ask.area !== undefined) where = `In the area: ${input.caught ?? 0}`;
   else {
     const ids = ask.targets ?? [];
@@ -208,7 +213,7 @@ export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templ
     rolled,
     where,
     gone,
-    open: here || !scene ? "Open" : `Go to ${scene.name} and open`,
+    open: here || !scene ? "Open" : `Go to ${place} and open`,
     openName: `Open the group save for ${who}'s ${spell}`,
     dismissName: `Dismiss ${who}'s ${spell}`,
   };

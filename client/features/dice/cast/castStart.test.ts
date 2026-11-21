@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CastAsk, PcStats, RoomState } from "#shared/model.ts";
 import { ASK_CLOSED } from "#shared/permissions.ts";
-import { castAsk, castTable, character, template } from "#shared/testutil.ts";
+import { castAsk, castTable, character, scene, template } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { castSeen, closeSettled, closeTheAsk, CLOSED_UNREAD, damageSent, newPage, RESOLVED_ELSEWHERE, restoredPage, settleTag, type Page } from "../groupSave/chain.ts";
 import { amountsOf } from "../groupSave/plan.ts";
@@ -234,6 +234,24 @@ describe("the DM's card", () => {
     assert.deepEqual([text.rolled, text.where], ["No damage rolled", "Targets: Goblin 1, Goblin 2"]);
     const reversed = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g2", "g1"], spell: "Hold Person" }), { viewing: "s1", caught: null, labels: new Map() });
     assert.equal(reversed.where, "Targets: Goblin 1, Goblin 2", "by name and number, whatever order the ask holds (LP10-SAVE-3)");
+  });
+
+  test("an ask on another floor of the scene on screen names its floor, and one on another scene its place (LP46-AREA-1)", () => {
+    const base = view();
+    const v: RoomState = {
+      ...base,
+      scenes: {
+        ...base.scenes,
+        ground: scene("ground", { name: "Tower", floor: { of: "ground", level: 0, name: "Ground floor" } }),
+        upper: scene("upper", { name: "Tower", order: 1, floor: { of: "ground", level: 1, name: "Upper floor" } }),
+      },
+    };
+    const ask = castAsk("d6", { sceneId: "ground" });
+    const fromUpper = castCardText(v, ask, { viewing: "upper", caught: null, labels: new Map() });
+    assert.deepEqual([fromUpper.where, fromUpper.open], ["On Ground floor", "Go to Ground floor and open"]);
+    const fromAway = castCardText(v, ask, { viewing: "s1", caught: null, labels: new Map() });
+    assert.deepEqual([fromAway.where, fromAway.open], ["On Tower · Ground floor", "Go to Tower · Ground floor and open"]);
+    assert.equal(castCardText(v, ask, { viewing: "ground", caught: 2, labels: new Map() }).open, "Open", "on its own floor");
   });
 
   test("an ask on another scene goes there to open, and only an ask here reads its area or caster as gone", () => {
