@@ -7969,13 +7969,50 @@ async function hexCryptScene(crypt: string): Promise<string> {
   return id;
 }
 
-/** Shows the DM a scene from its row in the Scenes panel, and waits for its settings. */
+/**
+ * Shows the DM a scene from its row in the Scenes panel, and waits for its
+ * settings and its load to end. The row says "loading…" only once the load
+ * has run past a short delay (features/scenes/SceneList.tsx), so a row at
+ * rest early can still turn under a measure. The load ends when the map
+ * is drawn and the board reports it a frame later: the map on the board,
+ * two frames, then the row at rest is the scene loaded.
+ */
 async function viewScene(panel: Locator, sceneId: string): Promise<void> {
   const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
-  await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+  const row = panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first();
+  await row.click();
   await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
   const field = panel.getByRole("textbox", { name: "Scene name" }).last();
   await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
+  const map = dmSocket.state?.scenes[sceneId]?.map;
+  if (map && !map.video) await waitFor(`${name}'s map drawn`, () => mapDrawn(panel.page(), map.widthPx / map.heightPx), SHOWS_MS);
+  await twoFrames(panel);
+  await waitFor(`${name}'s row at rest`, async () => ((await row.getAttribute("aria-busy")) === null ? true : null), SHOWS_MS);
+}
+
+/**
+ * Whether the board on screen draws a map image of this shape. A phone
+ * draws a smaller copy of the image, so the shape is what is compared, and
+ * a scene switched away from keeps no image of the scene before.
+ */
+function mapDrawn(page: Page, ratio: number): Promise<true | null> {
+  return page.evaluate((r) => {
+    type Picture = { width: number; height: number; naturalWidth?: number; naturalHeight?: number };
+    type Node = { image?: () => Picture | null | undefined };
+    type Stage = { width(): number; visible(): boolean; find(selector: string): Node[] };
+    const stages = (globalThis as unknown as { Konva?: { stages: Stage[] } }).Konva?.stages ?? [];
+    const drawn = stages
+      .filter((s) => s.width() > 0 && s.visible())
+      .some((s) =>
+        s.find("Image").some((n) => {
+          const img = n.image?.();
+          const w = img?.naturalWidth || img?.width || 0;
+          const h = img?.naturalHeight || img?.height || 0;
+          return h > 0 && Math.abs(w / h - r) < 0.02;
+        }),
+      );
+    return drawn ? true : null;
+  }, ratio);
 }
 
 /*
