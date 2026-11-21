@@ -79,6 +79,19 @@ async function onFloor(page: Page, name: string): Promise<void> {
   });
 }
 
+/** Scrolls only the side panel so `target` stands at its top, and puts the page itself back at the top. */
+async function scrollPanelTo(page: Page, target: Locator): Promise<void> {
+  await target.evaluate((el) => {
+    type Box = { scrollTop: number; scrollHeight: number; clientHeight: number; parentElement: Box | null; getBoundingClientRect(): { top: number } };
+    let box = (el as unknown as { closest(s: string): Box | null }).closest('[role="tabpanel"]');
+    while (box && !(box.scrollHeight > box.clientHeight + 5)) box = box.parentElement;
+    if (box) box.scrollTop += (el as unknown as Box).getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+    const g = globalThis as unknown as { scrollTo(x: number, y: number): void };
+    g.scrollTo(0, 0);
+  });
+  await page.waitForTimeout(300);
+}
+
 const work = mkdtempSync(path.join(tmpdir(), "raccoon-guide-floors-desk-"));
 const server = await startServer({ port: PORT, assetDir: path.join(work, "assets"), databaseUrl: DATABASE_URL });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -156,7 +169,7 @@ try {
   // Shot 2: the Floors group in the scene's settings.
   const scenes = await panel(dm, "Scenes");
   const group = await openSceneGroup(scenes, "Floors");
-  await group.evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+  await scrollPanelTo(dm, group);
   await quiet(dm);
   await picture(dm, "floors-settings");
 
