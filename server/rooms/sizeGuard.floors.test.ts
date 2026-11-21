@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { LIMITS, SCENE_FULL, serializedBytes } from "#shared/limits.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { room, scene, token } from "#shared/testutil.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, growthBound, memoryReserved, projectedSceneBytes, sceneFullWords, sceneGroups, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, memoryReserved, projectedSceneBytes, sceneGroups, SizeGuard } from "./sizeGuard.ts";
 
 /**
  * A scene's floors share one scene's budget (docs/design/design-v1-floors.md 9,
@@ -54,7 +54,7 @@ describe("the size guard on a scene with floors", () => {
     const guard = new SizeGuard({ stateLimit: 8 * MIB, sceneLimit });
     assert.equal(guard.check(before, ["s1"], 0, before).ok, true);
     const refused = guard.check(after, ["f1"], growthBound(before, after, ["token:b"]), before);
-    assert.deepEqual(refused, { ok: false, code: "quota", message: sceneFullWords(sceneLimit) });
+    assert.deepEqual(refused, { ok: false, code: "quota", message: SCENE_FULL });
     // The same bulk on another scene goes in: only a scene's own floors share its budget.
     assert.equal(guard.refusedScene, "s1");
     const elsewhere = withBulk(before, "b", "s2", 20_000);
@@ -115,7 +115,7 @@ describe("the size guard on a scene with floors", () => {
     const refused = guard.check(after, ["f6"], growthBound(before, after, ["scene:f6"]), before);
     assert.equal(guard.refusedScene, "s1", "the scene's own budget refused it, by its main floor");
     assert.equal(refused.ok, false);
-    if (!refused.ok) assert.ok(refused.message === sceneFullWords(LIMITS.projectedSceneBytes) || refused.message.includes("players' maps") || refused.message.includes("explore"), refused.message);
+    if (!refused.ok) assert.ok(refused.message === SCENE_FULL || refused.message.includes("players' maps") || refused.message.includes("explore"), refused.message);
   });
 
   test("players' memory is reserved on every floor of the players' scene, reached or not, and on no floor of another scene unplayed", () => {

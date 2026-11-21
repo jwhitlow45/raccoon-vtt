@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
-import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, SOUND_LIMITS, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, soundUseFits, stillFitsVideo, utf8Bytes } from "./limits.ts";
+import { BLOCKS_ROOM_TOO_FULL, HANDOUT_PAGES_FULL, KEPT_FOR_PLAYERS_FULL, LIMITS, ROOM_FULL, SCENE_FULL, SHOWING_COUNTS_AGAIN, sizeRemedy, SOUND_LIMITS, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, soundUseFits, stillFitsVideo, utf8Bytes } from "./limits.ts";
 import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
 import { FADES } from "./sound.ts";
 import { actor, character, companionBlock, customMonster, drawing, entry, room, srdImage, token } from "./testutil.ts";
@@ -371,5 +371,27 @@ describe("sound lengths by use (docs/design/design-v1-music.md 4.2, D-261102-464
   test("a track outlasts two crossfades and the reveal, so every reveal comes 10 to 20 s before its start (6.4)", () => {
     const longestFadeMs = Math.max(...FADES) * 1000;
     assert.ok(SOUND_LIMITS.use.music.minMs >= 2 * longestFadeMs + SOUND_LIMITS.revealMinMs);
+  });
+});
+
+describe("the words of a full room (size refusals name a remedy and no size)", () => {
+  test("each line's words name something the sender can delete and carry no MiB figure", () => {
+    for (const role of ["dm", "player"] as const) {
+      for (const core of [ROOM_FULL, SCENE_FULL, KEPT_FOR_PLAYERS_FULL]) {
+        const words = sizeRemedy(core, role);
+        if (role === "player" && core === KEPT_FOR_PLAYERS_FULL) {
+          assert.equal(words, core, "a player never meets the DM's kept line");
+          continue;
+        }
+        assert.ok(words.startsWith(core) && /\. (Delete|Remove) /.test(words), words);
+        assert.ok(!/em dash|\u2014|;/.test(words), words);
+      }
+    }
+    assert.ok(!/\d+ MiB size limit/.test(sizeRemedy(ROOM_FULL, "dm") + sizeRemedy(SCENE_FULL, "dm")));
+  });
+
+  test("words that are not a byte line's pass through, and a block save's words stay a player's own", () => {
+    assert.equal(sizeRemedy("the room is full: it can hold at most 50 scenes", "dm"), "the room is full: it can hold at most 50 scenes");
+    assert.equal(BLOCKS_ROOM_TOO_FULL, "The room is too full to save this stat block. Ask the DM to delete scenes they are done with, then save again.");
   });
 });

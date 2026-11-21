@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, LIMITS, NO_ROOM_TO_EXPLORE, roundUp, SEAT, serializedBytes } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, LIMITS, NO_ROOM_TO_EXPLORE, ROOM_FULL, roundUp, SEAT, serializedBytes, sizeRemedy } from "#shared/limits.ts";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
@@ -469,7 +469,7 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.ok(farRoomBytes(perPlayerRoom(13), true) > FAR.roomBytes, "13 scenes read past the line at the widest");
     const { r, rounds } = await beforeAndAfter(t, 13, ["a line", "character notes", "a move", "a whisper"], false);
     assert.deepEqual(rounds[0], [["a line", "quota"], ["character notes", "quota"], ["a move", "taken"], ["a whisper", "taken"]]);
-    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: `the room is full: it is at its ${FAR.roomBytes / (1024 * 1024)} MiB size limit` }, "the DM's create reads the widest");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") }, "the DM's create reads the widest");
   });
 
   test("LP43-LIMITS-2: inside the 1 MiB the room keeps for the players, the DM's adds are refused in its words and a player's line taken, with the DM's bookkeeping, a move of the players and deletes", async (t) => {
@@ -489,8 +489,8 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.ok(farRoomBytes(r.state, false) <= playersLine - KEPT_FOR_PLAYERS, "today's roster reads under the DM's line, where the DM's adds went on before");
     assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), "taken", "moving the players onto a scene they explore, which spends room for their play");
     assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken", "and back");
-    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's create");
-    assert.deepEqual(await answer(r, "dm", { t: "token.update", tokenId: "hero", patch: { notes: "A long note about the road" } } as Op), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's growing note");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, "the DM's create");
+    assert.deepEqual(await answer(r, "dm", { t: "token.update", tokenId: "hero", patch: { notes: "A long note about the road" } } as Op), { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, "the DM's growing note");
     assert.equal(await answer(r, "dm", { t: "token.move", tokenId: "hero", x: 7, y: 5 } as Op), "taken", "the DM's move");
     assert.equal(await answer(r, "dm", { t: "actor.effect.add", target: { tokenId: "hero" }, effect: { id: mint.next(r), key: "prone" } } as Op), "taken", "the DM's condition");
     assert.equal(await answer(r, "dm", { t: "log.chat", text: "Onward" }), "taken", "the DM's chat line");
@@ -514,7 +514,7 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.ok(farRoomBytes(state, true) <= playersLine - FAR.byteStep, "a step under the players' line");
     state.tokens.gob = token("gob", { name: "Goblin", x: 9, y: 9 });
     const r = await opened(t, state, "used");
-    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, "the DM's new adds still stop at the DM's line");
+    assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, "the DM's new adds still stop at the DM's line");
     assert.equal(await answer(r, "dm", { t: "token.delete", tokenId: "gob" }), "taken");
     assert.equal(await answer(r, "dm", { t: "undo", scope: "play", head: r.clients.dm.head("play", "undo").id } as Op), "taken", "the creature's");
     assert.ok(r.state.tokens.gob, "the goblin is back");
@@ -534,7 +534,7 @@ describe("a room past the far line on per-player sight alone", () => {
     const r = await opened(t, perPlayerRoom(scenes), "past");
     assert.equal(await answer(r, "dm", { t: "scene.delete", sceneId: "pp0" }), "taken");
     const step = r.clients.dm.head("setup", "undo").id;
-    assert.deepEqual(await undoSetup(r), { code: "quota", message: `could not undo deleting the scene pp0: the room is full: it is at its ${FAR.roomBytes / (1024 * 1024)} MiB size limit` });
+    assert.deepEqual(await undoSetup(r), { code: "quota", message: `could not undo deleting the scene pp0: ${sizeRemedy(ROOM_FULL, "dm")}` });
     assert.equal(r.clients.dm.head("setup", "undo").id, step, "the step stays to undo");
     assert.equal(r.state.scenes.pp0, undefined, "the scene stays deleted");
   });

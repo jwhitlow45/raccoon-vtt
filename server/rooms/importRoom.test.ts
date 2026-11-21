@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
 import { HttpError } from "../auth/http.ts";
-import { exploredReserve, FAR, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes } from "#shared/limits.ts";
+import { exploredReserve, FAR, LIMITS, NO_ROOM_TO_EXPLORE, SCENE_FULL, serializedBytes } from "#shared/limits.ts";
 import { projectState } from "#shared/project.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { splitRefusal } from "#shared/rules/walls.ts";
@@ -18,7 +18,7 @@ import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exp
 import { assertLinesNotAhead, assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { lastLineSeq } from "./remap.ts";
-import { numberingAdjust, projectionNumbering, SizeGuard, sceneFullWords } from "./sizeGuard.ts";
+import { numberingAdjust, projectionNumbering, SizeGuard } from "./sizeGuard.ts";
 
 /** The guard at the far lines, which a file an import takes by them meets on its first ops. */
 const FAR_GUARD = { stateLimit: FAR.roomBytes, sceneLimit: FAR.sceneBytes };
@@ -246,7 +246,7 @@ describe("wave 4 import limits (docs/design/design-v1-maps-vision.md 2.4)", () =
     const full = sceneOf(sceneLimit - sightReserve + 1);
     assert.throws(
       () => assertWithinLimits(full),
-      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === sceneFullWords(FAR.sceneBytes),
+      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === SCENE_FULL,
     );
     // Without vision there is nothing to reserve, and the same scene fits.
     full.scenes.s1 = { ...full.scenes.s1!, vision: { on: false, light: "dark" } };

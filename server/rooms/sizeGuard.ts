@@ -5,7 +5,7 @@ import { ZERO_HP_UNCONSCIOUS_ID, type HpLabel } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { MAX_HISTORY } from "#shared/reducer/encounter.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, roundUp, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, ownsRow, ownsSeatToken, reservedExploreFloors, ROOM_FULL, roundUp, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
@@ -105,17 +105,12 @@ import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
  * much map memory the room retains.
  */
 
-function roomFull(limit: number): LimitCheck {
-  return { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(limit / 1024 / 1024)} MiB size limit` };
+function roomFull(): LimitCheck {
+  return { ok: false, code: "quota", message: ROOM_FULL };
 }
 
-/** The refusal of an op that takes a scene past its budget, which an add of a floor says in the floors' words (actor.ts). */
-export function sceneFullWords(limit: number): string {
-  return `this scene is at its ${Math.floor(limit / 1024 / 1024)} MiB size limit`;
-}
-
-function sceneFull(limit: number): LimitCheck {
-  return { ok: false, code: "quota", message: sceneFullWords(limit) };
+function sceneFull(): LimitCheck {
+  return { ok: false, code: "quota", message: SCENE_FULL };
 }
 
 /** The last exact size, and how much the state may have grown since. */
@@ -337,7 +332,7 @@ export class SizeGuard {
     if (!state || state.bytes + state.growth + growth + reserve + held > this.stateLimit) {
       const bytes = measuredStateBytes(next);
       if (bytes + reserve + held > this.stateLimit && dmRoomBytes(next, bytes) + reserve + held > this.stateLimit && grewRoom(before, bytes + reserve + held, unreserved)) {
-        return newlyExploring && bytes + held <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
+        return newlyExploring && bytes + held <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull();
       }
       updates.push(() => this.stateMeasured(bytes));
     } else {
@@ -382,7 +377,7 @@ export class SizeGuard {
         this.#refusedScene = main;
         if (exploringHere) return { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE };
         // Over only by what players' copies may hold beyond the DM's, which the DM can make room for. A player reads the plain words.
-        return role === "dm" && maps > 0 && need - maps <= this.sceneLimit ? { ok: false, code: "quota", message: SCENE_MAPS_FULL } : sceneFull(this.sceneLimit);
+        return role === "dm" && maps > 0 && need - maps <= this.sceneLimit ? { ok: false, code: "quota", message: SCENE_MAPS_FULL } : sceneFull();
       }
       updates.push(() => floors.forEach((scene, i) => scenes.set(scene.id, { bytes: owns[i]!, growth: 0 })));
     }
@@ -454,7 +449,7 @@ export class SizeGuard {
       const dmPart = bytes - held.sub + reserves;
       if (farBytesOver("room", kind, line, dmPart, held.shown, grew)) {
         if (far === "widestDm") return { ok: false, code: "quota", message: PER_PLAYER_FULL };
-        return line === "dm" && !farBytesOver("room", kind, "players", dmPart, held.shown, grew) ? { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL } : roomFull(FAR.roomBytes);
+        return line === "dm" && !farBytesOver("room", kind, "players", dmPart, held.shown, grew) ? { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL } : roomFull();
       }
       this.#state = { bytes, growth: 0 };
     }
@@ -478,7 +473,7 @@ export class SizeGuard {
       const grew = before === undefined || need > neededBefore(before, main, MEMORY_CAP, "dm") + widthsBefore;
       if (!farBytesOver("scene", kind, line, need - held.sub, held.shown, grew)) continue;
       this.#refusedScene = main;
-      return far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : sceneFull(FAR.sceneBytes);
+      return far === "widestDm" ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : sceneFull();
     }
     return { ok: true };
   }
@@ -1632,7 +1627,7 @@ export function checkWholeScenes(state: RoomState, sceneLimit: number = LIMITS.p
     const here = floors.some((scene) => reserved.has(scene.id));
     const explored = sum(floors, (scene) => exploredReserve(state, scene.id));
     if (need + explored <= sceneLimit) continue;
-    return here && need <= sceneLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull(sceneLimit);
+    return here && need <= sceneLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull();
   }
   return { ok: true };
 }

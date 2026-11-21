@@ -14,8 +14,10 @@ import {
   HANDOUT_PAGES_FULL,
   LIMITS,
   NO_ROOM_TO_EXPLORE,
+  ROOM_FULL,
   serializedBytes,
   SHOWING_COUNTS_AGAIN,
+  sizeRemedy,
   utf8Bytes,
 } from "#shared/limits.ts";
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
@@ -2232,7 +2234,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
         const big: Op = { t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(700) } };
         const alone = applyOp(actor.committed.state, big, { memberId: dm.id, role: "dm" }, { seq: 1_000, at: new Date().toISOString() });
         assert.ok(alone.ok && dmPart(alone.state) + memoryStateReserve(alone.state) <= stateLimit, "it fits without the reserve");
-        assert.deepEqual(await send(big), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
+        assert.deepEqual(await send(big), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") });
 
         // Each hide where the party looks clears explored bits and the batch explores them again, so the tile's rev climbs by two.
         const tile = () => actor.committed.state.exploredTiles[`${sceneId}:1,0`]!;
@@ -2297,7 +2299,7 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design/desig
         const room0 = actor.committed.state;
         const spare = stateLimit - dmPart(room0) - numberingAdjust(room0) - exploredReserve(room0) - memoryStateReserve(room0);
         assert.ok(spare >= 0 && spare < 300, `${spare} bytes spare`);
-        assert.deepEqual(await send(note(spare + 150)), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
+        assert.deepEqual(await send(note(spare + 150)), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") });
         assert.equal(await send(note(Math.max(0, spare - 40))), null, "an edit that fits still passes");
         const now = actor.committed.state;
         assert.ok(dmPart(now) + numberingAdjust(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
@@ -2854,7 +2856,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
         await actor.op(p.conn, 3, { t: "companionBlock.update", blockId: "moth", patch: { traits: [{ name: "", text: "x".repeat(3_000) }] } });
         assert.deepEqual(await answer(p.sent, 3), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
         await actor.op(p.conn, 4, { t: "token.update", tokenId: pcId, patch: { notes: "n".repeat(3_000) } });
-        assert.deepEqual(await answer(p.sent, 4), { code: "quota", message: "the room is full: it is at its 0 MiB size limit" });
+        assert.deepEqual(await answer(p.sent, 4), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") });
         // A delete never grows the room.
         await actor.op(p.conn, 5, { t: "companionBlock.delete", blockId: "moth" });
         assert.equal(await answer(p.sent, 5), null);

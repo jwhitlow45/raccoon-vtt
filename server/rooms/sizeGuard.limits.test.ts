@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, roundUp } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, roundUp, SCENE_FULL } from "#shared/limits.ts";
 import type { Actor, LogEntry, Member, PcStats, RoomState, Viewer } from "#shared/model.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -115,7 +115,7 @@ describe("the far line", () => {
     const guard = new SizeGuard();
     guard.stateMeasured(measuredStateBytes(over), over);
     assert.ok(farRoomBytes(over, true) > FAR.roomBytes);
-    assert.deepEqual(judged(over, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit` });
+    assert.deepEqual(judged(over, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: ROOM_FULL });
     // Under by more than the far widths every creature counts at (farWidths).
     const under = nearFar(FAR.roomBytes - BOOKKEEPING_RESERVE.room - 3 * MIB);
     const free = new SizeGuard();
@@ -136,7 +136,7 @@ describe("the far line", () => {
     guard.stateMeasured(measuredStateBytes(state), state);
     assert.equal(guard.over, overFarLine(state));
     assert.ok(guard.over > 0 && Math.abs(guard.over - (before + blocks - FAR.roomBytes)) <= FAR.byteStep, `over by ${guard.over}`);
-    assert.deepEqual(judged(state, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(FAR.roomBytes / MIB)} MiB size limit` });
+    assert.deepEqual(judged(state, line("d1"), P1, guard, "widest"), { ok: false, code: "quota", message: ROOM_FULL });
   });
 
   test("an op that meets the line stops the bookkeeping reserve short of it, and an exempt kind goes on to the line itself", () => {
@@ -163,7 +163,7 @@ describe("the far line", () => {
     guard.stateMeasured(measuredStateBytes(state), state);
     const notes = applyOp(state, { t: "character.update", characterId: "c1", patch: { actor: { notes: "A long note about the road" } } } as Op, DM, env(9));
     assert.ok(notes.ok, notes.ok ? "" : notes.message);
-    assert.deepEqual(guard.check(notes.state, [], growthBound(state, notes.state, notes.touched), state, "dm", "today"), { ok: false, code: "quota", message: `this scene is at its ${FAR.sceneBytes / MIB} MiB size limit` });
+    assert.deepEqual(guard.check(notes.state, [], growthBound(state, notes.state, notes.touched), state, "dm", "today"), { ok: false, code: "quota", message: SCENE_FULL });
   });
 
   test("past the line an exempt kind that grows the room is refused, and one that adds nothing taken", () => {

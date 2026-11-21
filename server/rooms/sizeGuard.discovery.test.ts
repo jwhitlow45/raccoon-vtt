@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { holderTileKey, tileKey, wallChunk, chunkKey } from "#shared/keys.ts";
-import { exploredReserve, LIMITS, MARKED_SHARE_MOST, serializedBytes } from "#shared/limits.ts";
+import { exploredReserve, LIMITS, MARKED_SHARE_MOST, ROOM_FULL, serializedBytes } from "#shared/limits.ts";
 import { mapDiscoveryUpgrade } from "#shared/migrate.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type Drawing, type FreeWall, type Member, type MemoryChunk, type RoomState, type Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
@@ -443,7 +443,7 @@ describe("no measure reads a memory or an explored layer (rule 8)", () => {
     assert.deepEqual(answer(a, limit, DM), { ok: true });
     const refused = answer(b, limit, DM);
     assert.ok(!refused.ok);
-    assert.equal(refused.message, `the room is full: it is at its ${Math.floor(limit / MIB)} MiB size limit`, "the room-full words every op risks");
+    assert.equal(refused.message, ROOM_FULL, "the room-full words every op risks");
     assert.ok(!/150|157|s1|hiddenwall/.test(refused.message), "nothing says where the wall is");
   });
 

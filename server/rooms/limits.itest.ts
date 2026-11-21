@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, sizeRemedy } from "#shared/limits.ts";
 import type { Op } from "#shared/protocol.ts";
 import { farRoomBytes, heldBytes, PER_PLAYER_FULL } from "./sizeGuard.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
@@ -86,7 +86,7 @@ describe("the room keeps room for the players (LP43-LIMITS-2)", () => {
         refused = await answer(dmSocket, creature("n".repeat(4_000)));
         if (refused !== "taken") break;
       }
-      assert.deepEqual(refused, { code: "quota", message: KEPT_FOR_PLAYERS_FULL }, `the DM's creatures refused after ${creatures}`);
+      assert.deepEqual(refused, { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, `the DM's creatures refused after ${creatures}`);
       const kept = FAR.roomBytes - BOOKKEEPING_RESERVE.room - farRoomBytes(room(), true);
       assert.ok(kept >= KEPT_FOR_PLAYERS, `the players' 1 MiB is free at the widest: ${kept}`);
 
@@ -109,7 +109,7 @@ describe("the room keeps room for the players (LP43-LIMITS-2)", () => {
         last = await answer(p.socket, stroke(mat, p.id, k++));
         if (last === "taken") more++;
       }
-      assert.deepEqual(last, { code: "quota", message: `the room is full: it is at its ${FAR.roomBytes / (1024 * 1024)} MiB size limit` });
+      assert.deepEqual(last, { code: "quota", message: sizeRemedy(ROOM_FULL, "player") });
       c.diagnostic(`${side}: ${scenes} scenes, the DM's ${creatures} creatures, ${kept} bytes kept; a session for six held ${sessionBytes} bytes, then ${more} more strokes, ${heldBytes(room())} bytes held`);
 
       // Deleting always works, and frees room for the DM's adds.

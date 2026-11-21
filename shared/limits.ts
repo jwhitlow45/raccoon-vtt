@@ -1055,7 +1055,7 @@ function checkJournal(state: RoomState): LimitCheck {
 /** The refusal of a player's block save past their save budget (docs/design/design-v1-companion-stat-blocks.md 3.5). The editor knows it by these words. */
 export const BLOCK_SAVES_TOO_FAST = "Too many stat block saves at once. Wait a few seconds, then save again.";
 /** A block save the room's state limit refuses, in place of the size guard's words (section 3.4). */
-export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat block. Ask the DM to free some space, then save again.";
+export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat block. Ask the DM to delete scenes they are done with, then save again.";
 /**
  * The refusal of a `character.update` whose `expect` no longer matches the
  * character (docs/design/design-v1-resync.md 4): one code and these words whatever
@@ -1452,6 +1452,38 @@ export const KEPT_FOR_PLAYERS = 1 * MiB;
 
 /** The DM's refusal of an add that only the room kept for the players stops. */
 export const KEPT_FOR_PLAYERS_FULL = `the room is full: it keeps its last ${n(KEPT_FOR_PLAYERS / MiB)} MiB for what the players add`;
+
+/**
+ * What a byte line refuses with, before the remedy (`sizeRemedy`). No size
+ * is named: the room's lines differ (the DM's own, the players', the far
+ * line), and a number that changed with them read as a contradiction of
+ * what the docs say a room holds.
+ */
+export const ROOM_FULL = "the room is full";
+export const SCENE_FULL = "this scene is full";
+
+/**
+ * A byte-line refusal with what the sender can do about it, in the room's
+ * existing voice. The DM's list leads with Per player scenes, which hold
+ * the most (each reserves a map for every player). The words depend on the
+ * sender's role and which line refused, never on what the sender cannot see.
+ */
+export function sizeRemedy(message: string, role: "dm" | "player"): string {
+  const remedy = SIZE_REMEDY[role][message];
+  return remedy === undefined ? message : `${message}. ${remedy}`;
+}
+
+const SIZE_REMEDY: Record<"dm" | "player", Record<string, string | undefined>> = {
+  dm: {
+    [ROOM_FULL]: "Delete scenes you are done with, Per player ones first, or journal pages and drawings you no longer need",
+    [KEPT_FOR_PLAYERS_FULL]: "Delete scenes you are done with, Per player ones first, or journal pages and drawings you no longer need",
+    [SCENE_FULL]: "Delete drawings, walls or creatures you no longer need from it",
+  },
+  player: {
+    [ROOM_FULL]: "Delete a drawing or area of yours you no longer need, or ask the DM to delete scenes they are done with",
+    [SCENE_FULL]: "Delete a drawing or area of yours you no longer need, or ask the DM to clear some of the scene",
+  },
+};
 
 /**
  * The far byte line an op of `kind` reads in `scope`, or null for a

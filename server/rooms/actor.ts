@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime } from "#shared/ids.ts";
-import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
+import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, OPENINGS_SNAPSHOT_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
@@ -2383,7 +2383,8 @@ export class RoomActor {
     // scene's alike (D-261116-027).
     const restore = FAR_TREATMENT[op.t] === "restore" && kind.far !== "exempt";
     const far: FarJudge = viewer.role === "player" || restore ? "widest" : widestPerPlayerReserve(next) > widestPerPlayerReserve(before) ? "widestDm" : kind.far === "exempt" || FAR_TREATMENT[op.t] === "own" ? "today" : "dmAdd";
-    return this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt", viewer.role === "player" ? viewer.memberId : undefined);
+    const answer = this.#sizes.check(next, grown, growth, before, viewer.role, far, kind.far === "exempt", viewer.role === "player" ? viewer.memberId : undefined);
+    return answer.ok ? answer : { ...answer, message: sizeRemedy(answer.message, viewer.role) };
   }
 
   /**
