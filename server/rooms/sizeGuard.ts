@@ -4,8 +4,8 @@ import { AUTO_CHARS, CHUNK_CELLS, FALL_RIDERS_MOST, KNOWN_CHARS, UP_DIR_CHARS, t
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
-import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, type OpOf } from "#shared/protocol.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, HARD, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, SHED_STEPS_MOST, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { movesAnyToken } from "#shared/permissions.ts";
@@ -1474,7 +1474,7 @@ export function measuredStateBytes(state: RoomState): number {
   const memory = state.memory === undefined ? {} : { memory: {} };
   const memoryBy = state.memoryBy === undefined ? {} : { memoryBy: {} };
   return (
-    serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, falls: undefined, openFloors: undefined, ...memory, ...memoryBy }) +
+    serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, dmLogShed: undefined, falls: undefined, openFloors: undefined, ...memory, ...memoryBy }) +
     trapsMeasure(state) +
     fallsMeasure(state) +
     openedMeasure(state) -
@@ -1498,11 +1498,80 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
   const saveOutcomes = state.saveOutcomes === undefined ? 0 : serializedBytes({ saveOutcomes: state.saveOutcomes }) - 1;
+  const shed = shedField(state.dmLogShed);
   // The fall cards and the reached floors' marks, swapped for what the measures count of them.
   const floors = storedField(state, "falls") - fallsMeasure(state) + storedField(state, "openFloors") - openedMeasure(state);
-  const outside = reminded + saveOutcomes + floors + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state) - numberingAdjust(state);
+  const outside = reminded + saveOutcomes + shed + floors + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state) - numberingAdjust(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
+}
+
+/** A room's `,"dmLogShed":"…"` as stored, its comma included, or 0 where it has none. */
+function shedField(id: string | undefined): number {
+  return id === undefined ? 0 : 1 + fieldBytes("dmLogShed") + valueBytes(id);
+}
+
+/** The room's fields that hold one value rather than a collection of entities, which storedBytes serializes whole. */
+const SINGLE_FIELDS: ReadonlySet<string> = new Set(["meta", "encounter", "clock", "playing", "numbering", "reminded", "saveOutcomes", "dmLogShed"] satisfies (keyof RoomState)[]);
+
+/**
+ * The bytes of the room as its snapshot stores it (persistence.ts
+ * snapshotJson), from the sizes kept per entity and per collection, so a
+ * batch's close reads it exactly for about the work of what it wrote
+ * (design 1.4).
+ */
+export function storedBytes(state: RoomState): number {
+  let bytes = 2;
+  let fields = 0;
+  for (const [name, value] of Object.entries(state)) {
+    if (value === undefined) continue;
+    fields++;
+    bytes += fieldBytes(name) + (value !== null && typeof value === "object" && !SINGLE_FIELDS.has(name) ? collectionBytes(value) : valueBytes(value));
+  }
+  return bytes + Math.max(0, fields - 1);
+}
+
+/** The commas a list of `count` entries loses with `gone` of them. */
+function commasGone(count: number, gone: number): number {
+  return count === 0 ? 0 : Math.min(gone, count - 1);
+}
+
+/**
+ * What a batch's close takes out of a room whose stored bytes pass
+ * `bound`, HARD.storedBytes but in tests (design 1.4), only until it fits: first the DM's lines
+ * from the oldest, while the archive holds every line of the log up to
+ * them, so the first line of any audience it lacks stops them, then the
+ * fight's oldest history steps that the room held before the batch, never
+ * the newest. A line this batch wrote is not archived yet, so it stays. Null
+ * when the room fits or nothing may go. The actor and the tests both shed
+ * by this, so they agree.
+ */
+export function shedOf(state: RoomState, stored: number, archived: ReadonlySet<string>, before: RoomState, bound: number = HARD.storedBytes): { lines: string[]; steps: number } | null {
+  if (stored <= bound) return null;
+  const log = state.log;
+  const history = state.encounterHistory;
+  const lines: string[] = [];
+  let linesFreed = 0;
+  let steps = 0;
+  let stepsFreed = 0;
+  const fits = () => {
+    const field = lines.length === 0 ? 0 : shedField(lines.at(-1)) - shedField(state.dmLogShed);
+    return stored - linesFreed - commasGone(log.length, lines.length) + field - stepsFreed - commasGone(history.length, steps) <= bound;
+  };
+  for (const line of log) {
+    if (!archived.has(line.id) || lines.length === LIMITS.dmLogLines) break;
+    if (lineAudience(line) !== "dm") continue;
+    lines.push(line.id);
+    linesFreed += valueBytes(line);
+    if (fits()) return { lines, steps };
+  }
+  const held = new Set(before.encounterHistory);
+  while (steps < history.length - 1 && steps < SHED_STEPS_MOST && held.has(history[steps]!)) {
+    stepsFreed += valueBytes(history[steps]!);
+    steps++;
+    if (fits()) break;
+  }
+  return lines.length + steps > 0 ? { lines, steps } : null;
 }
 
 /** The scene an entity of a scene-level collection belongs to. */

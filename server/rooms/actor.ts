@@ -1,7 +1,8 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime } from "#shared/ids.ts";
-import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
+import { MAX_LOG_LINES } from "#shared/logRings.ts";
+import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, HARD, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
@@ -67,7 +68,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
-import { growthBound, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, SizeGuard, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, shedOf, SizeGuard, storedBytes, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
 import { climbOf, fallsKept, fallsRestored, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, withoutFallCards, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -124,8 +125,8 @@ export type ActorOptions = {
    * the two builds' stored rows side by side.
    */
   walkCloses: boolean;
-  /** The size guard's byte limits (design 10.5), lowered only by tests that fill a room. */
-  sizeLimits: { stateLimit?: number; sceneLimit?: number };
+  /** The size guard's byte limits (design 10.5) and the stored bound a batch's close sheds to (#shed), lowered only by tests that fill a room. */
+  sizeLimits: { stateLimit?: number; sceneLimit?: number; storedLimit?: number };
   /** The dice's draw (docs/design/design-v1-dice.md 4.2). Only tests script it. */
   draw: Draw;
   /** The receipt caps (docs/design/design-v1-dice.md 1.2), lowered only by tests that fill a room's day. */
@@ -560,6 +561,14 @@ export class RoomActor {
   #shownDisplays = new WeakSet<Connection>();
   #undo = new UndoStacks();
   #committedHistory = new Map<string, HistoryMessage>();
+  /**
+   * Ids of the log's lines the archive holds (room_log): read once as the
+   * room loads, then each committed batch whose lines it wrote. A shed takes
+   * only lines named here (#shed), so the archive's pages still hold them.
+   */
+  #archived = new Set<string>();
+  /** Whether this load has logged that the room stays past its stored bound (#shed). */
+  #toldStoredOver = false;
   #sentHistory = new WeakMap<Connection, number>();
   #groupScopes = new Map<ClientKey, { group: string; scope: HistoryScope; declared: boolean }>();
   /** Each client's last Undo or Redo refused with FORGET_ASK, and the step it asked about (docs/design/design-v1-map-discovery.md 5.3). */
@@ -734,7 +743,13 @@ export class RoomActor {
     const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
     const ids = await loadIds(deps.pool, roomId, loaded, opts.now());
     const info = await recheckQuotaOnLoad(deps, opts.quotaBytes);
+    const archived = await archivedLines(deps.pool, roomId, loaded.state.log).catch((err: unknown) => {
+      // Knowing of no line sheds none, which only leaves the room fuller.
+      deps.log.warn({ err, roomId }, "archived log lines unread");
+      return new Set<string>();
+    });
     const actor = new RoomActor({ ...deps, info }, loaded, receipts, ids);
+    actor.#archived = archived;
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
@@ -2760,6 +2775,7 @@ export class RoomActor {
     if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
     if (!this.replayFailed && (batch.ops.length > 0 || batch.answered > 0)) this.#rideEnd(batch);
     if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#meet(batch);
+    if (!this.replayFailed) this.#shed(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     this.#closeNumbers(batch, close);
@@ -2953,6 +2969,36 @@ export class RoomActor {
   }
 
   /**
+   * The close's last step (design 1.4): the room's stored bytes, read
+   * exactly at every close, start the guard's measure, and where they pass
+   * HARD.storedBytes one `sys.shed` takes what sizeGuard.ts shedOf names
+   * first. No op is ever refused for the stored bound: a room with nothing
+   * left to shed stays past it, which the operator is told once a load.
+   */
+  #shed(batch: Batch): void {
+    let state = this.#staged.state;
+    let stored = storedBytes(state);
+    const bound = this.#opts.sizeLimits.storedLimit ?? HARD.storedBytes;
+    if (stored > bound) {
+      const shed = shedOf(state, stored, this.#archived, batch.before, bound);
+      if (shed && this.#appendServerOp(batch, { t: "sys.shed", ...shed }, "shed")) {
+        state = this.#staged.state;
+        stored = storedBytes(state);
+      }
+      if (stored > bound && !this.#toldStoredOver) {
+        this.#toldStoredOver = true;
+        this.#log.warn({ roomId: this.roomId, storedBytes: stored }, "room is past its stored bound and has nothing left to shed");
+      }
+    }
+    this.#sizes.stateMeasured(measuredFromStored(stored, state), state);
+    // Lines leave the log by their rings too, so the ids kept are trimmed to those it holds once they could fill it twice.
+    if (this.#archived.size > 2 * MAX_LOG_LINES) {
+      const held = new Set(state.log.map((e) => e.id));
+      for (const id of this.#archived) if (!held.has(id)) this.#archived.delete(id);
+    }
+  }
+
+  /**
    * Appends a server-made op to the batch on the staged state, as stored and
    * replayed, logging rather than refusing one that fails. False when it
    * failed, so the map step can fail closed. Its kinds are uncounted
@@ -3056,6 +3102,7 @@ export class RoomActor {
       }
     }
     this.retrying = false;
+    if (write.archive) for (const r of batch.ops) for (const line of r.log) this.#archived.add(line.id);
     // Reads stop at the stored number, which every op the state holds is at or below. The frames' number can be one no op
     // took, which an op staged in the same millisecond takes next. A room whose replay failed applies no op, so its reads
     // stay where its replay stopped while refusals take numbers.
@@ -3807,6 +3854,17 @@ function trapsTouched(touched: readonly string[]): string[] {
   const out: string[] = [];
   for (const key of touched) if (key.startsWith("trap:")) out.push(key.slice(5));
   return out;
+}
+
+/**
+ * The ids of `log`'s lines the archive holds (room_log), read as the room
+ * loads, so a shed takes only lines the archive's pages still return
+ * (RoomActor #shed).
+ */
+async function archivedLines(pool: Pool, roomId: string, log: readonly LogEntry[]): Promise<Set<string>> {
+  if (log.length === 0) return new Set();
+  const { rows } = await pool.query<{ id: string }>("select id from room_log where room_id = $1 and id = any($2::text[])", [roomId, log.map((e) => e.id)]);
+  return new Set(rows.map((r) => r.id));
 }
 
 function wallsMoved(before: RoomState, after: RoomState): string[] {

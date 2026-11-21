@@ -379,13 +379,39 @@ function outsideMemberRings(log: readonly LogEntry[], members: Roster): string[]
   return out;
 }
 
-type LogRoom = Pick<RoomState, "log" | "members">;
+type LogRoom = Pick<RoomState, "log" | "members" | "dmLogShed">;
 
 type LiveStarts = { dm: string | null; members: Map<string, string> };
 const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, LiveStarts>>();
+const shedStarts = new WeakMap<LiveStarts, { shed: string; out: LiveStarts }>();
+
+/**
+ * Where each live log starts. The DM's starts no earlier than just past
+ * the newest DM line a shed took out of the log (RoomState.dmLogShed,
+ * shared/reducer/shed.ts), and so is defined when no DM line is left: the
+ * archive holds that line and every one before it, so the DM's older pages
+ * start there and leave no line out.
+ */
+function liveStarts(room: LogRoom): LiveStarts {
+  const rings = ringStarts(room);
+  const shed = room.dmLogShed;
+  if (shed === undefined) return rings;
+  const kept = shedStarts.get(rings);
+  if (kept?.shed === shed) return kept.out;
+  const past = justPast(shed);
+  const out = { dm: rings.dm !== null && compareLogIds(rings.dm, past) > 0 ? rings.dm : past, members: rings.members };
+  shedStarts.set(rings, { shed, out });
+  return out;
+}
+
+/** The first id after `id` in log order, which no line need hold. */
+function justPast(id: string): string {
+  const [seq, index] = id.split(":");
+  return `${seq}:${Number(index ?? 0) + 1}`;
+}
 
 /** All rings share one backwards pass. A member stops counting once their newest full ring is found. */
-function liveStarts({ log, members }: LogRoom): LiveStarts {
+function ringStarts({ log, members }: LogRoom): LiveStarts {
   const writable = isWritable(log) || isWritable(members);
   const cached = writable ? undefined : starts.get(log)?.get(members);
   if (cached) return cached;
@@ -446,6 +472,7 @@ function startFor(starts: LiveStarts, viewer: Viewer): string | null {
  * bytes pass that bound less the longest line it may hold, since the line
  * it dropped last fit no more than that. A line a ring dropped after the
  * oldest shared line then always lies before where the live log starts.
+ * A DM's starts past the DM lines a shed took (liveStarts).
  */
 export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   return startFor(liveStarts(room), viewer);

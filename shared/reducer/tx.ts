@@ -309,6 +309,18 @@ export class Tx {
   }
 
   /**
+   * Takes DM lines out of the log for `sys.shed` (shared/reducer/shed.ts)
+   * in one pass, each written as any removed line is, and keeps the newest
+   * as `dmLogShed`. That field is bookkeeping as `reminded` is: no key names
+   * it, so no projection, undo guard or size measure reads it.
+   */
+  shedLines(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    this.writeLog(ids.map((id) => [id, null] as const));
+    this.state.dmLogShed = ids.at(-1)!;
+  }
+
+  /**
    * Appends a log entry with an id derived from the envelope, so a replay
    * never inserts it twice. The log keeps each audience's lines apart
    * (shared/logRings.ts), each fixed by who reads the line in the room as
