@@ -693,7 +693,8 @@ function pitBands(preset: string | undefined): { band: LevelBand; falling: Damag
  * One drop deals its falling damage once, from the fall card
  * (D-261121-101). So the floor below takes a pit preset's falling part and
  * its pit words off the stored rig, but only while both its damage and its
- * note are still one level's preset, as made. The rig stores no level, so
+ * note are still one level's preset, as made, or the 10 ft pit A pit
+ * writes back over a level's other parts. The rig stores no level, so
  * anything the DM changed in either leaves the whole trap as written.
  * Back to a pit, a trap from a pit preset that holds no Bludgeoning part
  * becomes the 10 ft pit it starts as: the 10 ft drop's falling part, and
@@ -704,7 +705,10 @@ export function intoPatch(choice: "pit" | "below", ground: number, rig?: Pick<Tr
   const bands = pitBands(rig?.preset);
   if (choice === "below") {
     const patch: IntoPatch = { pit: null, below: true };
-    const level = bands.find((b) => b.note !== undefined && b.note === rig?.note && b.dc === rig?.save?.dc && damageKey([b.falling, ...b.rest]) === damageKey(rig?.damage));
+    const level =
+      bands.find((b) => b.note !== undefined && b.note === rig?.note && b.dc === rig?.save?.dc && damageKey([b.falling, ...b.rest]) === damageKey(rig?.damage)) ??
+      // The exact 10 ft pit that A pit writes back, whatever level's other parts it keeps (PUB46-SOL-04).
+      bands.find((b) => bands[0]!.note !== undefined && bands[0]!.note === rig?.note && b.dc === rig?.save?.dc && damageKey([bands[0]!.falling, ...b.rest]) === damageKey(rig?.damage));
     if (level) {
       patch.damage = level.rest.length > 0 ? level.rest.map((d) => ({ ...d })) : null;
       patch.note = null;

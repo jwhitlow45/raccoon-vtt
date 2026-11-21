@@ -450,12 +450,19 @@ describe("a pit preset's falling damage at each Into choice: one drop deals it o
   });
 
   test("back to a pit makes the 10 ft pit with the 10 ft drop's 1d6, whatever the level was (PUB46-SOL-03)", () => {
-    for (const band of LEVEL_BANDS) {
-      const back = pick(pick(preset("hidden-pit", band), "below"), "pit");
-      assert.deepEqual(back.damage, [{ formula: "1d6", type: "bludgeoning" }], band);
-      assert.equal(back.note, preset("hidden-pit").note, `${band}: the 10 ft pit's words`);
-      assert.deepEqual(pick(back, "below").damage, undefined, `${band}: the floor below again takes it off`);
+    for (const id of ["hidden-pit", "spiked-pit"]) {
+      for (const band of LEVEL_BANDS) {
+        const rest = trapPreset(id, band)!.rig.damage!.filter((d) => d.type !== "bludgeoning");
+        const back = pick(pick(preset(id, band), "below"), "pit");
+        assert.deepEqual(back.damage, [{ formula: "1d6", type: "bludgeoning" }, ...rest], `${id} ${band}`);
+        assert.equal(back.note, preset(id).note, `${id} ${band}: the 10 ft pit's words`);
+        const again = pick(back, "below");
+        assert.deepEqual(again.damage ?? [], rest, `${id} ${band}: the floor below again leaves only its other parts (PUB46-SOL-04)`);
+        assert.equal(again.note, undefined, `${id} ${band}`);
+      }
     }
+    const touched = { ...pick(pick(preset("spiked-pit", "11-16"), "below"), "pit"), note: "Mine." };
+    assert.deepEqual(intoPatch("below", 0, touched), { pit: null, below: true }, "an edit to A pit's rig still keeps everything");
     const spiked = pick(pick(preset("spiked-pit", "11-16"), "below"), "pit");
     assert.deepEqual(spiked.damage, [{ formula: "1d6", type: "bludgeoning" }, { formula: "8d8", type: "piercing" }]);
     const own = { ...pick(preset("hidden-pit"), "below"), damage: [{ formula: "2d6", type: "bludgeoning" as const }], note: "Mine." };
@@ -473,5 +480,9 @@ describe("a pit preset's falling damage at each Into choice: one drop deals it o
     assert.deepEqual(on.pit, { floor: -10 });
     assert.deepEqual(on.damage, [{ formula: "1d6", type: "bludgeoning" }]);
     assert.deepEqual(opensPitPatch(true, 0, off), intoPatch("pit", 0, off));
+    const spikes = pick(preset("spiked-pit", "17-20"), "below");
+    const spikedOn = merged(merged(spikes, opensPitPatch(false, 0, spikes)), opensPitPatch(true, 0, merged(spikes, opensPitPatch(false, 0, spikes))));
+    assert.deepEqual(spikedOn.damage, [{ formula: "1d6", type: "bludgeoning" }, { formula: "13d8", type: "piercing" }]);
+    assert.deepEqual(pick(spikedOn, "below").damage, [{ formula: "13d8", type: "piercing" }], "a spiked pit switched back on strips again");
   });
 });
