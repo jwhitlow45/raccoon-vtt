@@ -20,7 +20,7 @@
  *   DATABASE_URL=postgres://... GUIDE_PORT=3196 node scripts/guide-iso.ts
  */
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 as randomUUID } from "../shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
