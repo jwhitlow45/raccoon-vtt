@@ -8,13 +8,14 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { pitOpen } from "#shared/rules/traps.ts";
 import { floorBelow } from "#shared/rules/floorLinks.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { LEVEL_BANDS, TRAP_PRESET_IDS } from "#shared/srd/traps.ts";
+import { LEVEL_BANDS, TRAP_PRESET_IDS, trapPreset } from "#shared/srd/traps.ts";
 import { actor, DM, env, room, token } from "#shared/testutil.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   afterSummary,
   A_PIT,
+  cardRig,
   floorWord,
   INTO_GROUP,
   intoHelp,
@@ -384,5 +385,44 @@ describe("a trapdoor's Into (docs/design/design-v1-floors.md phase 4, 4.6)", () 
     assert.equal(afterSummary(rig({ below: true }), null, false, "Ground floor"), "Goes off once, stops the creature, drops to Ground floor");
     assert.equal(afterSummary(rig({ below: true }), null, false, null), "Goes off once, stops the creature, drops to no floor");
     assert.equal(afterSummary(rig({}), null, false, "Ground floor"), "Goes off once, stops the creature", "no trapdoor, no floor named");
+  });
+});
+
+describe("a pit preset's card at each Into choice: one drop deals its falling damage once (LP46A-TRAP-1, D-261121-100)", () => {
+  const preset = (id: string, band: (typeof LEVEL_BANDS)[number] = "1-4"): TrapRig => ({ ...trapPreset(id, band)!.rig, hits: "trigger" });
+
+  test("A pit keeps the pit's falling damage and its words", () => {
+    const pit = { ...preset("hidden-pit"), pit: { floor: -10 } };
+    assert.deepEqual(cardRig(pit), pit);
+    const spiked = { ...preset("spiked-pit", "5-10"), pit: { floor: -30 } };
+    assert.deepEqual(cardRig(spiked), spiked);
+  });
+
+  test("the floor below leaves the falling damage to the fall card and drops the pit's words, at every level", () => {
+    for (const band of LEVEL_BANDS) {
+      const card = cardRig({ ...preset("hidden-pit", band), below: true });
+      assert.equal(card.damage, undefined, band);
+      assert.equal(card.note, undefined, band);
+      assert.equal(card.message, "The floor gives way!", "its other effects stay");
+      assert.deepEqual(card.find, preset("hidden-pit", band).find);
+    }
+  });
+
+  test("a spiked pit opened onto the floor below keeps its spikes", () => {
+    const card = cardRig({ ...preset("spiked-pit", "11-16"), below: true });
+    assert.deepEqual(card.damage, [{ formula: "8d8", type: "piercing" }]);
+    assert.equal(card.note, undefined);
+  });
+
+  test("damage or words the DM wrote stay on a trapdoor, as do other presets' and a blank trap's", () => {
+    const edited = cardRig({ ...preset("hidden-pit"), below: true, damage: [{ formula: "2d6", type: "bludgeoning" }, { formula: "1d4", type: "fire" }], note: "Rusty hinges." });
+    assert.deepEqual(edited.damage, [{ formula: "2d6", type: "bludgeoning" }, { formula: "1d4", type: "fire" }]);
+    assert.equal(edited.note, "Rusty hinges.");
+    const fire = cardRig({ ...preset("hidden-pit"), below: true, damage: [{ formula: "1d6", type: "bludgeoning" }, { formula: "1d6", type: "fire" }] });
+    assert.deepEqual(fire.damage, [{ formula: "1d6", type: "fire" }], "the pit's dice in another type are not its fall");
+    const roof = { ...preset("collapsing-roof"), below: true as const };
+    assert.deepEqual(cardRig(roof), roof);
+    const blank: TrapRig = { on: ["enter"], who: "party", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, below: true, damage: [{ formula: "1d6", type: "bludgeoning" }], note: "A trapdoor." };
+    assert.deepEqual(cardRig(blank), blank);
   });
 });

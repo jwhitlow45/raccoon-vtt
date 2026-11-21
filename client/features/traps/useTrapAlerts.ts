@@ -8,7 +8,7 @@ import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
 import { dmAlerts, fallAlerts, fallsAfter, linesAfter, newestId, newestMade, playerAlerts, shownAlert, trapMoveWatch, type MoveAnswers, type TrapAlert } from "./alerts.ts";
 import { labelsOf } from "../../state/labels.ts";
-import { GROUP_SAVE_HELD } from "./rules.ts";
+import { cardRig, GROUP_SAVE_HELD } from "./rules.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
 const NO_LINES: readonly LogEntry[] = [];
@@ -46,7 +46,7 @@ export function useTrapAlerts(): void {
     // Save and damage from the toast: the springing as the room holds it at the tap, which another DM device may have settled.
     const saveAction = (a: TrapAlert) => {
       const trap = a.trapId ? store.getState().view?.traps[a.trapId] : undefined;
-      const rig = trap?.rig;
+      const rig = trap?.rig && cardRig(trap.rig);
       // The hint never marks anything found by itself: the DM does, from its toast.
       if (a.notice) return trap && !trap.found ? { label: "Mark found", run: () => void actions.dispatch({ t: "trap.update", trapId: trap.id, patch: { found: true } }) } : undefined;
       if (!trap || !rig || !rig.due?.some((d) => d.id === a.due) || (!rig.save && !rig.damage && !rig.conditions)) return undefined;

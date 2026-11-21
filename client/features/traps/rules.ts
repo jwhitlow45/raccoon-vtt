@@ -674,6 +674,26 @@ export function intoPatch(choice: "pit" | "below", ground: number): { pit: { flo
   return choice === "below" ? { pit: null, below: true } : { pit: { floor: pitFloor(ground, 10) }, below: null };
 }
 
+/**
+ * A trap's rig as its card, its toast and its group save read it. One drop
+ * deals its falling damage once, from the fall card (D-261121-100): a pit
+ * preset opened onto the floor below drops its creatures there, so the
+ * preset's falling damage and its pit's words, still as the preset wrote
+ * them, go. Its other effects, a spiked pit's spikes among them, and
+ * anything the DM changed stay.
+ */
+export function cardRig(rig: TrapRig): TrapRig {
+  if (rig.below !== true || !rig.preset) return rig;
+  const bands = LEVEL_BANDS.map((band) => trapPreset(rig.preset!, band)).filter((p) => p?.pitDepth !== undefined);
+  if (bands.length === 0) return rig;
+  const falling = new Set(bands.flatMap((p) => (p!.rig.damage ?? []).filter((d) => d.type === "bludgeoning").map((d) => d.formula)));
+  const damage = rig.damage?.filter((d) => d.type !== "bludgeoning" || !falling.has(d.formula));
+  const card: TrapRig = { ...rig, damage };
+  if (!damage?.length) delete card.damage;
+  if (bands.some((p) => p!.rig.note === rig.note)) delete card.note;
+  return card;
+}
+
 /** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at −10 ft.", with a true minus. */
 export function openedLine(pit: { floor: number }): string {
   const floor = pitFloorOf(pit);
