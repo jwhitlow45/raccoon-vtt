@@ -1501,14 +1501,32 @@ export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene", who
 
 /**
  * Whether the far line refuses an op of `kind` in `scope` on `whose` line
- * (farByteLine): its reading, the DM's part with its reserves rounded up to
- * FAR.byteStep and the players' seat-held bytes exactly, is past the line,
- * and the op grew the measure's total. The size guard reads it for the
- * room and for each scene an op touches (server/rooms/sizeGuard.ts).
+ * (farByteLine): its reading (farReading), the stepped part with its
+ * reserves rounded up to FAR.byteStep and the exact part to the byte, is
+ * past the line, and the op grew. The DM's op grew when the measure's total
+ * did. A player's grew when their own reading did (readingGrew). The size
+ * guard reads it for the room and for each scene (server/rooms/sizeGuard.ts).
  */
-export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], whose: "dm" | "players", dmPart: number, held: number, grew: boolean): boolean {
+export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], whose: "dm" | "players", stepped: number, exact: number, grew: boolean): boolean {
   const line = farByteLine(kind, scope, whose);
-  return line !== null && grew && roundUp(Math.max(0, dmPart), FAR.byteStep) + held > line;
+  return line !== null && grew && farReading(stepped, exact) > line;
+}
+
+/** A far reading: its stepped part rounded up to FAR.byteStep, and its exact part to the byte. */
+export function farReading(stepped: number, exact: number): number {
+  return roundUp(Math.max(0, stepped), FAR.byteStep) + exact;
+}
+
+/**
+ * Whether a player's op grew their far reading, both sides read over one
+ * membership (D-261121-060, 074): their exact part grew, or the whole
+ * reading did, its stepped part rounded. Hidden bytes the op takes away
+ * lower only the stepped part, so they never hide growth of the player's
+ * own, and hidden bytes it adds or moves count only where they carry the
+ * stepped part across a step.
+ */
+export function readingGrew(before: { stepped: number; exact: number }, after: { stepped: number; exact: number }): boolean {
+  return after.exact > before.exact || farReading(after.stepped, after.exact) > farReading(before.stepped, before.exact);
 }
 
 /** The far line's step: `value` rounded up to a multiple of `step`, so a far check reads the DM's part only in steps. */
@@ -1533,18 +1551,24 @@ export const ID_BUDGET = { windowMs: 30 * 60_000, player: 2_000, dm: 20_000 } as
 
 /**
  * Derived bounds (design section 8), held by the full fixture at every far
- * line (server/rooms/limits.bounds.test.ts): its stored state measured
- * 14.93 MiB, its export 14.93 MiB, and the DM's largest snapshot 12.33
- * MiB. Nothing refuses by these: tests hold stored states, snapshots and
- * buffers within them.
+ * line, with the fight's history at its bound and nine walks at their
+ * widest on the turn or no fight (server/rooms/limits.bounds.test.ts).
+ * Nothing refuses a player's op by these: tests hold stored states,
+ * snapshots and buffers within them, and a batch that leaves the room
+ * storing more sheds its oldest archived DM lines and history steps
+ * (server/rooms/actor.ts, shared/reducer/shed.ts).
  */
 export const HARD = {
-  /** The measured state at the room far line with its widest reserves, plus what sits outside the measure. */
-  storedBytes: 15.5 * MiB,
-  /** The largest room file an import takes (server/rooms/importRoom.ts). */
-  roomJsonBytes: 16 * MiB,
-  /** A socket's send buffer (server/rooms/ws.ts): the stored bound, which a DM snapshot stays under, and 1 MiB more, rounded up to a whole MiB. The fixture's DM snapshot measures 12.33 MiB, below it. */
-  sendBufferBytes: 17 * MiB,
+  /**
+   * The measured state at the room far line with its widest reserves, the
+   * walk pool among them, plus the history at its bound and what sits
+   * outside the measure.
+   */
+  storedBytes: 17 * MiB,
+  /** The largest room file an import takes (server/rooms/importRoom.ts): the stored bound and the remap's 0.5 MiB. */
+  roomJsonBytes: 17.5 * MiB,
+  /** A socket's send buffer (server/rooms/ws.ts): the stored bound, which a DM snapshot stays under, and 1 MiB more, rounded up to a whole MiB. */
+  sendBufferBytes: 18 * MiB,
   /** Rows of the fight, and every list keyed by a row. */
   rows: FAR.rows,
   /** Conditions on one creature: 32 shown, 32 hidden and the automatic Unconscious. */
@@ -1810,9 +1834,10 @@ export type OwnHeld = Record<"token" | "template" | "drawing" | "row" | "cast" |
  * the stepped part: other players' seat things, and whatever the copy
  * leaves out of their own (LP43-PRIV-1, D-261116-015 and 026).
  * The copy is the projection's own, so every rule it reads applies, a
- * blackout's included, and nothing the copy does not show moves that
- * player's answer. seatHeld, which the DM's lines read, has no view test and
- * holds every player's stored things, so it would.
+ * blackout's included, and what the copy leaves out never changes the
+ * exact part: twins whose stepped parts round alike give that player equal
+ * answers. seatHeld, which the DM's lines read, has no view test and holds
+ * every player's stored things, so it would not.
  */
 export function ownHeld(state: RoomState, memberId: string, view: SeatView, floors: ReadonlySet<string>): OwnHeld {
   const unseenAreas = new Set<string>();
@@ -1851,9 +1876,50 @@ export function ownHeld(state: RoomState, memberId: string, view: SeatView, floo
   };
 }
 
-/** A player's far counts' exact part in `sceneId`'s scopes, as seatHeld's: their own copy's own things (ownHeld). */
-function playerFarHeld(state: RoomState, sceneId: string | null, memberId: string, view: SeatView): SeatHeld {
-  const own = ownHeld(state, memberId, view, sceneId === null ? new Set() : sceneGroup(state, sceneId));
+/** The kinds of a player's own things their far counts hold exactly. */
+type OwnKind = "token" | "template" | "drawing" | "row" | "cast" | "companionBlock";
+const OWN_KINDS: readonly OwnKind[] = ["token", "template", "drawing", "row", "cast", "companionBlock"];
+
+/**
+ * A player's far counts' exact parts in `sceneId`'s scopes before and after
+ * their op, over one membership as their far bytes read it
+ * (server/rooms/sizeGuard.ts exactOver): what their own copy held of their
+ * own things before (ownHeld), and what the op made that it holds after.
+ * A thing of it their copy no longer holds counts as it did before while
+ * the room still stores it in the count's scope, and one no longer stored
+ * there counts nothing, so nothing that enters their copy without their op
+ * making it and nothing hidden that leaves the room moves the exact part.
+ */
+function playerFarHeldOver(before: RoomState, after: RoomState, sceneId: string | null, memberId: string, viewOf: SeatViewOf): { before: SeatHeld; after: SeatHeld } {
+  const scope = (state: RoomState) => (sceneId === null ? new Set<string>() : sceneGroup(state, sceneId));
+  const was = ownHeld(before, memberId, viewOf(before), scope(before));
+  const now = ownHeld(after, memberId, viewOf(after), scope(after));
+  const group = scope(after);
+  const storedIn = (state: RoomState, kind: OwnKind, id: string, inScope: boolean): boolean => {
+    const at = (thing: { sceneId: string } | undefined) => thing !== undefined && (!inScope || group.has(thing.sceneId));
+    if (kind === "token") return at(ownEntry(state.tokens, id));
+    if (kind === "template") return at(ownEntry(state.templates, id));
+    if (kind === "drawing") return at(ownEntry(state.drawings, id));
+    if (kind === "row") return state.encounter?.entries.some((e) => e.id === id) ?? false;
+    if (kind === "cast") return ownEntry(state.casts, id) !== undefined;
+    return ownEntry(state.companionBlocks, id) !== undefined;
+  };
+  const over = {} as Record<OwnKind, Map<string, unknown>>;
+  for (const kind of OWN_KINDS) {
+    const out = new Map<string, unknown>();
+    for (const [id, copy] of was[kind]) {
+      const held = now[kind].get(id);
+      if (held !== undefined) out.set(id, held);
+      else if (storedIn(after, kind, id, true)) out.set(id, copy);
+    }
+    for (const [id, copy] of now[kind]) if (!was[kind].has(id) && !storedIn(before, kind, id, false)) out.set(id, copy);
+    over[kind] = out;
+  }
+  return { before: seatHeldOf(before, sceneId, was), after: seatHeldOf(after, sceneId, over) };
+}
+
+/** A player's far counts' exact part in `sceneId`'s scopes, as seatHeld's, from their own things each as their copy holds it. */
+function seatHeldOf(state: RoomState, sceneId: string | null, own: Readonly<Record<OwnKind, ReadonlyMap<string, unknown>>>): SeatHeld {
   const drawings = [...own.drawing].filter(([id]) => state.drawings[id]!.sceneId === sceneId);
   const pointValues = drawings.reduce((sum, [, copy]) => sum + (copy as Drawing).points.length, 0);
   const ids = (copies: ReadonlyMap<string, unknown>) => new Set(copies.keys());
@@ -1894,7 +1960,9 @@ export function admitLimits(state: RoomState, sceneId: string | null, before: Ro
   const near = sender.role === "player" ? playerLimits(state, sceneId, before, sender, kind) : restLimits(state, sceneId, before);
   if (!near.ok || kind.far !== "meets") return near;
   // A player's far counts hold exactly only their own copy's own things, the DM's every seat's (LP43-PRIV-1).
-  return farLimits(state, sceneId, before, sender.role === "player" ? playerFarHeld(state, sceneId, sender.memberId, sender.viewOf(state)) : seatHeld(state, sceneId));
+  if (sender.role === "dm") return farLimits(state, sceneId, before, seatHeld(state, sceneId));
+  const held = playerFarHeldOver(before, state, sceneId, sender.memberId, sender.viewOf);
+  return farLimits(state, sceneId, before, held.after, held.before);
 }
 
 /** A view of each state built at most once, since a player's seats and far counts read the same one. */
@@ -2016,31 +2084,42 @@ function blockTotals(state: RoomState): { count: number; bytes: number } {
 
 /**
  * The far line's counts (FAR), for one scene or none, every room alike: a
- * count refuses an op that adds to its total while the far count is past
- * the line, with the cap's own words. Without `before`, as for a room
- * import, the line is absolute. `held` is the exact part: every seat's
- * (seatHeld) for the DM and an import, a player's own copy's for their op.
- * The byte lines are the size guard's (server/rooms/sizeGuard.ts).
+ * count refuses an op that adds to it while the far count is past the line,
+ * with the cap's own words. Without `before`, as for a room import, the line
+ * is absolute. `held` is the exact part: every seat's (seatHeld) for the DM
+ * and an import, whose op adds when the total grows. For a player's op it is
+ * their own copy's over one membership, with `heldBefore` the same before
+ * the op, and the op adds when their exact count grew or their whole far
+ * count did, the rest read in steps, as their far bytes read it
+ * (readingGrew). The byte lines are the size guard's
+ * (server/rooms/sizeGuard.ts).
  */
-export function farLimits(state: RoomState, sceneId: string | null, before?: RoomState, held: SeatHeld = seatHeld(state, sceneId)): LimitCheck {
+export function farLimits(state: RoomState, sceneId: string | null, before?: RoomState, held: SeatHeld = seatHeld(state, sceneId), heldBefore?: SeatHeld): LimitCheck {
+  const grows = (now: number, nowHeld: number, was: number, wasHeld: number) => (heldBefore === undefined ? now > was : nowHeld > wasHeld || farCount(now, nowHeld) > farCount(was, wasHeld));
   const rows = rowCount(state);
-  if ((!before || rows > rowCount(before)) && farCount(rows, held.rows.size) > FAR.rows) return roomFull(`${n(FAR.rows)} initiative rows`);
+  if ((!before || grows(rows, held.rows.size, rowCount(before), heldBefore?.rows.size ?? 0)) && farCount(rows, held.rows.size) > FAR.rows) return roomFull(`${n(FAR.rows)} initiative rows`);
   const casts = Object.keys(state.casts).length;
-  if ((!before || casts > Object.keys(before.casts).length) && farCount(casts, held.casts.size) > FAR.asks) {
+  if ((!before || grows(casts, held.casts.size, Object.keys(before.casts).length, heldBefore?.casts.size ?? 0)) && farCount(casts, held.casts.size) > FAR.asks) {
     return over(`at most ${n(FAR.asks)} asks for saves can wait at once. The DM resolves one first`);
   }
   const blocks = blockTotals(state);
   const blocksBefore = before && before.companionBlocks !== state.companionBlocks ? blockTotals(before) : before ? blocks : undefined;
-  if ((!blocksBefore || blocks.count > blocksBefore.count) && farCount(blocks.count, held.blocks.size) > FAR.blocks) {
+  if ((!blocksBefore || grows(blocks.count, held.blocks.size, blocksBefore.count, heldBefore?.blocks.size ?? 0)) && farCount(blocks.count, held.blocks.size) > FAR.blocks) {
     return over(`The room can hold at most ${n(FAR.blocks)} companion stat blocks. Delete one first.`);
   }
-  if ((!blocksBefore || blocks.bytes > blocksBefore.bytes) && roundUp(Math.max(0, blocks.bytes - held.blockBytes), FAR.byteStep) + held.blockShown > FAR.blockBytes) {
+  const blockReading = { stepped: blocks.bytes - held.blockBytes, exact: held.blockShown };
+  const blocksGrew = () =>
+    !blocksBefore || (heldBefore === undefined ? blocks.bytes > blocksBefore.bytes : readingGrew({ stepped: blocksBefore.bytes - heldBefore.blockBytes, exact: heldBefore.blockShown }, blockReading));
+  if (farReading(blockReading.stepped, blockReading.exact) > FAR.blockBytes && blocksGrew()) {
     return over(`The room can hold at most ${n(FAR.blockBytes / MiB)} MiB of companion stat blocks. Delete one first.`);
   }
   if (sceneId === null) return { ok: true };
   const now = sceneCounts(state, sceneId);
   const was = before ? sceneCounts(before, sceneId) : undefined;
-  const grew = (key: keyof SceneCounts) => !was || now[key] > was[key];
+  const heldOf = (counts: SeatHeld): SceneCounts => ({ tokens: counts.tokens.size, templates: counts.templates.size, drawings: counts.drawings.size, points: counts.pointValues });
+  const nowHeld = heldOf(held);
+  const wasHeld = heldBefore ? heldOf(heldBefore) : undefined;
+  const grew = (key: keyof SceneCounts) => !was || grows(now[key], nowHeld[key], was[key], wasHeld?.[key] ?? 0);
   if (grew("tokens") && farCount(now.tokens, held.tokens.size) > FAR.tokens) return sceneFull(`${n(FAR.tokens)} tokens`);
   if (grew("templates") && farCount(now.templates, held.templates.size) > FAR.areas) return sceneFull(`${n(FAR.areas)} areas`);
   if (grew("drawings") && farCount(now.drawings, held.drawings.size) > FAR.drawings) return sceneFull(`${n(FAR.drawings)} drawings`);

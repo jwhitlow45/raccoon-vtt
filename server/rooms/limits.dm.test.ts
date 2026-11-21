@@ -618,7 +618,9 @@ describe("scene changes and per-player scenes", () => {
 
 describe("rooms from before the update", () => {
   test("D8: the marked room with 20 per-player scenes takes a growing DM edit, a player's create and a remembering walk, and writes each scene's share once", async (t) => {
-    const marked = markedRoom(48);
+    // A step under Astra's room, which the walk pool every room's reading counts since change format 65 would take past
+    // the players' line (D-261121-120).
+    const marked = markedRoom(48, 7_832_678 - FAR.byteStep);
     assert.ok(marked.under, "the fixture's room is under the far line at the widest");
     const state = marked.state;
     const [dmId, playerId] = Object.keys(state.members).sort();

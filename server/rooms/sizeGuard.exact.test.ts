@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { DiceOp } from "#shared/dice/resolve.ts";
 import { FAR_TREATMENT } from "#shared/farLine.ts";
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
-import { FAR, LIMITS, serializedBytes } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, LIMITS, ROOM_FULL, serializedBytes } from "#shared/limits.ts";
 import type { Effect, EncounterSnapshot, RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op, OpType } from "#shared/protocol.ts";
@@ -12,11 +12,13 @@ import { applyOp } from "#shared/reducer.ts";
 import { keptHistory } from "#shared/reducer/encounter.ts";
 import { memberRing } from "#shared/logRings.ts";
 import { floorsOf, ownedBy } from "#shared/rules/floors.ts";
+import { turnUnderWay } from "#shared/rules/path.ts";
 import { actor, character, DM, effect, entry, env, P1, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { PLAYER_OPS as FIXED, playerTable as table, rolled } from "./playerOpsTesting.ts";
 import { UndoTable } from "./undoTesting.ts";
-import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
-import { exactCopies, farRoomBytes, farWidths, farWidthsByFloor, measuredStateBytes, ownHeldBytes, projectedSceneBytes, type ExactCopy } from "./sizeGuard.ts";
+import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, tower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
+import { farAnswer, parked } from "./copyTwinsTesting.ts";
+import { exactCopies, farRoomBytes, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes, type ExactCopy } from "./sizeGuard.ts";
 
 /*
  * LP44-PRIV-1 (D-261116-026, D-261119-003): a player's own op writes
@@ -28,9 +30,11 @@ import { exactCopies, farRoomBytes, farWidths, farWidthsByFloor, measuredStateBy
  * each scene's, move only by hidden things the op took away, never by a byte
  * it added, nor by anything still in the room leaving their exact part, an
  * op that changes what their copy holds included. The exceptions are the
- * residuals the private log tracks (D-261119-019), two of which this test
- * allows: a walk's bytes the copy leaves out, and a creature they do not
- * own, with the lines naming it, coming into or leaving their sight.
+ * residuals the private log tracks (D-261119-019), one of which this test
+ * allows: a creature they do not own, with the lines naming it, coming into
+ * or leaving their sight. A walk of the turn under way counts in the room's
+ * walk pool, and one of another turn at its stored bytes in the stepped
+ * part, which an op may only take away (D-261121-120).
  */
 
 const DEPS = { canUseAsset: () => true, canRestoreAsset: () => true } as never;
@@ -86,17 +90,28 @@ function namesDeleted(before: RoomState, after: RoomState, key: string): boolean
 }
 
 /**
- * The bytes of a walk P1's copy leaves out, of a creature P1 may move but
- * does not own, off the turn their copy shows: the move-any residual the
- * private log tracks (D-261120-003), which stays in the stepped part.
+ * The bytes on each floor of the walks a room kept from another turn than
+ * the one under way, which the stepped part holds as stored until a turn's
+ * end takes them off (D-261121-120): an op may take one away, and never
+ * adds one.
  */
-function walkUnseen(state: RoomState, key: string): number {
-  if (!key.startsWith("token:")) return 0;
-  const id = key.slice("token:".length);
-  const stored = state.tokens[id];
-  if (stored?.path === undefined || stored.ownerIds.includes("p1")) return 0;
-  const copy = seatView(state, "p1").copy("token", id) as Token | null;
-  return serializedBytes({ path: stored.path }) - serializedBytes(copy?.path === undefined ? {} : { path: copy.path });
+function otherTurnWalks(state: RoomState): Map<string, number> {
+  const seq = turnUnderWay(state.encounter)?.seq;
+  const out = new Map<string, number>();
+  for (const token of Object.values(state.tokens)) {
+    if (token.path === undefined || (seq !== undefined && token.path.turn === seq)) continue;
+    const lists = token.path.stops.filter((stop) => stop.seenBy !== undefined);
+    // As the measures count it: each list of who saw at the roster's widest (sizeGuard.ts tokenLists).
+    const bytes = serializedBytes({ path: token.path }) - 1 - sum(lists, (stop) => serializedBytes(stop.seenBy) - 2) + lists.length * widestList(state);
+    out.set(token.sceneId, (out.get(token.sceneId) ?? 0) + bytes);
+  }
+  return out;
+}
+
+/** A list of who saw at the roster's widest, as the measures count one beyond `[]`: its six longest ids. */
+function widestList(state: RoomState): number {
+  const ids = Object.keys(state.members).map((id) => serializedBytes(id)).sort((x, y) => y - x).slice(0, 6);
+  return ids.length === 0 ? 0 : sum(ids, (bytes) => bytes) + ids.length - 1;
 }
 
 /**
@@ -115,11 +130,10 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
   const residual = new Map<string, number>();
   for (const key of new Set([...was.keys(), ...is.keys()])) {
     if (was.has(key) !== is.has(key) && residualMove(before, after, key)) {
-      // What it takes out of the stepped part: its bytes and, for a creature, its fields' widths (farWidthsByFloor).
-      const taken = (copies: ReadonlyMap<EntityKey, ExactCopy>, state: RoomState) =>
-        (copies.get(key as EntityKey)?.sub ?? 0) + (copies.has(key as EntityKey) ? sum([...farWidthsByFloor(state, (k) => k === key).values()], (bytes) => bytes) : 0);
+      // What it takes out of the stepped part: its bytes and, for a creature, its fields' widths (FAR_WIDTHS).
+      const taken = (copies: ReadonlyMap<EntityKey, ExactCopy>) => copies.get(key as EntityKey)?.sub ?? 0;
       const on = (is.get(key) ?? was.get(key))!.on;
-      residual.set(on, (residual.get(on) ?? 0) + taken(was, before) - taken(is, after));
+      residual.set(on, (residual.get(on) ?? 0) + taken(was) - taken(is));
       accepted.push(`${key} ${is.has(key) ? "came into" : "left"} P1's exact part`);
       continue;
     }
@@ -131,13 +145,20 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
       accepted.push(`${key} keeps ${gain} bytes for a creature the op deleted`);
       continue;
     }
-    const walks = gain > 0 ? Math.max(0, Math.min(gain, walkUnseen(after, key) - walkUnseen(before, key))) : 0;
-    if (walks > 0) accepted.push(`${key} keeps ${walks} bytes of its walk P1's copy leaves out`);
     const on = is.get(key)?.on ?? was.get(key)!.on;
     const at = moved.get(on) ?? { hidden: 0, walks: 0 };
-    at.hidden += gain - walks;
-    at.walks += walks;
+    at.hidden += gain;
     moved.set(on, at);
+  }
+  // A walk of another turn the op took away, which the stepped part held as stored.
+  const [walksBefore, walksAfter] = [otherTurnWalks(before), otherTurnWalks(after)];
+  for (const on of new Set([...walksBefore.keys(), ...walksAfter.keys()])) {
+    const taken = (walksAfter.get(on) ?? 0) - (walksBefore.get(on) ?? 0);
+    if (taken > 0) continue;
+    const at = moved.get(on) ?? { hidden: 0, walks: 0 };
+    at.walks += taken;
+    moved.set(on, at);
+    if (taken < 0) accepted.push(`${-taken} bytes of a walk of another turn taken off on ${on}`);
   }
   const [b, a] = [steppedParts(before), steppedParts(after)];
   const whole = sum([...moved.values()], (bytes) => bytes.hidden);
@@ -549,7 +570,9 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
       [a, b] = [a1, b1];
     }
     assert.equal(b.encounterHistory.length, 2, "the fight kept both steps");
-    assert.ok(b.tokens.hero!.path!.stops.length > 6, "Hero keeps its walk past its turn");
+    // From change format 65 the walk ends with its turn, and the turn's step keeps it (D-261120-100).
+    assert.equal(b.tokens.hero!.path, undefined, "Hero's walk left with its turn");
+    assert.ok(b.encounterHistory[0]!.walks!.find((walk) => walk.tokenId === "hero")!.path.stops.length > 6, "and its step keeps it");
   });
 
   test("P1's End Turn with a hidden row of the DM's after every other, or none, moves P1's stepped parts alike (D-261120-060)", () => {
@@ -577,7 +600,8 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     const [one, many] = [walked(1), walked(19)];
     assert.ok(one.stored >= 1 && many.stored >= 19 && !many.held, `${one.stored} and ${many.stored} bends stored, none in P1's copy`);
     assert.deepEqual(many.moves, one.moves);
-    // The same walk past its turn with 1 bend or 40 off P1's ground: P1's copies are equal, and so are both parts.
+    // The same walk past its turn, kept from before change format 65, with 1 bend or 40 off P1's ground: P1's copies and
+    // exact parts are equal, and the stepped parts hold the walk at its stored bytes until a turn's end takes it off.
     const kept = (corners: number) => {
       const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) } });
       state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor() });
@@ -588,7 +612,9 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     const [a, b] = [kept(1), kept(40)];
     assert.equal(stableStringify(projectState(a, P1, { sceneId: null })), stableStringify(projectState(b, P1, { sceneId: null })), "P1's copies are equal");
     assert.deepEqual(Object.fromEntries([...exactCopies(b, "p1")].map(([key, part]) => [key, part.shown])), Object.fromEntries([...exactCopies(a, "p1")].map(([key, part]) => [key, part.shown])));
-    assert.deepEqual(Object.fromEntries(steppedParts(b)), Object.fromEntries(steppedParts(a)));
+    const corners = serializedBytes(b.tokens.hero!.path) - serializedBytes(a.tokens.hero!.path);
+    const [sa, sb] = [steppedParts(a), steppedParts(b)];
+    assert.deepEqual(Object.fromEntries([...sb].map(([scope, bytes]) => [scope, bytes - (scope === "s2" ? 0 : corners)])), Object.fromEntries(sa));
   });
 
   test("where players may apply damage, P1's hits on a goblin and on P2's hero, and the DM hiding both, move P1's stepped parts alike whatever P1 chose: the amount, a drop to 0 and the damage types (D-261120-061)", () => {
@@ -778,5 +804,164 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
       unchecked.push(kind);
     }
     assert.deepEqual(unchecked, []);
+  });
+});
+
+describe("LP44-PATH-TRIM: a walk ends with its turn (D-261120-100)", () => {
+  /**
+   * The DM's wolf on its own turn, which P1 walks under Players move any
+   * token to 9,12 by 1 leg or by 6, the stops P1's choice and every one in
+   * P1's sight.
+   */
+  const wolfWalked = (legs: 1 | 6): RoomState => {
+    let state = table();
+    state.meta.settings = { ...state.meta.settings, playersMoveAny: "all" };
+    state.tokens.wolf = token("wolf", { x: 9, y: 9, actor: { inline: actor({ dmNotes: "" }) } });
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: "rwolf",
+      entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rhero", { tokenId: "hero", value: 5 })],
+      turnStart: { entryId: "rwolf", tokenId: "wolf", sceneId: "s1", x: 9, y: 9, elevation: 0, seen: true, seq: 7 },
+    };
+    const route = legs === 1 ? [[9, 12]] : [[10, 9], [11, 10], [11, 11], [10, 12], [10, 13], [9, 12]];
+    route.forEach(([x, y], i) => {
+      const op = { t: "token.move", tokenId: "wolf", x, y } as Op;
+      assert.ok(canApply(op, P1, state, DEPS).ok, `P1 may walk the wolf to ${x},${y}`);
+      const result = applyOp(state, op, P1, env(2_900_000 + i));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      state = result.state;
+    });
+    assert.equal(state.tokens.wolf!.path?.stops.length, legs + 1, `the wolf's walk holds ${legs + 1} stops`);
+    return state;
+  };
+
+  /** What P1 reads of a room: their copy, their exact part as it counts, and their stepped parts. */
+  const reading = (state: RoomState) => ({
+    copy: stableStringify(projectState(state, P1, { sceneId: null })),
+    exact: Object.fromEntries([...exactCopies(state, "p1")].map(([key, part]) => [key, part.shown])),
+    stepped: Object.fromEntries(steppedParts(state)),
+  });
+
+  test("P1's walk of the DM's wolf by 1 leg or 6 on its turn: P1's exact parts and stepped parts are equal, the walk in the pool", () => {
+    const [a, b] = [wolfWalked(1), wolfWalked(6)];
+    assert.deepEqual(reading(b).exact, reading(a).exact);
+    assert.deepEqual(reading(b).stepped, reading(a).stepped);
+  });
+
+  const ends: [string, Op][] = [
+    ["the DM's Next", { t: "encounter.next" } as Op],
+    ["the fight's end", { t: "encounter.end" } as Op],
+    ["the removal of the wolf's row", { t: "encounter.remove", entryIds: ["rwolf"] } as Op],
+  ];
+  for (const [name, op] of ends) {
+    test(`P1's walk of the DM's wolf by 1 leg or 6 on its turn, then ${name}: P1's copies, exact parts and stepped parts are equal`, () => {
+      const [a, b] = [wolfWalked(1), wolfWalked(6)].map((state) => {
+        const result = applyOp(state, op, DM, env(2_950_000));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        return result.state;
+      });
+      assert.equal(b!.tokens.wolf!.path, undefined, "the turn's end took the walk off");
+      assert.deepEqual(reading(b!), reading(a!));
+    });
+  }
+});
+
+/*
+ * Design 1.6, taken past the line (D-261121-121, 129, 130): a player's
+ * moves, walks, climbs and getting on and off grow nothing their reading
+ * counts, so past the room's line itself each is taken as on main. Their
+ * End Turn writes the turn's line, which the line itself still has room
+ * for inside the bookkeeping reserve, where creates stop.
+ */
+describe("taken past the line", () => {
+  /** `ops` in turn on `state` parked `offset` from the room's line, each P1's answer. */
+  const answers = (state: RoomState, ops: readonly Op[], offset: number) => {
+    const [parkedState] = [structuredClone(state)];
+    parked([parkedState], "room", Object.values(parkedState.tokens).find((t) => t.ownerIds.includes("p1"))!.sceneId, offset);
+    let now = parkedState;
+    return ops.map((op, i) => {
+      const a = farAnswer(now, op, P1, 3_100_000 + i);
+      if (a.next) now = a.next;
+      return `${op.t}: ${a.said}`;
+    });
+  };
+  const past = FAR.byteStep / 2;
+  const insideReserve = -BOOKKEEPING_RESERVE.room / 2;
+  /** Pip's turn on the warhorse it steers, named 7, P1's. */
+  const ride = (): RoomState => {
+    const state = room({
+      tokens: {
+        pip: token("pip", { name: "Pip", kind: "pc", size: "small", ownerIds: ["p1"], x: 4, y: 4, elevation: 5, attached: { to: "horse", kind: "ride", steer: true } }),
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        gob: token("gob", { x: 9, y: 9, actor: { inline: actor({ dmNotes: "" }) } }),
+      },
+    });
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: "rpip",
+      entries: [entry("rpip", { tokenId: "pip", value: 20 }), entry("rgob", { tokenId: "gob", value: 5 })],
+      turnStart: { entryId: "rpip", tokenId: "pip", sceneId: "s1", x: 4, y: 4, elevation: 0, seen: true, seq: 7, mounts: ["horse"] },
+    };
+    return state;
+  };
+  const taken = (ops: readonly Op[]) => ops.map((op) => `${op.t}: taken`);
+
+  test("an own walk on its own turn, to two-digit squares, and an elevation change from 5 to 10", () => {
+    const state = ride();
+    state.tokens.pip = { ...state.tokens.pip!, attached: undefined, elevation: 5 };
+    state.encounter = { ...state.encounter!, turnStart: { ...state.encounter!.turnStart!, mounts: undefined } };
+    const ops: Op[] = [
+      { t: "token.move", tokenId: "pip", x: 6, y: 4 },
+      { t: "token.move", tokenId: "pip", x: 8, y: 6 },
+      { t: "token.move", tokenId: "pip", x: 12, y: 10, elevation: 10 },
+    ];
+    assert.deepEqual(answers(state, ops, past), taken(ops));
+    // Off its turn too: a move to two-digit squares.
+    const off = structuredClone(state);
+    off.encounter = null;
+    assert.deepEqual(answers(off, [{ t: "token.move", tokenId: "pip", x: 14, y: 12 }], past), ["token.move: taken"]);
+  });
+
+  test("under Players move any token, the DM's goblin moved from x 9 to 10, and climbed", () => {
+    const state = withStairs(tower());
+    state.meta.settings = { ...state.meta.settings, playersMoveAny: "all" };
+    state.tokens.gob = token("gob", { sceneId: GROUND, x: 9, y: 3, actor: { inline: actor({ dmNotes: "" }) } });
+    const ops: Op[] = [{ t: "token.move", tokenId: "gob", x: 10, y: 3 }, { t: "token.move", tokenId: "gob", x: 3, y: 3 }, { t: "token.climb", tokenId: "gob", linkId: "l1" } as Op];
+    assert.deepEqual(answers(state, ops, past), taken(ops));
+  });
+
+  test("a climb with an area on the climber, between floor ids of 2 characters and of 40", () => {
+    const long = "u".repeat(40);
+    const state = tower();
+    state.scenes[long] = { ...state.scenes[UPPER]!, id: long };
+    delete state.scenes[UPPER];
+    const linked = withStairs(state, { to: long });
+    linked.templates.aura = template("aura", { sceneId: GROUND, ownerId: "p1", attachedTo: "thorn", label: "Aura" });
+    const up: Op = { t: "token.climb", tokenId: "thorn", linkId: "l1" } as Op;
+    assert.deepEqual(answers(linked, [up], past), ["token.climb: taken"]);
+  });
+
+  test("a dismount, and a mount, dismount and remount on one turn", () => {
+    const ops: Op[] = [
+      { t: "token.move", tokenId: "horse", x: 8, y: 4 },
+      { t: "token.detach", tokenId: "pip", x: 10, y: 4 },
+      { t: "token.attach", tokenId: "pip", to: "horse", kind: "ride", steer: true, x: 8, y: 4, elevation: 0 },
+      { t: "token.move", tokenId: "horse", x: 8, y: 9 },
+      { t: "token.detach", tokenId: "pip", x: 10, y: 9 },
+    ] as Op[];
+    assert.deepEqual(answers(ride(), ops, past), taken(ops));
+  });
+
+  test("End Turn onto a creature a hidden mount joins, inside the bookkeeping reserve, as a create there is refused", () => {
+    const state = ride();
+    state.tokens.rider = token("rider", { x: 12, y: 12, visibility: "dm", attached: { to: "steed", kind: "ride", steer: true } });
+    state.tokens.steed = token("steed", { x: 12, y: 12, size: "large", visibility: "dm" });
+    state.encounter = { ...state.encounter!, entries: [entry("rpip", { tokenId: "pip", value: 20 }), entry("rrider", { tokenId: "rider", value: 10, hidden: true }), entry("rgob", { tokenId: "gob", value: 5 })] };
+    const end: Op = { t: "encounter.next", from: { entry: "rpip", round: 1 } } as Op;
+    const create: Op = { t: "drawing.create", drawing: { id: "d-in", sceneId: "s1", kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId: "p1", visibility: "all" } } as Op;
+    const said = answers(state, [end, create], insideReserve);
+    assert.deepEqual(said, ["encounter.next: taken", `drawing.create: quota: ${ROOM_FULL}`]);
   });
 });

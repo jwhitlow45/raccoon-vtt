@@ -12,7 +12,8 @@ import { SAVE_OUTCOME_LEDGER_BYTES, SAVE_OUTCOME_RECORD_BYTES, SAVE_OUTCOME_RECO
 import { actor, castAsk, character, companionBlock, drawing, entry, room, scene, token } from "#shared/testutil.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
-import { farRoomBytes, measuredLog, measuredStateBytes, memoryReserves, memoryShare, projectedSceneBytes } from "./sizeGuard.ts";
+import { floorsOf } from "#shared/rules/floors.ts";
+import { farRoomBytes, measuredLog, measuredStateBytes, memoryReserves, memoryShare, projectedSceneBytes, turnWalks, walkPool } from "./sizeGuard.ts";
 
 /*
  * The full fixture of the player limits' bounds (design section 8): a room
@@ -63,6 +64,8 @@ export type FullRoomOptions = {
   roomBytes?: number;
   /** The scene line drawings fill the players' scene to. */
   sceneBytes?: number;
+  /** Whether a fight runs, its history at its bound and nine walks at their widest on its turn. Yes unless set. */
+  fight?: boolean;
 };
 
 function roster(count: number): { members: Record<string, Member>; dms: string[]; players: string[] } {
@@ -81,10 +84,10 @@ function roster(count: number): { members: Record<string, Member>; dms: string[]
 /**
  * The room at the far lines: one scene at the scene line holding the far
  * tokens, the far rows, asks and open rolls with every answer, the fight's
- * history at its byte budget, the shared log at 200 of its longest lines,
- * every ring outside the measures full, and companion blocks filling the
- * room to its line. The roster is full, so every reserve sized by it is
- * at its widest.
+ * history at its byte bound and nine walks at their widest on its turn
+ * (or no fight), the shared log at 200 of its longest lines, every ring
+ * outside the measures full, and companion blocks filling the room to its
+ * line. The roster is full, so every reserve sized by it is at its widest.
  */
 export function fullRoom(opts: FullRoomOptions = {}): FullRoom {
   const { members, dms, players } = roster(opts.members ?? LIMITS.membersPerRoom);
@@ -96,13 +99,16 @@ export function fullRoom(opts: FullRoomOptions = {}): FullRoom {
   });
   addCharacters(state, players);
   addTokens(state, sceneId);
-  addFight(state, sceneId);
+  if (opts.fight !== false) {
+    addFight(state, sceneId);
+    addWalks(state);
+  }
   addAsks(state, sceneId);
   addRolls(state);
   addLog(state, dms, players);
   addReminded(state, players);
   addSaveOutcomes(state);
-  addHistory(state, sceneId, opts.sceneBytes ?? FAR.sceneBytes);
+  if (opts.fight !== false) addHistory(state);
   fillScene(state, sceneId, players, opts.sceneBytes ?? FAR.sceneBytes);
   fillBlocks(state, opts.roomBytes ?? FAR.roomBytes);
   return { state, sceneId, dms, players };
@@ -145,19 +151,55 @@ function addFight(state: RoomState, sceneId: string): void {
   state.encounter.entries = entries.slice(0, atFarCount(FAR.rows, seatHeld(state, null).rows.size));
 }
 
+/**
+ * Nine walks at their widest on the turn under way, as the walk pool holds
+ * them (server/rooms/sizeGuard.ts walkPool): the turn's creature's and
+ * eight mounts' sharing its turn, each of MAX_PATH_STOPS stops at their
+ * widest, every list of who saw a stop naming six of the roster, and a
+ * whole walk's corners on its first stop.
+ */
+function addWalks(state: RoomState): void {
+  const fight = state.encounter!;
+  const rider = fight.turnStart!.tokenId!;
+  const mounts = Object.keys(state.tokens).filter((id) => id !== rider).slice(0, LIMITS.turnMounts);
+  const seq = 7;
+  fight.turnStart = { ...fight.turnStart!, seq, mounts };
+  const seenBy = Object.keys(state.members).slice(0, MOST_SIGHT_HOLDERS);
+  const feet = 999_999.9999999999;
+  const stop = (i: number) => ({
+    x: WIDE_COORD,
+    y: WIDE_COORD,
+    elevation: -100_000,
+    uncounted: true as const,
+    seen: true as const,
+    seenBy,
+    joinedUnseen: true as const,
+    footprint: { w: 19.999999999999996, h: 19.999999999999996, squeeze: true as const },
+    ...(i === 0 ? { via: Array.from({ length: 2 * MAX_PATH_CORNERS }, () => WIDE_COORD) } : {}),
+    moved: feet,
+    cost: feet,
+    diag: [feet, feet] as [number, number],
+    routeSeen: true as const,
+    carried: true as const,
+  });
+  const path = { turn: seq, prior: { moved: feet, cost: feet, diag: [feet, feet] as [number, number], seenDiag: [feet, feet] as [number, number] }, stops: Array.from({ length: MAX_PATH_STOPS }, (_, i) => stop(i)) };
+  for (const id of [rider, ...mounts]) state.tokens[id] = { ...state.tokens[id]!, path };
+}
+
 /** The most things the far count takes beside `held` of the players': the DM's part in whole steps (shared/limits.ts farLimits). */
 function atFarCount(line: number, held: number): number {
   return held + Math.floor((line - held) / FAR.countStep) * FAR.countStep;
 }
 
 /**
- * The fight's 20 history steps within its byte budget and what the scene
- * line leaves: steps from earlier in the fight, each holding the rows it
- * had then, as many as keep 20 steps inside the budget.
+ * The fight's 20 history steps within its byte budget: steps from earlier
+ * in the fight, each holding the rows it had then, as many as keep 20
+ * steps inside the budget. Every reading counts the history as empty, so
+ * no line takes it from the room's content (D-261121-066).
  */
-function addHistory(state: RoomState, sceneId: string, limit: number): void {
+function addHistory(state: RoomState): void {
   const fight = state.encounter!;
-  const budget = Math.min(HISTORY_BYTES, limit - sceneMeasure(state, sceneId));
+  const budget = HISTORY_BYTES;
   const stepOf = (rows: number): EncounterSnapshot => ({ encounter: { ...fight, entries: fight.entries.slice(0, rows) }, effects: {}, revealed: [], at: AT });
   let rows = fight.entries.length;
   while (rows > 1 && serializedBytes(Array.from({ length: 20 }, () => stepOf(rows))) > budget) rows = Math.floor(rows * 0.95);
@@ -311,10 +353,18 @@ function addSaveOutcomes(state: RoomState): void {
   state.saveOutcomes = ledger;
 }
 
-/** The DM's measure of the scene, as the guard's scene line reads it. */
+/**
+ * The DM's measure of the scene with the fight's history and the turn's
+ * walks as empty, as the guard's far scene line counts them (sizeGuard.ts
+ * farWidths). The fixture's history steps hold no list of who saw, so the
+ * measure counts them at their bytes.
+ */
 export function sceneMeasure(state: RoomState, sceneId: string): number {
-  return projectedSceneBytes(state, sceneId);
+  const walks = sum(floorsOf(state, sceneId), (floor) => turnWalks(state).byFloor.get(floor.id) ?? 0);
+  return projectedSceneBytes(state, sceneId) - (serializedBytes(state.encounterHistory) - 2) - walks;
 }
+
+const sum = <T>(items: readonly T[], of: (item: T) => number) => items.reduce((total, item) => total + of(item), 0);
 
 /** The players' scene filled with players' drawings at their point values' cap until the next would pass the scene line. */
 function fillScene(state: RoomState, sceneId: string, players: readonly string[], limit: number): void {
@@ -478,8 +528,9 @@ export function creatureGrowth(state: RoomState, holders: readonly string[]): Cr
  * 20 marked per-player scenes, the DM and two players, each scene played
  * with both players holding sight, every layer at its widest, and the DM's
  * journal filling the measured state to the 7,832,678 bytes Astra's room
- * measured. `far` is the far line's read of it, the pool whole and every
- * per-player reserve at six players, rounded to its step.
+ * measured. `far` is the far line's read of it, the marked pool and the
+ * walk pool whole and every per-player reserve at six players, rounded to
+ * its step.
  */
 export type MarkedRoom = { state: RoomState; measured: number; sixPlayers: number; far: number; under: boolean };
 
@@ -521,6 +572,6 @@ export function markedRoom(cells: number, measured = 7_832_678): MarkedRoom {
   // A full roster's six players, so the per-player reserve reads at its widest, as the far line reads it for a player's op.
   const six = { ...state, members: { ...members, ...Object.fromEntries([3, 4, 5, 6].map((i) => [memberIdAt(i), { ...members[players[0]!]!, id: memberIdAt(i) }])) } };
   const sixPlayers = measuredStateBytes(six) - at;
-  const far = roundUp(at + sixPlayers + MARKED_POOL, FAR.byteStep);
+  const far = roundUp(at + sixPlayers + MARKED_POOL + walkPool(state), FAR.byteStep);
   return { state, measured: at, sixPlayers, far, under: far <= FAR.roomBytes };
 }

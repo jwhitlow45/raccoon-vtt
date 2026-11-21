@@ -7,8 +7,9 @@ import { heldClock, projectLogEntry, projectState, publicEffects, seatView, stab
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
-import { exactCopies, linesHeld, ownHeldBytes } from "./sizeGuard.ts";
+import { exactCopies, farWidths, linesHeld, measuredStateBytes, ownHeldBytes, turnWalks } from "./sizeGuard.ts";
 import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
+import { copyOf, hiddenCreatures, knownBy, OMITTED, players, seenCreature, twinBase } from "./copyTwinsTesting.ts";
 
 /*
  * D-261116-015 and D-261119-021: a player's exact part counts only what
@@ -22,7 +23,6 @@ import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, wit
  * does, and showing it again while unseen is that residual's too.
  */
 
-const copyOf = (state: RoomState, memberId: string) => stableStringify(projectState(state, { memberId, role: "player" }, { sceneId: null }));
 
 const there = (state: RoomState, key: string) => (key.startsWith("row:") ? (state.encounter?.entries.some((e) => `row:${e.id}` === key) ?? false) : readEntity(state, key as EntityKey) != null);
 
@@ -47,7 +47,6 @@ function shownMoved(before: RoomState, after: RoomState, memberId: string): stri
   return out;
 }
 
-const players = (state: RoomState) => Object.keys(state.members).filter((id) => state.members[id]!.kind === "player");
 
 /** `op` by `who` on `state`, and for each player whose copy it leaves as it was, what of their exact part it moved. */
 function moves(state: RoomState, op: Op, who: Viewer = DM): { next: RoomState | null; moved: string[]; unchanged: number } {
@@ -91,49 +90,29 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
     assert.deepEqual(held.filter((key) => key === "template:a1" || key === "drawing:r1"), []);
   });
 
-  test("a creature's walk counts at the walk width on the turn P1's copy shows, for a player who may move it, and as the copy holds it otherwise", () => {
-    const walked = (settings: Partial<RoomState["meta"]["settings"]>, active: string) => {
+  test("no walk counts in P1's exact part: a walk of the turn under way counts in the room's walk pool, whoever may move its creature (D-261121-120)", () => {
+    const walked = (settings: Partial<RoomState["meta"]["settings"]>, active: string, path: boolean, seq = 7) => {
       const state = room();
       state.meta = { ...state.meta, settings: { ...state.meta.settings, ...settings } };
-      state.tokens.wolf = token("wolf", { x: 5, y: 3, path: { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true }, { x: 5, y: 3, elevation: 0, seen: true }] } });
+      state.tokens.wolf = token("wolf", { x: 5, y: 3, ...(path ? { path: { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true }, { x: 5, y: 3, elevation: 0, seen: true }] } } : {}) });
       state.tokens.bat = token("bat", { x: 8, y: 8 });
-      state.encounter = { rev: 0, round: 1, activeEntryId: `r${active}`, entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rbat", { tokenId: "bat", value: 10 })], turnStart: { entryId: `r${active}`, tokenId: active, sceneId: "s1", x: 3, y: 3, elevation: 0, seen: true, seq: 7 } };
-      return exactCopies(state, "p1").get(keys.token("wolf"))!;
+      state.encounter = { rev: 0, round: 1, activeEntryId: `r${active}`, entries: [entry("rwolf", { tokenId: "wolf", value: 20 }), entry("rbat", { tokenId: "bat", value: 10 })], turnStart: { entryId: `r${active}`, tokenId: active, sceneId: "s1", x: 3, y: 3, elevation: 0, seen: true, seq } };
+      return { state, wolf: exactCopies(state, "p1").get(keys.token("wolf"))! };
     };
-    const [mover, healer, after] = [walked({ playersMoveAny: "all" }, "wolf"), walked({ playersApplyDamage: true }, "wolf"), walked({ playersMoveAny: "all" }, "bat")];
-    assert.ok(mover.shown - healer.shown > 20_000, `${mover.shown} against ${healer.shown}`);
-    assert.ok(mover.shown - after.shown > 20_000, `${mover.shown} against ${after.shown} once the turn passed`);
-  });
-
-  test("the turn P1's copy shows is its active row's, where it began when the row names no creature, and the mounts sharing it", () => {
-    const width = (turn: (state: RoomState) => void) => {
-      const state = room();
-      state.meta = { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: "all" } };
-      const path = { turn: 7, stops: [{ x: 3, y: 3, elevation: 0, seen: true as const }, { x: 5, y: 3, elevation: 0, seen: true as const }] };
-      state.tokens.wolf = token("wolf", { x: 5, y: 3, path });
-      state.tokens.horse = token("horse", { x: 8, y: 8, size: "large", path: { ...path, stops: path.stops.map((stop) => ({ ...stop, y: 8 })) } });
-      turn(state);
-      const held = exactCopies(state, "p1");
-      return [held.get(keys.token("wolf"))!.shown, held.get(keys.token("horse"))!.shown] as const;
-    };
-    const start = { sceneId: "s1", x: 3, y: 3, elevation: 0, seq: 7 };
-    const none = width(() => {});
-    // The wolf's row, where its turn began unseen by players, so the copy shows only the row.
-    const [unseenStart] = width((s) => (s.encounter = { rev: 0, round: 1, activeEntryId: "rwolf", entries: [entry("rwolf", { tokenId: "wolf" })], turnStart: { ...start, entryId: "rwolf", tokenId: "wolf" } }));
-    // A row by character alone, played by the wolf, where the turn began in sight.
-    const [byCharacter] = width((s) => {
-      s.characters.c2 = character("c2", { ownerIds: ["p2"] });
-      s.tokens.wolf = { ...s.tokens.wolf!, actor: { ref: "c2" } };
-      s.encounter = { rev: 0, round: 1, activeEntryId: "rc2", entries: [entry("rc2", { characterId: "c2" })], turnStart: { ...start, entryId: "rc2", tokenId: "wolf", seen: true } };
-    });
-    // The wolf's turn, riding the horse it steers, which shares the turn.
-    const [, mount] = width((s) => {
-      s.tokens.wolf = { ...s.tokens.wolf!, x: 8, y: 8, attached: { to: "horse", kind: "ride", steer: true } };
-      s.encounter = { rev: 0, round: 1, activeEntryId: "rwolf", entries: [entry("rwolf", { tokenId: "wolf" })], turnStart: { ...start, entryId: "rwolf", tokenId: "wolf", seen: true, mounts: ["horse"] } };
-    });
-    assert.ok(unseenStart - none[0] > 20_000, `the wolf's row: ${unseenStart} against ${none[0]}`);
-    assert.ok(byCharacter - none[0] > 20_000, `a row by character: ${byCharacter} against ${none[0]}`);
-    assert.ok(mount - none[1] > 20_000, `the horse sharing the turn: ${mount} against ${none[1]}`);
+    for (const settings of [{ playersMoveAny: "all" as const }, { playersApplyDamage: true }]) {
+      const [walking, standing] = [walked(settings, "wolf", true), walked(settings, "wolf", false)];
+      assert.equal(walking.wolf.shown, standing.wolf.shown, JSON.stringify(settings));
+      assert.equal(walking.wolf.sub, standing.wolf.sub, JSON.stringify(settings));
+      const whole = (state: RoomState) => measuredStateBytes(state) + farWidths(state);
+      assert.equal(whole(walking.state), whole(standing.state), "the pool holds the turn's walk");
+    }
+    // Once its turn passed the walk is not the turn's: a room kept it from before change format 65, and it counts at its
+    // bytes outside P1's exact part until a turn's end takes it off.
+    const [after, none] = [walked({ playersMoveAny: "all" }, "bat", true, 8), walked({ playersMoveAny: "all" }, "bat", false, 8)];
+    assert.equal(after.wolf.shown, none.wolf.shown);
+    assert.equal(turnWalks(after.state).bytes, 0);
+    assert.equal(farWidths(after.state), farWidths(none.state));
+    assert.ok(measuredStateBytes(after.state) > measuredStateBytes(none.state));
   });
 
   test("the DM renames or resizes P1's area while its creature is out of P1's sight, and hiding it takes it out as a delete does", () => {
@@ -203,99 +182,6 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
 /** Where each thing in a player's exact part counts what it shows, and how much: what equal copies must give alike. */
 function shownBy(state: RoomState, memberId: string): Record<string, string> {
   return Object.fromEntries([...exactCopies(state, memberId)].map(([key, part]) => [key, `${part.shown} B on ${part.shownOn ?? part.on}`]));
-}
-
-/** A creature P1's copy holds that no player owns, and one hidden from players, in a random room. */
-const seenCreature = (s: RoomState) => Object.values(s.tokens).find((t) => t.ownerIds.length === 0 && t.visibility === "all" && copyOf(s, "p1").includes(`"id":"${t.id}"`));
-const hiddenCreatures = (s: RoomState) => Object.values(s.tokens).filter((t) => t.visibility === "dm" && t.ownerIds.length === 0);
-const walk = (seen: boolean[]) => ({ turn: 3, stops: seen.map((on, i) => ({ x: i, y: 1, elevation: 0, ...(on ? { seen: true as const } : {}) })) });
-
-/**
- * Ways a twin of a room differs only in what P1's copy leaves out, each
- * returning false where the room has nothing to change. A twin whose copy
- * comes out otherwise is not compared.
- */
-const OMITTED: Record<string, (s: RoomState) => boolean> = {
-  "a walk P1 saw none of, on a creature they see": (s) => {
-    const t = seenCreature(s);
-    if (t) s.tokens[t.id] = { ...t, path: walk([false, false]) };
-    return t !== undefined;
-  },
-  "a walk P1 saw some of, on a creature they see": (s) => {
-    const t = seenCreature(s);
-    if (t) s.tokens[t.id] = { ...t, path: walk([true, false, true]) };
-    return t !== undefined;
-  },
-  "a hidden creature's place, name and notes": (s) => {
-    const t = hiddenCreatures(s)[0];
-    if (t) s.tokens[t.id] = { ...t, x: t.x + 3, name: `${t.name} the Hidden`, notes: "n".repeat(300) };
-    return t !== undefined;
-  },
-  "the DM's notes on a creature P1 sees": (s) => {
-    const t = seenCreature(s);
-    if (t && "inline" in t.actor) s.tokens[t.id] = { ...t, actor: { inline: { ...t.actor.inline, dmNotes: "d".repeat(500) } } };
-    return t !== undefined && "inline" in t.actor;
-  },
-  "the creature a held area of P1's follows": (s) => {
-    const [, other] = hiddenCreatures(s);
-    if (other && s.templates.pa) s.templates.pa = { ...s.templates.pa, attachedTo: other.id };
-    return other !== undefined && s.templates.pa !== undefined;
-  },
-  "the floor of a held area of P1's": (s) => {
-    const floor = Object.keys(s.scenes).find((id) => id !== s.templates.pa?.sceneId);
-    if (floor && s.templates.pa) s.templates.pa = { ...s.templates.pa, sceneId: floor };
-    return floor !== undefined && s.templates.pa !== undefined;
-  },
-  "the conditions an HP change on a creature P1 saw put on": (s) => {
-    const line = s.log.find((l) => l.id === "hp-seen");
-    const data = line?.data as { revert?: { added?: unknown[] } } | undefined;
-    if (line && data?.revert) s.log = s.log.map((l) => (l === line ? { ...l, data: { ...l.data, revert: { ...data.revert, added: [...(data.revert!.added ?? []), effect("e-more", { key: "prone" })] } } } as never : l));
-    return data?.revert !== undefined;
-  },
-  "which hidden row's turn is under way, on creatures P1 sees": (s) => {
-    const rows = s.encounter?.entries.filter((e) => e.id.startsWith("hidden-turn")) ?? [];
-    const next = rows.find((e) => e.id !== s.encounter!.activeEntryId);
-    if (next) s.encounter = { ...s.encounter!, activeEntryId: next.id, turnStart: { ...s.encounter!.turnStart!, entryId: next.id, tokenId: next.tokenId! } };
-    return next !== undefined;
-  },
-  "P1's things behind a blackout": (s) => {
-    s.meta = { ...s.meta, view: { ...s.meta.view, blackout: true } };
-    for (const [id, t] of Object.entries(s.templates)) if (t.ownerId === "p1") s.templates[id] = { ...t, label: "Moved in the dark", origin: { ...t.origin, x: t.origin.x + 2 } };
-    return true;
-  },
-};
-
-/** The room with P1's area and ruler on a hidden creature, a fight on a creature P1 sees, and Players move any token in half. */
-function twinBase(seed: number): RoomState {
-  const r = rng(seed * 31 + 7);
-  const state = randomState(r);
-  const hidden = hiddenCreatures(state)[0];
-  if (hidden) {
-    state.templates.pa = template("pa", { sceneId: hidden.sceneId, ownerId: "p1", attachedTo: hidden.id, label: "Bless" });
-    state.drawings.pr = drawing("pr", { sceneId: hidden.sceneId, kind: "ruler", ownerId: "p1", anchors: [null, hidden.id], points: [1.5, 1.5, hidden.x + 0.5, hidden.y + 0.5] });
-  }
-  if (seed % 2 === 0) state.meta = { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: "all" } };
-  // A fight whose turn is a hidden row's, kept hidden on its turn, on one of two creatures P1 sees with walks P1's copy
-  // leaves out.
-  const scene = state.meta.playerSceneId ?? Object.keys(state.scenes)[0]!;
-  state.tokens["turn-a"] = token("turn-a", { sceneId: scene, x: 1, y: 1, path: walk([true, true]) });
-  state.tokens["turn-b"] = token("turn-b", { sceneId: scene, x: 2, y: 1, path: walk([true, true]) });
-  state.meta = { ...state.meta, settings: { ...state.meta.settings, revealHiddenOnTurn: false } };
-  state.encounter = {
-    rev: 0,
-    round: 1,
-    activeEntryId: "hidden-turn-a",
-    entries: [entry("hidden-turn-a", { tokenId: "turn-a", hidden: true }), entry("hidden-turn-b", { tokenId: "turn-b", hidden: true })],
-    turnStart: { entryId: "hidden-turn-a", tokenId: "turn-a", sceneId: scene, x: 1, y: 1, elevation: 0, seq: 3 },
-  };
-  // An HP change every player saw on a creature P1 sees, which put a condition on it.
-  const seen = seenCreature(state);
-  if (seen) {
-    const vitals = { hp: { cur: 5, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
-    const revert = { before: vitals, after: vitals, added: [effect("e-hit", { key: "poisoned" })] };
-    state.log = [...state.log, { id: "hp-seen", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert, tokenId: seen.id, seen: true } } as never];
-  }
-  return state;
 }
 
 describe("D-261120-003: rooms whose copies are equal give a player equal exact parts", () => {
@@ -453,21 +339,6 @@ const ownContent = (key: string, where: string) => {
  * show again residual 7's (D-261120-012).
  */
 const areaMoved = (where: string) => /^templates\.[^.]+\.(attachedTo|sceneId|ownerId|visibility)$/.test(where);
-
-/**
- * What `memberId` holds of a room: their copy, the shared lines as they
- * read them when written (linesHeld), and the walks of their creatures as
- * their copy held them on their turns (SeatView `walk`), which their exact
- * part counts so. Twins alike in all three must give equal exact parts.
- */
-const knownBy = (state: RoomState, memberId: string) => {
-  const view = seatView(state, memberId);
-  const walks = Object.keys(state.tokens).sort().flatMap((id) => {
-    const walk = view.walk(id);
-    return walk === null ? [] : [[id, walk]];
-  });
-  return `${copyOf(state, memberId)}\n${stableStringify([...linesHeld(state, memberId, view)].map(([line, held]) => [line.id, held]))}\n${stableStringify(walks)}`;
-};
 
 /** The things the examples a review named need, on a random room: a creature P1 sees with what players are not shown of it. */
 function namedBase(seed: number): RoomState {

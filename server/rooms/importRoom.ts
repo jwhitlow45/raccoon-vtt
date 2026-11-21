@@ -38,7 +38,7 @@ import { idRow, recordIds, SERVER_MEMBER } from "./createIds.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
 import { lastLineSeq, refillMapVideos, refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
-import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserved, memoryReserves, sharesRoom } from "./sizeGuard.ts";
+import { checkWholeScenes, historyPastEmpty, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserved, memoryReserves, sharesRoom } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -460,7 +460,8 @@ function limitsProblem(state: RoomState, lines: Lines): string | null {
     const sight = sightPiecesCheck(counted, sceneId);
     if (!sight.ok) return sight.message;
   }
-  const bytes = measuredStateBytes(state);
+  // The far lines count the fight's history as empty, as a live room's far reading does: its own bound holds it.
+  const bytes = measuredStateBytes(state) - (lines.far ? historyPastEmpty(state) : 0);
   if (bytes > lines.stateBytes) return `the room state is over ${lines.stateBytes / (1024 * 1024)} MiB`;
   // The player scene's explored layer must be able to grow to its full size (docs/design/design-v1-maps-vision.md 2.4).
   if (bytes + exploredReserve(state) > lines.stateBytes) return NO_ROOM_TO_EXPLORE;
@@ -484,7 +485,7 @@ function limitsProblem(state: RoomState, lines: Lines): string | null {
   }
   if (bytes + exploredReserve(state) + memoryReserves(state).whole + shared > lines.stateBytes) return MEMORY_TOO_LARGE;
   // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
-  const scenes = checkWholeScenes(state, lines.sceneBytes);
+  const scenes = checkWholeScenes(state, lines.sceneBytes, lines.far);
   return scenes.ok ? null : scenes.message;
 }
 

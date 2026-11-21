@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FAR, roundUp } from "#shared/limits.ts";
+import { FAR, roundUp, serializedBytes } from "#shared/limits.ts";
+import { readEntity } from "#shared/keys.ts";
 import type { RoomState, Scene, Token, Viewer } from "#shared/model.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
@@ -705,15 +706,18 @@ describe("D-261119-114 and 123: a drop scene's reserve holds what its drops writ
       assert.deepEqual(held(is), held(was), "P1's exact part holds the same creatures and areas");
       assert.equal(held(was).length, 862, "every one of them");
       const reserve = dropReserve(result.state);
-      // What the drop adds to a reading's exact part, which no step rounds away, and to both parts together.
+      // What the drop adds to a reading's exact part, which no step rounds away, and to both parts together. P1's exact part
+      // counts each creature's and area's floor and place at their widths (D-261121-130), so the drop adds nothing to it.
       for (const who of ["p1", "dm"] as const) {
         const [before, after] = [partsOf(plain.state, who), partsOf(result.state, who)];
         const [exact, both] = [after.exact - before.exact, after.stepped + after.exact - before.stepped - before.exact];
-        assert.ok((who === "dm" || exact > 0) && exact <= reserve && both <= reserve, `${who}: the drop added ${exact} bytes to the exact part and ${both} in all, the reserve ${reserve}`);
+        assert.ok((who === "dm" || exact === 0) && exact <= reserve && both <= reserve, `${who}: the drop added ${exact} bytes to the exact part and ${both} in all, the reserve ${reserve}`);
       }
-      // Each part of the headroom holds what the drop adds to its kind, more than the DM's caps alone would hold.
+      // Each part of the headroom holds what the drop adds to its kind as stored, as the DM's reading counts what seats
+      // hold, more than the DM's caps alone would hold.
       const part = dropHeadrooms(result.state).get(LOW)!;
-      const grew = (prefix: string) => [...is].filter(([key]) => key.startsWith(prefix)).reduce((sum, [key, copy]) => sum + copy.shown - (was.get(key)?.shown ?? 0), 0);
+      const grew = (prefix: string) =>
+        [...is.keys()].filter((key) => key.startsWith(prefix)).reduce((sum, key) => sum + serializedBytes(readEntity(result.state, key)) - serializedBytes(readEntity(plain.state, key)), 0);
       const [creatures, areas] = [grew("token:m"), grew("template:")];
       // A trapdoor's drop to a floor with a longer id comes close to each creature's and area's width, so its creatures and areas
       // outgrow what 500 creatures and 200 areas would hold. A pit only lowers them.
@@ -722,9 +726,6 @@ describe("D-261119-114 and 123: a drop scene's reserve holds what its drops writ
         assert.ok(creatures > (part.creatures / FAR.tokens) * 500, `600 creatures added ${creatures} bytes, past what 500 would hold`);
         assert.ok(areas <= part.areas && areas > (part.areas / RIDING_AREAS) * 200, `260 areas added ${areas} bytes, the headroom ${part.areas}, past what 200 would hold`);
       } else assert.equal(part.areas, 0, "a pit moves no area to another floor");
-      // Thorn's walk, started where it landed, grows it past a creature's own headroom, which the turn's walks hold.
-      const thorn = is.get("token:thorn" as never)!.shown - was.get("token:thorn" as never)!.shown;
-      if (rig === "below") assert.ok(thorn > part.creatures / FAR.tokens && thorn <= part.creatures / FAR.tokens + part.walks / 20, `Thorn grew ${thorn} bytes`);
       // The far line holds the reserve in place of the near measure's 4 KiB a pit floor, in the room's reading and the tower's,
       // and another scene's reading holds none of it.
       const pit = rig === "pit" ? PIT_TOKENS_RESERVE : 0;
