@@ -114,26 +114,24 @@ function endWalks(tx: Tx, ended: number | undefined, resumes?: number): SavedWal
  * Keeps each walk a room held from before op version 65 in the history
  * step whose Next ended its turn, one saved before 65, which holds no
  * `walks` (D-261120-105). A step from 65 on always holds them, so it never
- * takes one. Kept only while the history stays within HISTORY_BYTES. A walk
- * no step ended goes without a trace, since no Previous can resume its
- * turn.
+ * takes one. The history then keeps its newest steps within its bounds
+ * (boundedHistory): a step its walk does not fit beside the newer ones goes
+ * with every older step, as Previous unwinds newest first, so no step
+ * Previous can resume is kept without the walk it ended
+ * (FLR4INT-ASTRA-10). A Next's keptHistory then bounds it with the new
+ * step, which keeps the steps that bounding both at once would. A walk no
+ * step ended goes without a trace, since no Previous can resume its turn.
  */
 function keepOlderWalks(tx: Tx, older: ReadonlyMap<number, SavedWalk[]>): void {
-  const history = tx.state.encounterHistory;
-  let bytes = history.reduce((total, step) => total + stepBytes(step), 0);
   let changed = false;
-  const kept = history.map((step) => {
+  const filed = tx.state.encounterHistory.map((step) => {
     const seq = step.encounter.turnStart?.seq;
     const walks = step.walks === undefined && seq !== undefined ? older.get(seq) : undefined;
     if (!walks) return step;
-    const next = { ...step, walks };
-    const grown = stepBytes(next) - stepBytes(step);
-    if (bytes + grown > HISTORY_BYTES) return step;
-    bytes += grown;
     changed = true;
-    return next;
+    return { ...step, walks };
   });
-  if (changed) tx.write(keys.encounterHistory, kept);
+  if (changed) tx.write(keys.encounterHistory, boundedHistory(filed));
 }
 
 /**
@@ -646,16 +644,19 @@ function stepBytes(step: EncounterSnapshot): number {
  * bounded by bytes as well as steps (shared/limits.ts HARD).
  */
 export function keptHistory(history: readonly EncounterSnapshot[], step: EncounterSnapshot): EncounterSnapshot[] {
-  let bytes = stepBytes(step);
-  if (bytes > HISTORY_BYTES) return [];
-  const kept: EncounterSnapshot[] = [step];
-  for (let i = history.length - 1; i >= 0 && kept.length < MAX_HISTORY; i--) {
-    const older = history[i]!;
-    bytes += stepBytes(older);
+  return boundedHistory([...history, step]);
+}
+
+/** The newest steps of `history`, at most MAX_HISTORY and within HISTORY_BYTES: from the first that does not fit, none older. */
+function boundedHistory(history: readonly EncounterSnapshot[]): EncounterSnapshot[] {
+  let bytes = 0;
+  let from = history.length;
+  while (from > 0 && history.length - from < MAX_HISTORY) {
+    bytes += stepBytes(history[from - 1]!);
     if (bytes > HISTORY_BYTES) break;
-    kept.unshift(older);
+    from--;
   }
-  return kept;
+  return history.slice(from);
 }
 
 /**

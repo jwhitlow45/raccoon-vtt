@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readEntity } from "../keys.ts";
-import type { RoomState, TokenPath, Viewer } from "../model.ts";
+import type { EncounterSnapshot, RoomState, TokenPath, Viewer } from "../model.ts";
 import type { Op, RestoreEntry } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { guardHash } from "./tx.ts";
 import { pathThisTurn } from "../rules/path.ts";
-import { AT, DM, P1, entry, room, token } from "../testutil.ts";
+import { HISTORY_BYTES, serializedBytes } from "../limits.ts";
+import { AT, DM, P1, effect, entry, room, token } from "../testutil.ts";
 
 /*
  * A creature's walk ends with its turn from op version 65 (D-261120-100,
@@ -139,6 +140,56 @@ describe("a walk ends with its turn (D-261120-100)", () => {
     assert.equal(f.state.encounter?.activeEntryId, "rwolf");
     assert.deepEqual(f.path("wolf"), walked, "the wolf's turn resumes with its walk");
     assert.equal(feet(f.path("wolf")), 20);
+  });
+
+  /**
+   * The history behind an older step that brings it to `short` bytes under its bound, and an oldest small step before
+   * that, which fits beside the newer ones alone.
+   */
+  const padded = (history: readonly EncounterSnapshot[], short: number): EncounterSnapshot[] => {
+    const first = history[0]!;
+    const older = (pad: number, seq: number): EncounterSnapshot => ({ ...first, encounter: { ...first.encounter, turnStart: { ...first.encounter.turnStart!, seq } }, effects: { pad: [effect("pad", { key: "custom", label: "p".repeat(pad) })] } });
+    const oldest = older(0, 1);
+    const used = history.reduce((total, step) => total + serializedBytes(step), serializedBytes(oldest));
+    const out = [oldest, older(HISTORY_BYTES - short - used - serializedBytes(older(0, 2)), 2), ...history];
+    assert.equal(out.reduce((total, step) => total + serializedBytes(step), 0), HISTORY_BYTES - short);
+    return out;
+  };
+  /** Each step's walks by creature, undefined for a step saved before 65. */
+  const walksOf = (state: RoomState) => state.encounterHistory.map((step) => step.walks?.map((w) => w.tokenId));
+
+  test("a turn's end at 65 keeps a walk from before 65 in its step at the history's bound, dropping the older steps it has no room beside (FLR4INT-ASTRA-10)", () => {
+    const f = fight(64, true);
+    for (const [x, y] of [[11, 9], [11, 11], [9, 11], [9, 13], [11, 13], [9, 9]] as const) f.run(move("wolf", x, y), P1);
+    const walked = f.path("wolf")!;
+    f.run(NEXT);
+    f.state = { ...f.state, encounterHistory: padded(f.state.encounterHistory, 225) };
+    f.run(NEXT, DM, null);
+    assert.equal(f.path("wolf"), undefined);
+    assert.deepEqual(walksOf(f.state), [["wolf"], []], "the older steps go, the oldest that would fit too, and the wolf's keeps its walk");
+    f.run(PREV, DM, null).run(PREV, DM, null);
+    assert.equal(f.state.encounter?.activeEntryId, "rwolf");
+    assert.deepEqual(f.path("wolf"), walked, "the wolf's turn resumes with its walk");
+  });
+
+  /** A walk of 50 stops on turn 7, the wolf's, as a room kept from before 65 may hold it. */
+  const long: TokenPath = { turn: 7, stops: Array.from({ length: 50 }, (_, i) => ({ x: 9 + (i % 5), y: 9, elevation: 0, seen: true as const })) };
+
+  test("a removal that passes the turn, and Previous, keep a walk from before 65 in its step at the history's bound the same way (FLR4INT-ASTRA-10)", () => {
+    const removal = fight(64, true).run(NEXT);
+    removal.state = { ...removal.state, tokens: { ...removal.state.tokens, wolf: { ...removal.state.tokens.wolf!, path: long } }, encounterHistory: padded(removal.state.encounterHistory, 225) };
+    removal.run({ t: "encounter.remove", entryIds: ["rgob"] }, DM, null);
+    assert.equal(removal.state.encounter?.activeEntryId, "rhero");
+    assert.deepEqual(walksOf(removal.state), [["wolf"]], "the removal files the walk and drops the older step");
+
+    const f = fight(64, true).run(NEXT).run(NEXT);
+    assert.equal(f.state.encounter?.activeEntryId, "rhero");
+    f.state = { ...f.state, tokens: { ...f.state.tokens, wolf: { ...f.state.tokens.wolf!, path: long } }, encounterHistory: padded(f.state.encounterHistory, 225) };
+    f.run(PREV, DM, null);
+    assert.equal(f.state.encounter?.activeEntryId, "rgob");
+    assert.deepEqual(walksOf(f.state), [["wolf"]], "Previous files the walk and drops the older step");
+    f.run(PREV, DM, null);
+    assert.deepEqual(f.path("wolf"), long, "the wolf's turn resumes with its walk");
   });
 
   test("Previous at 65 over a step whose turn left no walks takes the taken-back turn's walk off (FLR4-OPUS-12)", () => {
