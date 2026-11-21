@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import { FALL_RIDERS_MOST, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
-import type { Op, OpOf } from "../protocol.ts";
+import type { ActorTarget, Op, OpOf } from "../protocol.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { ownEntry } from "../records.ts";
 import { isCreature, onHolder } from "../rules/attach.ts";
@@ -272,17 +272,29 @@ export function fallSettle(tx: Tx, op: OpOf<"fall.settle">): void {
 /**
  * What a group save's outcome settles of a card (`actor.outcome`'s `fall`,
  * 4.4, FLR4INT-ASTRA-05): the creatures it names, applied or skipped,
- * leave the card in the same op. One the card still names and the room
- * still holds stays on it, such as a rider the DM's page could not reach
- * on another scene, so no damage the card holds is lost. The card goes
- * once none is left. An outcome naming a creature the card no longer
- * names is refused, so another device's Apply never applies it twice.
+ * leave the card in the same op, and with each one every other token the
+ * card names of the same creature, as two riders that show one character,
+ * on whatever scene, as do the tokens of a creature the outcome targets
+ * (FLR4-SOL-22). One creature takes its fall once, whichever token took
+ * it. Any other the card still names and the room still holds stays on
+ * it, such as a rider the DM's page could not reach on another scene, so
+ * no damage the card holds is lost. The card goes once none is left. An
+ * outcome naming a creature the card no longer names is refused, so
+ * another device's Apply never applies it twice.
  */
-export function settleFallOutcome(tx: Tx, fall: { fallId: FallId; tokenIds: readonly TokenId[] }): void {
+export function settleFallOutcome(tx: Tx, fall: { fallId: FallId; tokenIds: readonly TokenId[] }, targets: readonly { target: ActorTarget }[] = []): void {
   const card = ownEntry(tx.state.falls, fall.fallId);
   const named = card ? [card.tokenId, ...(card.riders ?? [])] : [];
   if (!card || fall.tokenIds.some((id) => !named.includes(id))) throw invalid(FALL_SETTLED);
-  const left = named.filter((id) => !fall.tokenIds.includes(id) && ownEntry(tx.state.tokens, id) !== undefined);
+  // The key actorOutcome counts a creature once by: its character, else its token.
+  const creature = (target: ActorTarget): string | undefined => {
+    const resolved = tx.tryResolveActor(target);
+    return resolved && `${resolved.holder}:${resolved.id}`;
+  };
+  const settledCreatures = new Set([...fall.tokenIds.map((tokenId) => creature({ tokenId })), ...targets.map((t) => creature(t.target))]);
+  settledCreatures.delete(undefined);
+  const settled = (id: TokenId) => fall.tokenIds.includes(id) || settledCreatures.has(creature({ tokenId: id }));
+  const left = named.filter((id) => !settled(id) && ownEntry(tx.state.tokens, id) !== undefined);
   if (left.length === named.length) return;
   const [first, ...riders] = left;
   if (first === undefined) {

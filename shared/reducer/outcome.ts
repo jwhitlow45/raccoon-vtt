@@ -41,7 +41,7 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
   if (op.trap !== undefined) settleTrap(tx, op.trap.trapId, op.trap.due);
   // A fall's group save takes the creatures it settles off its card in the same op, so each one's damage applies at most once
   // (docs/design/design-v1-floors.md phase 4, 4.4).
-  if (op.fall !== undefined) settleFallOutcome(tx, op.fall);
+  if (op.fall !== undefined) settleFallOutcome(tx, op.fall, op.targets);
   if (tracksSaveOutcomes(tx.env.opVersion) && op.recharge !== undefined) actorUse(tx, { t: "actor.use", ...op.recharge });
   const holders = new Set<string>();
   for (const item of op.targets) {

@@ -382,7 +382,8 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   }
   // A row stands for its creature, so a card's other tokens of a creature it settled, as two riders that
   // show one character, leave the card with it where the page reaches them. Left on, the card would apply
-  // that creature's fall again (FLR4INT-ASTRA-08). One the page does not reach stays, as a row's would.
+  // that creature's fall again (FLR4INT-ASTRA-08). The server takes off the ones on another scene with
+  // their creature too (settleFallOutcome, FLR4-SOL-22).
   if (page.source.kind === "fall") {
     for (const id of page.source.tokenIds) {
       const token = dice.view.tokens[id];

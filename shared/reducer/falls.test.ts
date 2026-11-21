@@ -307,8 +307,32 @@ describe("the cards (4.4)", () => {
     assert.equal(applied(part.state, outcome(["bree"])).state.falls?.["120:0"], undefined, "the last creature settled ends it");
     const breeGone = { ...state, tokens: Object.fromEntries(Object.entries(state.tokens).filter(([id]) => id !== "bree")) };
     assert.equal(applied(breeGone, outcome(["horse", "thorn"])).state.falls?.["120:0"], undefined, "one no longer in the room holds nothing to apply");
-    const none = applied(state, outcome([]));
+    const none = applied(state, { ...outcome([]), targets: [] } as Op);
     assert.deepEqual(none.state.falls?.["120:0"], state.falls!["120:0"], "an outcome that settles no one leaves the card as it was");
+  });
+
+  test("a creature the card names by two tokens leaves it whole when either takes the fall, on whatever scene, and takes it once (FLR4-SOL-22)", () => {
+    const base = withTokens(holed({}, { sceneId: GROUND, x: 6, y: 6 }), token("horse", { sceneId: GROUND, name: "Horse", x: 6, y: 6 }), thornToken({ id: "thorn2", sceneId: "s2" }), token("bree", { sceneId: "s2", name: "Bree" }));
+    const state = withFalls(base, fallCard({ tokenId: "horse", riders: ["thorn", "thorn2", "bree"] }));
+    const hp = (s: RoomState) => s.characters.thorn!.actor.hp!.cur;
+    // Apply on Ground floor reaches Horse and Thorn: Thorn's other token, on another scene, leaves with Thorn, and Bree stays.
+    const first = applied(state, { t: "actor.outcome", plan: "p1", fall: { fallId: "120:0", tokenIds: ["horse", "thorn"] }, targets: [{ target: { tokenId: "horse" }, amount: 6 }, { target: { tokenId: "thorn" }, amount: 6 }] });
+    assert.equal(hp(first.state), 14);
+    assert.deepEqual([first.state.falls?.["120:0"]?.tokenId, first.state.falls?.["120:0"]?.riders], ["bree", undefined]);
+    // On the other scene the DM's Apply names thorn2 again: refused, so 14 never becomes 8.
+    const again = applyOp(first.state, opSchema.parse({ t: "actor.outcome", plan: "p2", fall: { fallId: "120:0", tokenIds: ["thorn2", "bree"] }, targets: [{ target: { tokenId: "thorn2" }, amount: 6 }] }), DM, env(nextSeq()));
+    assert.deepEqual(again.ok ? null : again.message, FALL_SETTLED);
+    const last = applied(first.state, { t: "actor.outcome", plan: "p3", fall: { fallId: "120:0", tokenIds: ["bree"] }, targets: [{ target: { tokenId: "bree" }, amount: 6 }] });
+    assert.deepEqual([hp(last.state), last.state.falls?.["120:0"]], [14, undefined], "Bree's Apply ends the card");
+    // A creature the outcome damages through a token the outcome does not settle leaves the card with all its tokens too.
+    const targeted = applied(state, { t: "actor.outcome", plan: "p4", fall: { fallId: "120:0", tokenIds: ["horse"] }, targets: [{ target: { tokenId: "thorn" }, amount: 6 }] });
+    assert.deepEqual([targeted.state.falls?.["120:0"]?.tokenId, targeted.state.falls?.["120:0"]?.riders], ["bree", undefined]);
+    // A skipped Thorn, settled with no damage, takes its other token off too.
+    const skipped = applied(state, { t: "actor.outcome", plan: "p6", fall: { fallId: "120:0", tokenIds: ["horse", "thorn"] }, targets: [] });
+    assert.deepEqual([skipped.state.falls?.["120:0"]?.tokenId, skipped.state.falls?.["120:0"]?.riders], ["bree", undefined]);
+    // Settling only Horse keeps both of Thorn's tokens and Bree.
+    const horse = applied(state, { t: "actor.outcome", plan: "p5", fall: { fallId: "120:0", tokenIds: ["horse"] }, targets: [] });
+    assert.deepEqual([horse.state.falls?.["120:0"]?.tokenId, horse.state.falls?.["120:0"]?.riders], ["thorn", ["thorn2", "bree"]]);
   });
 
   test("a fall made under fall cards at the cap evicts within the op's undo, so the DM's undo puts the evicted card back", () => {

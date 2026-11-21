@@ -241,7 +241,10 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     assert.equal(hp(after, "thorn"), 14);
     const away = room4(["horse", "thorn", "thorn2"], { thorn2: "s2" });
     const apart = cardPage(away, away.falls!["120:0"]!);
-    assert.deepEqual([...buildPlan(apart.page, apart.dice, SIX, ids())!.fall!.tokenIds].sort(), ["horse", "thorn"], "one the page does not reach stays on the card");
+    assert.deepEqual([...buildPlan(apart.page, apart.dice, SIX, ids())!.fall!.tokenIds].sort(), ["horse", "thorn"], "the plan names only what the page reaches");
+    // The server takes Thorn's token on the other scene off with Thorn, so no second Apply there deals 6 again (FLR4-SOL-22).
+    const settledAway = applyAll(away);
+    assert.deepEqual([hp(settledAway.state, "thorn"), settledAway.applies, settledAway.state.falls?.["120:0"]], [14, 1, undefined]);
   });
 
   test("a skipped row's creature still leaves with all its tokens", () => {
