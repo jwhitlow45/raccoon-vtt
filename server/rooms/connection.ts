@@ -107,8 +107,8 @@ export class Connection {
   readonly now: Clock;
   /**
    * Previews other viewers hold from this socket, keyed `kind:id`, with the
-   * scene they were sent for, the last frame, by which a batch that
-   * re-projects everything judges each receiver's again (ephemeral.ts
+   * scene they were sent for, the last frame, by which every batch while a
+   * screen holds a preview judges each receiver's again (ephemeral.ts
    * rejudgePreviews), and when it came. Only previews some viewer holds,
    * at most MOST_PREVIEWS_SENT, the one framed least recently first.
    */

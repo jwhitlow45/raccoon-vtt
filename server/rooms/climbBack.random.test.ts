@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ANA, BREE, GROUND, UPPER, putOp, thornToken, tower, withOpening } from "#shared/floorLinksTestutil.ts";
-import type { FloorLink, RoomState, Viewer } from "#shared/model.ts";
+import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
@@ -17,8 +17,8 @@ import { UndoTable } from "./undoTesting.ts";
  * give her the same answers and copies.
  *
  * The tower (shared/floorLinksTestutil.ts): stairs l1 on Ground floor at 3, 3,
- * 2 by 1, up to l2 on Upper floor; an opening o1 on Upper floor at 6, 6 over o2
- * on Ground floor. Ana owns Thorn.
+ * 2 by 1, up to l2 on Upper floor, and an opening o1 on Upper floor at 6, 6
+ * over o2 on Ground floor. Ana owns Thorn.
  */
 
 const climb = (linkId = "l1"): Op => ({ t: "token.climb", tokenId: "thorn", linkId });
@@ -42,17 +42,9 @@ function fog(t: UndoTable, sceneId: string, on: boolean): void {
   t.state = { ...t.state, scenes: { ...t.state.scenes, [sceneId]: { ...t.state.scenes[sceneId]!, fogEnabled: on } } };
 }
 
-/**
- * Every player's copy of every floor they hold, each end's rev left out: an
- * end's rev counts every edit of the pair, which is not what these twins
- * compare (the copy shows the same ends at the same squares).
- */
+/** Every player's whole copy of every floor they hold. */
 function copies(t: UndoTable, players: readonly Viewer[] = [ANA, BREE]): unknown[] {
-  return players.map((who) => {
-    const copy = projectState(t.state, who, { sceneId: null }) as unknown as { floorLinks?: Record<string, Partial<FloorLink>> };
-    const links = Object.fromEntries(Object.entries(copy.floorLinks ?? {}).map(([id, { rev: _rev, ...rest }]) => [id, rest]));
-    return { ...copy, floorLinks: links };
-  });
+  return players.map((who) => projectState(t.state, who, { sceneId: null }));
 }
 
 /** A DM edit of a pair and the edit that puts it back. */

@@ -144,6 +144,18 @@ export function fallCandidates(tx: Tx, before: RoomState, op: Op): Set<TokenId> 
 }
 
 /**
+ * Both ends of a pair as a climb or a fall takes `taken` (model.ts
+ * ShownEnds): the fields a player who holds both ends is shown of them,
+ * which an undo or redo of the step finds again (permissions.ts
+ * climbBackCheck).
+ */
+export function shownEndsOf(taken: FloorLink, pair: FloorLink): ShownEnds {
+  const shown: ShownEnds = { kind: taken.kind, rect: { ...taken.rect }, pairRect: { ...pair.rect } };
+  if (taken.grid !== undefined) shown.grid = taken.grid;
+  return shown;
+}
+
+/**
  * The fall pass (4.1, 4.3 step 5): each candidate on the ground whose
  * space lies wholly inside an opening's upper end, held up by nothing by
  * 4.1's rule, falls to the floor below (reducer/floorLinks.ts landThrough)
@@ -156,18 +168,6 @@ export function fallCandidates(tx: Tx, before: RoomState, op: Op): Set<TokenId> 
  * lands, as the link pass would, so that holder's own fall later in the
  * pass never carries it twice.
  */
-/**
- * Both ends of a pair as a climb or a fall takes `taken` (model.ts
- * ShownEnds): the fields a player who holds both ends is shown of them,
- * which an undo or redo of the step finds again (permissions.ts
- * climbBackCheck).
- */
-export function shownEndsOf(taken: FloorLink, pair: FloorLink): ShownEnds {
-  const shown: ShownEnds = { kind: taken.kind, rect: { ...taken.rect }, pairRect: { ...pair.rect } };
-  if (taken.grid !== undefined) shown.grid = taken.grid;
-  return shown;
-}
-
 export function fallPass(tx: Tx, before: RoomState, candidates: ReadonlySet<TokenId>, landings: Landing[]): FallRecord[] {
   const records: FallRecord[] = [];
   const landed = new Set<TokenId>();

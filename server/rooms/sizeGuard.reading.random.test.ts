@@ -232,7 +232,7 @@ function walksHeld(state: RoomState, where: string): void {
 /** (I2, I3) The batch's close on one twin, at `bound`: the shed shedOf names, which must apply and leave every player's copy as it was. */
 function closed(before: RoomState, state: RoomState, bound: number, where: string): { state: RoomState; shed: boolean } {
   const stored = storedBytes(state);
-  // The lines committed before this batch are archived; the batch's own are not yet.
+  // The lines committed before this batch are archived. The batch's own are not yet.
   const archived = new Set(before.log.map((e) => e.id));
   const shed = shedOf(state, stored, archived, before, bound);
   if (!shed) {
@@ -280,7 +280,7 @@ describe("the far rule as a state machine (design 1.6, D-261121-060, 120, 121, 1
       let [a0, b0] = [one, other];
       if (seed % 4 === 3) [a0, b0] = [rowsAtEdge(a0), rowsAtEdge(b0)];
       parked([a0, b0], past, a0.tokens["p1-hero"]!.sceneId, offset);
-      // Half the runs lower the stored bound under the room, so batches shed; the rest keep HARD, which no run reaches.
+      // Half the runs lower the stored bound under the room, so batches shed. The rest keep HARD, which no run reaches.
       const bound = seed % 2 === 0 ? storedBytes(a0) + 5_000 : HARD.storedBytes;
       const r = rng(seed * 104_729);
       let twins: [RoomState, RoomState] = [a0, b0];

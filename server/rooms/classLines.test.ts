@@ -20,7 +20,7 @@ import { UndoTable } from "./undoTesting.ts";
  * and a show in A against an add in B.
  *
  * Bree (p1's character) is Frightened (bfx) with a Wisdom save that ends it,
- * its occurrence 5:0 pending; Goblin 2 is Poisoned; Bree's owl is Charmed
+ * its occurrence 5:0 pending. Goblin 2 is Poisoned. Bree's owl is Charmed
  * under the same effect id as Bree's fear.
  */
 

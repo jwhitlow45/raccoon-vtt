@@ -1763,13 +1763,6 @@ function diceRollCheck(c: Check, op: OpOf<"dice.roll">): Decision {
 }
 
 /**
- * A DM's undo or redo never puts back a reference to an image that was
- * deleted since (docs/design/design-v1-dm-tools.md 2.6). Only references the
- * restore adds are checked: one the entity holds now is in use, so it was
- * not deleted. A player's restores touch only drawings and token poses,
- * which add no image.
- */
-/**
  * Whether a restore would leave two open save requests for one occurrence
  * of an effect (D-261121-131): a hide closes the condition's request, the
  * DM may ask again, and the hide's undo would bring the first one back
@@ -1802,6 +1795,13 @@ function restoreAsksTwice(c: Check, op: OpOf<"sys.restore">): boolean {
   });
 }
 
+/**
+ * A DM's undo or redo never puts back a reference to an image that was
+ * deleted since (docs/design/design-v1-dm-tools.md 2.6). Only references the
+ * restore adds are checked: one the entity holds now is in use, so it was
+ * not deleted. A player's restores touch only drawings and token poses,
+ * which add no image.
+ */
 function restoredAssetsUsable(op: OpOf<"sys.restore">, c: Check): Decision {
   const usable = c.deps.restoredAssetUsable;
   if (!usable) return OK;

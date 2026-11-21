@@ -2053,13 +2053,13 @@ const fallCard = z.strictObject({
   ft: z.number().int().min(0).max(FALL_FEET_MOST),
   made: z.number().int().min(0),
 });
-/** One root's fall in a player's step (FallRecord), with the card its undo removed. */
 /**
  * The ends a climb or a fall took as its player was shown them (model.ts
  * ShownEnds), on records from op version 65.
  */
 const shownEnds = z.strictObject({ kind: floorLinkKind, rect: floorLinkRect, pairRect: floorLinkRect, grid: gridShape.optional() });
 
+/** One root's fall in a player's step (FallRecord), with the card its undo removed. */
 const fallRecord = z.strictObject({
   tokenId: id,
   linkId: plainId,
@@ -3244,11 +3244,6 @@ export const serverOnlyOps = [
     drawings: z.array(id).max(RIDE_END_MOST).refine(inIdOrder, { message: "rulers ended are listed once each, in id order" }),
   }).refine((o) => o.templates.length + o.drawings.length > 0, { message: "nothing ended" }),
   /**
-   * Each marked scene's fixed share of MARKED_POOL (shared/limits.ts),
-   * written once into its mark at the room's first load on this format
-   * and at an import. A share never moves again.
-   */
-  /**
    * What a batch's close takes out of a room whose stored bytes pass
    * HARD.storedBytes (op version 65, server/rooms/sizeGuard.ts): the DM
    * lines `lines` names, an oldest run of the DM's ring that the archive
@@ -3259,6 +3254,11 @@ export const serverOnlyOps = [
     lines: z.array(logId).max(LIMITS.dmLogLines).refine(inLogOrder, { message: "lines shed are listed once each, in id order" }),
     steps: z.number().int().min(0).max(SHED_STEPS_MOST),
   }).refine((o) => o.lines.length + o.steps > 0, { message: "nothing shed" }),
+  /**
+   * Each marked scene's fixed share of MARKED_POOL (shared/limits.ts),
+   * written once into its mark at the room's first load on this format
+   * and at an import. A share never moves again.
+   */
   op("sys.share", {
     shares: z
       .array(z.strictObject({ sceneId: id, share: z.number().int().min(0).max(MARKED_SHARE_MOST) }))

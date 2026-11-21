@@ -458,8 +458,9 @@ function namedKeys(e: EphEvent): EntityKey[] {
  * shows whose kept frame names one of them gets its bare cancel in the same
  * batch. So a Hide, a light turned off, a door closed, fog added or stairs
  * removed, and the Undo or Redo of any of them, ends a drag or ruler over
- * what the screen no longer holds, which no global batch would judge again.
- * Only this screen's previews are read.
+ * what the screen no longer holds with the batch's own change, before the
+ * batch's judgment of every held preview (rejudgePreviews). Only this
+ * screen's previews are read.
  */
 export function cancelLost(receiver: Connection, lost: readonly EntityKey[], connections: Iterable<Connection>): void {
   if (receiver.closed || receiver.previewsHeld.size === 0 || lost.length === 0) return;

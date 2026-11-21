@@ -9,7 +9,7 @@ import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, SHED_STEPS_
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
 import { movesAnyToken } from "#shared/permissions.ts";
-import { chunkPositions, heldClock, heldGroundMap, ownsToken, perPlayerScene, publicEffects, seatView } from "#shared/project.ts";
+import { chunkPositions, heldClock, heldGroundMap, perPlayerScene, publicEffects, seatView } from "#shared/project.ts";
 import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { floorsOf, onPlayersScene } from "#shared/rules/floors.ts";
 import { turnUnderWay } from "#shared/rules/path.ts";
@@ -2025,7 +2025,7 @@ export type OwnCopyBytes = { floors: ReadonlyMap<string, ExactBytes>; roomLevel:
  * the player plays only through a creature of theirs. Each one moves only
  * with what their copy shows.
  */
-type WidthRoom = { readonly memberId: string; readonly clockId: string | undefined; readonly owns: ReadonlySet<string>; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly damage: boolean; readonly playsOnly: ReadonlySet<string> };
+type WidthRoom = { readonly memberId: string; readonly clockId: string | undefined; readonly memberIds: readonly string[]; readonly memberIdMost: number; readonly damage: boolean; readonly playsOnly: ReadonlySet<string> };
 
 /**
  * A field a player's own ops write beyond their copy (D-261119-003): its
@@ -2605,21 +2605,20 @@ function widthsOf(fields: readonly WidthField[], thing: Readonly<Record<string, 
 /** Each floor's FAR_WIDTHS bytes, kept per tokens collection, which is replaced and never changed, with what else they read. */
 const byFloorKept = new WeakMap<object, { templates: object; room: string; out: Map<string, number> }>();
 
-/** The FAR_WIDTHS bytes of the creatures and areas on each floor, of those `only` takes when given. */
-export function farWidthsByFloor(state: RoomState, only?: (key: EntityKey) => boolean): Map<string, number> {
+/** The FAR_WIDTHS bytes of the creatures and areas on each floor. */
+export function farWidthsByFloor(state: RoomState): Map<string, number> {
   const room = widthsRoom(state);
   const sign = `${room.sceneIdMost}:${room.listWidth}:${room.damage}`;
-  const hit = only ? undefined : byFloorKept.get(state.tokens);
+  const hit = byFloorKept.get(state.tokens);
   if (hit && hit.templates === state.templates && hit.room === sign) return hit.out;
   const out = new Map<string, number>();
-  const add = (fields: readonly WidthField[], key: EntityKey, thing: { sceneId: string }) => {
-    if (only && !only(key)) return;
+  const add = (fields: readonly WidthField[], thing: { sceneId: string }) => {
     const extra = widthsOf(fields, thing as unknown as Record<string, unknown>, room);
     if (extra > 0) out.set(thing.sceneId, (out.get(thing.sceneId) ?? 0) + extra);
   };
-  for (const token of Object.values(state.tokens)) add(FAR_WIDTHS.token, keys.token(token.id), token);
-  for (const template of Object.values(state.templates)) add(FAR_WIDTHS.template, keys.template(template.id), template);
-  if (!only && !isWritable(state.tokens) && !isWritable(state.templates)) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
+  for (const token of Object.values(state.tokens)) add(FAR_WIDTHS.token, token);
+  for (const template of Object.values(state.templates)) add(FAR_WIDTHS.template, template);
+  if (!isWritable(state.tokens) && !isWritable(state.templates)) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
   return out;
 }
 
@@ -2680,15 +2679,13 @@ function turnStartWidth(state: RoomState, encounter: Encounter): number {
 }
 
 /**
- * What the far line counts beyond the measure of the characters `only`
- * takes when given, where players may apply damage to any creature they
- * see: each actor's fields a player's damage writes (damageWidths), and its
- * rev, which each write moves on.
+ * What the far line counts beyond the measure of the characters, where
+ * players may apply damage to any creature they see: each actor's fields a
+ * player's damage writes (damageWidths), and its rev, which each write
+ * moves on.
  */
-function charactersDamageWidths(state: RoomState, only?: (key: EntityKey) => boolean): number {
-  let bytes = 0;
-  for (const c of Object.values(state.characters)) if (!only || only(keys.character(c.id))) bytes += characterDamageWidths(c);
-  return bytes;
+function charactersDamageWidths(state: RoomState): number {
+  return sum(Object.values(state.characters), characterDamageWidths);
 }
 
 /** One character's part of charactersDamageWidths. */
@@ -2697,23 +2694,20 @@ function characterDamageWidths(c: Character): number {
 }
 
 /**
- * What the far line counts beyond the measure in the room-level part, of
- * the rows and characters `only` takes when given: the fight's rev and each
- * row's place among ties (`tieOrder`), which a player's row moves on for
- * rows they do not receive, at their widths (D-261119-011), the fight's
- * turn start at its widest, the history as empty, and what a player's
- * damage writes on characters (charactersDamageWidths).
+ * What the far line counts beyond the measure in the room-level part: the
+ * fight's rev and each row's place among ties (`tieOrder`), which a
+ * player's row moves on for rows they do not receive, at their widths
+ * (D-261119-011), the fight's turn start at its widest, the history as
+ * empty, and what a player's damage writes on characters
+ * (charactersDamageWidths).
  */
-export function farWidthsRoomLevel(state: RoomState, only?: (key: EntityKey) => boolean): number {
-  const characters = state.meta.settings.playersApplyDamage ? charactersDamageWidths(state, only) : 0;
+export function farWidthsRoomLevel(state: RoomState): number {
+  const characters = state.meta.settings.playersApplyDamage ? charactersDamageWidths(state) : 0;
   const encounter = state.encounter;
-  const history = only ? 0 : historyWidth(state);
+  const history = historyWidth(state);
   if (!encounter) return characters + history;
-  let bytes = characters + history + (only ? 0 : Math.max(0, fieldBytes("rev") + DIGITS.rev + 1 - memberBytes("rev", encounter.rev)) + turnStartWidth(state, encounter));
-  for (const row of encounter.entries) {
-    if (only && !only(`row:${row.id}` as EntityKey)) continue;
-    bytes += Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder));
-  }
+  let bytes = characters + history + Math.max(0, fieldBytes("rev") + DIGITS.rev + 1 - memberBytes("rev", encounter.rev)) + turnStartWidth(state, encounter);
+  for (const row of encounter.entries) bytes += Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder));
   return bytes;
 }
 
@@ -2899,7 +2893,6 @@ function exactRoom(state: RoomState, memberId: string, view: SeatView): { room: 
   const room: WidthRoom = {
     memberId,
     clockId: heldClock(state, viewer)?.id,
-    owns: new Set(Object.values(state.tokens).filter((token) => ownsToken(state, viewer, token)).map((token) => token.id)),
     memberIds: Object.keys(state.members),
     memberIdMost: Math.max(0, ...Object.keys(state.members).map((id) => utf8Bytes(JSON.stringify(id)))),
     damage: state.meta.settings.playersApplyDamage,
