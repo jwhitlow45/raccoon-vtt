@@ -8,6 +8,7 @@ import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { FALL_CARD_ATTR, LINK_PANE_ATTR, TRAP_INTO_ATTR } from "../client/features/floors/ids.ts";
+import { trapPreset } from "#shared/srd/traps.ts";
 import { ConsoleWatch, dragCells, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, sleep, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
@@ -43,6 +44,13 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - fl4o-5: a fall on a scene the DM is not showing toasts "A creature
  *   fell 10 ft to Ground floor on Tower." with Show, which goes there, and
  *   the card then names the rat and is dismissed.
+ * - LP46FIX-1: a pony with a kobold riding it walks onto the hole, and the
+ *   card naming both applies: Apply's group save hurts both and removes the
+ *   card, where it once refused with "This save's choices could not be
+ *   kept."
+ * - LP46FIX-3: four creatures that fall in one op toast once, "4
+ *   creatures fell to Ground floor.", in line on a 390 x 844 phone at 100%
+ *   and 130%.
  * - fl4o-6: the bat in the air over the hole: its bar leads with Fly down,
  *   named "Fly down to Ground floor" and tipped "Fly down to Ground floor
  *   ({)", in line at the three sizes and both scales. { flies it down to 5
@@ -50,6 +58,9 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - fl4o-7: a pit trap on Upper floor gets Into, A pit or Ground floor, in
  *   line, and Ground floor makes it a trapdoor with its help. Its public
  *   springing drops the goblin standing on it to Ground floor with a card.
+ *   LP46FIX-2: made from Hidden Pit, its trap card says it opened onto
+ *   Ground floor, and neither asks the pit's 1d6 nor reads its pit words,
+ *   since the fall card asks the drop's.
  * - fl4o-8: hidden stairs: the pane's Hidden from players hides both ends,
  *   the DM's name adds "Hidden", and Bree gets nothing of them.
  * - fl4o-9: the window's memory: four floors with four openings each over
@@ -129,6 +140,8 @@ const run = {
   goblin2: uuidv7(),
   rat: uuidv7(),
   bat: uuidv7(),
+  pony: uuidv7(),
+  kobold: uuidv7(),
   trapdoor: uuidv7(),
   hole: "",
   holeBelow: "",
@@ -527,6 +540,62 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await waitFor("no card left", () => (Object.keys(state()?.falls ?? {}).length === 0 ? true : null));
   });
 
+  test("LP46FIX-1. a pony with a kobold riding it falls through the hole, and the card naming both applies: Apply's group save hurts both and removes the card", async () => {
+    const PONY_AT = { x: 11, y: 4 };
+    await ops.send({ t: "token.create", token: { id: run.pony, sceneId: run.upper, kind: "monster", name: "Pony", disposition: "neutral", actor: { inline: actor(HP) }, ...PONY_AT, size: "large", visibility: "all" } });
+    await ops.send({ t: "token.create", token: { id: run.kobold, sceneId: run.upper, kind: "monster", name: "Kobold", disposition: "hostile", actor: { inline: actor(HP) }, ...PONY_AT, size: "small", visibility: "all" } });
+    await ops.send({ t: "token.attach", tokenId: run.kobold, to: run.pony, kind: "ride", steer: true, ...PONY_AT, elevation: 0 });
+    await waitFor("the kobold riding the pony", () => (tokenOf(run.kobold)?.attached?.to === run.pony ? true : null));
+    await ops.send({ t: "token.move", tokenId: run.pony, x: HOLE.x, y: HOLE.y });
+    await waitFor("both below", () => (tokenOf(run.pony)?.sceneId === run.ground && tokenOf(run.kobold)?.sceneId === run.ground ? true : null));
+    const card = dm.getByRole("region", { name: "Fall: Pony and Kobold" });
+    await card.getByText("Pony and Kobold fell 10 ft to Ground floor: each 1d6 Bludgeoning, Prone.", { exact: true }).waitFor();
+    await card.getByRole("button", { name: "Apply Pony and Kobold's fall" }).click();
+    const damage = dm.getByLabel("Damage", { exact: true });
+    await damage.waitFor();
+    const lines0 = state()?.log.length ?? 0;
+    await damage.press("Enter");
+    const rolled = await waitFor("the fall's roll", () => state()?.log.slice(lines0).find((e) => e.data?.type === "dice" && e.data.rolls.some((r) => r.formula === "1d6")) ?? null);
+    const amount = rolled.data?.type === "dice" ? rolled.data.rolls.find((r) => r.formula === "1d6")!.total : 0;
+    const apply = dm.getByRole("button", { name: /^Apply/ }).last();
+    await apply.waitFor();
+    await apply.click();
+    const hp = (id: string) => {
+      const a = tokenOf(id)?.actor;
+      return a && "inline" in a ? a.inline.hp?.cur : undefined;
+    };
+    await waitFor(`both at ${HP - amount}`, () => (hp(run.pony) === HP - amount && hp(run.kobold) === HP - amount ? true : null));
+    assert.equal(await dm.getByText("This save's choices could not be kept", { exact: false }).count(), 0);
+    await waitFor("the card gone", () => (Object.keys(state()?.falls ?? {}).length === 0 ? true : null));
+    await card.waitFor({ state: "detached" });
+    await shots.take(dm, "lp46fix-1-riders-applied");
+  });
+
+  test("LP46FIX-3. four creatures that fall in one op toast once with the count, in line on a phone at 100% and 130%", async () => {
+    const cells = [{ x: HOLE.x, y: HOLE.y }, { x: HOLE.x + 1, y: HOLE.y }, { x: HOLE.x, y: HOLE.y + 1 }, { x: HOLE.x + 1, y: HOLE.y + 1 }];
+    const lines: string[] = [];
+    try {
+      for (const scale of SCALES) {
+        await sizeTo(dm, PHONE, scale);
+        const imps = cells.map(() => uuidv7());
+        for (const [i, id] of imps.entries()) await ops.send({ t: "token.create", token: { id, sceneId: run.upper, kind: "monster", name: `Imp ${i + 1}`, disposition: "hostile", actor: { inline: actor(HP) }, x: i, y: 12, size: "small", visibility: "all" } });
+        await waitFor("the imps upstairs", () => (imps.every((id) => tokenOf(id)?.sceneId === run.upper) ? true : null));
+        await ops.send({ t: "token.moveMany", moves: imps.map((tokenId, i) => ({ tokenId, ...cells[i]! })) });
+        await waitFor("the imps below", () => (imps.every((id) => tokenOf(id)?.sceneId === run.ground) ? true : null));
+        const note = toast(dm, "4 creatures fell to Ground floor.");
+        await note.waitFor();
+        assert.equal(await dm.locator("[data-toast]").filter({ hasText: /Imp \d fell/ }).count(), 0, "no toast for each");
+        lines.push(...alignmentLines(await measureAlignment(note), `${at(PHONE, scale)} the crowd's toast`));
+        await shots.take(dm, `lp46fix-3-crowd-toast-${at(PHONE, scale)}`);
+        await ops.send({ t: "token.deleteMany", tokenIds: imps });
+        await waitFor("their cards gone", () => (Object.keys(state()?.falls ?? {}).length === 0 ? true : null));
+      }
+    } finally {
+      await deskAgain(dm);
+    }
+    assert.deepEqual(lines, [], "the crowd's toast out of line");
+  });
+
   test("fl4o-6. the bat over the hole leads its bar with Fly down, named and tipped for Ground floor, in line, { flies it down 5 ft over the ground and } back up", async () => {
     await showFloor(dm, "Upper floor");
     await deselect(dm);
@@ -574,7 +643,9 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
 
   test("fl4o-7. a pit trap on Upper floor gets Into, in line, Ground floor makes it a trapdoor, and its springing drops the goblin standing on it to Ground floor with a card", async () => {
     await showFloor(dm, "Upper floor");
-    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, pit: { floor: -10 }, hits: "trigger", actions: [], find: [], notice: false };
+    // Made from Hidden Pit (LP46FIX-2): its 1d6 and its words are the pit's falling damage and the pit's own.
+    const pit = trapPreset("hidden-pit", "1-4")!.rig;
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, pit: { floor: -10 }, hits: "trigger", actions: [], find: [], notice: false, damage: pit.damage, note: pit.note, preset: "hidden-pit" };
     await ops.send({ t: "trap.create", trap: { id: run.trapdoor, sceneId: run.upper, name: "Trapdoor", zone: { cells: [TRAPDOOR] }, rig } });
     await ops.send({ t: "token.create", token: { id: run.goblin2, sceneId: run.upper, kind: "monster", name: "Second Goblin", disposition: "hostile", actor: { inline: actor(HP) }, x: TRAPDOOR.x, y: TRAPDOOR.y, size: "medium", visibility: "all" } });
     await waitFor("the trap and the goblin upstairs", () => (state()?.traps[run.trapdoor] && tokenOf(run.goblin2) ? true : null));
@@ -616,6 +687,15 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await waitFor("the goblin dropped below", () => (tokenOf(run.goblin2)?.sceneId === run.ground ? true : null));
     assert.deepEqual([tokenOf(run.goblin2)!.x, tokenOf(run.goblin2)!.y], [TRAPDOOR.x, TRAPDOOR.y], "onto the same squares");
     await dm.getByRole("region", { name: "Fall: Second Goblin" }).waitFor();
+    // LP46FIX-2: the trap card says where it opened, and leaves the drop's damage to the fall card.
+    const trapCard = dm.getByRole("group", { name: "Trapdoor went off" });
+    await trapCard.waitFor();
+    const fold = trapCard.getByRole("button", { expanded: false });
+    if ((await fold.count()) > 0) await fold.first().click();
+    await trapCard.getByText("Opened the trapdoor onto Ground floor.", { exact: true }).waitFor();
+    assert.equal(await trapCard.getByRole("button", { name: "Save and damage" }).count(), 0, "no second fall damage");
+    assert.equal(await trapCard.getByText("10-foot pit", { exact: false }).count(), 0, "no pit words");
+    await shots.take(dm, "lp46fix-2-trapdoor-card");
     for (const id of Object.keys(state()?.falls ?? {})) await ops.send({ t: "fall.settle", fallId: id });
     for (const due of state()?.traps[run.trapdoor]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapdoor, due: due.id });
   });
