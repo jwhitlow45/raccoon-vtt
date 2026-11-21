@@ -15,6 +15,7 @@ import {
   logsInIdOrder,
   MAX_LOG,
   memberRing,
+  ownLines,
   PARTY_LINE_BASE,
   PARTY_SLOT,
   rosterRanks,
@@ -781,6 +782,44 @@ describe("shared live-log scans", () => {
       if (writable === "log") state.log.splice(0, 30);
       else for (let i = 0; i < 40; i++) state.members[`new${i}`] = member(`new${i}`);
       assert.equal(liveStart(state, P1), referenceStart(state, P1));
+    }
+  });
+});
+
+describe("the lines a player holds (shared/logRings.ts ownLines)", () => {
+  test("the shared lines and the player's own copies, in id order, never a DM line, another's copy or a whisper", () => {
+    // A DM line one player reads: the DM's line and one copy for its reader, as Tx.addLog writes them.
+    const pet: Line = { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 3 } };
+    const mount: Line = { kind: "event", data: { type: "hp", tokenId: "mount", change: "damage", amount: 2 } };
+    const shared: Line = { kind: "event", data: { type: "hp", tokenId: "hero", change: "damage", amount: 1, seen: true } };
+    const gob: Line = { kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 4 } };
+    let state = write(base(), [shared, pet, gob], 1).state;
+    state = write(state, [mount], 2).state;
+    state = write(state, [{ kind: "whisper", from: "p2", to: ["p1"], text: "psst" }], 3).state;
+    const ids = (lines: readonly LogEntry[]) => lines.map((e) => e.id);
+    const audiences = (memberId: string) => ownLines(state.log, memberId).map((e) => (lineAudience(e) === "party" ? `party ${e.to!.join()}` : lineAudience(e)));
+    assert.deepEqual(audiences("p1"), ["shared", "party p1", "party p1"]);
+    assert.deepEqual(audiences("p2"), ["shared", "party p2"]);
+    assert.ok(ownLines(state.log, "p1").every((e) => !dmNumbered(e.id) && e.kind !== "whisper"));
+    assert.deepEqual(ids(ownLines(state.log, "p1")), ids(state.log.filter((e) => ownLines(state.log, "p1").includes(e))), "in the log's order");
+    assert.deepEqual(ownLines(state.log, "dm1"), state.log.filter((e) => lineAudience(e) === "shared"), "a member with no copies holds the shared lines alone");
+  });
+
+  test("on a player's own projection it keeps what they read of the same lines", () => {
+    for (const seed of [5, 11, 23]) {
+      const r = rng(seed);
+      let state = base();
+      for (let seq = 1; seq <= 120; seq++) {
+        const step = randomStep(r, state);
+        state = "lines" in step ? write(state, step.lines, seq).state : churn(state, step, seq).state;
+      }
+      for (const viewer of [P1, P2]) {
+        const held = new Set(ownLines(state.log, viewer.memberId).map((e) => e.id));
+        const copy = liveLog(state, viewer);
+        const own = ownLines(copy, viewer.memberId);
+        assert.ok(own.every((e) => held.has(e.id)), `seed ${seed}: ${viewer.memberId}'s copy holds no line beyond theirs`);
+        assert.deepEqual(own.map((e) => e.id), copy.filter((e) => e.kind !== "whisper").map((e) => e.id), `seed ${seed}: every line of the copy but a whisper`);
+      }
     }
   });
 });

@@ -4,7 +4,7 @@ import { idTime } from "#shared/ids.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, OPENINGS_SNAPSHOT_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { FallRecord, HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -672,8 +672,9 @@ export class RoomActor {
     // A room whose replay failed writes no snapshot at all, so a fixed build can still rebuild it from its rows.
     // From the numbering upgrade on, and so for the automatic Unconscious upgrade (persistence.ts automaticUpgrade): a
     // room loaded across it is saved with its first commit, so its converted ids are stored once. And across openings
-    // between floors, so an older build refuses a room once its first op of change format 64 is stored.
-    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < OPENINGS_SNAPSHOT_VERSION;
+    // between floors and walks that end with their turn, so an older build refuses a room once its first op of change
+    // format 64, or of 65, is stored.
+    this.#countSnapshotDue = !loaded.replayFailed && loaded.snapshotVersion < WALK_TRIM_SNAPSHOT_VERSION;
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
@@ -2959,7 +2960,7 @@ export class RoomActor {
    * higher one handed out, and moves neither. A meeting names no scene, so
    * its growth goes to the floors of the creatures it wrote.
    */
-  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember"> | OpOf<"sys.meet"> | OpOf<"sys.rideEnd"> | OpOf<"sys.share">, what: string): boolean {
+  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember"> | OpOf<"sys.meet"> | OpOf<"sys.rideEnd"> | OpOf<"sys.share"> | OpOf<"sys.shed">, what: string): boolean {
     // Never reached while #commitNow skips the explore there: the tail a failed replay left holds the next seq, or a gap.
     if (this.replayFailed) {
       this.#log.error({ roomId: this.roomId }, `${what} op skipped, the room's replay failed`);
@@ -2984,7 +2985,7 @@ export class RoomActor {
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
     if (result.rejudge) batch.rejudge = true;
-    this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : op.t === "sys.rideEnd" || op.t === "sys.share" ? [] : [op.sceneId]);
+    this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : op.t === "sys.rideEnd" || op.t === "sys.share" || op.t === "sys.shed" ? [] : [op.sceneId]);
     return true;
   }
 

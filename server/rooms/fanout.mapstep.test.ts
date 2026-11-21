@@ -112,7 +112,7 @@ describe("players' maps by fog class through the fan-out (5.6)", () => {
             }
             const fresh = projectState(state, v.conn.viewer, { sceneId: "s1" });
             assert.equal(stableStringify(v.view), stableStringify(fresh), `step ${i}, ${v.conn.memberId}`);
-            assert.ok(!Object.keys(v.view).some((k) => MEMORY_KEYS.test(k) && (v.view as Record<string, unknown>)[k] !== undefined && Object.keys((v.view as Record<string, object>)[k] ?? {}).length > 0), `no memory in ${v.conn.memberId}'s copy`);
+            assert.ok(!Object.keys(v.view).some((k) => MEMORY_KEYS.test(k) && (v.view as Record<string, unknown>)[k] !== undefined && Object.keys((v.view as unknown as Record<string, object>)[k] ?? {}).length > 0), `no memory in ${v.conn.memberId}'s copy`);
           }
           if (i === 3) {
             const [, p1] = viewers;

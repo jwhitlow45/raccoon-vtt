@@ -434,6 +434,9 @@ const pathStop = z.strictObject({
 const pathFeet = z.number().min(0).max(1_000_000);
 const pathDiag = z.tuple([pathFeet, pathFeet]);
 const pathPrior = z.strictObject({ moved: pathFeet.optional(), cost: pathFeet.optional(), diag: pathDiag.optional(), seenDiag: pathDiag });
+const tokenPath = z.strictObject({ turn: z.number().int().min(0), prior: pathPrior.optional(), stops: z.array(pathStop).min(1).max(MAX_PATH_STOPS) });
+/** A walk a turn's end keeps in its history step (EncounterSnapshot.walks), without the lists of who saw its stops. */
+const savedPath = tokenPath.extend({ stops: z.array(pathStop.omit({ seenBy: true })).min(1).max(MAX_PATH_STOPS) });
 
 /** Eighths of a square, at most 3/8 off a token's spot (rules/nudge.ts nudgeBound). */
 const nudgeEighths = z.number().int().min(-3).max(3);
@@ -471,7 +474,7 @@ const token = z.strictObject({
   altImages: z.array(imageRef).min(1).max(MAX_ALT_IMAGES).optional(),
   rangeRings: z.array(z.number().int().min(5).max(MAX_RANGE_RING_FT)).min(1).max(MAX_RANGE_RINGS).optional(),
   // Backups from before paths were recorded have none, and those from before stairs no `prior` (docs/design/design-v1-floors.md phase 2, 5).
-  path: z.strictObject({ turn: z.number().int().min(0), prior: pathPrior.optional(), stops: z.array(pathStop).min(1).max(MAX_PATH_STOPS) }).optional(),
+  path: tokenPath.optional(),
   // Backups from before wave 4 have none of these.
   squeeze: z.literal(true).optional(),
   light: mapSchemas.tokenLight.optional(),
@@ -699,6 +702,11 @@ const encounterSnapshot = z.strictObject({
     // One for each creature a Next changed, as `effects` holds them: up to every creature in the room, which the state's byte limit bounds.
     .optional(),
   resumesGone: z.literal(true).optional(),
+  // The walks of the turn a Next ended (op version 65), none in backups from before it.
+  walks: z
+    .array(z.strictObject({ tokenId: id, sceneId: id, x: coord, y: coord, elevation: z.number().int().min(-100_000).max(100_000), path: savedPath }))
+    .max(FAR.tokens)
+    .optional(),
   at: iso,
 });
 
@@ -849,7 +857,7 @@ const logEvent = z.discriminatedUnion("type", [
     back: z.literal(true).optional(),
     hidden: z.literal(true).optional(),
   }),
-  z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
+  z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause", "hide", "show"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional(), exact: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: effectIdSchema, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
   z.strictObject({ type: z.literal("deathSave"), ...holder, ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3), exact: z.literal(true).optional() }),
@@ -1146,6 +1154,8 @@ export const roomStateSchema = z.strictObject({
   trapSeen: z.array(trapLogEntry).max(LIMITS.trapSeenLines),
   // The record of the running turn's reminders, which an export may carry and the import leaves behind (remap.ts).
   reminded: reminded.optional(),
+  // The newest DM line a shed took out (RoomState.dmLogShed), which an export may carry and the import leaves behind (remap.ts).
+  dmLogShed: lineId.optional(),
   // Map discovery (docs/design/design-v1-map-discovery.md 5.3, 5.5). A backup from before it reaches this schema through the
   // snapshot migration, which adds them empty, and an import that carries none starts with none. A holder's chunk key
   // names its scene, member and place, longer than an id.

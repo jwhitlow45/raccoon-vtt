@@ -116,6 +116,7 @@ import {
   viewFollow,
 } from "./reducer/room.ts";
 import { sysRideEnd } from "./reducer/rideEnd.ts";
+import { sysShed } from "./reducer/shed.ts";
 import {
   characterCreate,
   characterDelete,
@@ -161,6 +162,16 @@ export type Applied = {
   withoutTraps?: () => ApplyResult;
   /** The keys only the trap step wrote, which a player's undo of the move leaves as they are (6.5). */
   trapWrote?: ReadonlySet<EntityKey>;
+  /**
+   * The tokens whose walk the op took off only because their creature is
+   * outside the turn under way (Tx.dropWalk, op version 65), by key: a
+   * mount that left its rider's turn, or a walk a room stored from before.
+   * A player's undo step leaves that removal out, keeping a key with no
+   * other change out of the step and a key changed otherwise with its walk
+   * as the op left it, and the step's pose checks skip a token whose only
+   * change it is.
+   */
+  walksDropped?: ReadonlySet<EntityKey>;
   /**
    * One record a root that fell through an opening in the op
    * (docs/design/design-v1-floors.md phase 4, 4.5), with the upper end as it
@@ -289,6 +300,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     ...(trapWrote && trapWrote.size > 0 ? { trapWrote } : {}),
     ...(traps?.wrote || plain ? { withoutTraps: () => (plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true })) } : {}),
     ...(falls.length > 0 ? { falls } : {}),
+    ...(tx.walksDropped().size > 0 ? { walksDropped: tx.walksDropped() } : {}),
   };
 }
 
@@ -633,6 +645,8 @@ function dispatch(tx: Tx, op: Op): void {
       return sysRideEnd(tx, op);
     case "sys.share":
       return sysShare(tx, op);
+    case "sys.shed":
+      return sysShed(tx, op);
     case "vision.holders":
       return visionHolders(tx, op);
     case "token.updateMany":

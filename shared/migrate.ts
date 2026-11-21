@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 48;
-export const OP_VERSION = 64;
+export const SNAPSHOT_VERSION = 49;
+export const OP_VERSION = 65;
 
 export type MigrationStep = {
   from: number;
@@ -300,6 +300,12 @@ export const snapshotMigrations: MigrationStep[] = [
   // commit at change format 64 carries this snapshot (server/rooms/actor.ts #countSnapshotDue), so no older build ever
   // loads a room part way through ops it does not know.
   { from: 47, to: 48, apply: (state) => state },
+  // Walks that end with their turn (WALK_TRIM_SNAPSHOT_VERSION): a history step's `walks`, an effect line's `hide` and
+  // `show` actions and the room's `dmLogShed` are new, and absent reads as before, so a v48 room is a v49 room as it is.
+  // The number moves so that an older build refuses a v49 snapshot instead of loading it: its strict schema refuses each
+  // of them, and it would keep a walk on its creature past its turn. The room's first commit at change format 65
+  // carries this snapshot (server/rooms/actor.ts #countSnapshotDue).
+  { from: 48, to: 49, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1523,6 +1529,20 @@ export const opMigrations: MigrationStep[] = [
     to: 64,
     apply: (op) => op,
   },
+  {
+    // Walks that end with their turn (WALK_TRIM_OP_VERSION): `sys.shed` is new, and a `sys.restore`'s `climb` and each of
+    // its `falls` may carry `shown`, all of which an older strict schema refuses, so no stored op changes shape and the
+    // step is the identity. From this version a creature's walk ends with its turn (walksEndWithTurn), hiding or showing
+    // a condition writes a line and a hide closes the condition's open save request (classChangesWriteLines), a line's
+    // readers read a companion's HP by the link their copy holds (companionByCopy), and a player's cast reads the rolls
+    // of lines they hold (rollsFromOwnLines). Ops stored before replay as they ran.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup for any room this version saved, since its first commit writes a v49 snapshot that an older build
+    // refuses.
+    from: 64,
+    to: 65,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2236,6 +2256,70 @@ export function opensOps(opVersion: number | undefined): boolean {
  */
 export function dragsEndClear(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < OPENINGS_OP_VERSION);
+}
+
+/**
+ * The first op version and snapshot version of walks that end with their
+ * turn (walksEndWithTurn), of the lines a condition's hide and show write
+ * (classChangesWriteLines), of a line's companion readers by the copy
+ * (companionByCopy), of a player's cast read from their own lines
+ * (rollsFromOwnLines), of `sys.shed`, and of `shown` on a restore's climb
+ * and fall records.
+ */
+export const WALK_TRIM_OP_VERSION = 65;
+export const WALK_TRIM_SNAPSHOT_VERSION = 49;
+
+/**
+ * Whether a creature's walk ends with its turn (D-261120-100): Next, a
+ * removal that passes the turn on, Previous and a fight's end take every
+ * walk off its creature, a Next keeps those of the turn it ended in its
+ * history step, Previous puts back those of the turn it resumes, and a
+ * restore keeps a walk only on a creature whose turn it is. A mount that
+ * leaves its rider's turn loses its walk, and every op ends with no walk
+ * of the turn under way on a creature outside that turn, so a room stored
+ * before keeps no such walk past its first op from this version. So no
+ * stored walk outlives its turn. Ops stored before version 65 left a walk
+ * on its creature until its next move, and replay so. Live ops carry no
+ * stored version and take today's rule.
+ */
+export function walksEndWithTurn(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < WALK_TRIM_OP_VERSION);
+}
+
+/**
+ * Whether hiding a shown condition from players, or showing a hidden one,
+ * writes a line (actor.effect.update): players read a hide as the
+ * condition's removal and a show as its add, and the DM reads that it is
+ * hidden or shown. A hide also closes the condition's open save request
+ * as a removal does, with no line, leaving its occurrence pending. Ops
+ * stored before version 65 wrote no line and left the request open, and
+ * replay so. Live ops carry no stored version and take today's rule.
+ */
+export function classChangesWriteLines(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < WALK_TRIM_OP_VERSION);
+}
+
+/**
+ * Whether a line, when it settles, reads a creature's HP, life and life
+ * lines for each player by the companion link as that player's copy holds
+ * it, so a companion whose link the copy lacks reads as a plain object.
+ * It fixes a line's readers, ids and parts, so ops stored before version
+ * 65, which read the stored link, replay so. Live ops carry no stored
+ * version and take today's rule.
+ */
+export function companionByCopy(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < WALK_TRIM_OP_VERSION);
+}
+
+/**
+ * Whether a player's cast reads its damage rolls only from lines the
+ * player holds: the shared lines and their own party copies
+ * (shared/logRings.ts ownLines), never the DM's line a copy stands for.
+ * Ops stored before version 65 read one line per event (eventLines), and
+ * replay so. Live ops carry no stored version and take today's rule.
+ */
+export function rollsFromOwnLines(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < WALK_TRIM_OP_VERSION);
 }
 
 /**

@@ -2054,6 +2054,12 @@ const fallCard = z.strictObject({
   made: z.number().int().min(0),
 });
 /** One root's fall in a player's step (FallRecord), with the card its undo removed. */
+/**
+ * The ends a climb or a fall took as its player was shown them (model.ts
+ * ShownEnds), on records from op version 65.
+ */
+const shownEnds = z.strictObject({ kind: floorLinkKind, rect: floorLinkRect, pairRect: floorLinkRect, grid: gridShape.optional() });
+
 const fallRecord = z.strictObject({
   tokenId: id,
   linkId: plainId,
@@ -2063,6 +2069,7 @@ const fallRecord = z.strictObject({
   to: id,
   fallId,
   card: fallCard.optional(),
+  shown: shownEnds.optional(),
 });
 
 /**
@@ -3050,6 +3057,16 @@ const historyOpSchema = z.looseObject({ t: z.enum(["undo", "redo"]) }).pipe(hist
 /** The most areas, and the most rulers, one `sys.rideEnd` names. */
 export const RIDE_END_MOST = 1_000;
 const inIdOrder = (ids: readonly string[]) => ids.every((x, i) => i === 0 || ids[i - 1]! < x);
+/** Log line ids, `"<seq>:<index>"`, each after the one before by seq and then index (keys.ts compareLogIds). */
+const inLogOrder = (ids: readonly string[]) =>
+  ids.every((x, i) => {
+    if (i === 0) return true;
+    const [as, ai] = ids[i - 1]!.split(":").map(Number);
+    const [bs, bi] = x.split(":").map(Number);
+    return as! < bs! || (as === bs && ai! < bi!);
+  });
+/** The most history steps one `sys.shed` takes: every step but the newest, which a shed keeps (reducer/encounter.ts MAX_HISTORY). */
+export const SHED_STEPS_MOST = 19;
 
 export const serverOnlyOps = [
   op("sys.memberJoin", {
@@ -3108,13 +3125,16 @@ export const serverOnlyOps = [
     quiet: z.array(id).min(1).max(MAX_RESTORE_ENTRIES).optional(),
     /**
      * The climb the step made (docs/design/design-v1-floors.md phase 2, 8):
-     * the climber, the end it took by id, rev and `made`, and the floors
-     * from and to. Under it the restore may move the climber, its
-     * passengers and their areas between those two floors and no others.
-     * Only permissions read it, and only the server builds a restore, from
-     * its own history.
+     * the climber, the end it took by id, rev and `made`, the floors from
+     * and to, and from op version 65 the ends as its player was shown them
+     * (`shown`). Under it the restore may move the climber, its passengers
+     * and their areas between those two floors and no others. Only
+     * permissions read it, and only the server builds a restore, from its
+     * own history.
      */
-    climb: z.strictObject({ tokenId: id, linkId: plainId, rev: z.number().int().min(0), made: z.number().int().min(0), from: id, to: id }).optional(),
+    climb: z
+      .strictObject({ tokenId: id, linkId: plainId, rev: z.number().int().min(0), made: z.number().int().min(0), from: id, to: id, shown: shownEnds.optional() })
+      .optional(),
     /**
      * The falls through openings the step made (docs/design/design-v1-floors.md
      * phase 4, 4.5), one record a root the player received, beside `climb`,
@@ -3228,6 +3248,17 @@ export const serverOnlyOps = [
    * written once into its mark at the room's first load on this format
    * and at an import. A share never moves again.
    */
+  /**
+   * What a batch's close takes out of a room whose stored bytes pass
+   * HARD.storedBytes (op version 65, server/rooms/sizeGuard.ts): the DM
+   * lines `lines` names, an oldest run of the DM's ring that the archive
+   * already holds, in id order, then the fight's `steps` oldest history
+   * steps. It writes no log line. Replay applies it as stored.
+   */
+  op("sys.shed", {
+    lines: z.array(logId).max(LIMITS.dmLogLines).refine(inLogOrder, { message: "lines shed are listed once each, in id order" }),
+    steps: z.number().int().min(0).max(SHED_STEPS_MOST),
+  }).refine((o) => o.lines.length + o.steps > 0, { message: "nothing shed" }),
   op("sys.share", {
     shares: z
       .array(z.strictObject({ sceneId: id, share: z.number().int().min(0).max(MARKED_SHARE_MOST) }))
@@ -4081,6 +4112,7 @@ export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
   "sys.meet": "server",
   "sys.rideEnd": "server",
   "sys.share": "server",
+  "sys.shed": "server",
   "sys.sound": "server",
   "sys.dice": "server",
 };

@@ -135,6 +135,7 @@ function handMade(state: RoomState): Case[] {
   dm({ t: "sys.meet", tokenIds: [t0] });
   dm({ t: "sys.rideEnd", templates: [Object.keys(state.templates)[0] ?? "a0"], drawings: [Object.keys(state.drawings)[0] ?? "d0"] });
   dm({ t: "sys.share", shares: [{ sceneId: "s1", share: 1_024 }] });
+  dm({ t: "sys.shed", lines: [state.log[0]?.id ?? "1:900000"], steps: 1 });
   dm({ t: "sys.restore", entries: [{ key: `token:${t0}`, value: null }], from: "undo", deps: true });
   ops.push({ op: { t: "sys.restore", entries: [{ key: `token:${t0}`, value: state.tokens[t0] ?? null }], from: "redo", deps: true }, who: P1 });
   const asked = [

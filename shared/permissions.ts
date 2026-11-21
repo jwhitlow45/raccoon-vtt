@@ -759,6 +759,9 @@ function forDm(op: Op, c: Check): Decision {
     case "sys.share":
       // Shares of the remembered map pool are written once by the server (shared/limits.ts MARKED_POOL).
       return refuse("forbidden", "the server writes shares of remembered maps");
+    case "sys.shed":
+      // The actor takes old lines and history steps out of a room past its stored bound, at a batch's close (server/rooms/sizeGuard.ts).
+      return refuse("forbidden", "the server takes old lines and fight history out of a full room");
     case "sound.create":
       // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-music.md 7.1).
       if (c.deps.roomSound === false) return refuse("invalid", SOUND_OFF);
@@ -1045,6 +1048,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "sys.meet":
     case "sys.rideEnd":
     case "sys.share":
+    case "sys.shed":
     case "token.deleteMany":
     case "journal.create":
     case "journal.update":

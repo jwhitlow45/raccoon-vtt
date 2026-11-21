@@ -116,6 +116,8 @@ export type ResolvedActor = {
  */
 export class Tx {
   state: RoomState;
+  /** The room as the op found it, which no write changes. */
+  readonly initial: RoomState;
   readonly env: Env;
   readonly actor: Viewer;
   global = false;
@@ -127,6 +129,8 @@ export class Tx {
   private readonly order: EntityKey[] = [];
   /** Keys this op wrote only for bookkeeping (see bumpWalls), which its inverse leaves out. */
   private readonly bookkeeping = new Set<EntityKey>();
+  /** The tokens whose walk dropWalk took off, by key. */
+  private readonly droppedWalks = new Set<EntityKey>();
   private logIndex = 0;
   private dmLineIndex = 0;
   /**
@@ -145,6 +149,7 @@ export class Tx {
   private readonly frozenReach = new Map<LogEntry, LineReach>();
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
+    this.initial = state;
     this.state = { ...state };
     markWritable(this.state);
     this.actor = actor;
@@ -279,6 +284,28 @@ export class Tx {
 
   remove(key: EntityKey): void {
     this.write(key, null);
+  }
+
+  /**
+   * Takes the walk off a creature outside the turn under way, as every op
+   * from version 65 ends (shared/migrate.ts walksEndWithTurn): a mount that
+   * left its rider's turn, or a walk of the turn a room stored before then.
+   * It is written as any change is, and the key joins `walksDropped`, so a
+   * player's undo step and its pose checks can leave the walk's removal out
+   * (Applied.walksDropped).
+   */
+  dropWalk(tokenId: string): void {
+    const key = keys.token(tokenId);
+    const token = readEntity(this.state, key) as Token | null;
+    if (!token || token.path === undefined) return;
+    const { path: _path, ...rest } = token;
+    this.write(key, rest);
+    this.droppedWalks.add(key);
+  }
+
+  /** The tokens whose walk dropWalk took off in this op, by key. */
+  walksDropped(): ReadonlySet<EntityKey> {
+    return this.droppedWalks;
   }
 
   /**

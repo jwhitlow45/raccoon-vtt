@@ -536,6 +536,21 @@ export function eventLines(log: readonly LogEntry[]): LogEntry[] {
   return log.filter((e) => e.copyOf === undefined || !dmLines.has(e.copyOf));
 }
 
+/**
+ * The lines one player holds of the log, for the reads that judge what is
+ * theirs: the shared lines and the copies of party lines made for them
+ * (`to`, the reader alone), in id order. Never a DM line, a party line's
+ * own included, and never another's copy or a whisper. On a player's own
+ * projection, which holds only what they read, it keeps the shared lines
+ * and their copies too, so the read answers as the server's does.
+ */
+export function ownLines(log: readonly LogEntry[], memberId: string): LogEntry[] {
+  return log.filter((e) => {
+    const audience = lineAudience(e);
+    return audience === "shared" || (audience === "party" && e.to?.[0] === memberId);
+  });
+}
+
 function seqOf(id: string): number {
   return Number(id.slice(0, id.indexOf(":")));
 }

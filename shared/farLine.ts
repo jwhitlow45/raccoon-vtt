@@ -186,6 +186,7 @@ export const FAR_TREATMENT: { readonly [T in OpType]: FarTreatment } = {
   "sys.memberRemove": "server",
   "sys.rideEnd": "server",
   "sys.share": "server",
+  "sys.shed": "server",
   "sys.meet": "server",
   "sys.dice": "bookkeeping",
 };

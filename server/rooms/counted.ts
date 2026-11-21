@@ -30,6 +30,7 @@ const SERVER_ONLY: Record<ServerOnlyOp["t"], boolean> = {
   "sys.meet": false,
   "sys.rideEnd": false,
   "sys.share": false,
+  "sys.shed": false,
 };
 
 /**

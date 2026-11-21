@@ -51,6 +51,12 @@ import {
   OPENINGS_OP_VERSION,
   OPENINGS_SNAPSHOT_VERSION,
   opensOps,
+  WALK_TRIM_OP_VERSION,
+  WALK_TRIM_SNAPSHOT_VERSION,
+  walksEndWithTurn,
+  classChangesWriteLines,
+  companionByCopy,
+  rollsFromOwnLines,
   meetsNumbers,
   needsNumberingUpgrade,
   seatsApart,
@@ -2169,6 +2175,56 @@ describe("op version 64 and snapshot 48, openings between floors (docs/design/de
   test("a build at 63 and 47 refuses a room from this one, so it never draws an opening as a ladder", () => {
     assert.throws(() => runMigrations(opening, 64, 63, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 48, 47, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 65 and snapshot 49, walks that end with their turn", () => {
+  const shown = { kind: "stairs", rect: { x: 1, y: 1, w: 2, h: 2 }, pairRect: { x: 1, y: 1, w: 2, h: 2 } };
+  const climb = { tokenId: "thorn", linkId: "l1", rev: 3, made: 12, from: "s1", to: "s2" };
+  const fall = { tokenId: "thorn", linkId: "o1", rev: 1, made: 14, from: "s2", to: "s1", fallId: "120:0" };
+  const restore = (extra: object) => ({ t: "sys.restore", entries: [{ key: "token:thorn", value: null }], from: "undo", deps: true, ...extra });
+  const shed = { t: "sys.shed", lines: ["9:900000", "10:900001", "10:900002"], steps: 2 };
+
+  test("keeps stored ops and snapshots unchanged through the identity steps, and the new op and fields parse", () => {
+    assert.equal(WALK_TRIM_OP_VERSION, 65);
+    assert.equal(WALK_TRIM_SNAPSHOT_VERSION, 49);
+    assert.equal(OP_VERSION, WALK_TRIM_OP_VERSION);
+    assert.equal(SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION);
+    const old = restore({ climb, falls: [fall] });
+    assert.equal(runMigrations(old, 64, 65, opMigrations), old);
+    assert.equal(migrateOp(old, 64), old);
+    for (const op of [old, restore({ climb: { ...climb, shown }, falls: [{ ...fall, shown: { ...shown, kind: "opening", grid: "hexRows" } }] }), shed, { ...shed, lines: [] }, { ...shed, steps: 0 }]) {
+      assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+    }
+    const state = room();
+    assert.equal(runMigrations(state, 48, 49, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 48), state);
+  });
+
+  test("a shed names something, its lines once each in id order and its steps short of the history's newest", () => {
+    for (const op of [
+      { ...shed, lines: [], steps: 0 },
+      { ...shed, lines: ["10:900001", "9:900000"] },
+      { ...shed, lines: ["9:900000", "9:900000"] },
+      { ...shed, steps: 20 },
+      { ...shed, steps: -1 },
+      { ...shed, lines: ["x"] },
+      { ...shed, lines: Array.from({ length: LIMITS.dmLogLines + 1 }, (_, i) => `${i + 1}:900000`) },
+    ]) {
+      assert.equal(opSchema.safeParse(op).success, false, JSON.stringify(op).slice(0, 120));
+    }
+    assert.ok(opSchema.safeParse({ ...shed, lines: Array.from({ length: LIMITS.dmLogLines }, (_, i) => `${i + 1}:900000`), steps: 19 }).success);
+  });
+
+  test("gates every rule of the step at 65, so ops stored at 64 and before replay as they ran", () => {
+    for (const gate of [walksEndWithTurn, classChangesWriteLines, companionByCopy, rollsFromOwnLines]) {
+      assert.deepEqual([gate(1), gate(63), gate(64), gate(65), gate(undefined)], [false, false, false, true, true], gate.name);
+    }
+  });
+
+  test("a build at 64 and 48 refuses a room from this one", () => {
+    assert.throws(() => runMigrations(shed, 65, 64, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 49, 48, snapshotMigrations), /down/);
   });
 });
 

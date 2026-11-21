@@ -174,6 +174,14 @@ export type RoomState = {
    */
   reminded?: Reminded;
   /**
+   * The id of the newest DM line `sys.shed` took out of the log (op version
+   * 65), so the DM's live log starts just past it (shared/logRings.ts
+   * liveStarts) and the archive holds every DM line before. Reducer
+   * bookkeeping as `reminded` is: no key names it, so no projection, undo
+   * guard or size measure reads it. An import leaves it behind.
+   */
+  dmLogShed?: string;
+  /**
    * DM only, and never projected under its own key: what the party's
    * explored layer remembers of the build where it differs from the build
    * now, keyed `"<sceneId>:<cx>,<cy>"` (docs/design/design-v1-map-discovery.md
@@ -831,7 +839,16 @@ export type Fall = { id: FallId; rev: number; tokenId: TokenId; riders?: TokenId
  * before the op, the floors from and to, and its card. `card` is only on a
  * step's record: the card an undo removed, which the redo writes back.
  */
-export type FallRecord = { tokenId: TokenId; linkId: FloorLinkId; rev: number; made: number; from: SceneId; to: SceneId; fallId: FallId; card?: Fall };
+export type FallRecord = { tokenId: TokenId; linkId: FloorLinkId; rev: number; made: number; from: SceneId; to: SceneId; fallId: FallId; card?: Fall; shown?: ShownEnds };
+
+/**
+ * An end of stairs, a ladder or an opening as a climb or a fall took it, by
+ * what its taker's player is shown of both ends (docs/design/design-v1-floors.md
+ * phase 2, 8): the kind, this end's `rect` and its pair's, and the hex shape
+ * they were written under. A record from op version 65 carries it, and a
+ * player's undo or redo of the step is judged by it.
+ */
+export type ShownEnds = { kind: FloorLinkKind; rect: CellRect; pairRect: CellRect; grid?: GridShape };
 
 /**
  * A hex grid's orientation (docs/design/design-v1-hex-grids.md 4.1): hex rows have
@@ -1350,9 +1367,11 @@ export type Token = {
   /**
    * Where the creature went on its turn (features section 4): one stop per
    * drop, so the table can see which squares it crossed and how far it has
-   * moved. Only the active creature's moves on its own turn add to it. The
-   * turn passing writes no token, so a path from an earlier turn stays here
-   * and counts as empty (shared/rules/path.ts) until a move replaces it.
+   * moved. Only the active creature's moves on its own turn add to it. From
+   * op version 65 the turn's end takes it off (shared/migrate.ts
+   * walksEndWithTurn). Before then the turn passing wrote no token, so a
+   * path from an earlier turn may still be here, and counts as empty
+   * (shared/rules/path.ts) until a move replaces it or a turn ends.
    */
   path?: TokenPath;
   /**
@@ -2429,8 +2448,22 @@ export type EncounterSnapshot = {
    * step's turn instead.
    */
   resumesGone?: true;
+  /**
+   * The walks of the turn this `next` ended, from op version 65
+   * (shared/migrate.ts walksEndWithTurn), which it took off their creatures,
+   * each with where its creature stood then, in id order. `prev` puts each
+   * back on its creature while the creature still stands there. A walk keeps
+   * no stop's list of who saw it (`seenBy`), which the history's bound does
+   * not hold. From 65 every step holds the list, empty when the turn left
+   * none. A step saved before 65 has none, until a turn's end from 65 takes
+   * off a walk of the turn it ended and keeps it here.
+   */
+  walks?: SavedWalk[];
   at: string;
 };
+
+/** A walk a turn's end took off its creature (EncounterSnapshot.walks). */
+export type SavedWalk = { tokenId: TokenId; sceneId: SceneId; x: number; y: number; elevation: number; path: TokenPath };
 
 /**
  * One creature's effects as a `next` changed them (EncounterSnapshot.effectChanges):
@@ -2915,6 +2948,14 @@ type AboutCreature = { tokenId?: TokenId; characterId?: CharacterId; seen?: true
 export type Vitals = { hp: { cur: number; max: number; temp: number }; life: LifeState; deathSaves: { ok: number; fail: number } };
 
 /**
+ * What an effect line says happened to an effect. From op version 65
+ * (shared/migrate.ts classChangesWriteLines) `hide` and `show` are the DM's
+ * lines of a condition hidden from or shown to players, whose players read
+ * a removal and an add.
+ */
+export type EffectLineAction = "add" | "remove" | "expire" | "pause" | "hide" | "show";
+
+/**
  * What an HP change replaced, kept on its log line so the DM can take the
  * change back from the log (features section 10, design 7.7). DM only: no
  * player projection carries it, the creature's owner included. Reaching 0
@@ -2969,7 +3010,7 @@ export type LogEvent =
       of?: string;
     })
   | (AboutCreature & { type: "life"; life: LifeState })
-  | (AboutCreature & { type: "effect"; key: Effect["key"]; action: "add" | "remove" | "expire" | "pause"; spell?: string; hidden?: true })
+  | (AboutCreature & { type: "effect"; key: Effect["key"]; action: EffectLineAction; spell?: string; hidden?: true })
   /** `exact` restricts a check from damage with parts to viewers who can read exact HP, at write time and when read later. */
   | (AboutCreature & { type: "concentration"; dc?: number; spell?: string; ended?: boolean; hidden?: true; exact?: true })
   /**
