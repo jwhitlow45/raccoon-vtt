@@ -58,9 +58,9 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - fl4o-7: a pit trap on Upper floor gets Into, A pit or Ground floor, in
  *   line, and Ground floor makes it a trapdoor with its help. Its public
  *   springing drops the goblin standing on it to Ground floor with a card.
- *   LP46FIX-2: made from Hidden Pit, its trap card says it opened onto
- *   Ground floor, and neither asks the pit's 1d6 nor reads its pit words,
- *   since the fall card asks the drop's.
+ *   LP46FIX-2: made from Hidden Pit, picking Ground floor takes the pit's
+ *   1d6 and its pit words off the trap, since the fall card asks the
+ *   drop's, so its springing leaves the fall card alone, with no trap card.
  * - fl4o-8: hidden stairs: the pane's Hidden from players hides both ends,
  *   the DM's name adds "Hidden", and Bree gets nothing of them.
  * - fl4o-9: the window's memory: four floors with four openings each over
@@ -663,6 +663,9 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await into.getByRole("radio", { name: "A pit", exact: true }).waitFor();
     await into.getByRole("radio", { name: "Ground floor", exact: true }).click();
     await waitFor("a trapdoor", () => (state()?.traps[run.trapdoor]?.rig?.below === true && state()?.traps[run.trapdoor]?.rig?.pit === undefined ? true : null));
+    // LP46FIX-2: the same step takes the pit's falling damage and words off, as the pane now shows.
+    const door = state()!.traps[run.trapdoor]!.rig!;
+    assert.deepEqual([door.damage, door.note, door.preset], [undefined, undefined, "hidden-pit"], "the pit's 1d6 and words gone, the rest kept");
     await trapPane.getByText("Creatures standing on it fall to Ground floor, onto the same squares.", { exact: true }).waitFor();
     await shots.take(dm, "fl4o-7-trapdoor-into");
     const lines: string[] = [];
@@ -687,15 +690,10 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await waitFor("the goblin dropped below", () => (tokenOf(run.goblin2)?.sceneId === run.ground ? true : null));
     assert.deepEqual([tokenOf(run.goblin2)!.x, tokenOf(run.goblin2)!.y], [TRAPDOOR.x, TRAPDOOR.y], "onto the same squares");
     await dm.getByRole("region", { name: "Fall: Second Goblin" }).waitFor();
-    // LP46FIX-2: the trap card says where it opened, and leaves the drop's damage to the fall card.
-    const trapCard = dm.getByRole("group", { name: "Trapdoor went off" });
-    await trapCard.waitFor();
-    const fold = trapCard.getByRole("button", { expanded: false });
-    if ((await fold.count()) > 0) await fold.first().click();
-    await trapCard.getByText("Opened the trapdoor onto Ground floor.", { exact: true }).waitFor();
-    assert.equal(await trapCard.getByRole("button", { name: "Save and damage" }).count(), 0, "no second fall damage");
-    assert.equal(await trapCard.getByText("10-foot pit", { exact: false }).count(), 0, "no pit words");
-    await shots.take(dm, "lp46fix-2-trapdoor-card");
+    // LP46FIX-2: with nothing of its own left to apply, the trapdoor leaves the drop's damage to the fall card and makes no card.
+    assert.deepEqual(state()?.traps[run.trapdoor]?.rig?.due ?? [], [], "no springing waits");
+    assert.equal(await dm.getByRole("group", { name: "Trapdoor went off" }).count(), 0, "no trap card");
+    await shots.take(dm, "lp46fix-2-trapdoor-fall-only");
     for (const id of Object.keys(state()?.falls ?? {})) await ops.send({ t: "fall.settle", fallId: id });
     for (const due of state()?.traps[run.trapdoor]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapdoor, due: due.id });
   });

@@ -576,15 +576,18 @@ export function newTrapInput(input: { grid: Grid; id: string; sceneId: string; s
  * level read back from the save's DC and the damage, or the preset's name
  * alone once they no longer match any level's.
  */
-export function presetLine(rig: Pick<TrapRig, "preset" | "save" | "damage">): string | null {
+export function presetLine(rig: Pick<TrapRig, "preset" | "save" | "damage" | "below">): string | null {
   if (!rig.preset) return null;
   const any = trapPreset(rig.preset, "1-4");
   if (!any) return null;
-  const formulas = (d: TrapRig["damage"]) => (d ?? []).map((p) => `${p.formula} ${p.type}`).join(",");
-  const band = LEVEL_BANDS.find((b) => {
+  const exact = LEVEL_BANDS.find((b) => {
     const p = trapPreset(rig.preset!, b)!;
-    return p.rig.save?.dc === rig.save?.dc && formulas(p.rig.damage) === formulas(rig.damage);
+    return p.rig.save?.dc === rig.save?.dc && damageKey(p.rig.damage) === damageKey(rig.damage);
   });
+  // A trapdoor's level reads off what the floor below left of it (intoPatch), its falling part gone,
+  // where that names one level: a spiked pit's spikes do, a plain pit's nothing does not.
+  const left = rig.below === true && !exact ? pitBands(rig.preset).filter((b) => b.dc === rig.save?.dc && damageKey(b.rest) === damageKey(rig.damage)) : [];
+  const band = exact ?? (left.length === 1 ? left[0]!.band : undefined);
   return band ? `From ${any.name}, ${BAND_NAMES[band].toLowerCase()}` : `From ${any.name}`;
 }
 
@@ -665,33 +668,56 @@ export function intoOf(rig: Pick<TrapRig, "pit" | "below">): "pit" | "below" | n
   return rig.below === true ? "below" : rig.pit !== undefined ? "pit" : null;
 }
 
+type Damage = NonNullable<TrapRig["damage"]>;
+type IntoPatch = { pit: { floor: number } | null; below: true | null; damage?: Damage | null; note?: null };
+
+const damageKey = (d: TrapRig["damage"]) => (d ?? []).map((p) => `${p.formula} ${p.type}`).join(",");
+
+/** A pit preset's levels, each with its falling part (the first Bludgeoning part) and its other parts, or none for a preset that opens no pit. */
+function pitBands(preset: string | undefined): { band: LevelBand; falling: Damage[number]; rest: Damage; note: string | undefined; dc: number | undefined }[] {
+  if (!preset) return [];
+  return LEVEL_BANDS.flatMap((band) => {
+    const p = trapPreset(preset, band);
+    const damage = p?.rig.damage ?? [];
+    const at = damage.findIndex((d) => d.type === "bludgeoning");
+    if (!p || p.pitDepth === undefined || at < 0) return [];
+    return [{ band, falling: damage[at]!, rest: damage.filter((_, i) => i !== at), note: p.rig.note, dc: p.rig.save?.dc }];
+  });
+}
+
 /**
  * The rig's patch for an Into choice: the floor below clears the pit, and
  * a pit clears the trapdoor and starts 10 ft deep, as Opens a pit does, so
  * a rig never holds both (protocol.ts PIT_OR_BELOW).
+ *
+ * One drop deals its falling damage once, from the fall card
+ * (D-261121-101). So the floor below takes a pit preset's falling part off
+ * the stored rig while its damage is still exactly its level's preset list
+ * (as presetLine reads it, at the level the preset's note names while the
+ * rig still holds it), and the pit's words while they are the preset's.
+ * Anything the DM added or changed, before or after, stays and is asked as
+ * written. Back to a pit, a trap from a pit preset that holds no
+ * Bludgeoning part gets its level's falling part again. Trapdoors stored
+ * before this keep the damage they hold.
  */
-export function intoPatch(choice: "pit" | "below", ground: number): { pit: { floor: number } | null; below: true | null } {
-  return choice === "below" ? { pit: null, below: true } : { pit: { floor: pitFloor(ground, 10) }, below: null };
-}
-
-/**
- * A trap's rig as its card, its toast and its group save read it. One drop
- * deals its falling damage once, from the fall card (D-261121-100): a pit
- * preset opened onto the floor below drops its creatures there, so the
- * preset's falling damage and its pit's words, still as the preset wrote
- * them, go. Its other effects, a spiked pit's spikes among them, and
- * anything the DM changed stay.
- */
-export function cardRig(rig: TrapRig): TrapRig {
-  if (rig.below !== true || !rig.preset) return rig;
-  const bands = LEVEL_BANDS.map((band) => trapPreset(rig.preset!, band)).filter((p) => p?.pitDepth !== undefined);
-  if (bands.length === 0) return rig;
-  const falling = new Set(bands.flatMap((p) => (p!.rig.damage ?? []).filter((d) => d.type === "bludgeoning").map((d) => d.formula)));
-  const damage = rig.damage?.filter((d) => d.type !== "bludgeoning" || !falling.has(d.formula));
-  const card: TrapRig = { ...rig, damage };
-  if (!damage?.length) delete card.damage;
-  if (bands.some((p) => p!.rig.note === rig.note)) delete card.note;
-  return card;
+export function intoPatch(choice: "pit" | "below", ground: number, rig?: Pick<TrapRig, "preset" | "damage" | "note" | "save">): IntoPatch {
+  const bands = pitBands(rig?.preset);
+  if (choice === "below") {
+    const patch: IntoPatch = { pit: null, below: true };
+    // The note, while still the preset's, says which level the trap was made at, so a level's dice typed over
+    // another's (3d6 on a levels 1-4 pit) read as the DM's own. Without it, any level's exact list counts.
+    const made = bands.filter((b) => b.note !== undefined && b.note === rig?.note);
+    const level = (made.length > 0 ? made : bands).find((b) => b.dc === rig?.save?.dc && damageKey([b.falling, ...b.rest]) === damageKey(rig?.damage));
+    if (level) patch.damage = level.rest.length > 0 ? level.rest.map((d) => ({ ...d })) : null;
+    if (rig?.note !== undefined && bands.some((b) => b.note === rig.note)) patch.note = null;
+    return patch;
+  }
+  const patch: IntoPatch = { pit: { floor: pitFloor(ground, 10) }, below: null };
+  if (bands.length > 0 && !(rig?.damage ?? []).some((d) => d.type === "bludgeoning")) {
+    const level = bands.find((b) => damageKey(b.rest) === damageKey(rig?.damage)) ?? bands[0]!;
+    patch.damage = [{ ...level.falling }, ...(rig?.damage ?? []).map((d) => ({ ...d }))];
+  }
+  return patch;
 }
 
 /** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at −10 ft.", with a true minus. */

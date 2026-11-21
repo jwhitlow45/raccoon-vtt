@@ -327,7 +327,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
                   { value: "below", label: below },
                 ]}
                 description={into === "below" ? intoHelp(below) : undefined}
-                onChange={(choice) => setRig(intoPatch(choice, ground))}
+                onChange={(choice) => setRig(intoPatch(choice, ground, rig))}
               />
             </div>
           ) : null}
