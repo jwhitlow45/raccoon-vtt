@@ -2,7 +2,7 @@ import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredRe
 import { holderTileKey, tileKey } from "#shared/keys.ts";
 import { DM_LINE_BASE, MAX_LOG, PARTY_LINE_BASE, PARTY_SLOT, memberRing, ringed, rosterRanks } from "#shared/logRings.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { CompanionBlock, DiceRoll, Effect, EncounterSnapshot, InitEntry, LogEntry, Member, RemindedPairs, RoomState, Token } from "#shared/model.ts";
+import type { CompanionBlock, DiceRoll, Effect, EncounterSnapshot, InitEntry, LogEntry, Member, RemindedPairs, RoomSettings, RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { MAX_CHAT, MAX_EFFECT_LEVEL, MAX_NAME, MAX_NOTES, MAX_PATH_CORNERS, MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
@@ -66,6 +66,13 @@ export type FullRoomOptions = {
   sceneBytes?: number;
   /** Whether a fight runs, its history at its bound and nine walks at their widest on its turn. Yes unless set. */
   fight?: boolean;
+  /**
+   * The room's settings while it fills, as the DM's change of one meets
+   * the DM's line: Players apply damage counts widths on every creature
+   * and character, so a room filled with it off may hold no room to turn
+   * it on.
+   */
+  settings?: Partial<RoomSettings>;
 };
 
 function roster(count: number): { members: Record<string, Member>; dms: string[]; players: string[] } {
@@ -93,7 +100,7 @@ export function fullRoom(opts: FullRoomOptions = {}): FullRoom {
   const { members, dms, players } = roster(opts.members ?? LIMITS.membersPerRoom);
   const sceneId = longId("scene", 0);
   const state = room({
-    meta: { ...room().meta, name: wide(MAX_NAME), playerSceneId: sceneId },
+    meta: { ...room().meta, name: wide(MAX_NAME), playerSceneId: sceneId, settings: { ...room().meta.settings, ...opts.settings } },
     members,
     scenes: { [sceneId]: scene(sceneId, { name: wide(MAX_NAME), bounds: { w: LIMITS.sceneCells, h: LIMITS.sceneCells } }) },
   });

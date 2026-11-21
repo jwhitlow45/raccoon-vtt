@@ -472,14 +472,14 @@ describe("a room past the far line on per-player sight alone", () => {
     assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") }, "the DM's create reads the widest");
   });
 
-  test("LP43-LIMITS-2: inside the 1 MiB the room keeps for the players, the DM's adds are refused in its words and a player's line taken, with the DM's bookkeeping, a move of the players and deletes", async (t) => {
-    // The fewest scenes whose widest reading leaves the players less than 1 MiB and at least a step.
+  test("LP43-LIMITS-2: inside what the room keeps for the players, the DM's adds are refused in its words and a player's line taken, with the DM's bookkeeping, a move of the players and deletes", async (t) => {
+    // The fewest scenes whose widest reading leaves the players less than KEPT_FOR_PLAYERS and at least a step.
     const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
     const scenes = [8, 9, 10, 11, 12].find((n) => {
       const reading = farRoomBytes(perPlayerRoom(n), true);
       return reading > playersLine - KEPT_FOR_PLAYERS && reading <= playersLine - FAR.byteStep;
     });
-    assert.ok(scenes !== undefined, "a room inside the kept 1 MiB");
+    assert.ok(scenes !== undefined, "a room inside the kept room");
     const state = perPlayerRoom(scenes);
     // A second scene the party explores, so moving the players there raises the room's reserves, and a goblin of the DM's.
     state.scenes.s2 = { ...state.scenes.s2!, fogEnabled: true, vision: { on: true, light: "bright" } };

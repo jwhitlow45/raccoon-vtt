@@ -1434,21 +1434,39 @@ export const FAR = {
 export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as const;
 
 /**
+ * The most bytes one thing takes in a player's exact part past what the
+ * stepped part takes out for it (server/rooms/sizeGuard.ts exactCopies),
+ * under any of the room's settings: a creature, a character, an area their
+ * copy holds, and an area it holds neither of, nor the creature or floor it
+ * is on, which counts at its widest. limits.bounds.test.ts holds each at or
+ * above what a thing of its kind takes.
+ */
+export const EXACT_WIDTH = { creature: 256, character: 5 * 1024, area: 256, unseenArea: 3328 } as const;
+
+/**
  * Bytes under the room's far line that the DM's adds leave to the
  * players' (D-261116-008): a DM's op that meets the line stops this much
- * before a player's does, read at the same widest reserves, so the players
- * always keep this much once the DM's per-player scenes or own things stop.
- * Measured on live play 43's repro (server/rooms/limits.itest.ts), a
- * session of 5 areas and 50 strokes of 200 point values for each of six
- * players takes 418 KiB. Each player keeps more than this less one step,
- * 0.75 MiB or close to two sessions (D-261116-016): the DM's adds stop with
- * the stored bytes and reserves at least this far under the players' line,
- * and a reading rounds its stepped part up by less than a step whoever's
- * things it holds exactly. Joins and the DM's play after that spend their
- * own bytes of it. A scene keeps more already: the DM's own part of it
- * stops at the 3 MiB scene line, half its far line.
+ * before a player's does, read at the same widest reserves. Measured on
+ * live play 43's repro (server/rooms/limits.itest.ts), a session of 5
+ * areas and 50 strokes of 200 point values for each of six players takes
+ * 418 KiB. It is 1 MiB plus the most the room's settings and sight put in
+ * a player's exact part past the stored bytes (D-261121-019): every
+ * creature the far line counts in a scene, which Players move any token
+ * and Players apply damage bring in, every character, which apply damage
+ * brings in, and one seat's areas, its riding ones out of sight. A reading
+ * rounds its stepped part up by less than a step, so once the DM's adds
+ * stop each player keeps more than 0.75 MiB, close to two sessions
+ * (D-261116-016), less only what their own asks and drawings, the roll
+ * requests and the shared lines count past their stored bytes. It is
+ * rounded up to a whole number of steps, so its words name a round size.
+ * Joins and the DM's play after that spend their own bytes of it. A scene
+ * keeps more already: the DM's own part of it stops at the 3 MiB scene
+ * line, half its far line.
  */
-export const KEPT_FOR_PLAYERS = 1 * MiB;
+export const KEPT_FOR_PLAYERS = roundUp(
+  MiB + FAR.tokens * EXACT_WIDTH.creature + LIMITS.charactersPerRoom * EXACT_WIDTH.character + SEAT.ridingAreas * EXACT_WIDTH.unseenArea + FLOORS * SEAT.freeAreas * EXACT_WIDTH.area,
+  FAR.byteStep,
+);
 
 /** The DM's refusal of an add that only the room kept for the players stops. */
 export const KEPT_FOR_PLAYERS_FULL = `the room is full: it keeps its last ${n(KEPT_FOR_PLAYERS / MiB)} MiB for what the players add`;

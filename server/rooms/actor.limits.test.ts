@@ -5,9 +5,10 @@ import { BOOKKEEPING_RESERVE, FAR, farByteLine, ROOM_FULL, SCENE_FULL, SEAT, siz
 import { GROUND, UPPER, thornToken, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
+import type { Op } from "#shared/protocol.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { scene, token } from "#shared/testutil.ts";
+import { env, scene, token } from "#shared/testutil.ts";
 import { farRoomBytes, farWidths, projectedSceneBytes } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
@@ -131,8 +132,9 @@ describe("a fight's start meets the line as any create does, setting nothing asi
     const f = scopeFixture();
     f.state.scenes.big = scene("big", { order: 10 });
     for (let i = 0; i * 4_000 < FAR.sceneBytes; i++) f.state.tokens[`n${i}`] = token(`n${i}`, { sceneId: "big", notes: "n".repeat(4_000) });
-    // The room far short of the DM's line even with the history, so only the scene's line answers.
-    assert.ok(farRoomBytes(f.state, true) + 1.5 * MIB < farByteLine("meets", "room", "dm")!, `${farRoomBytes(f.state, true)} short of the DM's line`);
+    // The room under the DM's line once the fight starts, its history at its bound included, so only the scene's line answers.
+    const started = applyOp(f.state, start(f) as Op, { memberId: f.dm.id, role: "dm" }, env(9));
+    assert.ok(started.ok && farRoomBytes(started.state, true) <= farByteLine("meets", "room", "dm")!, `${started.ok ? farRoomBytes(started.state, true) : started.message} against the DM's line`);
     const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
     const dm = await h.connect(f.dm);
     assert.equal(answer(await dm.send(start(f))), `quota: ${sizeRemedy(SCENE_FULL, "dm")}`);

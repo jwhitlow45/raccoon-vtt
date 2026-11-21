@@ -276,11 +276,11 @@ describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing 
     assert.ok(takes(rooms[0]!, hi - 2 * area) && !takes(rooms[0]!, hi + 2 * area), "the window holds the line");
   });
 
-  test("LIMITS-2: a player's add reads the players' line, never the DM's 1 MiB sooner one", () => {
+  test("LIMITS-2: a player's add reads the players' line, never the DM's sooner one", () => {
     // P1's reading between the DM's line and the players': P1's line taken, the DM's growing note refused in the kept words.
     const state = filled(room(), fillFor(room(), FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS / 2));
     const reading = farRoomBytes(state, true);
-    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS && reading < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, `${reading} inside the kept 1 MiB`);
+    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS && reading < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, `${reading} inside the kept room`);
     assert.deepEqual(playerJudged(state, line("d1"), "p1"), { ok: true }, "P1's line");
     const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
     guard.stateMeasured(measuredStateBytes(state), state);
