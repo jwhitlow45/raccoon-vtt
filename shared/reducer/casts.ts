@@ -1,7 +1,7 @@
 import { parseFormula } from "../dice/formula.ts";
 import { keys, sightOf } from "../keys.ts";
-import { eventLines } from "../logRings.ts";
-import { floorsOps, logsByAudience } from "../migrate.ts";
+import { eventLines, ownLines } from "../logRings.ts";
+import { floorsOps, logsByAudience, rollsFromOwnLines } from "../migrate.ts";
 import type { CastAsk, CastEnd, CastRolled, LogEvent, Token } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
@@ -84,14 +84,19 @@ function castLine(ask: CastAsk): Extract<LogEvent, { type: "cast" }> {
  * caster, by its token or its character, and is plain damage: no
  * critical, and no d20 test (no critical range, save, initiative or
  * advantage, and no d20 in its formula). Anything else leaves it
- * undefined, as a pruned roll does, and the DM rolls.
+ * undefined, as a pruned roll does, and the DM rolls. From op version 65
+ * (rollsFromOwnLines) it reads only the lines the asker holds (ownLines):
+ * the shared lines and their own party copies, never the DM's line a copy
+ * stands for, so whether the DM's ring still holds that line changes
+ * nothing.
  */
 function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[] | undefined {
   const damage = ask.damage;
   if (!damage || !caster) return undefined;
   const parts = new Map<number, Extract<LogEvent, { type: "dice" }>>();
   const askers = logsByAudience(tx.env.opVersion);
-  for (const entry of eventLines(tx.state.log)) {
+  const lines = rollsFromOwnLines(tx.env.opVersion) ? ownLines(tx.state.log, ask.by) : eventLines(tx.state.log);
+  for (const entry of lines) {
     const data = entry.data;
     if (data?.type !== "dice" || data.tag !== damage.tag || (askers && data.by !== ask.by)) continue;
     const part = data.part ?? 0;

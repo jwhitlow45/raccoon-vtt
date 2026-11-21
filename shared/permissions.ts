@@ -1,6 +1,6 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
-import { eventLines } from "./logRings.ts";
+import { ownLines } from "./logRings.ts";
 import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
@@ -1622,14 +1622,17 @@ function typedInitiative(c: Check, row: InitEntry, value: number | null, roll: s
  * total, kept within the row's -50 to 100, is the value. So an attack's
  * total, or an initiative from an earlier fight, never sets a row. The line
  * is in the log every viewer of it reads, so its formula stays in plain view.
+ * It reads only the lines the player holds (ownLines): the shared lines and
+ * their own party copies, never the DM's line a copy stands for, so the
+ * answer is the one their own device reaches.
  */
 function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, value: number, roll: string | undefined): boolean {
   if (roll === undefined) return false;
-  // Newest first, one line per event, so the fight's start ends the search: anything older is another fight's. The encounter keeps the
+  // Newest first, so the fight's start ends the search: anything older is another fight's. The encounter keeps the
   // start's seq, so a start line the DM's ring dropped still ends it. A fight from before it ends at its start line, and a start the log no
   // longer holds is older than every line it holds.
   const startSeq = state.encounter?.startSeq;
-  const lines = eventLines(state.log);
+  const lines = ownLines(state.log, memberId);
   for (let i = lines.length - 1; i >= 0; i--) {
     const data = lines[i]!.data;
     if (startSeq !== undefined && Number(lines[i]!.id.slice(0, lines[i]!.id.indexOf(":"))) < startSeq) return false;
