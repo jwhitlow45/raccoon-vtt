@@ -43,7 +43,8 @@ export const FALL_TITLE = "Fall";
  * unapplied. A fall under 10 ft deals no damage and offers Dismiss alone.
  * A card whose creature landed on another scene offers Show, which goes
  * there, since the DM's copy holds that creature only then, and one whose
- * creature left the map offers Dismiss alone.
+ * creature left the scene shown, moved to another scene or off the map,
+ * offers Dismiss alone, until the DM shows the scene it stands on.
  *
  * Dismiss and Show wait for their answer: busy at once to a second tap, the
  * spinner after the room's usual 200 ms, and a plain error where it fails.
