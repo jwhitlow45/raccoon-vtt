@@ -207,10 +207,12 @@ describe("a preview that goes ends only where it showed", () => {
     return { state, t, tick: (ms: number) => (clock += ms) };
   }
 
-  test("expired, it cancels for p1 alone", () => {
+  test("expired, it cancels for p1 alone at the DM's next frame, and a batch before then sends nothing", () => {
     const { state, t, tick } = visionTable();
     tick(PREVIEW_STALE_MS);
     rejudgePreviews(state, t.all);
+    assert.deepEqual([t.p1.got, t.p2.got, t.display.got], [[], [], []], "a stale drag is not judged at a batch");
+    routeEphemeral(state, t.dm.conn, "s1", { k: "ruler", id: "next", points: [{ x: 40.5, y: 8.5 }] }, t.all);
     assert.deepEqual(t.p1.got, [{ k: "dragCancel", tokenId: "gob" }]);
     assert.deepEqual([t.p2.got, t.display.got], [[], []]);
   });

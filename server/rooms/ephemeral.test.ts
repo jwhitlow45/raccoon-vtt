@@ -493,7 +493,7 @@ describe("what a socket's previews keep", () => {
     assert.deepEqual([...t.p2.conn.previewsHeld.keys()].sort(), [...t.p1.conn.previewsSent.keys()].map((k) => `p1|${k}`).sort());
   });
 
-  test("a preview with no frame for a while goes at the next frame or global batch, and one kept alive stays", () => {
+  test("a preview with no frame for a while goes at the sender's next frame, never at a batch, and one kept alive stays", () => {
     const state = room();
     const t = clocked(state);
     // The one kept alive came first, so only its later frames put it after the still one.
@@ -511,10 +511,13 @@ describe("what a socket's previews keep", () => {
     );
     assert.deepEqual([...t.p2.conn.previewsHeld.keys()], ["p1|ruler:alive"]);
     t.tick(PREVIEW_STALE_MS);
+    const sent = t.p2.got.length;
     rejudgePreviews(state, t.all);
-    assert.equal(t.p1.conn.previewsSent.size, 0);
-    assert.deepEqual(t.p2.got.at(-1), { k: "rulerEnd", id: "alive" });
-    assert.equal(t.p2.conn.previewsHeld.size, 0);
+    assert.deepEqual([[...t.p1.conn.previewsSent.keys()], t.p2.got.length, [...t.p2.conn.previewsHeld.keys()]], [["ruler:alive"], sent, ["p1|ruler:alive"]], "a batch neither ends nor forgets it");
+    t.send(t.p1.conn, ruler("next"));
+    assert.deepEqual([...t.p1.conn.previewsSent.keys()], ["ruler:next"]);
+    assert.deepEqual(t.p2.got.slice(sent, sent + 1), [{ k: "rulerEnd", id: "alive" }]);
+    assert.deepEqual([...t.p2.conn.previewsHeld.keys()], ["p1|ruler:next"]);
   });
 });
 
@@ -547,14 +550,17 @@ describe("two sockets of one member on one preview", () => {
     t.tick(9_000);
     t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
     t.tick(1_001);
-    rejudgePreviews(state, t.all);
+    // A ruler the DM keeps to the DM's own screens: the older socket's next frame.
+    t.send(t.a.conn, { k: "ruler", id: "a-next", points: [{ x: 5.5, y: 5.5 }] });
     assert.deepEqual(cancels(t.p1.got), []);
     assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"), "the screen still holds the drag");
-    assert.equal(t.a.conn.previewsSent.size, 0, "the older entry went");
+    assert.equal(t.a.conn.previewsSent.has("drag:gob"), false, "the older entry went");
     assert.deepEqual([...t.b.conn.previewsSent.keys()], ["drag:gob"]);
-    // Once the newer one is stale too, the screen gets its cancel.
+    // Once the newer one is stale too, a batch sends nothing and the newer socket's next frame ends it.
     t.tick(PREVIEW_STALE_MS);
     rejudgePreviews(state, t.all);
+    assert.deepEqual(cancels(t.p1.got), []);
+    t.send(t.b.conn, { k: "ruler", id: "b-next", points: [{ x: 5.5, y: 5.5 }] });
     assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
   });
 

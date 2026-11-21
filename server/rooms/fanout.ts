@@ -539,11 +539,7 @@ const NAMED_BY_PREVIEWS = new Set(["token", "floorLink"]);
  * after) is projected whole and diffed against what it holds, as every
  * connection is on a global batch, so the rows, casts, roll requests and
  * log lines of a floor it gains or loses come and go with the floor
- * (docs/design/design-v1-floors.md 8.1). The answer says whether any did, so
- * the actor judges held previews again. It is read on a global batch too,
- * since a height edit is global and judges no preview by itself
- * (Tx.rejudge), and a floor hidden in the same batch must still end what
- * showed on it (review FL3-SOL-02).
+ * (docs/design/design-v1-floors.md 8.1).
  *
  * `lost` is given, for each connection, the token and end keys whose
  * deleted change the batch sent it, after its `ev` (docs/design/design-v1-floors.md
@@ -557,7 +553,7 @@ export function publishBatch(
   current: (key: ClientKey) => Connection | undefined,
   history?: (conn: Connection, delivered: boolean) => void,
   lost?: (conn: Connection, keys: EntityKey[]) => void,
-): { heldChanged: boolean } {
+): void {
   const all = [...connections];
   const live = all.filter((conn) => !conn.closed && conn.held !== null);
   const held = new Map(live.map((conn) => [conn, heldBy(batch.after, conn)] as const));
@@ -633,7 +629,6 @@ export function publishBatch(
     }
     history?.(conn, true);
   }
-  return { heldChanged: changed.size > 0 };
 }
 
 /*

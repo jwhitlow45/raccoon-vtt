@@ -121,8 +121,6 @@ export class Tx {
   readonly env: Env;
   readonly actor: Viewer;
   global = false;
-  /** A global change that can take away what a held preview shows: every one but a floor's height (changesRise). */
-  rejudge = false;
   log: LogEntry[] = [];
   private readonly copied = new Set<keyof RoomState>();
   private readonly before = new Map<EntityKey, unknown>();
@@ -278,8 +276,7 @@ export class Tx {
         }
       }
     }
-    if (isGlobalChange(parsed.kind, prev, next)) this.global = this.rejudge = true;
-    else if (changesRise(parsed.kind, prev, next)) this.global = true;
+    if (isGlobalChange(parsed.kind, prev, next) || changesRise(parsed.kind, prev, next)) this.global = true;
   }
 
   remove(key: EntityKey): void {
@@ -883,9 +880,7 @@ function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
  * A floor's height is global too (docs/design/design-v1-floors.md phase 3,
  * 4.3): it is the `rise` a player's copy of each end of a climb up to it
  * carries, and those are other keys. Heights change rarely, so the whole
- * re-projection costs little. A height edit changes the climbs in those
- * copies and no token or end a preview shows, so it leaves `rejudge` alone
- * (review FL3-SOL-01).
+ * re-projection costs little.
  */
 function changesRise(kind: string, prev: unknown, next: unknown): boolean {
   return kind === "scene" && prev !== null && next !== null && (prev as Scene).floor?.height !== (next as Scene).floor?.height;

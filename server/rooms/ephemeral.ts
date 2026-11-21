@@ -381,25 +381,40 @@ function withheldFor(state: RoomState, sceneId: string, e: EphEvent): (receiver:
   };
 }
 
+/** Whether any screen shows a preview, so the actor judges them again after a batch (rejudgePreviews). */
+export function holdsPreview(connections: Iterable<Connection>): boolean {
+  for (const conn of connections) if (!conn.closed && conn.previewsHeld.size > 0) return true;
+  return false;
+}
+
+/** Whether a kept frame is past PREVIEW_STALE_MS: dead by the clock alone, so only routing or the sender's close ends it. */
+function stale(sender: Connection, sent: SentPreview): boolean {
+  return sender.now() - sent.at >= PREVIEW_STALE_MS;
+}
+
 /**
- * Previews held on other screens, judged again after a batch that set
- * `global` (docs/design/design-v1-per-player-vision.md 7.2), or changed the
- * floors some receiver holds (docs/design/design-v1-floors.md 8.1): a switch to
- * or from Per player, a holder pick, Hide, a creature moved to another
- * floor or any other change that re-projects everything can leave a
- * receiver showing a drag or a live ruler it may no longer see. Each is
- * judged by its last frame, as it would be routed now, so one whose token
- * left its floor ends, and a receiver that may no longer have it gets its
- * bare cancel. A carried ruler's last frame is the inbound one, so it is
- * judged by its chain and by every token and end it names too
- * (docs/design/design-v1-floors.md phase 3, 4.4). A batch that is neither
- * still ends a preview over a key it took from a screen (cancelLost).
+ * Previews held on other screens, judged again after every batch while a
+ * screen holds one (docs/design/design-v1-per-player-vision.md 7.2,
+ * docs/design/design-v1-floors.md 8.1): a switch to or from Per player, a
+ * holder pick, Hide, a creature moved to another floor, a lock or a change
+ * to a floor some screen does not hold can leave a receiver showing a drag
+ * or a live ruler it may no longer see. Each is judged by its last frame,
+ * as it would be routed now, so one whose token left its floor ends, and a
+ * receiver that may no longer have it gets its bare cancel. A carried
+ * ruler's last frame is the inbound one, so it is judged by its chain and
+ * by every token and end it names too (docs/design/design-v1-floors.md phase
+ * 3, 4.4).
+ *
+ * A frame past PREVIEW_STALE_MS is neither judged, cancelled nor forgotten
+ * here: the sender's next frame (expireStale) or close (cancelPreviews)
+ * ends it, as it would with no batch between.
  */
 export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
   const all = [...connections];
   for (const sender of all) {
-    expireStale(sender, all);
-    for (const [key, { kind, id, sceneId, last }] of [...sender.previewsSent]) {
+    for (const [key, sent] of [...sender.previewsSent]) {
+      if (stale(sender, sent)) continue;
+      const { kind, id, sceneId, last } = sent;
       const heldKey = `${sender.memberId}|${kind}:${id}`;
       const judged = state.scenes[sceneId] !== undefined;
       const may = senderMay(state, sender, sceneId, last);
@@ -454,7 +469,8 @@ export function cancelLost(receiver: Connection, lost: readonly EntityKey[], con
     const sender = all.find((c) => c.id === senderId);
     const key = heldKey.slice(heldKey.indexOf("|") + 1);
     const sent = sender?.previewsSent.get(key);
-    if (!sender || !sent || !namedKeys(sent.last).some((k) => gone.has(k))) continue;
+    // A stale frame waits for its sender's next frame or close, as in rejudgePreviews.
+    if (!sender || !sent || stale(sender, sent) || !namedKeys(sent.last).some((k) => gone.has(k))) continue;
     release(receiver, heldKey, sender);
     receiver.send({ t: "eph", from: sender.memberId, sceneId: sent.sceneId, e: cancelEvent(sent.kind, sent.id) });
     // A preview no screen shows from this socket any more keeps no frame, as rejudgePreviews drops one.

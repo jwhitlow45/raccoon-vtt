@@ -359,12 +359,11 @@ describe("floor.order (9)", () => {
     assert.equal(applied(towerOf(3), { t: "floor.order", sceneId: "s1", floors: ["f2", "s1", "f3"] }).global, true);
   });
 
-  test("a level change judges previews again, and a height edit re-projects without judging them (FL3-SOL-01)", () => {
-    assert.equal(applied(towerOf(3), { t: "floor.order", sceneId: "s1", floors: ["f2", "s1", "f3"] }).rejudge, true);
+  test("a height edit re-projects, and one that leaves the height as it was does not", () => {
     const raised = applied(towerOf(3), { t: "scene.update", sceneId: "f2", patch: { floor: { height: 25 } } });
-    assert.deepEqual([raised.global, raised.rejudge], [true, false]);
+    assert.equal(raised.global, true);
     const same = applied(towerOf(3), { t: "scene.update", sceneId: "f2", patch: { floor: { height: 10 } } });
-    assert.deepEqual([same.global, same.rejudge], [false, false]);
+    assert.equal(same.global, false);
   });
 });
 

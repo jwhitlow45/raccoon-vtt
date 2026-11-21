@@ -37,7 +37,7 @@ import { counted } from "./counted.ts";
 import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
-import { cancelLost, cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
@@ -336,8 +336,6 @@ type Batch = {
   ops: OpRecord[];
   touched: EntityKey[];
   global: boolean;
-  /** Whether a global change in the batch can take away what a held preview shows (Tx.rejudge). */
-  rejudge: boolean;
   acks: Map<ClientKey, number[]>;
   ackDetails: Map<ClientKey, OpAcknowledgment[]>;
   rejects: Map<ClientKey, Reject[]>;
@@ -2348,7 +2346,6 @@ export class RoomActor {
     }
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
-    if (result.rejudge) batch.rejudge = true;
     if (springing !== null) this.#sizes.grew(springing, grown);
     memory?.commit();
     if (counts) this.lastOpAt = moment.now;
@@ -2711,7 +2708,6 @@ export class RoomActor {
         ops: [],
         touched: [],
         global: false,
-        rejudge: false,
         acks: new Map(),
         ackDetails: new Map(),
         rejects: new Map(),
@@ -3032,7 +3028,6 @@ export class RoomActor {
     this.#staged = { state: result.state, seq };
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
-    if (result.rejudge) batch.rejudge = true;
     this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : op.t === "sys.rideEnd" || op.t === "sys.share" || op.t === "sys.shed" ? [] : [op.sceneId]);
     return true;
   }
@@ -3127,7 +3122,7 @@ export class RoomActor {
     try {
       // Read by the fan-out as it builds each frame, so the number is handed out only by a batch that sends one (#closeNumbers).
       const handOut = () => this.#handOut(batch.pub);
-      const published = publishBatch(
+      publishBatch(
         {
           get pub() {
             return handOut();
@@ -3150,9 +3145,10 @@ export class RoomActor {
         // A preview over a creature or stairs the batch took from a screen's copy ends there now (docs/design/design-v1-floors.md phase 3, 4.4).
         (conn, lost) => cancelLost(conn, lost, this.#connections),
       );
-      // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design/design-v1-per-player-vision.md 7.2),
-      // and so can one that changed the floors a socket holds (docs/design/design-v1-floors.md 8.1). A height edit re-projects the climbs alone.
-      if (batch.rejudge || published.heldChanged) rejudgePreviews(batch.state, this.#connections);
+      // Every batch judges the held drags and live rulers again, whatever it changed: a lock, a Hide, a move to another
+      // floor or a re-projection can each take away what one showed (docs/design/design-v1-per-player-vision.md 7.2,
+      // docs/design/design-v1-floors.md 8.1).
+      if (holdsPreview(this.#connections)) rejudgePreviews(batch.state, this.#connections);
       for (const conn of this.#connections) this.#previewStands(conn, batch.state);
     } catch (err) {
       // The batch is stored, but which sockets it reached is unknown: each one takes the committed room afresh as it reconnects.
