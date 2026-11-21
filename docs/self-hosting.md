@@ -837,12 +837,15 @@ newest first.
   video and draws its still.
 - **Placing a token between squares**
   ([design](design/design-v1-snap-off.md)): room format 34,
-  change format 44.
+  change format 44. Until it reloads, an old page draws a token placed
+  between squares on the square the rules count it in, and offers no Place
+  freely.
 - **Weather** ([design](design/design-v1-weather.md)): room format 33,
   change format 43. Until it reloads, an old page draws no weather.
 - **The in-game clock** ([design](design/design-v1-calendar.md)): room
   format 32, change format 42. A fight's end adds its rounds to the clock,
-  and a character's Long Rest stamps when it ended.
+  and a character's Long Rest stamps when it ended. Until it reloads, an old
+  page shows no clock.
 - **Riders on a mount off the grid** ([design](design/design-v1-attach.md)):
   change format 41. Until it reloads, an old page seats a rider by the
   mount's stored box, so its drop preview can part from where the rider
