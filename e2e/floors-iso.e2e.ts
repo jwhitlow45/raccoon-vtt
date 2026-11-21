@@ -207,7 +207,9 @@ function inFromFar(rect: { x: number; y: number; w: number; h: number }, turn: T
 /**
  * Waits until the hole's bottom shows `depth` cells down at a point: the
  * relief there opaque and `want` of the ground stage where the point lies
- * at 0 ("copy"), or black ("black").
+ * at 0 ("copy"), or black ("black"). A copy is of a map, never black here:
+ * over a floor the page does not hold yet, the ground stage and the bottom
+ * are both black, so a black copy is the state before the floor arrives.
  */
 async function bottomShows(page: Page, at: { x: number; y: number }, cells: number, want: "copy" | "black", what: string): Promise<{ relief: Rgba; ground: Rgba }> {
   let last: { relief: Rgba; ground: Rgba } | undefined;
@@ -217,7 +219,7 @@ async function bottomShows(page: Page, at: { x: number; y: number }, cells: numb
       const { relief, ground } = last!;
       if (relief[3] !== 255) return null;
       if (want === "black") return near(relief, [0, 0, 0, 255]) ? last! : null;
-      return near(relief, ground) && ground[3] === 255 ? last! : null;
+      return near(relief, ground) && ground[3] === 255 && !near(ground, [0, 0, 0, 255], 12) ? last! : null;
     });
   } catch (err) {
     throw new Error(`${(err as Error).message}: the relief read ${last ? show(last.relief) : "nothing"}, the ground ${last ? show(last.ground) : "nothing"}`);
@@ -306,9 +308,9 @@ describe("the floors below in Isometric", { concurrency: false, timeout: 600_000
       const at = inFromFar(UPPER_HOLE, turn);
       // Each square's own color: a bottom a cell higher or lower would copy the square beside this one.
       await bottomShows(dm, at, 2, "copy", `the hole's bottom 2 cells down at turn ${turn}`);
-      // Where the point lies at 0 the hole's far sides show, which a flat floor never draws on the relief.
+      // Where the point lies at 0 the hole's far sides show, which a flat floor never draws on the relief. The point itself stands in front of the far corner, on the seam where the two far sides meet, whose pixel each side covers only in part on some renderers (CI's read alpha 232). Half a cell along x puts it a quarter cell across the screen onto one side, clear of the seam and of a square's edge.
       const [flat, beside] = await boardPixels(dm, [
-        { ...at, z: 0 },
+        { x: at.x + 0.5, y: at.y, z: 0 },
         { x: UPPER_HOLE.x - 3.5, y: UPPER_HOLE.y + 3.5, z: 0 },
       ]);
       assert.ok(flat!.relief[3] === 255 && !near(flat!.relief, flat!.ground), `turn ${turn}: the far side stands, read ${show(flat!.relief)} over ${show(flat!.ground)}`);
@@ -322,7 +324,8 @@ describe("the floors below in Isometric", { concurrency: false, timeout: 600_000
     // Half a cell in from the far corner the bottom shows 2 cells down, and 1.2 cells down the far side above it: so the bottom lies 2 cells down, not Cellar's 4.
     const at = inFromFar(GROUND_HOLE, 0, 0.5);
     await bottomShows(ana, at, 2, "black", "a black bottom 2 cells down");
-    const [side] = await boardPixels(ana, [{ ...at, z: -1.2 }]);
+    // A quarter cell across the screen from the seam where the two far sides meet, as fl4i-1 reads, onto the lit one.
+    const [side] = await boardPixels(ana, [{ x: at.x - 0.25, y: at.y + 0.25, z: -1.2 }]);
     assert.ok(side!.relief[3] === 255 && !near(side!.relief, [0, 0, 0, 255], 12), `the far side above the bottom, read ${show(side!.relief)}`);
     await shots.take(ana, "fl4i-2-ana-hole-unreached");
   });
