@@ -1,0 +1,43 @@
+export default async (c: any) => {
+  const dm = c.state.dm;
+  const b = { w: 30, h: 20 };
+  await c.harness.openSideTab(dm, "Scenes");
+  await dm.getByText("Watchtower", { exact: true }).first().click();
+  await dm.waitForTimeout(2000);
+  await (await import(`./lib.ts?t=${Date.now()}`)).charactersList(c, dm);
+  const panel = dm.locator('[role="tabpanel"]').first();
+  // Mara is open from before? Open Mara and place her on the tower.
+  await panel.getByText("Mara", { exact: true }).first().click();
+  await dm.waitForTimeout(400);
+  await panel.getByRole("button", { name: "Place a token" }).first().click();
+  await dm.waitForTimeout(500);
+  await c.harness.tapCell(dm, b, { x: 19, y: 8 });
+  await dm.waitForTimeout(800);
+  await dm.keyboard.press("Escape");
+  await (await import(`./lib.ts?t=${Date.now()}`)).charactersList(c, dm);
+  await panel.getByText("Thorn", { exact: true }).first().click();
+  await dm.waitForTimeout(400);
+  await panel.getByRole("button", { name: "Place a token" }).first().click();
+  await dm.waitForTimeout(500);
+  await c.harness.tapCell(dm, b, { x: 9, y: 10 });
+  await dm.waitForTimeout(800);
+  await dm.keyboard.press("Escape");
+  // Three harpies.
+  await c.harness.openSideTab(dm, "Monsters");
+  const back = panel.getByRole("button", { name: "Back to Monsters" });
+  if (await back.count()) await back.click();
+  await dm.getByLabel("Search monsters").fill("harpy");
+  await dm.waitForTimeout(600);
+  await panel.getByText("Harpy", { exact: true }).first().click();
+  await dm.waitForTimeout(500);
+  await panel.getByRole("button", { name: "How many plus 1" }).click();
+  await panel.getByRole("button", { name: /^Place 2 on the map/ }).click();
+  await dm.waitForTimeout(400);
+  await c.harness.tapCell(dm, b, { x: 8, y: 6 });
+  await dm.waitForTimeout(800);
+  await dm.keyboard.press("Escape");
+  const { roomState } = await import(`./lib.ts?t=${Date.now()}`);
+  const st = await roomState(c, c.state.tower);
+  const toks = Object.values(st.tokens).filter((t: any) => t.sceneId === c.state.tower) as any[];
+  return toks.map((t) => `${t.name} ${t.number ?? ""} ${t.x},${t.y} elev=${t.elevation ?? 0} id=${t.id}`);
+};

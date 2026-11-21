@@ -1,0 +1,23 @@
+export default async (c: any) => {
+  const dm = c.state.dm;
+  const b = { w: 30, h: 20 };
+  await c.harness.openSideTab(dm, "Monsters");
+  const panel = dm.locator('[role="tabpanel"]').first();
+  const back = panel.getByRole("button", { name: "Back to Monsters" });
+  if (await back.count()) await back.click();
+  await dm.getByLabel("Search monsters").fill("skeleton");
+  await dm.waitForTimeout(700);
+  const list = await panel.innerText();
+  await panel.getByText("Skeleton", { exact: true }).first().click();
+  await dm.waitForTimeout(600);
+  await panel.getByRole("button", { name: "How many plus 1" }).click();
+  await panel.getByRole("button", { name: "How many plus 1" }).click();
+  const hid = panel.getByLabel("Hidden from players");
+  if (await hid.isChecked()) await hid.uncheck();
+  await panel.getByRole("button", { name: /^Place 3 on the map/ }).click();
+  await dm.waitForTimeout(500);
+  await c.harness.tapCell(dm, b, { x: 20, y: 11 });
+  await dm.waitForTimeout(1000);
+  await dm.keyboard.press("Escape");
+  return list.slice(0, 400);
+};

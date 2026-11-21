@@ -1,0 +1,27 @@
+export default async (c: any) => {
+  const dmContext = await c.browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const dm = await dmContext.newPage();
+  c.state.dmContext = dmContext;
+  c.state.dm = dm;
+  const errors: string[] = [];
+  dm.on("pageerror", (e: Error) => errors.push(e.message));
+  c.state.errors = errors;
+  await dm.goto(`${c.origin}/`);
+  await dm.getByLabel("Room name").fill("Guide examples");
+  await dm.getByLabel("Your name").fill("Dana");
+  c.state.password = await dm.getByLabel("Player password").inputValue();
+  await c.shot(dm, "home-create");
+  await dm.getByRole("button", { name: "Create room" }).click();
+  await dm.getByRole("heading", { name: "Save your DM link" }).waitFor();
+  const link = (await dm.locator("code").first().textContent()) ?? "";
+  const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
+  c.state.roomId = match![1]!.replace("-", "");
+  c.state.dmLink = link;
+  await dm.getByLabel("I saved my DM link").check();
+  await dm.getByRole("button", { name: "Continue to the room" }).click();
+  await dm.waitForTimeout(2500);
+  await c.shot(dm, "first-room");
+  const cookie = (await dmContext.cookies(c.origin)).map((x: any) => `${x.name}=${x.value}`).join("; ");
+  c.state.cookie = cookie;
+  return { roomId: c.state.roomId, password: c.state.password, errors };
+};

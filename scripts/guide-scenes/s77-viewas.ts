@@ -1,0 +1,20 @@
+export default async (c: any) => {
+  const dm = c.state.dm;
+  await c.state.ops.send({ t: "door.set", sceneId: c.state.crypt, door: { edge: "8,9,w" }, state: "open" });
+  await c.state.ops.send({ t: "token.move", tokenId: c.state.cryptPcs.mara, x: 9, y: 9 });
+  await dm.waitForTimeout(800);
+  await c.harness.openSideTab(dm, "DM");
+  await dm.waitForTimeout(600);
+  const panel = dm.locator('[role="tabpanel"]').first();
+  const text = await panel.innerText();
+  await dm.mouse.move(5, 790);
+  await c.shot(dm, "final-dm-panel");
+  const sel = panel.getByRole("combobox").first();
+  await sel.selectOption({ label: "Pat" }).catch(() => {});
+  await panel.getByRole("button", { name: "View", exact: true }).click();
+  await dm.waitForTimeout(2500);
+  await dm.mouse.move(5, 790);
+  await c.shot(dm, "final-crypt-player");
+  const banner = (await dm.locator("body").innerText()).slice(0, 300);
+  return text.slice(0, 1500) + "\n-----\n" + banner;
+};

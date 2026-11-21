@@ -1,0 +1,65 @@
+// AT-SHOT-1: on the watchtower's field, two SRD warhorses. Thorn rides the first, by his bar's Attach (Ride Warhorse 1,
+// Controlled). Mara stands by the second with her Attach list open and Ride Warhorse 2 picked: Controlled or Independent.
+export default async (c: any) => {
+  const dm = c.state.dm;
+  const ops = c.state.ops;
+  const b = { w: 30, h: 20 };
+  const tower = c.state.tower;
+  await c.harness.pickTool(dm, "Select");
+  await dm.getByRole("button", { name: "Clear" }).first().click().catch(() => {});
+  await c.harness.openSideTab(dm, "Scenes");
+  await dm.getByText("Watchtower", { exact: true }).first().click();
+  await dm.waitForTimeout(2000);
+  await c.harness.pickTool(dm, "Select");
+  await dm.keyboard.press("0");
+  await c.harness.openSideTab(dm, "Monsters");
+  const panel = dm.locator('[role="tabpanel"]').first();
+  const back = panel.getByRole("button", { name: "Back to Monsters" });
+  if (await back.count()) await back.click();
+  await dm.getByLabel("Search monsters").fill("warhorse");
+  await dm.waitForTimeout(600);
+  await panel.getByText("Warhorse", { exact: true }).first().click();
+  await dm.waitForTimeout(500);
+  await panel.getByRole("button", { name: "How many plus 1" }).click();
+  const hidden = panel.getByLabel("Hidden from players");
+  if (await hidden.isChecked().catch(() => false)) await hidden.uncheck();
+  await panel.getByRole("button", { name: /^Place 2 on the map/ }).click();
+  await dm.waitForTimeout(400);
+  await c.harness.tapCell(dm, b, { x: 4, y: 4 });
+  await dm.waitForTimeout(800);
+  await dm.keyboard.press("Escape");
+  const { roomState } = await import(`./lib.ts?t=${Date.now()}`);
+  const st = await roomState(c, tower);
+  const toks = Object.values(st.tokens).filter((t: any) => t.sceneId === tower) as any[];
+  const horses = toks.filter((t) => t.name === "Warhorse").sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  c.state.horses = horses.map((h) => h.id);
+  await ops.send({ t: "token.update", tokenId: horses[0].id, patch: { disposition: "ally" } });
+  await ops.send({ t: "token.update", tokenId: horses[1].id, patch: { disposition: "ally" } });
+  await ops.send({ t: "token.move", tokenId: horses[0].id, x: 3, y: 9 });
+  await ops.send({ t: "token.move", tokenId: horses[1].id, x: 7, y: 13 });
+  await ops.send({ t: "token.move", tokenId: c.state.towerThorn, x: 5, y: 9, elevation: 0 });
+  await ops.send({ t: "token.move", tokenId: c.state.towerMara, x: 6, y: 15, elevation: 0 });
+  await dm.waitForTimeout(800);
+  // Thorn rides the first, by the bar.
+  await c.harness.tapCell(dm, b, { x: 5, y: 9 });
+  await dm.waitForTimeout(600);
+  await dm.getByRole("button", { name: "Attach", exact: true }).first().click();
+  await dm.waitForTimeout(600);
+  await dm.getByRole("button", { name: /^Ride Warhorse \(?1\)?/ }).first().click();
+  await dm.waitForTimeout(400);
+  await dm.getByRole("button", { name: "Ride", exact: true }).first().click();
+  await dm.waitForTimeout(800);
+  await dm.keyboard.press("Escape");
+  await dm.waitForTimeout(400);
+  // Mara by the second, her list open with Ride Warhorse 2 picked.
+  await c.harness.tapCell(dm, b, { x: 6, y: 15 });
+  await dm.waitForTimeout(600);
+  await dm.getByRole("button", { name: "Attach", exact: true }).first().click();
+  await dm.waitForTimeout(600);
+  await dm.getByRole("button", { name: /^Ride Warhorse \(?2\)?/ }).first().click();
+  await dm.waitForTimeout(600);
+  await dm.mouse.move(1000, 790);
+  await c.shot(dm, "at-attach");
+  const list = await dm.getByRole("dialog").last().innerText().catch(() => "no dialog");
+  return list;
+};

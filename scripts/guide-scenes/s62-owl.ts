@@ -1,0 +1,20 @@
+export default async (c: any) => {
+  const dm = c.state.dm;
+  await (await import(`./lib.ts?t=${Date.now()}`)).charactersList(c, dm);
+  await dm.waitForTimeout(600);
+  const panel = dm.locator('[role="tabpanel"]').first();
+  await panel.getByText("Ivo", { exact: true }).first().click();
+  await dm.waitForTimeout(600);
+  await panel.getByRole("button", { name: "Add a companion" }).click();
+  await dm.waitForTimeout(600);
+  const form0 = await panel.innerText();
+  await panel.getByLabel("Name").fill("Hoot");
+  await panel.getByRole("button", { name: "Choose a stat block" }).click();
+  await dm.waitForTimeout(800);
+  const dlg = dm.getByRole("dialog").last();
+  const d0 = await dlg.innerText();
+  await dlg.getByRole("searchbox").or(dlg.getByRole("textbox")).first().fill("owl");
+  await dm.waitForTimeout(800);
+  const d1 = await dlg.innerText();
+  return form0.slice(0, 1200) + "\n-----\n" + d0.slice(0, 600) + "\n-----\n" + d1.slice(0, 600);
+};
