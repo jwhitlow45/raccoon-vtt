@@ -1,7 +1,7 @@
-import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
+import { chunkKey, doorChunk, holderChunkKey, keys, parseKey, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { ownLines } from "./logRings.ts";
-import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, ShownEnds, Token, Viewer } from "./model.ts";
+import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollRequest, RollTarget, RoomSettings, RoomState, Scene, ShownEnds, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, HIDDEN_ROW_REFUSED, LIMITS, stillFitsVideo } from "./limits.ts";
@@ -775,6 +775,7 @@ function forDm(op: Op, c: Check): Decision {
     case "token.updateMany":
       return imageUsable(c, op.patch.image) ? OK : GONE;
     case "sys.restore":
+      if (restoreAsksTwice(c, op)) return refuse("invalid", CHANGED_SINCE);
       return restoredAssetsUsable(op, c);
     case "character.create":
       return imageUsable(c, op.character.defaultImage) ? OK : GONE;
@@ -1768,6 +1769,39 @@ function diceRollCheck(c: Check, op: OpOf<"dice.roll">): Decision {
  * not deleted. A player's restores touch only drawings and token poses,
  * which add no image.
  */
+/**
+ * Whether a restore would leave two open save requests for one occurrence
+ * of an effect (D-261121-131): a hide closes the condition's request, the
+ * DM may ask again, and the hide's undo would bring the first one back
+ * beside the new one, which only an ask checks (reducer/rolls.ts rollAsk).
+ * Requests match by the creature their target resolves to and the
+ * occurrence, as endSaves reads them.
+ */
+function restoreAsksTwice(c: Check, op: OpOf<"sys.restore">): boolean {
+  const written = new Map<string, RollRequest | null>();
+  const tokens = new Map<string, Token | null>();
+  for (const entry of op.entries) {
+    const parsed = parseKey(entry.key);
+    if (parsed?.kind === "roll") written.set(parsed.id, (entry.value as RollRequest | null) ?? null);
+    else if (parsed?.kind === "token") tokens.set(parsed.id, (entry.value as Token | null) ?? null);
+  }
+  const back = [...written.values()].filter((r): r is RollRequest => r !== null && r.ends !== undefined && ownEntry(c.state.rolls, r.id) === undefined);
+  if (back.length === 0) return false;
+  const creature = (request: RollRequest): string | undefined => {
+    const target = request.targets[0];
+    if (!target) return undefined;
+    if (target.tokenId === undefined) return target.characterId === undefined ? undefined : `character:${target.characterId}`;
+    const token = tokens.has(target.tokenId) ? tokens.get(target.tokenId) : ownEntry(c.state.tokens, target.tokenId);
+    if (!token) return undefined;
+    return "ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`;
+  };
+  const open = [...Object.values(c.state.rolls ?? {}).filter((r) => !written.has(r.id)), ...[...written.values()].filter((r): r is RollRequest => r !== null)];
+  return back.some((request) => {
+    const who = creature(request);
+    return who !== undefined && open.some((other) => other.id !== request.id && other.ends?.occurrence === request.ends!.occurrence && creature(other) === who);
+  });
+}
+
 function restoredAssetsUsable(op: OpOf<"sys.restore">, c: Check): Decision {
   const usable = c.deps.restoredAssetUsable;
   if (!usable) return OK;

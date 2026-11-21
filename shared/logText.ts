@@ -495,6 +495,10 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
             return `${who}'s Concentration${on} ran out.`;
           case "pause":
             return `${who}'s Concentration${on} is paused outside combat.`;
+          case "hide":
+            return `${who}'s Concentration${on} is hidden from players.`;
+          case "show":
+            return `${who}'s Concentration${on} is shown to players.`;
         }
       }
       const effect = effectName(data.key);
@@ -507,6 +511,10 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
           return `${effect} ends on ${who}.`;
         case "pause":
           return `${effect} on ${who} is paused outside combat.`;
+        case "hide":
+          return `${effect} on ${who} is hidden from players.`;
+        case "show":
+          return `${effect} on ${who} is shown to players.`;
       }
       return `${who}'s effects changed.`;
     }

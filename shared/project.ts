@@ -4154,7 +4154,11 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     }
     case "effect":
       // Hidden from players, owners included, like the effect itself on the actor (neverRead).
-      return holderFor(ctx, data) ? data : null;
+      if (!holderFor(ctx, data)) return null;
+      // A condition hidden from players reads to them as its removal, and one shown again as its add (actors.ts effectUpdate).
+      if (data.action === "hide") return { ...data, action: "remove" };
+      if (data.action === "show") return { ...data, action: "add" };
+      return data;
     case "rest": {
       // Everyone who sees the creature sees it rest. The HP it got back is as private as its HP.
       const holder = holderFor(ctx, data);

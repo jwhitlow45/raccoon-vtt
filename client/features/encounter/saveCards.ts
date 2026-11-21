@@ -237,8 +237,18 @@ export function saveCard(input: SaveCardInput): SaveCardModel {
     return { ...base, status, rollNote: null, buttons: settle, rollLoading: false };
   }
   const ask: CardButton<SaveAction>[] = facts.askable ? [{ action: "ask", text: `Ask ${facts.name}` }] : [];
-  const status = facts.played && !facts.askable ? `${facts.name} is not on the players' scene, so no request can go.` : null;
+  const status = facts.played && !facts.askable ? `${facts.name} is not on the players' scene, so no request can go.` : facts.askable && effect.hiddenFromPlayers ? hiddenAskWords(facts.name, effect) : null;
   return { ...base, status, rollNote, buttons: [...ask, ...roll, ...marks] };
+}
+
+/**
+ * The card's status on a condition hidden from players, before the DM asks:
+ * "Poisoned is hidden from players. Asking shows Bree a save against it.".
+ * A request names its effect, so Ask shows its player a save-ends effect on
+ * their creature, the DM's choice.
+ */
+export function hiddenAskWords(name: string, effect: PendingSave["effect"]): string {
+  return `${effectWords(effect)} is hidden from players. Asking shows ${name} a save against it.`;
 }
 
 /** A DM's mark on a linked request's target, with the answer's own tag (shared/permissions.ts ANSWER_NEEDS_TAG). */
@@ -251,11 +261,12 @@ function markOp(pending: PendingSave, result: "pass" | "fail", tag: string): Cli
 /** Passed: the effect goes, which undo takes back. With a request, the DM's Pass mark, whose answer ends the effect on the server. */
 /**
  * Where the card's own roll goes and the DC its line carries: hidden from
- * players only for a monster, as every roll starts, and in the open
- * without the DC, which only the DM's view holds (dcOnLine).
+ * players for a monster, as every roll starts, and for a condition hidden
+ * from players, as the condition is, and else in the open without the DC,
+ * which only the DM's view holds (dcOnLine).
  */
 export function saveEndsRollTo(view: Pick<RoomState, "members" | "characters" | "tokens">, pending: PendingSave): { to: "all" | "dm"; dc?: number } {
-  const to = startsSecret(view, true, [pending.target]) ? "dm" : "all";
+  const to = pending.effect.hiddenFromPlayers === true || startsSecret(view, true, [pending.target]) ? "dm" : "all";
   const dc = dcOnLine(to, pending.effect.save.dc, false);
   return dc === undefined ? { to } : { to, dc };
 }

@@ -1,4 +1,4 @@
-import { clockTicks, combatUses, healRevivesDead, playerLimitsOps, reviveToOne } from "../migrate.ts";
+import { classChangesWriteLines, clockTicks, combatUses, healRevivesDead, playerLimitsOps, reviveToOne } from "../migrate.ts";
 import { CLOCK_TOO_FAR, clockNow } from "../calendar.ts";
 import { HIDDEN_EFFECTS_FULL, LIMITS } from "../limits.ts";
 import type { Effect, EffectEnds, RoomState } from "../model.ts";
@@ -27,6 +27,7 @@ import { hpRevertOf } from "./hpUndo.ts";
 import { keys, parseKey } from "../keys.ts";
 import { Refuse, gone, invalid, type ResolvedActor, type Tx } from "./tx.ts";
 import { typeUnion } from "./uses.ts";
+import { creatureRef } from "./rolls.ts";
 import { damageDefenses } from "../rules/damageDefenses.ts";
 import { dealtTypes, rowDamage } from "../rules/typedDamage.ts";
 
@@ -243,6 +244,33 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
   const fit = effectsFitChanged(holderKey(resolved), resolved.actor.effects, index, next);
   if (!fit.ok) throw effectsFull(fit);
   tx.putActor(resolved, { ...resolved.actor, effects: fit.effects });
+  const hides = current.hiddenFromPlayers !== true && next.hiddenFromPlayers === true;
+  const shows = current.hiddenFromPlayers === true && next.hiddenFromPlayers !== true;
+  if (!classChangesWriteLines(tx.env.opVersion) || (!hides && !shows)) return;
+  // Players read a hide as the condition's removal and a show as its add, each in the line those would write, so a
+  // hide closes the condition's open save request as the removal would (rolls.ts endSaves). The DM reads its own words
+  // (shared/logText.ts).
+  if (hides) {
+    closeSaveRequests(tx, resolved, current);
+    tx.addActorEvents(resolved, [effectEvent(current, "hide")]);
+  } else tx.addActorEvents(resolved, [effectEvent(next, "show")]);
+}
+
+/**
+ * Closes each open save request of an effect's occurrence on one creature,
+ * as endSaves closes one whose effect is gone: no line, and the occurrence
+ * left pending, so the DM may ask again. A request matches by the creature
+ * its target resolves to, its effect id and its occurrence, since an
+ * effect's id is unique on its creature only.
+ */
+function closeSaveRequests(tx: Tx, resolved: ResolvedActor, effect: Effect): void {
+  const requests = Object.values(tx.state.rolls ?? {}).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const request of requests) {
+    const target = request.targets[0];
+    if (!request.ends || !target || request.ends.effect !== effect.id || request.ends.occurrence !== effect.due?.id) continue;
+    const holder = tx.tryResolveActor(creatureRef(target));
+    if (holder?.holder === resolved.holder && holder.id === resolved.id) tx.remove(keys.roll(request.id));
+  }
 }
 
 /**

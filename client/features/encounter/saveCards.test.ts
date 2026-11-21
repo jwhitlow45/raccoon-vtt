@@ -227,6 +227,27 @@ describe("a save-ends card for a creature a player plays", () => {
     assert.equal(askSaveOp(pending, "r9", 20).ok, false);
   });
 
+  test("on a condition hidden from players, before the DM asks, the card says asking shows Bree a save against it, and still offers Ask", () => {
+    const view = breeRoom();
+    const b1 = view.tokens.b1!;
+    view.tokens.b1 = { ...b1, actor: { inline: actor({ effects: [{ ...frightened("e1", { id: "7:0", state: "pending" }, true), hiddenFromPlayers: true }] }) } };
+    const card = saveCard(input(view));
+    assert.equal(card.status, "Frightened is hidden from players. Asking shows Bree a save against it.");
+    assert.deepEqual(actionsOf(card), ["Ask Bree", "Roll +1", "Passed", "Failed", "Dismiss"]);
+    // Once asked, the card reads the request as on any other condition.
+    view.rolls = request();
+    assert.equal(saveCard(input(view)).status, "Asked Bree. Waiting for the roll.");
+    // Off the players' scene, no request can go, which the card says instead.
+    view.tokens.b1 = { ...view.tokens.b1!, sceneId: "s2" };
+    view.rolls = {};
+    assert.equal(saveCard(input(view)).status, "Bree is not on the players' scene, so no request can go.");
+  });
+
+  test("a monster's hidden condition says nothing of asking", () => {
+    const view = goblinRoom({ effects: [{ ...frightened("e1", { id: "5:0", state: "pending" }), hiddenFromPlayers: true }] });
+    assert.equal(saveCard(input(view)).status, null);
+  });
+
   test("off the players' scene no request can go: Roll when the bonus is known", () => {
     const view = breeRoom({ sceneId: "s2" });
     const card = saveCard(input(view));
@@ -389,6 +410,18 @@ describe("a card's roll keeps a DC players may not see off its line", () => {
       assert.equal(seen?.rolls.length, 1, `${viewer.memberId} reads the roll`);
       assert.equal(seen && "dc" in seen, false, `${viewer.memberId}: the line hides the DC too`);
     }
+  });
+
+  test("save ends: the card's roll on a condition hidden from players starts secret, keeping its DC for the DMs", () => {
+    const state = breeRoom();
+    const bree = state.characters.bree!;
+    state.characters.bree = { ...bree, actor: { ...bree.actor, effects: bree.actor.effects.map((e) => ({ ...e, hiddenFromPlayers: true as const })) } };
+    const pending = pendingSaves(state).find((p) => "characterId" in p.target);
+    assert.ok(pending);
+    const envelope = saveEndsRollTo(state, pending);
+    assert.deepEqual(envelope, { to: "dm", dc: 17 });
+    const after = rolled(state, DM, pending.target, envelope);
+    for (const viewer of [P1, P2]) assert.equal(line(after.state, after.id, viewer)?.rolls.length ?? 0, 0, `${viewer.memberId} reads no roll`);
   });
 
   test("save ends: a monster's roll is hidden from players and keeps its DC for the DMs", () => {
