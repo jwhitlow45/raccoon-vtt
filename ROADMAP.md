@@ -15,7 +15,7 @@ software for D&D groups playing the 2024 rules, made for phones first. New
 work favors what a group needs during a session, whether everyone sits
 around one table or some players join from elsewhere.
 
-**Finish the "Later" tier** of [mvp.md](docs/design/mvp.md). Most of it
+**Finish the "Later" tier** of [mvp.md](docs/design/mvp.md). All of it
 is built:
 
 - Join requests that the DM approves.
@@ -24,10 +24,9 @@ is built:
 - Weather on the map, with its effect on rolls.
 - Music, background sounds and effects, kept in sync for everyone, behind the server's sound switch.
 - An in-game calendar and clock, with effects that last a length of time and light that follows the time of day.
-- Several floors in one scene: floors with a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs.
+- Several floors in one scene: floors with a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, hidden stairs, openings that creatures fall or fly through, trapdoors, light, sight and areas through an opening, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs.
 
-What remains of it is the next part of floors: openings and falls between
-floors, and sight from one floor to another.
+The desktop app below is the one thing left before v0.5.0.
 
 **Offer a desktop app.** A download for Windows, macOS and Linux that runs
 the server on the DM's own computer, so players on the same network join in
