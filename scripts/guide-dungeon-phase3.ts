@@ -25,7 +25,7 @@
  * GUIDE_COPY_DIR, when set, also gets each picture as guide-<name>.png, which
  * it never overwrites, for looking at the pictures at full quality.
  */
-import { randomUUID } from "node:crypto";
+import { uuidv7 as randomUUID } from "../shared/ids.ts";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
