@@ -759,6 +759,9 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
     const before = entry.value as Token | null | undefined;
+    // A walk the op took off only because its creature left the turn under way (shared/reducer/tx.ts dropWalk) is
+    // bookkeeping: the undo neither checks that creature nor puts the walk back (D-261121-128).
+    if (walkDroppedOnly(before, step.poses[parsed.id])) continue;
     // A silent passenger of the step rides back quietly while it is still under the group, and is left as it is otherwise,
     // gone or not. Either way it never answers (docs/design/design-v1-attach.md 8.3).
     if (silent.has(parsed.id)) {
@@ -783,6 +786,18 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     entries: [...moved, ...(across ? areasAcross(state, moved) : [])],
     ...(quietIds.length > 0 ? { quiet: quietIds } : {}),
   };
+}
+
+/**
+ * Whether the step changed a token only by taking its walk off: the same
+ * floor, place, size and link before and after (`left`), a walk before and
+ * none after. Only the walk's end with its turn does that (Tx.dropWalk),
+ * since every move and resize of a player's step changes its place, size
+ * or link.
+ */
+function walkDroppedOnly(before: Token | null | undefined, left: Pose | undefined): boolean {
+  if (!before || !left || before.path === undefined || left.path !== "null") return false;
+  return samePose(poseOf(before, () => true), left, false);
 }
 
 /**
