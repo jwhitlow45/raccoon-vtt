@@ -4,6 +4,7 @@ import { describeEvent, type LogNames } from "#shared/logText.ts";
 import { isPoseOp, type ClientOp } from "#shared/protocol.ts";
 import { ownsToken } from "../tokens/access.ts";
 import type { Labels } from "../../lib/labels.ts";
+import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
@@ -99,7 +100,8 @@ export type FallAlert = { text: string; show?: { sceneId: string } };
  * DM's copy does not hold. No name is stored on the card, so each is read
  * off the creature the copy holds. One op that drops more than
  * FALL_TOASTS_MOST cards, as an opening placed under a crowd, toasts once
- * for them all: "12 creatures fell to Ground floor." (LP46A polish).
+ * for them all: "4 creatures fell to Ground floor.", "10 or more creatures
+ * fell to Ground floor." once its cards fill the room (LP46A polish).
  */
 export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
   const byOp = new Map<number, Fall[]>();
@@ -112,11 +114,13 @@ export const FALL_TOASTS_MOST = 3;
 
 function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes">, viewing: string | null): FallAlert {
   const creatures = cards.reduce((n, card) => n + 1 + (card.riders?.length ?? 0), 0);
+  // A new card past the room's cap drops the oldest in the same op (writeCard), so an op whose cards fill the room may have made more.
+  const count = cards.length >= LIMITS.fallsPerRoom ? `${creatures} or more creatures` : `${creatures} creatures`;
   const sceneId = cards[0]!.sceneId;
-  const one = cards.every((card) => card.sceneId === sceneId);
-  const scene = one ? ownEntry(state.scenes, sceneId) : undefined;
+  if (!cards.every((card) => card.sceneId === sceneId)) return { text: `${count} fell to the floors below.` };
+  const scene = ownEntry(state.scenes, sceneId);
   const floor = scene?.floor?.name ?? scene?.name;
-  return { text: floor ? `${creatures} creatures fell to ${floor}.` : `${creatures} creatures fell to the floors below.`, ...(scene && sceneId !== viewing ? { show: { sceneId } } : {}) };
+  return { text: floor ? `${count} fell to ${floor}.` : `${count} fell to the floors below.`, ...(scene && sceneId !== viewing ? { show: { sceneId } } : {}) };
 }
 
 function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {

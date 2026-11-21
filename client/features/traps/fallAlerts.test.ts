@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Fall, RoomState } from "#shared/model.ts";
 import { character, room, scene, token } from "#shared/testutil.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { applied, GROUND, putOpeningOp, tower, UPPER } from "#shared/floorLinksTestutil.ts";
 import { FALL_TOASTS_MOST, fallAlerts, fallsAfter, newestMade } from "./alerts.ts";
 
 /*
@@ -60,9 +62,10 @@ describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
 
   test("up to the most it toasts one by one, past that once with the count, riders counted", () => {
     assert.equal(fallAlerts(crowd(FALL_TOASTS_MOST), view(), "ground", NO_LABELS).length, FALL_TOASTS_MOST);
-    const many = crowd(12);
-    many[0] = { ...many[0]!, riders: ["r1", "r2"] };
-    assert.deepEqual(fallAlerts(many, view(), "ground", NO_LABELS), [{ text: "14 creatures fell to Ground floor." }]);
+    const some = crowd(6);
+    some[0] = { ...some[0]!, riders: ["r1", "r2"] };
+    assert.deepEqual(fallAlerts(some, view(), "ground", NO_LABELS), [{ text: "8 creatures fell to Ground floor." }]);
+    assert.deepEqual(fallAlerts(crowd(LIMITS.fallsPerRoom - 1), view(), "ground", NO_LABELS), [{ text: "9 creatures fell to Ground floor." }]);
     assert.deepEqual(fallAlerts(crowd(4), view(), "upper", NO_LABELS), [{ text: "4 creatures fell to Ground floor.", show: { sceneId: "ground" } }]);
   });
 
@@ -71,5 +74,15 @@ describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
     assert.deepEqual(fallAlerts(two, view(), "ground", NO_LABELS).map((a) => a.text), ["4 creatures fell to Ground floor.", "A creature no longer on the map fell 10 ft to Ground floor."]);
     const mixed = [...crowd(3, 150), ...crowd(1, 150, { sceneId: "crypt" }).map((c) => ({ ...c, id: "150:9" }))];
     assert.deepEqual(fallAlerts(mixed, view(), "ground", NO_LABELS), [{ text: "4 creatures fell to the floors below." }]);
+  });
+
+  test("an opening placed under 12 creatures keeps 10 cards, and the toast says 10 or more (PUB46-SOL-02)", () => {
+    const imps = Array.from({ length: 12 }, (_, i) => token(`imp${i}`, { sceneId: UPPER, kind: "monster", name: `Imp ${i}`, x: 6 + (i % 4), y: 6 + Math.floor(i / 4) }));
+    const before = tower({ tokens: Object.fromEntries(imps.map((t) => [t.id, t])) });
+    const after = applied(before, putOpeningOp({ rect: { x: 6, y: 6, w: 4, h: 3 } })).state;
+    const cards = fallsAfter(after.falls, -1);
+    assert.equal(cards.length, LIMITS.fallsPerRoom, "the room keeps its cap");
+    assert.equal(imps.filter((t) => after.tokens[t.id]?.sceneId === GROUND).length, 12, "all 12 fell");
+    assert.deepEqual(fallAlerts(cards, after, GROUND, NO_LABELS), [{ text: "10 or more creatures fell to Ground floor." }]);
   });
 });
