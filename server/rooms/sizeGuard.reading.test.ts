@@ -8,7 +8,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { MAX_LOG } from "#shared/logRings.ts";
 import { DM, actor, character, effect, entry, env, P1, rng, room, scene, token, trap } from "#shared/testutil.ts";
 import { GROUND, UPPER, tower, withStairs } from "#shared/floorLinksTestutil.ts";
-import { farAnswer, hiddenCreatures, knownBy, OMITTED, parked, readingsApart, twinBase, type Past } from "./copyTwinsTesting.ts";
+import { farAnswer, hiddenCreatures, knownBy, OMITTED, parked, readingsApart, twinBase, type FarAnswer, type Past } from "./copyTwinsTesting.ts";
 import { scopeFixture } from "./undoScopeTesting.ts";
 import { exactCopies, farWidths, growthBound, ownHeldBytes, playerReadings, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
 
@@ -26,13 +26,17 @@ import { exactCopies, farWidths, growthBound, ownHeldBytes, playerReadings, proj
 const MIB = 1024 * 1024;
 let seq = 1_000;
 
-/** P1's answer to `op`, or the DM's op applied as the DM gives it, the near lines out of the way. */
-const answer = (state: RoomState, op: Op, who: Viewer = P1) => {
+/**
+ * P1's answer to `op`, or the DM's op applied as the DM gives it, the near
+ * lines out of the way, at `at`: twins answer one op at one seq, so the
+ * lines it writes have one id in both.
+ */
+const answer = (state: RoomState, op: Op, who: Viewer = P1, at = ++seq): FarAnswer => {
   if (who.role === "dm") {
-    const r = applyOp(state, op, who, env(++seq));
+    const r = applyOp(state, op, who, env(at));
     return r.ok ? { said: "taken", next: r.state } : { said: `${r.code}: ${r.message}`, next: null };
   }
-  return farAnswer(state, op, who, ++seq);
+  return farAnswer(state, op, who, at);
 };
 
 /** A walk of `stops` stops on turn `turn`. */
@@ -121,14 +125,15 @@ function runTwins(twins: [RoomState, RoomState], steps: ReadonlyArray<{ op: Op; 
     const next = list ? list[i]! : (steps as (state: RoomState) => { op: Op; who: Viewer } | null)(twins[0]);
     if (!next) break;
     const { op, who } = next;
-    const [a, b] = [answer(twins[0], op, who), answer(twins[1], op, who)];
+    const at = ++seq;
+    const [a, b] = [answer(twins[0], op, who, at), answer(twins[1], op, who, at)];
     if (who.role === "player") said.push(`${op.t}: ${a.said.split(":")[0]}`);
     if (who.role === "player" && b.said !== a.said) said.push(`${op.t}: ${b.said.split(":")[0]}`);
     if (a.said !== b.said) {
       if (who.role === "dm") break;
-      const took = (state: RoomState) => applyOp(state, op, who, env(++seq));
+      const took = (state: RoomState) => applyOp(state, op, who, env(at));
       const [ta, tb] = [took(twins[0]), took(twins[1])];
-      const why = ta.ok && tb.ok ? readingsApart([twins[0], ta.state], [twins[1], tb.state]) : null;
+      const why = ta.ok && tb.ok ? readingsApart([twins[0], ta.state], [twins[1], tb.state], [a.scope, b.scope]) : null;
       if (why) recorded[why]++;
       else failures.push(`${what}, ${op.t}: ${a.said} against ${b.said}`);
       break;
@@ -173,7 +178,8 @@ describe("D-261121-060 and 121: past the far line a player's answer reads their 
     assert.deepEqual(failures, []);
     for (const name of Object.keys(differences)) assert.ok((pairs.get(name) ?? 0) >= 4, `${name}: ${pairs.get(name) ?? 0} twins`);
     assert.ok([...said.keys()].some((k) => k.endsWith(": taken")) && [...said.keys()].some((k) => k.endsWith(": quota")), `both answers met: ${JSON.stringify(counts)}`);
-    assert.ok(recorded["own copy"] + recorded.step <= compared / 10, `residuals ${JSON.stringify(recorded)} of ${compared}`);
+    // Each residual is established from the twins (readingsApart), and they stay rare: a mutant that reads past the copy meets them often.
+    assert.ok(recorded["own copy"] + recorded.step <= Math.ceil(compared / 100), `residuals ${JSON.stringify(recorded)} of ${compared}`);
   });
 });
 
@@ -373,7 +379,8 @@ describe("D-261121-129, 130: the exact part reads only the copy and constants", 
     }
     const twins: [RoomState, RoomState] = [at(7, false), at(30_000, true)];
     parked(twins, "room", "s1", FAR.byteStep / 2);
-    const [x, y] = [answer(twins[0], hit), answer(twins[1], hit)];
+    const when = ++seq;
+    const [x, y] = [answer(twins[0], hit, P1, when), answer(twins[1], hit, P1, when)];
     assert.equal(x.said, y.said);
     assert.match(x.said, /^quota/, "past the line the HP line grows the log");
   });
@@ -419,7 +426,8 @@ describe("D-261121-120 and 125: no fight's start or end, and no walk, moves a re
       });
       parked(twins, past, "s1", FAR.byteStep / 2);
       const move: Op = { t: "token.move", tokenId: "hero", x: 12, y: 2 };
-      const [a, b] = [answer(twins[0], move), answer(twins[1], move)];
+      const when = ++seq;
+      const [a, b] = [answer(twins[0], move, P1, when), answer(twins[1], move, P1, when)];
       assert.ok(a.next, a.said);
       assert.ok(exactCopies(a.next, "p1").has(keys.token("lurker")) && !exactCopies(twins[0], "p1").has(keys.token("lurker")), "the lurker came into P1's copy");
       assert.deepEqual([a.said, b.said], ["taken", "taken"], past);
@@ -439,7 +447,8 @@ describe("D-261121-120 and 125: no fight's start or end, and no walk, moves a re
       // A light is no exempt kind, so it reads the line less the bookkeeping reserve.
       parked(twins, past, "s1", -BOOKKEEPING_RESERVE[past] - 1_000);
       const torch: Op = { t: "token.update", tokenId: "hero", patch: { light: { bright: 20, dim: 20 } } } as Op;
-      const [a, b] = [answer(twins[0], torch), answer(twins[1], torch)];
+      const when = ++seq;
+      const [a, b] = [answer(twins[0], torch, P1, when), answer(twins[1], torch, P1, when)];
       assert.ok(a.next, a.said);
       assert.ok(exactCopies(a.next, "p1").has(keys.token("lurker")) && !exactCopies(twins[0], "p1").has(keys.token("lurker")), "the lurker came into P1's copy");
       assert.deepEqual([a.said, b.said], ["taken", "taken"], past);

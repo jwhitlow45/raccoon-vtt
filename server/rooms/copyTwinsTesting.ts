@@ -1,11 +1,12 @@
 import { FAR_TREATMENT, opKind } from "#shared/farLine.ts";
-import { admitLimits, FAR, farReading, LIMITS, type LimitSender } from "#shared/limits.ts";
+import { admitLimits, FAR, farReading, LIMITS, ROOM_FULL, roundUp, SCENE_FULL, type CopiedKind, type LimitSender } from "#shared/limits.ts";
+import { readEntity, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState, seatView, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { drawing, effect, entry, env, randomState, rng, scene, template, token } from "#shared/testutil.ts";
-import { growthBound, linesHeld, playerReadings, SizeGuard, touchedScenes, type FarParts } from "./sizeGuard.ts";
+import { exactOver, growthBound, linesHeld, playerReadings, SizeGuard, touchedScenes, type ExactCopy, type FarParts } from "./sizeGuard.ts";
 
 /*
  * Twins of a random room apart only in what P1's copy leaves out
@@ -121,8 +122,13 @@ export const knownBy = (state: RoomState, memberId: string) => {
   return `${copyOf(state, memberId)}\n${stableStringify([...linesHeld(state, memberId, view)].map(([line, held]) => [line.id, held]))}`;
 };
 
-/** A player's or the DM's answer to an op as the actor gives it with the near lines out of the way, and the room after it. */
-export type FarAnswer = { said: string; next: RoomState | null };
+/**
+ * A player's or the DM's answer to an op as the actor gives it with the
+ * near lines out of the way, the room after it, and for a player's op a
+ * byte line refused, the scope whose line it was: "room" or the scene by
+ * its main floor.
+ */
+export type FarAnswer = { said: string; next: RoomState | null; scope?: string };
 
 const MIB = 1024 * 1024;
 
@@ -150,32 +156,58 @@ export function farAnswer(before: RoomState, op: Op, who: Viewer, at: number): F
   const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
   const far = who.role === "player" ? "widest" : kind.far === "exempt" ? "today" : "dmAdd";
   const check = guard.check(measured.state, scenes, growthBound(before, measured.state, measured.touched), before, who.role, far, kind.far === "exempt", who.role === "player" ? who.memberId : undefined);
-  return check.ok ? { said: "taken", next: result.state } : { said: `${check.code}: ${check.message}`, next: null };
+  if (check.ok) return { said: "taken", next: result.state };
+  const scope = check.message === ROOM_FULL ? "room" : check.message === SCENE_FULL ? (guard.refusedScene ?? undefined) : undefined;
+  return { said: `${check.code}: ${check.message}`, next: null, ...(scope !== undefined ? { scope } : {}) };
 }
+
+/** A thing in an exact part by its key as the state stores it: a row of the fight, a line of the log, or an entity. */
+const storedAt = (state: RoomState, key: string): unknown => {
+  if (key.startsWith("row:")) return state.encounter?.entries.find((e) => e.id === key.slice("row:".length));
+  if (key.startsWith("log:")) return state.log.find((line) => line.id === key.slice("log:".length));
+  return readEntity(state, key as EntityKey);
+};
+
+/** P1's copy of a thing in their exact part, by its key: a shared line as they read it when written. */
+const copyAt = (state: RoomState, key: string, memberId: string): string => {
+  const view = seatView(state, memberId);
+  const at = key.indexOf(":");
+  const [kind, id] = [key.slice(0, at), key.slice(at + 1)];
+  return stableStringify(kind === "log" ? view.written(id) : view.copy(kind as CopiedKind, id));
+};
+
+/** The keys whose part differs between two exact parts, or that one holds and the other does not. */
+const partsApart = (x: ReadonlyMap<EntityKey, ExactCopy>, y: ReadonlyMap<EntityKey, ExactCopy>): EntityKey[] =>
+  [...new Set([...x.keys(), ...y.keys()])].filter((key) => {
+    const [p, q] = [x.get(key), y.get(key)];
+    return !p || !q || p.on !== q.on || p.shownOn !== q.shownOn || p.shown !== q.shown || p.sub !== q.sub;
+  });
 
 /**
  * Why twins' answers to one op of P1's may differ, or null where nothing
- * recorded explains it (D-261121-073): the op's result in P1's own copy
- * differs between them, so their exact parts grow apart in some scope
- * (residual 2, things the op made), or the twins' readings of some scope
- * stand a step apart before or after, hidden bytes having carried a
- * stepped part across a step (residual 1). With exact parts that grow
- * alike, nothing else can part their answers.
+ * recorded explains it (D-261121-073), each established from the twins
+ * themselves. "own copy" (residual 2): their exact parts after the op
+ * differ, and every thing they differ in is one the op made or wrote in a
+ * twin whose copy P1 holds differently in the two. "step" (residual 1):
+ * in the scope whose byte line refused, the first of `refused` (each
+ * twin's) in the order the far check reads them, the twins' stepped parts
+ * round to different steps before or after the op, hidden bytes having
+ * carried one across a step. Exact parts apart before the op explain
+ * nothing: P1's copies were alike then.
  */
-export function readingsApart(a: [RoomState, RoomState], b: [RoomState, RoomState], memberId = "p1"): "own copy" | "step" | null {
+export function readingsApart(a: [RoomState, RoomState], b: [RoomState, RoomState], refused: ReadonlyArray<string | undefined>, memberId = "p1"): "own copy" | "step" | null {
+  const [ea, eb] = [exactOver(a[0], a[1], memberId), exactOver(b[0], b[1], memberId)];
+  if (partsApart(ea.before, eb.before).length > 0) return null;
+  const apart = partsApart(ea.after, eb.after);
+  const wrote = ([before, after]: [RoomState, RoomState], key: string) => stableStringify(storedAt(before, key)) !== stableStringify(storedAt(after, key));
+  if (apart.length > 0) return apart.every((key) => (wrote(a, key) || wrote(b, key)) && copyAt(a[1], key, memberId) !== copyAt(b[1], key, memberId)) ? "own copy" : null;
   const [ra, rb] = [playerReadings(a[0], a[1], memberId), playerReadings(b[0], b[1], memberId)];
-  const scopes = new Set([...ra.keys(), ...rb.keys()]);
-  const grown = (readings: typeof ra, scope: string) => {
-    const at = readings.get(scope);
-    return at ? at.after.exact - (at.before?.exact ?? 0) : 0;
-  };
-  if ([...scopes].some((scope) => grown(ra, scope) !== grown(rb, scope))) return "own copy";
-  const reading = (parts: FarParts | undefined) => (parts ? farReading(parts.stepped, parts.exact) : 0);
-  const apart = (scope: string) => {
-    const [x, y] = [ra.get(scope), rb.get(scope)];
-    return reading(x?.before) !== reading(y?.before) || reading(x?.after) !== reading(y?.after);
-  };
-  return [...scopes].some(apart) ? "step" : null;
+  const order = [...ra.keys()];
+  const scope = refused.filter((at): at is string => at !== undefined && order.includes(at)).sort((x, y) => order.indexOf(x) - order.indexOf(y))[0];
+  if (scope === undefined) return null;
+  const rounded = (parts: FarParts | undefined) => (parts ? roundUp(Math.max(0, parts.stepped), FAR.byteStep) : null);
+  const [x, y] = [ra.get(scope), rb.get(scope)];
+  return rounded(x?.before) !== rounded(y?.before) || rounded(x?.after) !== rounded(y?.after) ? "step" : null;
 }
 
 /** Where twins are parked: past the room's line, P1's scene's, or the room's at the widest on per-player sight alone. */
