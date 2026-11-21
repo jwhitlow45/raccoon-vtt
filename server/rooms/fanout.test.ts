@@ -310,8 +310,9 @@ describe("the server's held maps", () => {
 
 describe("a mount's path in its rider's turn (docs/design/design-v1-attach.md 7.2)", () => {
   test("reaches a player's socket and leaves it as the rider's row comes into sight and goes out of it, with no change to the mount", () => {
-    // The DM's goblin rides P1's horse under control on its own turn, both in the lifted fog. Then the goblin gets off into
-    // the fog and back out: its row is hidden and shown again, and with it the horse's path of the turn.
+    // The DM's goblin rides P1's horse under control on its own turn, both in the lifted fog. Then the horse carries the
+    // goblin into the fog and back out: its row is hidden and shown again, and with it the horse's path of the turn. A
+    // getting off would take the path off from change format 65 (design-v1-attach.md 7.2).
     let state = room({
       tokens: {
         horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: ["p1"], x: 2, y: 2 }),
@@ -339,10 +340,10 @@ describe("a mount's path in its rider's turn (docs/design/design-v1-attach.md 7.
     assert.deepEqual(state.encounter?.turnStart?.mounts, ["horse"]);
     step({ t: "token.move", tokenId: "horse", x: 4, y: 2 });
     assert.ok(viewers[0]!.view.tokens.horse?.path, "the horse's path of the goblin's turn reaches P1");
-    step({ t: "token.detach", tokenId: "gob", x: 6, y: 2 });
-    step({ t: "token.move", tokenId: "gob", x: 15, y: 2 });
+    step({ t: "token.move", tokenId: "horse", x: 15, y: 2 });
+    assert.ok(state.tokens.horse!.path, "the room keeps the horse's walk");
     assert.equal(viewers[0]!.view.tokens.horse?.path, undefined, "with the goblin's row out of sight, so is the path");
-    step({ t: "token.move", tokenId: "gob", x: 7, y: 2 });
+    step({ t: "token.move", tokenId: "horse", x: 7, y: 2 });
     assert.ok(viewers[0]!.view.tokens.horse?.path, "and back with it");
   });
 });

@@ -27,9 +27,11 @@ function bresTurn(setup?: (s: RoomState) => void) {
   const f = {
     state,
     seq: 0,
+    /** The change format every op from here on is stored at, or none for live ops. */
+    version: undefined as number | undefined,
     run(op: Op, who: Viewer = DM) {
       f.seq++;
-      const r = applyOp(f.state, op, who, env(f.seq));
+      const r = applyOp(f.state, op, who, { ...env(f.seq), ...(f.version === undefined ? {} : { opVersion: f.version }) });
       assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
       f.state = r.state;
       return f;
@@ -261,8 +263,30 @@ describe("a controlled mount's path on its rider's turn (7.2)", () => {
     assert.equal(free.state.tokens.horse!.path, undefined);
   });
 
-  test("a remount on the same turn goes on with the same path, a move between that shares no turn recording nothing and counting nothing", () => {
+  test("a remount on the same turn starts a fresh path, as the getting off took the mount's walk off, and a move between records nothing (D-261121-127)", () => {
     const f = bresTurn().share("horse").run({ t: "token.move", tokenId: "horse", x: 8, y: 4 });
+    f.run({ t: "token.detach", tokenId: "bree", x: 10, y: 4 });
+    assert.equal(f.state.tokens.horse!.path, undefined, "the mount leaves the turn with its walk");
+    assert.equal(f.state.encounter!.turnStart!.mounts, undefined);
+    f.run({ t: "token.move", tokenId: "horse", x: 8, y: 5 });
+    assert.equal(f.state.tokens.horse!.path, undefined, "the move between records nothing");
+    f.run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 9, y: 5, elevation: 0 });
+    assert.deepEqual(f.state.encounter!.turnStart!.mounts, ["horse"]);
+    f.run({ t: "token.move", tokenId: "horse", x: 8, y: 9 });
+    assert.deepEqual(
+      f.stops("horse").map((s) => [s.x, s.y, s.uncounted ?? false, s.moved]),
+      [
+        [8, 5, false, undefined],
+        [8, 9, false, 20],
+      ],
+      "its feet this turn read from where it was remounted",
+    );
+  });
+
+  test("ops stored at change format 64 go on with the same path on a remount the same turn, a move between that shares no turn recording nothing and counting nothing", () => {
+    const f = bresTurn().share("horse");
+    f.version = 64;
+    f.run({ t: "token.move", tokenId: "horse", x: 8, y: 4 });
     f.run({ t: "token.detach", tokenId: "bree", x: 10, y: 4 });
     f.run({ t: "token.move", tokenId: "horse", x: 8, y: 5 });
     assert.equal(f.stops("horse").length, 2, "the move between records nothing");

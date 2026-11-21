@@ -1,9 +1,9 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import type { InitEntry, PathStop, Token, TokenPath } from "../model.ts";
+import type { InitEntry, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
 import { gridOfToken, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
-import { attaches } from "../migrate.ts";
+import { attaches, walksEndWithTurn } from "../migrate.ts";
 import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, withinReach, type LinkNames } from "../rules/attach.ts";
 import { footprintSize } from "../rules/footprint.ts";
 import { sceneGrid } from "../rules/grid.ts";
@@ -154,16 +154,58 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
  * that ends its ride, whatever ends it (getting off, Let go, the link pass,
  * a deletion, an undo), since sharing is bound to one turn and one ride.
  * It changes no row: a row that marks time this round goes on marking it.
+ * From op version 65 (walksEndWithTurn) it ends with strayTurnWalks, so a
+ * mount that leaves takes its walk of the turn with it and a remount the
+ * same turn starts a fresh one (7.2).
  */
 export function settleMounts(tx: Tx): void {
+  const trims = walksEndWithTurn(tx.env.opVersion);
   const encounter = tx.state.encounter;
   const start = encounter?.turnStart;
-  if (!encounter || !start?.mounts) return;
-  const turn = turnUnderWay(encounter);
-  const kept = turn ? start.mounts.filter((id) => sharesTurn(tx.state, id, turn)) : [];
-  if (kept.length === start.mounts.length) return;
-  const { mounts: _left, ...rest } = start;
-  writeEncounter(tx, { ...encounter, turnStart: kept.length > 0 ? { ...rest, mounts: kept } : rest });
+  if (encounter && start?.mounts) {
+    const turn = turnUnderWay(encounter);
+    const kept = turn ? start.mounts.filter((id) => sharesTurn(tx.state, id, turn) || (trims && chainUnseen(tx, id, turn))) : [];
+    if (kept.length !== start.mounts.length) {
+      const { mounts: _left, ...rest } = start;
+      writeEncounter(tx, { ...encounter, turnStart: kept.length > 0 ? { ...rest, mounts: kept } : rest });
+    }
+  }
+  if (trims) strayTurnWalks(tx);
+}
+
+/**
+ * Takes off every walk of the turn under way held by a creature outside it:
+ * neither the turn's creature nor a mount on its `mounts` (op version 65,
+ * walksEndWithTurn), once settleMounts has kept only the mounts that share
+ * it. So the op that ends a mount's share takes its walk, a restore that
+ * brings one back to a creature outside the turn leaves it off, and a room
+ * stored before 65, which kept a mount's walk after it left the turn, sheds
+ * them at its first op from 65, whoever sends it. A device's copy that
+ * holds no turn under way leaves its walks to the server's answer, and it
+ * judges only the creatures it holds, whose place on the list it holds as
+ * the room does.
+ */
+export function strayTurnWalks(tx: Tx): void {
+  const turn = turnUnderWay(tx.state.encounter);
+  if (!turn) return;
+  const inTurn = new Set([turn.tokenId, ...(turn.mounts ?? [])]);
+  const strays = Object.values(tx.state.tokens).filter((token) => token.path?.turn === turn.seq && !inTurn.has(token.id));
+  for (const token of sortedById(strays)) tx.dropWalk(token.id);
+}
+
+/**
+ * Whether the mount was on the same turn's list when the op began, though
+ * the room as the op found it showed no chain of controlled rides from the
+ * turn's creature up to it. The server's room never does: every op ends by
+ * keeping only mounts that share the turn. A player's copy does where a
+ * mount it holds rides above one it does not, whose link the copy leaves
+ * out (project.ts linkShown). Such a copy cannot tell whether the op ended
+ * the ride, so its prediction keeps the mount and its walk, as the room
+ * most likely does, and the server's answer settles it.
+ */
+function chainUnseen(tx: Tx, mountId: string, turn: TurnStart & { seq: number }): boolean {
+  const began = turnUnderWay(tx.initial.encounter);
+  return began?.seq === turn.seq && began.mounts?.includes(mountId) === true && !sharesTurn(tx.initial, mountId, began);
 }
 
 /**

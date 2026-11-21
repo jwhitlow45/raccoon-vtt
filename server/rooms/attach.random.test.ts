@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readEntity, type EntityKey } from "#shared/keys.ts";
+import { LIMITS } from "#shared/limits.ts";
 import type { AttachKind, CreatureSize, Encounter, InitEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { inSightOfNonOwners } from "#shared/project.ts";
 import { MAX_PATH_STOPS, type Op } from "#shared/protocol.ts";
@@ -32,6 +33,7 @@ const INVARIANTS = {
   restoreWhole: "every restore applies whole or refuses",
   replay: "replaying the stored ops rebuilds the same state",
   pathBound: "no path holds more stops than the room keeps",
+  turnWalks: "after every op only the turn's creature and the mounts on its list hold walks of the turn under way, at most 1 + LIMITS.turnMounts",
 } as const;
 
 type Invariant = keyof typeof INVARIANTS;
@@ -174,7 +176,7 @@ class Watch {
   /** The turns each token recorded movement on, per round. */
   recorded = new Map<string, Map<number, Set<number>>>();
   /** How often the run reached the cases that matter, so a run that never gets there fails. */
-  seen = { joins: 0, mountLegs: 0, linksDropped: 0, quietPassengers: 0 };
+  seen = { joins: 0, mountLegs: 0, linksDropped: 0, quietPassengers: 0, mountWalksEnded: 0 };
   initial: RoomState;
   constructor(initial: RoomState) {
     this.initial = initial;
@@ -189,6 +191,7 @@ class Watch {
     const after = t.state;
     const { op, who } = t.last;
     this.#links(after, where);
+    this.#turnWalks(op, before, after, where);
     for (const t of Object.values(after.tokens)) holds("pathBound", (t.path?.stops.length ?? 0) <= MAX_PATH_STOPS, where, `${t.id} holds ${t.path?.stops.length} stops`);
     for (const [id, was] of Object.entries(before.tokens)) {
       if (was.attached && after.tokens[id] && !after.tokens[id]!.attached && op.t !== "token.detach") this.seen.linksDropped++;
@@ -198,6 +201,18 @@ class Watch {
     this.#shares(op, before, after, where);
     this.#records(op, before, after, where);
     if (op.t === "sys.restore") this.#restoreWhole(op, after, where);
+  }
+
+  #turnWalks(op: Op, before: RoomState, after: RoomState, where: string): void {
+    const turn = turnUnderWay(after.encounter);
+    if (!turn) return;
+    const walking = Object.values(after.tokens).filter((x) => x.path?.turn === turn.seq).map((x) => x.id);
+    const inTurn = new Set([turn.tokenId, ...(turn.mounts ?? [])]);
+    holds("turnWalks", walking.every((id) => inTurn.has(id)) && walking.length <= 1 + LIMITS.turnMounts, where, `turn ${turn.seq} walks ${walking.join(",")}, list ${[...inTurn].join(",")}`);
+    // A mount that left the turn under way without the turn passing, its walk with it (D-261121-127).
+    const was = turnUnderWay(before.encounter);
+    if (was?.seq !== turn.seq || op.t === "sys.restore") return;
+    for (const id of was.mounts ?? []) if (!inTurn.has(id) && before.tokens[id]?.path?.turn === turn.seq && after.tokens[id] && !after.tokens[id]!.path) this.seen.mountWalksEnded++;
   }
 
   #links(after: RoomState, where: string): void {
@@ -326,8 +341,11 @@ function normalized(key: string, value: unknown, after: RoomState): unknown {
     const link = out.attached as Token["attached"];
     const holder = link ? after.tokens[link.to] : undefined;
     if (!link || !holder || !linkHolds(SQUARES, after.meta.settings, link.kind, out as unknown as Token, holder)) delete out.attached;
-    // A walk lives only on its turn, so the restore leaves off one from a turn since ended (D-261120-100).
-    if ((out.path as Token["path"])?.turn !== turnUnderWay(after.encounter)?.seq) delete out.path;
+    // A walk lives only on its turn, so the restore leaves off one from a turn since ended (D-261120-100), and one of the
+    // turn under way on a creature outside it: a mount whose rider's turn it no longer shares (D-261121-127).
+    const turn = turnUnderWay(after.encounter);
+    const inTurn = turn !== null && (key === `token:${turn.tokenId}` || (turn.mounts ?? []).some((id) => key === `token:${id}`));
+    if ((out.path as Token["path"])?.turn !== turn?.seq || !inTurn) delete out.path;
   }
   if (key === "encounter" && out.turnStart) {
     const { mounts: _mounts, ...start } = out.turnStart as Record<string, unknown>;
@@ -393,7 +411,7 @@ describe("attached tokens, randomized (docs/design/design-v1-attach.md 13)", () 
       for (const [k, v] of [...Object.entries(applied), ...Object.entries(seen)]) totals[k] = (totals[k] ?? 0) + v;
     }
     // The run must reach what it claims to test.
-    for (const kind of ["token.attach", "token.detach", "token.move", "token.moveMany", "token.update", "token.delete", "encounter.next", "encounter.prev", "undo", "redo", "joins", "mountLegs", "linksDropped", "quietPassengers"]) {
+    for (const kind of ["token.attach", "token.detach", "token.move", "token.moveMany", "token.update", "token.delete", "encounter.next", "encounter.prev", "undo", "redo", "joins", "mountLegs", "linksDropped", "quietPassengers", "mountWalksEnded"]) {
       assert.ok((totals[kind] ?? 0) >= 10, `${kind} applied only ${totals[kind] ?? 0} times`);
     }
   });

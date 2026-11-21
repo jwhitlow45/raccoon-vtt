@@ -593,7 +593,8 @@ export function withPath(
   }
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
-  // A mount's path this turn outlives a move that shares no turn, which records nothing, so a remount the same turn goes on with it (7.2).
+  // A mount's path this turn outlives a move that shares no turn, which records nothing. From op version 65 the op that ends its
+  // share takes the path off (attach.ts settleMounts), so a remount the same turn starts a fresh one (7.2). Before then it went on.
   // On another floor its stops would lie on the floor it left, so a change of floor drops it, as a change of scene does.
   if (turn.tokenId !== after.id && !mount) return keepsOld || (!floors && attaches(tx.env.opVersion) && before.path?.turn === turn.seq) ? after : withoutPath(after);
   // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).

@@ -178,7 +178,11 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
  * creature's delete its whole value. An undo of the turn's end puts back
  * the fight with the walks, and keeps them. A walk the creature holds
  * already, which a room kept from before op version 65 may, stays as it
- * is, so an undo writes nothing of a creature's but what it puts back.
+ * is, so an undo writes nothing of a creature's but what it puts back. A
+ * walk of the turn under way is the op's last step to judge (attach.ts
+ * strayTurnWalks): it stays only on the turn's creature or a mount that
+ * shares the turn in the room the restore leaves, so the undo of a mount's
+ * move after it left the turn brings back no walk (D-261121-127).
  */
 function keepTurnWalks(tx: Tx, entries: readonly RestoreEntry[], before: ReadonlyMap<EntityKey, unknown>): void {
   const seq = turnUnderWay(tx.state.encounter)?.seq;
