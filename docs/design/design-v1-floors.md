@@ -289,8 +289,10 @@ Where the build went its own way. Each entry names its decision.
 **Review round 1 (FLR4 fixes)**
 - **Both ends held.** A player's undo or redo across stairs, a ladder or a hole, and a fall's undo and redo, read an end's `rev` and `made` only while their copy holds both ends (`holdsBothEnds` in `shared/permissions.ts`). Otherwise it refuses with the generic "the stairs changed", so a far end the DM moved under fog answers as any withheld end does.
 - **Restore bounds.** `sys.restore`'s `falls` holds at most `MAX_RESTORE_ENTRIES` records, as its entries do, so a move of 100 creatures that drags one more through a hole still undoes.
-- **Commas across floors.** A scene's measure counts a comma for each entry on a floor of a scene, where a scene of one floor counts one between each two, so a creature, an area or a ruler that crosses floors moves the measure by nothing, whatever else either floor holds. A player's exact part takes every comma of their own entries on a floor, so the stepped part keeps only others' (`commasOf` and `collectionCommas` in server/rooms/sizeGuard.ts, D-261120-140).
 - **Caches.** The stairs' check (`linksProblem`) and the openings' joins are kept per scene, keyed on what they read: links, scenes, build chunks and traps for the check, links and scenes for the joins. `playersSee` is still asked of every state, and both are skipped while a collection may still be written.
+
+**Review round 6**
+- **Commas across floors.** A scene's measure counts a comma for each entry on a floor of a scene, where a scene of one floor counts one between each two, so a creature that climbs or falls to another floor, with the areas that follow it, moves the measure by nothing, whatever else either floor holds. A kept ruler stays on its own floor. A player's exact part takes every comma of their own entries on a floor, so the stepped part keeps only others' (`commasOf` and `collectionCommas` in server/rooms/sizeGuard.ts, D-261120-140).
 
 **Trap toasts**
 - **Trap toasts name the floor.** A trap that goes off on another floor of the scene shown reads "Hidden Pit went off on Upper floor.", and one on a floor of another scene "Hidden Pit went off on Crypt · Upper floor.", as other floors words name a place (`placeName`). The Passive Perception hint does the same (D-261120-104).
