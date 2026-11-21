@@ -335,9 +335,9 @@ Tap an end while **Between floors** is open to open its pane. **Kind** turns sta
 
 **Climbing.** A creature standing on the squares gets **Go up** or **Go down** first in its action bar, ahead of Undo move, Doesn't count and the door. On a phone held upright it takes Roll's place in the strip, with its words where they fit and as a stairwell icon where they do not. On a keyboard, `}` goes up and `{` goes down for the one selected creature. A player can climb whenever they could move that creature, and you can climb any creature that stands on its own feet. One that rides or is carried answers "Thorn is carried. Its holder takes the stairs.", so climb its holder instead. The creature lands on the same squares of the other floor, on the ground there, with what rides or is carried on it and its areas. A creature it was dragging is let go, so a drag ends at the stairs.
 
-![Pat's phone on Thorn's turn: Thorn stands on the stairs, named Stairs up, the marker reads Moved 15 ft and 15 ft left, and the stairwell icon, Go up, sits beside Apply and End turn.](dm-guide/floors-climb-strip.webp)
+![Ana's phone on Thorn's turn: Thorn stands on the stairs, named Up to Upper floor, the marker reads Moved 15 ft and 15 ft left, and the stairwell icon, Go up, sits beside Apply and End turn.](dm-guide/floors-climb-strip.webp)
 
-![Pat's phone after the climb: Upper floor's wooden boards, Thorn on the stairs' other end, the marker reading Moved 25 ft and 5 ft left, and the stairwell icon in the strip now Go down.](dm-guide/floors-climb-landed.webp)
+![Ana's phone after the climb: Upper floor's wooden boards, Thorn on the stairs' other end, the marker reading Moved 25 ft and 5 ft left, and the stairwell icon in the strip now Go down.](dm-guide/floors-climb-landed.webp)
 
 A climb is a leg of the turn and costs speed. Stairs cost the height between the two floors, 10 ft unless you set another under the floor's **Height above the floor below**. A ladder costs twice that, unless the creature has a Climb speed, and a prone creature pays one more foot for each foot. **Moved** keeps the feet of the floors a creature left, so after a 15 ft walk and stairs 10 ft high it reads "Moved 25 ft" upstairs. A drag that ends on stairs reads as any walk and never routes through them, and so does a walking ruler until you press **Up the stairs** (see [Measuring up the stairs](#measuring-up-the-stairs)).
 
@@ -400,6 +400,8 @@ An area cast over a hole reaches through it by the same rule, so it works where 
 
 In the [isometric view](#the-isometric-view) each hole draws as a drop. Its walls sink like a pit's and the floor below shows at the bottom, or black where the players have not reached it. A creature standing over the hole is drawn at the floor's own height until it falls.
 
+![The Upper floor in Isometric on the DM's screen: a 4 by 4 hole in the boards drawn as a drop, its walls sunk like a pit's, a chip reading 10 ft down over it and its name Down to Ground floor, beside the Initiative panel.](dm-guide/floors-opening-isometric.webp)
+
 ### Falls
 
 A creature that ends a move standing on the ground wholly over a hole falls to the floor below. It lands on the same squares, on that floor's ground, with what it carries, what rides it and its areas, and a creature it was dragging is let go. A fall is the same step down that stairs take, with the damage of the SRD: 1d6 Bludgeoning for each full 10 ft, at most 20d6, and Prone unless the fall hurts nothing. The drop is the floor's height, 10 ft unless its page sets another, adjusted by the ground under each end.
@@ -425,6 +427,8 @@ A flier goes through a hole as a climber takes stairs. A creature in the air wit
 The app keeps no record of who can fly. A creature stays in the air where you lifted it with **Elevation**, so when a flier should drop, lower it. On the ground, `}` and `{` answer "Only a creature in the air goes through an opening." A walking ruler is not carried through a hole, so measure a flight in two rulers.
 
 ![Ana's phone with Thorn selected, flying 5 ft over the hole: his bar shows the arrow for Fly down beside Conditions, and the hole's chip reads 10 ft down.](dm-guide/floors-fly-strip.webp)
+
+![Ana's phone on Ground floor with Thorn selected, flying 5 ft under the hole: the hole's lower end is outlined and named Up to Upper floor, and his bar shows the arrow for Fly up beside Conditions.](dm-guide/floors-fly-up.webp)
 
 ### Trapdoors
 
@@ -1097,7 +1101,7 @@ On a phone held upright, the bar rests as a strip across the foot of the map. It
 
 Press **Expand** (a chevron pointing up, with its name beside it where there is room) to grow the bar up the screen and show all of it, and **Collapse** to rest it again. **Conditions** and **Uses** in the strip open the whole bar with their list showing, and closing the list rests it again. On a screen too short for the bar to grow, the strip scrolls instead, and **Scroll for more** takes Expand's place.
 
-![The DM's phone held upright on the forest road, Goblin Warrior 2 tapped: its action bar rests as a strip at the foot of the map, with its name and "AC 15 · HP 4/10", Expand and Close, then the − sign, the HP field, Apply, Conditions and Roll.](dm-guide/phone-strip.webp)
+![The DM's phone held upright on the forest road, Goblin Warrior (2) tapped: its action bar rests as a strip at the foot of the map, with its name and "AC 15 · HP 4/10", Expand and Close, then the − sign, the HP field, Apply, Conditions and Roll.](dm-guide/phone-strip.webp)
 
 The fight's alert cards and the app's toasts stay above the strip and leave a band of map clear over it, and the cards fold into their one row when they would leave no band. Where the map above the strip is short, a new toast shows as one line over the top bar, and the alerts' row moves into the strip's header until the toast goes. Tap the toast's words to read the whole message.
 
@@ -1219,6 +1223,8 @@ With no fight running, **New fight** offers you a choice of who is in it:
 ![The Initiative panel with no fight running and Goblin Warrior 3 selected, its action bar open on the map: New fight offers Goblin Warrior 3, Everyone here (7), Visible to players (3) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/initiative-start.webp)
 
 On a scene with floors, **Floors** appears above those buttons with **This floor** and **Every floor**. This floor is the one on your screen, and Every floor changes the buttons to "Everyone on every floor (12)" and "Visible to players (7)". Each creature is judged where it stands, by that floor's own fog and sight, so a fight that spans a staircase starts in one step. The choice belongs to New fight alone.
+
+![New fight on a scene with floors, with Every floor chosen: Floors reads This floor and Every floor, and the buttons read Selected token, Everyone on every floor (5), Visible to players (4) and Nobody yet, with Roll monsters' Initiative switched on under them.](dm-guide/floors-fight-every-floor.webp)
 
 If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
@@ -1703,7 +1709,7 @@ Drag a token and drop it where the creature goes. As you drag, the app draws the
 
 The token walks the cheapest way to where you drop it. While **Walls and ledges block players' moves** is on, a wall, a closed door or a ledge makes the line bend along the way the creature would walk, through an open door or up the stairs, with a dot at each corner. With that setting off, walks ignore those barriers. Either way, the line goes around a patch of rubble when that costs less than wading through it. The label at the end of the line reads what the walk costs, and under that, what cost extra.
 
-![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground, with a Hidden Pit marker in the chamber beyond.](dm-guide/movement.webp)
+![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground,.](dm-guide/movement.webp)
 
 Mara's Speed is 30 ft, so the 45 ft walk in the picture needs a Dash, and its line is yellow. [Difficult ground](#difficult-ground) lists everything that costs extra.
 
@@ -2582,7 +2588,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 - To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays stays off until the start of the dragon's next turn, when they all come back. If you tap the wrong one, **Undo** in the top bar takes it back (see [Uses and Legendary Actions](#uses-and-legendary-actions)).
 - When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)**, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
 
-![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 30 (Rend critical damage)" and the breakdown of that roll, which every HP entry now offers, and the Dice panel with the Rend damage on top, Apply to on Mara, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
+![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 18 (Rend damage)" and the breakdown of that roll, which every HP entry now offers, and the Dice panel with the Rend damage on top, Apply to on Mara, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
@@ -2596,7 +2602,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 Radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
 5. When Bree takes damage, her player gets the Concentration save. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when Concentration does.
 
-![Spirit Guardians around Bree among the goblins: the attached aura, the goblins inside it in the Areas panel, and the reminder's notice as Goblin Warrior 1 walks in.](dm-guide/guardians.webp)
+![Spirit Guardians around Bree among the goblins: the attached aura, the goblins inside it in the Areas panel, and the reminder's notice as a goblin warrior walks in.](dm-guide/guardians.webp)
 
 **The familiar**
 
