@@ -291,6 +291,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     trapLog: [],
     trapSeen: [],
     // No record of the running turn's reminders (RoomState.reminded): it belongs to that turn, and names old member ids.
+    // Nor the newest DM line a shed took out (RoomState.dmLogShed): the new room's archive holds none of the old room's lines.
   };
   // The clock holds no id but its own, and each character's stamp names that one, so both come through as they are
   // (docs/design/design-v1-calendar.md 6.6). No clock stays no field.

@@ -205,6 +205,23 @@ describe("remapState", () => {
     assert.equal("reminded" in remapState(parsed.state, { assets: new Map() }), false);
   });
 
+  test("a file that carries a step's walks and the newest shed DM line imports with neither, since both name the old room's seqs", () => {
+    let state = room();
+    state.tokens.a = token("a", { name: "A" });
+    state.tokens.b = token("b", { name: "B", x: 3 });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "a", value: 20 }, { id: "n2", tokenId: "b", value: 10 }] });
+    state = apply(state, { t: "encounter.next" }, undefined, 2);
+    state = apply(state, { t: "token.move", tokenId: "a", x: 2, y: 0 }, undefined, 3);
+    state = apply(state, { t: "encounter.next" }, undefined, 4);
+    assert.deepEqual(state.encounterHistory.at(-1)!.walks?.map((w) => w.tokenId), ["a"]);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify({ ...exportableState(state, DM), encounterHistory: state.encounterHistory, dmLogShed: `2:${DM_LINE_BASE}` })));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    assert.equal("dmLogShed" in out, false);
+    assert.equal(out.encounterHistory.length, 2);
+    assert.ok(out.encounterHistory.every((step) => step.walks === undefined), "no step keeps a walk");
+  });
+
   test("a take-back line names the row it resumed by its new id", () => {
     let state = room();
     state.tokens.a = token("a", { name: "A" });
