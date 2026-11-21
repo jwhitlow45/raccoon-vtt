@@ -320,3 +320,40 @@ describe("a creature crossing floors past a scene's line answers alike whatever 
     assert.ok(got.every((g) => g[0] === got[0]![0]), JSON.stringify(got));
   });
 });
+
+describe("a walk a player's op takes off a creature outside the turn stays out of their Undo (D-261121-128)", () => {
+  /** P1's Pip on the turn, riding a mastiff that rides a warhorse only the DM sees, which holds a walk of the turn where `walked`. */
+  function riding(walked: boolean) {
+    const f = scopeFixture();
+    const state = f.state;
+    state.tokens.pip = token("pip", { sceneId: f.sceneId, name: "Pip", kind: "pc", size: "small", ownerIds: [f.player.id], x: 4, y: 4, attached: { to: "dog", kind: "ride", steer: true } });
+    state.tokens.dog = token("dog", { sceneId: f.sceneId, name: "Mastiff", kind: "npc", x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } });
+    state.tokens.horse = token("horse", { sceneId: f.sceneId, name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, visibility: "dm", ...(walked ? { path: { turn: 7, stops: [{ x: 2, y: 4, elevation: 0 }, { x: 4, y: 4, elevation: 0 }] } } : {}) });
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: "rpip",
+      entries: [{ id: "rpip", tokenId: "pip", value: 20 }, { id: "rgob", tokenId: f.goblin, value: 5 }],
+      turnStart: { entryId: "rpip", tokenId: "pip", sceneId: f.sceneId, x: 4, y: 4, elevation: 0, seen: true, seq: 7, mounts: ["dog", "horse"] },
+    } as RoomState["encounter"];
+    return { f, state };
+  }
+
+  test("Pip gets off, the DM edits the hidden warhorse, and P1's Undo answers alike whether the warhorse walked or not", async (t) => {
+    const got: string[][] = [];
+    for (const walked of [true, false]) {
+      const { f, state } = riding(walked);
+      const h = await scopeActor(t, state);
+      const dm = await h.connect(f.dm);
+      const p1 = await h.connect(f.player, "player");
+      const off = answer(await p1.send({ t: "token.detach", tokenId: "pip", x: 5, y: 4 }));
+      assert.equal(off, "taken");
+      assert.equal(h.actor.committed.state.tokens.horse!.path, undefined, "the warhorse left the turn without a walk");
+      const edit = answer(await dm.send({ t: "token.update", tokenId: "horse", patch: { notes: "Saddle sores." } }));
+      const undo = answer(await p1.send({ t: "undo", scope: "play", head: p1.head().id }));
+      got.push([off, edit, undo]);
+    }
+    assert.deepEqual(got[0], got[1]);
+    assert.deepEqual(got[0], ["taken", "taken", "taken"]);
+  });
+});

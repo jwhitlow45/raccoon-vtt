@@ -12,7 +12,7 @@ import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type 
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, visibleAssetIds } from "#shared/project.ts";
+import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
@@ -378,7 +378,7 @@ type Batch = {
 };
 
 /** `number` is the one the op's envelope took (#reduce). */
-type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string };
+type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; walksDropped?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string };
 
 /**
  * The DM's ops that ask before players' remembered map is forgotten
@@ -1902,7 +1902,8 @@ export class RoomActor {
     if (cmd.group !== undefined && actionScope !== "none" && !trackedOutcome) this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
     if (restoredFrom && step) {
       push(batch.restored, key, { n, what: saveOutcomeMissing ? step.label.slice(0, 200 - SAVE_CANNOT_REOPEN.length) + SAVE_CANNOT_REOPEN : step.label });
-      const inverse = reduced.inverse ?? (op.t === "sys.restore" && op.saveOutcome ? [] : null);
+      const all = reduced.inverse ?? (op.t === "sys.restore" && op.saveOutcome ? [] : null);
+      const inverse = all && viewer.role === "player" ? withoutDroppedWalks(all, reduced.walksDropped, this.#staged.state) : all;
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
       if (!fromLog && historyHead !== undefined) this.#undo.consume(viewer.memberId, restoredFrom, historyScope, historyHead);
@@ -1915,7 +1916,7 @@ export class RoomActor {
       // keeps every other inverse, including trap effects, under its original whole-value guard.
       const pose = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op));
       const trapWrote = reduced.trapWrote;
-      const allEntries = reduced.inverse ?? [];
+      const allEntries = viewer.role === "player" ? withoutDroppedWalks(reduced.inverse ?? [], reduced.walksDropped, this.#staged.state) : (reduced.inverse ?? []);
       // Nor a fall's card, which the step settles by its records alone (docs/design/design-v1-floors.md phase 4, 4.5).
       const inverse = pose ? withoutFallCards(trapWrote ? allEntries.filter((e) => !trapWrote.has(e.key)) : allEntries) : allEntries;
       const poses = pose ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
@@ -2370,6 +2371,7 @@ export class RoomActor {
       },
       ...(result.trapped ? { trapped: true as const } : {}),
       ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
+      ...(result.walksDropped ? { walksDropped: result.walksDropped } : {}),
       ...(result.falls ? { falls: result.falls } : {}),
     };
   }
@@ -3853,6 +3855,31 @@ function pagesWithSizes(pages: HandoutPage[], facts: Map<string, AssetFact>): Ha
 function trapsTouched(touched: readonly string[]): string[] {
   const out: string[] = [];
   for (const key of touched) if (key.startsWith("trap:")) out.push(key.slice(5));
+  return out;
+}
+
+/**
+ * A player's inverse without what the op wrote only to take a walk off a
+ * creature outside the turn under way (Applied.walksDropped): that removal
+ * is bookkeeping, so their Undo or Redo never puts the walk back and never
+ * checks the creature for it. A creature the op changed otherwise keeps its
+ * entry, with its path as the op left it.
+ */
+function withoutDroppedWalks(entries: RestoreEntry[], dropped: ReadonlySet<string> | undefined, after: RoomState): RestoreEntry[] {
+  if (!dropped || dropped.size === 0) return entries;
+  const out: RestoreEntry[] = [];
+  for (const entry of entries) {
+    const was = entry.value as Token | null;
+    if (!dropped.has(entry.key) || !was) {
+      out.push(entry);
+      continue;
+    }
+    const now = readEntity(after, entry.key) as Token | null;
+    const { path: _path, ...rest } = was;
+    const value: Token = now?.path === undefined ? rest : { ...rest, path: now.path };
+    if (now && stableStringify({ ...value, rev: 0 }) === stableStringify({ ...now, rev: 0 })) continue;
+    out.push({ ...entry, value });
+  }
   return out;
 }
 
