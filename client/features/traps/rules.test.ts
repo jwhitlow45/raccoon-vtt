@@ -20,6 +20,7 @@ import {
   intoHelp,
   intoOf,
   intoPatch,
+  opensPitPatch,
   noFloorUnder,
   alsoSummary,
   cleanLine,
@@ -464,4 +465,13 @@ describe("a pit preset's falling damage at each Into choice: one drop deals it o
     assert.equal(intoPatch("below", 0, { ...preset("collapsing-roof") }).damage, undefined, "a preset with no pit");
   });
 
+  test("Opens a pit off then on makes the same 10 ft pit as A pit (PUB46-O-8)", () => {
+    const door = pick(preset("hidden-pit", "17-20"), "below");
+    const off = merged(door, opensPitPatch(false, 0, door));
+    assert.deepEqual([off.pit, off.below], [undefined, undefined]);
+    const on = merged(off, opensPitPatch(true, 0, off));
+    assert.deepEqual(on.pit, { floor: -10 });
+    assert.deepEqual(on.damage, [{ formula: "1d6", type: "bludgeoning" }]);
+    assert.deepEqual(opensPitPatch(true, 0, off), intoPatch("pit", 0, off));
+  });
 });

@@ -55,6 +55,7 @@ import {
   intoHelp,
   intoOf,
   intoPatch,
+  opensPitPatch,
   noFloorUnder,
   noteSummary,
   openedLine,
@@ -310,7 +311,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
               help={opened && rig.pit ? openedLine(rig.pit) : undefined}
               checked={into !== null}
               disabled={opened}
-              onChange={(on) => setRig(on ? { pit: { floor: pitFloor(ground, 10) } } : { pit: null, below: null })}
+              onChange={(on) => setRig(opensPitPatch(on, ground, rig))}
             />
           ) : null}
           {/* Into shows only where there is a floor to drop to, and never once a pit has opened, since its ground is already lowered. */}

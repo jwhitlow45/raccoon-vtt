@@ -720,6 +720,11 @@ export function intoPatch(choice: "pit" | "below", ground: number, rig?: Pick<Tr
   return patch;
 }
 
+/** The rig's patch for the Opens a pit switch: on, the 10 ft pit that A pit makes (intoPatch), off, neither a pit nor a trapdoor. */
+export function opensPitPatch(on: boolean, ground: number, rig: Pick<TrapRig, "preset" | "damage" | "note" | "save">): IntoPatch {
+  return on ? intoPatch("pit", ground, rig) : { pit: null, below: null };
+}
+
 /** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at −10 ft.", with a true minus. */
 export function openedLine(pit: { floor: number }): string {
   const floor = pitFloorOf(pit);
