@@ -46,7 +46,7 @@ export type WsOptions = {
   caps?: Partial<SocketCaps>;
   /** Protocol-level ping interval (design 7.5): 30 s. */
   pingMs?: number;
-  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): HARD.sendBufferBytes, 17 MiB, for 10 s. */
+  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): HARD.sendBufferBytes, 18 MiB, for 10 s. */
   bufferedLimit?: number;
   bufferedHoldMs?: number;
   /** `scene` rate: 1 per 2 s per socket and 4 per 10 s per session. */

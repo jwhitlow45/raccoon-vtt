@@ -654,6 +654,25 @@ newest first.
 
 **Since v0.3.1**
 
+- **Walks end with their turn, and the stored bound**
+  ([design](design/design-v1-player-limits.md)): room format 49, change
+  format 65. Back up every room before the update. A creature's walk now
+  ends with its turn, kept in the fight's history for Previous, and a mount
+  that leaves its rider's turn loses its walk, so getting back on starts a
+  fresh one. A room saved mid-turn drops the walks of creatures outside the
+  turn at its first change on this version. A condition the DM hides reads
+  to players as removed, and showing it again as added. The room's size
+  limit counts the turn's walks in one fixed share of about 0.3 MiB, fight
+  or not, and no longer counts the fight's history, so a fight's start sets
+  no room aside. Where a room's saved size passes 17 MiB, each change's
+  save drops its oldest DM-only log lines that the log archive already
+  holds, then its oldest turn history steps, until it fits. The server logs
+  "room is past its stored bound and has nothing left to shed" once a load
+  where nothing is left to drop. Reload DM pages first, then every other
+  open page, table displays included. An older build refuses every room and
+  backup this version has saved, so going back needs the backups taken just
+  before the update. A room file over 16 MiB, up to 17.5 MiB, imports only
+  on this version or later.
 - **Openings between floors** ([design](design/design-v1-floors.md)): room
   format 48, change format 64. No data migrates, since a room saved before
   reads as it did and its changes replay as they ran. Until it reloads, an
@@ -678,12 +697,9 @@ newest first.
   through no wall, or is let go where its walk last held. Drags stored at
   change format 63 and earlier replay as they ran.
 - **A fight's room** ([design](design/design-v1-player-limits.md)): no
-  format step. While a fight runs, the room's size limit counts its turn
-  history at the 1 MiB it may keep. No data migrates. A fight already
-  running at the update in a room above about 9.5 MiB reads over the line
-  until it ends, so new things and growing edits are refused there while
-  moves, turns, HP and chat go on, and a fight can't start once a room
-  reads above about 8.5 MiB.
+  format step. A fight's start meets the room's size limit as any new thing
+  does, and from change format 65 no reading counts its turn history (see
+  the first note). No data migrates.
 - **Rider seats and hex walks** ([design](design/design-v1-attach.md)):
   change format 63. A move may carry where a rider was dropped. Creatures in
   single file on hexes hold their height until the holder lands, step
