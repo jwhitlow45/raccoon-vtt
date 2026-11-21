@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Fall, RoomState } from "#shared/model.ts";
 import { character, room, scene, token } from "#shared/testutil.ts";
-import { fallAlerts, fallsAfter, newestMade } from "./alerts.ts";
+import { FALL_TOASTS_MOST, fallAlerts, fallsAfter, newestMade } from "./alerts.ts";
 
 /*
  * The DM's toast for each new fall card (docs/design/design-v1-floors.md
@@ -52,5 +52,24 @@ describe("the DM's toast for a new fall card", () => {
     state.tokens.horse = token("horse", { sceneId: "ground", name: "Horse" });
     assert.deepEqual(fallAlerts([card({ tokenId: "horse", riders: ["thorn"] })], state, "ground", NO_LABELS), [{ text: "Horse and Thorn fell 10 ft to Ground floor." }]);
     assert.deepEqual(fallAlerts([card({ tokenId: "wolf", riders: ["thorn"] })], state, "ground", NO_LABELS), [{ text: "Thorn fell 10 ft to Ground floor." }], "a rider whose mount went since");
+  });
+});
+
+describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
+  const crowd = (n: number, made = 130, over: Partial<Fall> = {}) => Array.from({ length: n }, (_, i) => ({ ...card({ made, tokenId: `c${i}`, ...over }), id: `${made}:${i}` }));
+
+  test("up to the most it toasts one by one, past that once with the count, riders counted", () => {
+    assert.equal(fallAlerts(crowd(FALL_TOASTS_MOST), view(), "ground", NO_LABELS).length, FALL_TOASTS_MOST);
+    const many = crowd(12);
+    many[0] = { ...many[0]!, riders: ["r1", "r2"] };
+    assert.deepEqual(fallAlerts(many, view(), "ground", NO_LABELS), [{ text: "14 creatures fell to Ground floor." }]);
+    assert.deepEqual(fallAlerts(crowd(4), view(), "upper", NO_LABELS), [{ text: "4 creatures fell to Ground floor.", show: { sceneId: "ground" } }]);
+  });
+
+  test("each op on its own, and floors of more than one landing named as the floors below", () => {
+    const two = [...crowd(4, 130), ...crowd(1, 140)];
+    assert.deepEqual(fallAlerts(two, view(), "ground", NO_LABELS).map((a) => a.text), ["4 creatures fell to Ground floor.", "A creature no longer on the map fell 10 ft to Ground floor."]);
+    const mixed = [...crowd(3, 150), ...crowd(1, 150, { sceneId: "crypt" }).map((c) => ({ ...c, id: "150:9" }))];
+    assert.deepEqual(fallAlerts(mixed, view(), "ground", NO_LABELS), [{ text: "4 creatures fell to the floors below." }]);
   });
 });

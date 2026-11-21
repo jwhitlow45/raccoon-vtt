@@ -97,9 +97,29 @@ export type FallAlert = { text: string; show?: { sceneId: string } };
  * Show where that floor is not the one shown, and "A creature fell 10 ft to
  * Ground floor on Tower." with Show for another scene, whose creatures the
  * DM's copy does not hold. No name is stored on the card, so each is read
- * off the creature the copy holds.
+ * off the creature the copy holds. One op that drops more than
+ * FALL_TOASTS_MOST cards, as an opening placed under a crowd, toasts once
+ * for them all: "12 creatures fell to Ground floor." (LP46A polish).
  */
 export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
+  const byOp = new Map<number, Fall[]>();
+  for (const card of cards) byOp.set(card.made, [...(byOp.get(card.made) ?? []), card]);
+  return [...byOp.values()].flatMap((op) => (op.length > FALL_TOASTS_MOST ? [crowdAlert(op, state, viewing)] : eachAlert(op, state, viewing, labels)));
+}
+
+/** The most fall cards one op toasts one by one. */
+export const FALL_TOASTS_MOST = 3;
+
+function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes">, viewing: string | null): FallAlert {
+  const creatures = cards.reduce((n, card) => n + 1 + (card.riders?.length ?? 0), 0);
+  const sceneId = cards[0]!.sceneId;
+  const one = cards.every((card) => card.sceneId === sceneId);
+  const scene = one ? ownEntry(state.scenes, sceneId) : undefined;
+  const floor = scene?.floor?.name ?? scene?.name;
+  return { text: floor ? `${creatures} creatures fell to ${floor}.` : `${creatures} creatures fell to the floors below.`, ...(scene && sceneId !== viewing ? { show: { sceneId } } : {}) };
+}
+
+function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
   return cards.map((card) => {
     const scene = ownEntry(state.scenes, card.sceneId);
     const floor = scene?.floor?.name ?? scene?.name ?? "another floor";
