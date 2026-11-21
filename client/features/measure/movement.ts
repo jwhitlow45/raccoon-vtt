@@ -49,8 +49,10 @@ export type { SizedSpot } from "#shared/rules/route.ts";
 export { spotRect, straightFeet as movedFeet } from "#shared/rules/route.ts";
 
 /**
- * The token's path this turn as this viewer holds it, or null. A DM's copy
- * keeps paths of earlier turns, which count as empty. A player gets a path
+ * The token's path this turn as this viewer holds it, or null. From change
+ * format 65 a turn's end takes its paths off, but a DM's copy of a room
+ * kept from before may still hold paths of earlier turns, which count as
+ * empty. A player gets a path
  * only while it is the turn under way's (design 7.3), but not the turn's
  * start when they could not see where it began, so a path in a player's
  * copy of the active creature with no start to check it against is this

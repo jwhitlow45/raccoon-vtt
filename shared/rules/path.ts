@@ -12,8 +12,12 @@ import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattic
  * draws and measures by.
  *
  * A path lives on its token, tagged with the turn it belongs to, so a move
- * writes only the token and the turn passing writes nothing. A path whose
- * tag is not the turn under way counts as empty wherever it is read.
+ * writes only the token. From change format 65 a turn's end takes every
+ * path off, and Previous puts back those of the turn it resumes
+ * (shared/migrate.ts walksEndWithTurn). Before then the turn passing wrote
+ * nothing, so a room may still hold a path from an earlier turn, which
+ * counts as empty wherever it is read: a path whose tag is not the turn
+ * under way always does.
  *
  * Its stops are the turn's legs on the floor the creature stands on. What
  * the turn took on floors it left is summed in `prior`
