@@ -69,7 +69,7 @@ describe("a player's fall's step (4.5)", () => {
     const [card] = Object.values(t.state.falls ?? {});
     assert.ok(card, "the fall made a card");
     const made = step(t);
-    assert.deepEqual(made.falls, [{ tokenId: "thorn", linkId: "o1", rev: 0, made: 90, from: UPPER, to: GROUND, fallId: card.id }]);
+    assert.deepEqual(made.falls, [{ tokenId: "thorn", linkId: "o1", rev: 0, made: 90, from: UPPER, to: GROUND, fallId: card.id, shown: { kind: "opening", rect: { x: 6, y: 6, w: 2, h: 2 }, pairRect: { x: 6, y: 6, w: 2, h: 2 } } }]);
     assert.deepEqual(fallKeys(made.entries), [], "no card in the step");
     for (let i = 1; i <= 2; i++) {
       assert.equal(t.undo(ANA), "ok", `undo ${i}`);

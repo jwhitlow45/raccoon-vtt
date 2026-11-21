@@ -57,7 +57,7 @@ describe("a climb's step (8)", () => {
     const above = pose(t);
     assert.equal(above?.sceneId, UPPER);
     assert.equal(t.stacks.peek("p1", "undo")?.label, UP);
-    assert.deepEqual(t.stacks.peek("p1", "undo")?.climb, { tokenId: "thorn", linkId: "l1", rev: 1, made: t.state.floorLinks!.l1!.made, from: GROUND, to: UPPER });
+    assert.deepEqual(t.stacks.peek("p1", "undo")?.climb, { tokenId: "thorn", linkId: "l1", rev: 1, made: t.state.floorLinks!.l1!.made, from: GROUND, to: UPPER, shown: { kind: "stairs", rect: { x: 3, y: 3, w: 2, h: 1 }, pairRect: { x: 3, y: 3, w: 2, h: 1 } } });
     for (let i = 0; i < 2; i++) {
       assert.equal(t.undo(ANA), "ok", `undo ${i + 1}`);
       assert.deepEqual(pose(t), below, `undo ${i + 1}: on Ground floor where Thorn stood, with the walk's path`);
@@ -190,17 +190,15 @@ describe("a climb's undo and redo refused (8)", () => {
     assert.equal(t.state.tokens.thorn!.sceneId, GROUND);
   });
 
-  test("stairs removed and placed again with the same ids, over a landing raised meanwhile or not, are other stairs: the stairs changed (ASTRA-14)", () => {
+  test("stairs removed and placed again with the same ids on the same squares are the stairs Ana was shown, over a landing raised meanwhile or not (STAIRS-REV-1)", () => {
     for (const raise of [true, false]) {
       const t = table();
       assert.equal(t.play(ANA, climb()), "ok");
       assert.equal(t.play(DM, { t: "floorLink.delete", linkId: "l1" }), "ok");
       if (raise) assert.equal(t.play(DM, { t: "build.height", sceneId: GROUND, cells: ["3,3", "4,3"], height: 5 }), "ok");
       assert.equal(t.play(DM, putOp()), "ok");
-      const again = t.state.floorLinks!.l2!;
-      assert.equal(again.rev, 1, "a new record's rev starts where the old one's did");
-      assert.equal(t.undo(ANA), LINK_WORDS.changed("stairs"), raise ? "raised" : "level");
-      assert.equal(t.state.tokens.thorn!.sceneId, UPPER);
+      assert.equal(t.undo(ANA), "ok", raise ? "raised" : "level");
+      assert.equal(t.state.tokens.thorn!.sceneId, GROUND);
     }
   });
 

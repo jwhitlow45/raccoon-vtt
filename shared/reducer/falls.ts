@@ -1,6 +1,6 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import { FALL_RIDERS_MOST, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type Token, type TokenId, type Trap } from "../model.ts";
+import { FALL_RIDERS_MOST, type Fall, type FallId, type FallRecord, type FloorLink, type RoomState, type SceneId, type ShownEnds, type Token, type TokenId, type Trap } from "../model.ts";
 import type { ActorTarget, Op, OpOf } from "../protocol.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { ownEntry } from "../records.ts";
@@ -148,13 +148,26 @@ export function fallCandidates(tx: Tx, before: RoomState, op: Op): Set<TokenId> 
  * space lies wholly inside an opening's upper end, held up by nothing by
  * 4.1's rule, falls to the floor below (reducer/floorLinks.ts landThrough)
  * with a card. Each landing joins `landings`, and the pass returns one
- * record a root that fell, with the upper end as it stood before the op.
+ * record a root that fell, with the upper end as it stood before the op
+ * and both ends as its player is shown them (`shown`, shownEndsOf).
  * Candidates go in id order, each read where the pass so far left it, and
  * one a fall already carried along is not asked again. A creature that
  * falls alone off a holder that does not count leaves its seat as it
  * lands, as the link pass would, so that holder's own fall later in the
  * pass never carries it twice.
  */
+/**
+ * Both ends of a pair as a climb or a fall takes `taken` (model.ts
+ * ShownEnds): the fields a player who holds both ends is shown of them,
+ * which an undo or redo of the step finds again (permissions.ts
+ * climbBackCheck).
+ */
+export function shownEndsOf(taken: FloorLink, pair: FloorLink): ShownEnds {
+  const shown: ShownEnds = { kind: taken.kind, rect: { ...taken.rect }, pairRect: { ...pair.rect } };
+  if (taken.grid !== undefined) shown.grid = taken.grid;
+  return shown;
+}
+
 export function fallPass(tx: Tx, before: RoomState, candidates: ReadonlySet<TokenId>, landings: Landing[]): FallRecord[] {
   const records: FallRecord[] = [];
   const landed = new Set<TokenId>();
@@ -173,7 +186,8 @@ export function fallPass(tx: Tx, before: RoomState, candidates: ReadonlySet<Toke
     leaveSeat(tx, token);
     const card = writeCard(tx, { tokenId: id, sceneId: hole.to, from, ft, riders: ridersSince(tx, id, first) });
     const stood = ownEntry(before.floorLinks, hole.id) ?? hole;
-    records.push({ tokenId: id, linkId: hole.id, rev: stood.rev, made: stood.made, from, to: hole.to, fallId: card.id });
+    const below = ownEntry(before.floorLinks, stood.pair) ?? far;
+    records.push({ tokenId: id, linkId: hole.id, rev: stood.rev, made: stood.made, from, to: hole.to, fallId: card.id, shown: shownEndsOf(stood, below) });
   }
   return records;
 }

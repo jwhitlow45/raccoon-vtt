@@ -7,6 +7,7 @@ export type KeptRoute = NonNullable<OpOf<"token.move">["route"]>;
 /** The climb a step made, as its restore carries it (UndoEntry.climb). */
 export type ClimbRecord = NonNullable<OpOf<"sys.restore">["climb"]>;
 import { ownEntry } from "#shared/records.ts";
+import { shownEndsOf } from "#shared/reducer/falls.ts";
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -542,12 +543,17 @@ function samePose(a: Pose, b: Pose, path = true): boolean {
   );
 }
 
-/** The climb a `token.climb` makes, for its step: the end it takes as it stands before the op, and the floors from and to. */
+/**
+ * The climb a `token.climb` makes, for its step: the end it takes as it
+ * stands before the op, the floors from and to, and both ends as its
+ * player is shown them (`shown`), by which their undo and redo find them.
+ */
 export function climbOf(before: RoomState, op: Op): ClimbRecord | undefined {
   if (op.t !== "token.climb") return undefined;
   const link = ownEntry(before.floorLinks, op.linkId);
+  const pair = link && ownEntry(before.floorLinks, link.pair);
   const token = ownEntry(before.tokens, op.tokenId);
-  return link && token ? { tokenId: token.id, linkId: link.id, rev: link.rev, made: link.made, from: token.sceneId, to: link.to } : undefined;
+  return link && pair && token ? { tokenId: token.id, linkId: link.id, rev: link.rev, made: link.made, from: token.sceneId, to: link.to, shown: shownEndsOf(link, pair) } : undefined;
 }
 
 /**

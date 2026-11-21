@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { ownLines } from "./logRings.ts";
-import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, ShownEnds, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, HIDDEN_ROW_REFUSED, LIMITS, stillFitsVideo } from "./limits.ts";
@@ -1944,15 +1944,35 @@ function holdsBothEnds(c: Check, end: FloorLink): boolean {
   return far !== undefined && [end, far].every((e) => e.hidden !== true && c.visible(keys.floorLink(e.id)));
 }
 
+/** Whether the ends a step took (`taken` and its pair) are as `shown` (reducer/falls.ts shownEndsOf), each by what a player who holds both is shown of it. */
+function endsAsShown(taken: FloorLink, pair: FloorLink, shown: ShownEnds): boolean {
+  const sameRect = (a: FloorLink["rect"], b: FloorLink["rect"]) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+  return [taken, pair].every((e) => e.kind === shown.kind && e.grid === shown.grid) && sameRect(taken.rect, shown.rect) && sameRect(pair.rect, shown.pairRect);
+}
+
+/**
+ * Whether the end a step crosses by is still the one it took
+ * (docs/design/design-v1-floors.md phase 2, 8). A record from op version
+ * 65 carries the ends as the player was shown them (`shown`), and is
+ * judged by those alone, never by `rev` or `made`, which a change the
+ * player never saw moves. A record without it, from an op stored before,
+ * is judged by `rev` and `made` as it was.
+ */
+function sameEnds(c: Check, record: { linkId: string; rev: number; made: number; shown?: ShownEnds }, end: FloorLink): boolean {
+  if (!record.shown) return end.rev === record.rev && end.made === record.made;
+  const taken = end.id === record.linkId ? end : ownEntry(c.state.floorLinks, end.pair);
+  const pair = taken && ownEntry(c.state.floorLinks, taken.pair);
+  return taken !== undefined && pair !== undefined && taken.id === record.linkId && endsAsShown(taken, pair, record.shown);
+}
+
 /**
  * Whether a player's undo or redo of a climb finds the stairs it took
  * (8, ASTRA-04, ASTRA-14), read on the climber's floor now: an undo goes
  * from `to` back to `from` by the end there whose pair is the end it took,
  * a redo from `from` to `to` by that end itself. Either way the player
- * gets both ends (holdsBothEnds), and that end is at the climb's rev and
- * `made`, unlocked, with the climber's snapped space inside its squares. A
- * pair removed and placed again with the same ids has a new `made`, so it
- * fails too. Else "the stairs changed", whatever changed.
+ * gets both ends (holdsBothEnds), and the ends are as they were shown at
+ * the climb (sameEnds), unlocked, with the climber's snapped space inside
+ * its squares. Else "the stairs changed", whatever changed.
  */
 function climbBackCheck(c: Check, climb: Climb, from: "undo" | "redo"): Decision {
   const token = ownEntry(c.state.tokens, climb.tokenId);
@@ -1962,7 +1982,7 @@ function climbBackCheck(c: Check, climb: Climb, from: "undo" | "redo"): Decision
   // Whether they get both ends comes before any word about either: an end gone, hidden and withheld read alike, so the words never name the kind of an end they cannot see.
   if (!token || !end || !holdsBothEnds(c, end)) return refuse("invalid", LINK_WORDS.changed("stairs"));
   const changed = refuse("invalid", LINK_WORDS.changed(end.kind));
-  if (end.sceneId !== here || end.to !== there || end.rev !== climb.rev || end.made !== climb.made || end.locked === true) return changed;
+  if (end.sceneId !== here || end.to !== there || !sameEnds(c, climb, end) || end.locked === true) return changed;
   // Its space alone: a later move, its height's included, is the restore's own guard to answer (MOVED_SINCE).
   return spaceOn(c.state, token, end) ? OK : changed;
 }
@@ -1985,9 +2005,9 @@ function climbMoves(climb: Climb | undefined, falls: readonly FallRecord[] | und
 
 /**
  * Whether a player's redo of a fall finds the hole it fell through
- * (phase 4, 4.5): the upper end by id at the record's rev and `made`,
- * while the player gets both ends (holdsBothEnds), unlocked, still an
- * opening's upper end to the floor it fell to, with the creature on the
+ * (phase 4, 4.5): the upper end by id, as it was shown at the fall
+ * (sameEnds), while the player gets both ends (holdsBothEnds), unlocked,
+ * still an opening's upper end to the floor it fell to, with the creature on the
  * floor it fell from and the space the redo puts back, set there on that
  * end's ground, wholly inside it. Else "the opening changed", or for an
  * end gone or withheld the words of any end they cannot see. The walk's
@@ -2000,7 +2020,7 @@ function fallBackCheck(c: Check, record: FallRecord, value: unknown): Decision {
   const restored = value && typeof value === "object" ? (value as Token) : null;
   if (!token || !restored || !upper || !holdsBothEnds(c, upper)) return refuse("invalid", LINK_WORDS.changed("stairs"));
   const changed = refuse("invalid", LINK_WORDS.changed(upper.kind));
-  if (token.sceneId !== record.from || upper.sceneId !== record.from || upper.to !== record.to || upper.rev !== record.rev || upper.made !== record.made || upper.locked === true || !isHole(c.state, upper)) return changed;
+  if (token.sceneId !== record.from || upper.sceneId !== record.from || upper.to !== record.to || !sameEnds(c, record, upper) || upper.locked === true || !isHole(c.state, upper)) return changed;
   return spaceOn(c.state, { ...restored, sceneId: record.from, elevation: upper.ground }, upper) ? OK : changed;
 }
 

@@ -48,7 +48,7 @@ describe("who falls (4.1)", () => {
     assert.ok(card);
     assert.deepEqual({ ...card, rev: 0 }, { id: card.id, rev: 0, tokenId: "thorn", sceneId: GROUND, from: UPPER, ft: 10, made: card.made });
     assert.match(card.id, /^\d+:0$/);
-    assert.deepEqual(r.falls, [{ tokenId: "thorn", linkId: "o1", rev: 0, made: 90, from: UPPER, to: GROUND, fallId: card.id }]);
+    assert.deepEqual(r.falls, [{ tokenId: "thorn", linkId: "o1", rev: 0, made: 90, from: UPPER, to: GROUND, fallId: card.id, shown: { kind: "opening", rect: { x: 6, y: 6, w: 2, h: 2 }, pairRect: { x: 6, y: 6, w: 2, h: 2 } } }]);
   });
 
   test("a Large ogre half over the hole stays, and one wholly over it falls", () => {

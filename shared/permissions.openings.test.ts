@@ -179,17 +179,18 @@ describe("a player's undo and redo of a fall (4.5)", () => {
     const moved = run(f.after, { t: "floorLink.update", linkId: "o1", patch: { rect: { x: 12, y: 12, w: 2, h: 2 } } });
     assert.equal(decide(moved, f.undo()), `invalid: ${LINK_WORDS.changed("opening")}`);
     assert.equal(LINK_WORDS.changed("opening"), "the opening changed");
-    // Its rev alone, the squares as they were: the same words.
+    // Its rev alone, the squares as they were: the opening Ana was shown, so taken (STAIRS-REV-1).
     const revved = { ...f.after, floorLinks: Object.fromEntries(Object.entries(f.after.floorLinks!).map(([id, l]) => [id, { ...l, rev: l.rev + 1 }])) };
-    assert.equal(decide(revved, f.undo()), "invalid: the opening changed");
+    assert.equal(decide(revved, f.undo()), "ok");
   });
 
-  test("a redo after the hole was moved, removed and placed again, or locked in the stored state reads the opening changed", () => {
+  test("a redo after the hole was moved or locked in the stored state reads the opening changed, and one at another rev or `made` alone goes", () => {
     const f = fell();
     const { up, redo } = redoOf(f);
     const ends = (state: RoomState, patch: Partial<FloorLink>): RoomState => ({ ...state, floorLinks: Object.fromEntries(Object.entries(state.floorLinks!).map(([id, l]) => [id, { ...l, ...patch }])) });
-    assert.equal(decide(ends(up, { rev: 5 }), redo), "invalid: the opening changed");
-    assert.equal(decide(ends(up, { made: 999 }), redo), "invalid: the opening changed");
+    // A player is shown neither, so neither decides (STAIRS-REV-1).
+    assert.equal(decide(ends(up, { rev: 5 }), redo), "ok");
+    assert.equal(decide(ends(up, { made: 999 }), redo), "ok");
     assert.equal(decide(ends(up, { locked: true }), redo), "invalid: the opening changed");
     const moved = run(up, { t: "floorLink.update", linkId: "o1", patch: { rect: { x: 12, y: 12, w: 2, h: 2 } } });
     assert.equal(decide(moved, redo), "invalid: the opening changed");
