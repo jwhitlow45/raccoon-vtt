@@ -290,3 +290,6 @@ Where the build went its own way. Each entry names its decision.
 - **Both ends held.** A player's undo or redo across stairs, a ladder or a hole, and a fall's undo and redo, read an end's `rev` and `made` only while their copy holds both ends (`holdsBothEnds` in `shared/permissions.ts`). Otherwise it refuses with the generic "the stairs changed", so a far end the DM moved under fog answers as any withheld end does.
 - **Restore bounds.** `sys.restore`'s `falls` holds at most `MAX_RESTORE_ENTRIES` records, as its entries do, so a move of 100 creatures that drags one more through a hole still undoes.
 - **Caches.** The stairs' check (`linksProblem`) and the openings' joins are kept per scene, keyed on what they read: links, scenes, build chunks and traps for the check, links and scenes for the joins. `playersSee` is still asked of every state, and both are skipped while a collection may still be written.
+
+**Follow-ups (FLR4TRIM)**
+- **Trap toasts name the floor.** A trap that goes off on another floor of the scene shown reads "Hidden Pit went off on Upper floor.", and one on a floor of another scene "Hidden Pit went off on Crypt · Upper floor.", as other floors words name a place (`placeName`). The Passive Perception hint does the same (D-261120-104).

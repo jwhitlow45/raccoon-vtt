@@ -231,7 +231,7 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     assert.equal(after.state.falls?.["120:0"], undefined);
   });
 
-  test("the character's other token on another floor leaves with it, and one on another scene stays, as another creature there does", () => {
+  test("the character's other tokens leave with it on another floor or another scene, and another creature on another scene keeps its fall", () => {
     const state = room4(["horse", "thorn", "thorn2", "bree"], { thorn2: UPPER, bree: "s2" });
     const { page, dice } = cardPage(state, state.falls!["120:0"]!);
     const plan = buildPlan(page, dice, SIX, ids())!;

@@ -1144,6 +1144,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
     - Any other page whose creatures have all moved to another scene refuses with "Its creatures have moved to another scene. Discard this page and start it again from its source." in place of Apply.
   - A trap set off out of the players' sight during a player's move stays armed for them: the toast adds "The players saw nothing.", and the card offers **Do its effects** and **Mark sprung**.
 - A trap that goes off while the DM views another scene still toasts, with its sound: "Hidden Pit went off on Crypt." Its **Show** switches to that scene and toasts again with the creatures' names and **Save and damage**, and the card waits there. The Passive Perception hint does the same, with **Mark found** once there.
+  - On a scene with floors the toast names the floor: "Hidden Pit went off on Upper floor." from another floor of the same scene, and "Hidden Pit went off on Crypt · Upper floor." from another scene.
 - A fall card stands among the DM's alerts under the traps and above the asks, newest first, and **Dismiss** moves focus to the next card, else the one before, else the first alert, else the map.
 - Players read the trap's line in the log, "Thorn: The floor gives way!", and the player whose creature set it off gets it as a toast, with its sound where sound is on. The DM's Log shows the DM's own trap lines among the rest.
 - A request for a save against a trap names it "Trap" until it is found, and by its name after, while the DM's page keeps its real name.
