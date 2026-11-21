@@ -16,7 +16,7 @@
  *
  *   DATABASE_URL=postgres://... GUIDE_PORT=3197 node scripts/guide-panel-size.ts
  */
-import { randomUUID } from "node:crypto";
+import { uuidv7 as randomUUID } from "../shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -79,9 +79,9 @@ try {
   const goblins = [randomUUID(), randomUUID(), randomUUID()];
   await ops.send({ t: "token.create", token: { id: bree, sceneId, kind: "pc", name: "Bree", size: "medium", x: 4, y: 4, visibility: "all", disposition: "ally", actor: { inline: actor(27) } } });
   for (const [i, id] of goblins.entries()) {
-    await ops.send({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", number: i + 1, size: "medium", x: 8 + i, y: 4 + (i % 2), visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } });
+    await ops.send({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 8 + i, y: 4 + (i % 2), visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } });
   }
-  await ops.send({ t: "encounter.start", entries: [{ id: "e-bree", tokenId: bree, value: 17 }, ...goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 14 - i * 3 }))] });
+  await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: bree, value: 17 }, ...goblins.map((tokenId, i) => ({ id: randomUUID(), tokenId, value: 14 - i * 3 }))] });
   await ops.send({ t: "encounter.next" });
   await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 4 ? true : null));
 
