@@ -93,6 +93,22 @@ const browser = new Proxy(launched, {
             t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
             return (t ^ (t >>> 14)) >>> 0;
           };
+          // A D&D Beyond sync is stamped with the day it is made, which the re-sync review prints ("Last synced on ..."), so
+          // every run would draw a new day. A sync saved from this page goes out with a fixed one, in the past as the server wants.
+          const send = WebSocket.prototype.send;
+          WebSocket.prototype.send = function (data: Parameters<typeof send>[0]) {
+            if (typeof data === "string" && data.includes('"ddbSync"')) {
+              try {
+                const frame = JSON.parse(data);
+                const sync = frame?.t === "op" && frame.op?.t === "character.update" ? frame.op.patch?.ddbSync : undefined;
+                if (sync && sync.at === undefined) {
+                  sync.at = "2026-10-20T12:00:00.000Z";
+                  data = JSON.stringify(frame);
+                }
+              } catch {}
+            }
+            return send.call(this, data);
+          };
           const real = crypto.getRandomValues.bind(crypto);
           crypto.getRandomValues = ((array: ArrayBufferView) => {
             if (array instanceof Uint8Array && array.length === 16) {
