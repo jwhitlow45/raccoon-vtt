@@ -137,8 +137,9 @@ export function rollText(data: RollEvent, who: string, dm = false): string {
 const CHANGE_NAMES = { "heroic-inspiration": "Heroic Inspiration", "halfling-luck": "Halfling Luck" } as const;
 
 /**
- * A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your
- * bonus: 9", "1d20+5 with Advantage: 14, 7 dropped". Only a player types a
+ * A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3: 9, with
+ * your bonus", "1d20+5 with Advantage: 14, 7 dropped". The note comes after
+ * the die so the formula never reads as the bonus. Only a player types a
  * bonus, and a player reads only their own creatures' answers, so the bonus
  * is "your bonus" for them and "their bonus" for the DM.
  */
@@ -147,7 +148,7 @@ export function answerDice(result: DiceResult, typedBonus: boolean, dm = false):
   const parsed = parseFormula(result.formula);
   const formula = parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;
   const faces = terms ? terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => (t.kept[i] ? count(face) : `${count(face)} dropped`)) : [])) : [];
-  return `${formula}${typedBonus ? (dm ? ", their bonus" : ", your bonus") : ""}${faces.length > 0 ? `: ${faces.join(", ")}` : ""}`;
+  return `${formula}${faces.length > 0 ? `: ${faces.join(", ")}` : ""}${typedBonus ? (dm ? ", with their bonus" : ", with your bonus") : ""}`;
 }
 
 /** A count with thousands separators, as dice text writes every number. */

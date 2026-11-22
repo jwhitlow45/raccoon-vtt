@@ -600,13 +600,13 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await shots.take(player, "rolls-card-rolled-in-place");
     await c.getByRole("button", { name: "Done, fold it into a chip" }).tap();
     await c.waitFor({ state: "detached" });
-    const chip = player.getByRole("button", { name: new RegExp(`^DEX save: rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
+    const chip = player.getByRole("button", { name: new RegExp(`^DEX save: rolled ${rolled.total} \\(1d20\\+4: \\d+, with your bonus\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
     await chip.waitFor();
 
     // The card's own expander: a waiting Roll also carries aria-expanded, for its one-roll options.
     await live.locator('button[aria-expanded="false"]:not([aria-haspopup])').first().tap();
     // The DM reads the player's typed bonus as theirs (LP7-DICE-11).
-    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, their bonus: \\d+\\)`)).waitFor();
+    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4: \\d+, with their bonus\\)`)).waitFor();
 
     // Heroic Inspiration, asked from the chip's card and allowed in one tap.
     await chip.tap();
