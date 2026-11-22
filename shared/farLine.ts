@@ -1,7 +1,8 @@
 import { readEntity } from "./keys.ts";
 import type { LimitKind } from "./limits.ts";
-import type { RoomState } from "./model.ts";
+import type { RoomState, Token } from "./model.ts";
 import { isPoseOp, type Op, type OpType } from "./protocol.ts";
+import { keepNumbering } from "./reducer/numbering.ts";
 
 /**
  * How each op type meets the far line (shared/limits.ts FAR,
@@ -226,14 +227,21 @@ function togglesOnly(patch: object): boolean {
 
 /**
  * Whether a restore puts back only toggles (TOGGLE_FIELDS): each entry a
- * creature or an area `state` holds, with its value equal to the stored
- * one but in those fields and its rev. So the undo of a hide is
- * bookkeeping as the show is. Anything else it puts back, or a thing
- * changed since, meets the line as before.
+ * creature or an area `state` holds, with its value as the restore writes
+ * it equal to the stored one but in those fields and its rev. A creature's
+ * number is read as the reducer writes it (keepNumbering), so a meeting
+ * that numbered it since leaves the undo of its hide a toggle. So the undo
+ * of a hide is bookkeeping as the show is. Anything else it puts back, or
+ * a thing changed since, meets the line as before.
  */
 export function restoresToggles(op: Op, state: RoomState): boolean {
   if (op.t !== "sys.restore" || op.entries.length === 0) return false;
-  return op.entries.every(({ key, value }) => (key.startsWith("token:") || key.startsWith("template:")) && sameButToggles(value, readEntity(state, key)));
+  return op.entries.every(({ key, value }) => {
+    const stored = readEntity(state, key);
+    if (key.startsWith("template:")) return sameButToggles(value, stored);
+    if (!key.startsWith("token:") || !isRecord(value) || !isRecord(stored)) return false;
+    return sameButToggles(keepNumbering(state, value as Token, stored as Token), stored);
+  });
 }
 
 function sameButToggles(restored: unknown, stored: unknown): boolean {

@@ -453,4 +453,41 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
       assert.equal(h.actor.committed.state.tokens.lurker!.visibility, "dm");
     });
   }
+
+  /**
+   * Past the players' line, with a wolf the party met alone (so it has no
+   * number) and a second wolf hidden: DM A toggles the first, DM B shows
+   * the second, whose meeting numbers the first, and DM A's Undo puts back
+   * a toggle on a creature numbered since (LP47FIXA-ASTRA-01).
+   */
+  async function numberedBetween(t: TestContext, toggle: Op, back: (state: RoomState) => unknown, before: unknown) {
+    const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
+    f.state.tokens.wolf1 = token("wolf1", { sceneId: f.sceneId, name: "Wolf", x: 8, y: 9, met: 2 });
+    f.state.tokens.wolf2 = token("wolf2", { sceneId: f.sceneId, name: "Wolf", x: 9, y: 9, visibility: "dm" });
+    const scene = f.state.scenes[f.sceneId]!;
+    f.state.scenes[f.sceneId] = { ...scene, numbers: { names: { ...scene.numbers?.names, Wolf: [2, 1] } } };
+    f.state.numbering = { rev: 0, groups: 2 };
+    assert.ok(farRoomBytes(f.state, true) <= FAR.roomBytes - 64 * 1024, `${FAR.roomBytes - farRoomBytes(f.state, true)} short of the line`);
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dmA = await h.connect(f.dm);
+    const dmB = await h.connect(f.otherDm);
+    assert.equal(answer(await dmA.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(ROOM_FULL, "dm")}`, "past the players' line");
+    assert.equal(answer(await dmA.send(toggle)), "taken", "DM A's toggle");
+    assert.equal(answer(await dmB.send({ t: "token.update", tokenId: "wolf2", patch: { visibility: "all" } })), "taken", "DM B's show");
+    const numbered = await until(() => (h.actor.committed.state.tokens.wolf1!.number === 1 ? true : undefined), "the first wolf numbered by the second's meeting");
+    assert.ok(numbered);
+    // A lock is a step of setup, a hide of play (shared/undoScope.ts).
+    const scope = dmA.history().setup?.undo.head ? "setup" : "play";
+    assert.equal(answer(await dmA.send({ t: "undo", scope, head: dmA.head(scope).id })), "taken", "DM A's Undo");
+    const wolf = h.actor.committed.state.tokens.wolf1!;
+    assert.deepEqual([back(h.actor.committed.state), wolf.number], [before, 1], "put back, keeping its number");
+  }
+
+  test("a hide's Undo past the players' line is taken after another creature's meeting numbered it since", async (t) => {
+    await numberedBetween(t, { t: "token.update", tokenId: "wolf1", patch: { visibility: "dm" } }, (state) => state.tokens.wolf1!.visibility, "all");
+  });
+
+  test("a lock's Undo past the players' line is taken after another creature's meeting numbered it since", async (t) => {
+    await numberedBetween(t, { t: "token.update", tokenId: "wolf1", patch: { locked: true } }, (state) => state.tokens.wolf1!.locked, false);
+  });
 });
