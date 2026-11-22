@@ -6,7 +6,7 @@ import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import type { RoomSettings, RoomState, Viewer } from "#shared/model.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { turnUnderWay } from "#shared/rules/path.ts";
-import { exactCopies, farRoomBytes, growthBound, measuredStateBytes, ownHeldBytes, SizeGuard, turnWalks, walkPool, type ExactCopy } from "./sizeGuard.ts";
+import { exactCopies, farReadings, farRoomBytes, growthBound, measuredStateBytes, ownHeldBytes, SizeGuard, turnWalks, walkPool, type ExactCopy } from "./sizeGuard.ts";
 import { actor, apply, castAsk, character, effect, env, member, room, scene, template, token } from "#shared/testutil.ts";
 import { DEFAULT_BUFFERED_LIMIT } from "./ws.ts";
 import { fullRoom, markedRoom, measureBounds, memberIdAt, roomMeasure, type FullRoomOptions } from "./limitsTesting.ts";
@@ -105,6 +105,16 @@ describe("the marked room of 20 per-player scenes", () => {
       const large = markedRoom(cells);
       assert.ok(Math.abs(large.measured - 7_832_678) < 1024, `${cells} squares: ${large.measured}`);
       assert.ok(!large.under, `${cells} squares: ${large.far}`);
+    }
+  });
+
+  test("reads as a fresh copy of it does, every collection replaced once filled as an op leaves it", () => {
+    for (const [cells, measured] of [[48, 7_832_678 - FAR.byteStep], [64, 7_832_678]] as const) {
+      const marked = markedRoom(cells, measured).state;
+      const fresh = structuredClone(marked);
+      const player = Object.keys(marked.members)[1]!;
+      assert.deepEqual(farReadings(undefined, marked, player), farReadings(undefined, fresh, player), `${cells} squares`);
+      assert.equal(farRoomBytes(marked, true), farRoomBytes(fresh, true), `${cells} squares`);
     }
   });
 });

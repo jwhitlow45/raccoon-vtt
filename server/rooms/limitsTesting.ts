@@ -646,6 +646,15 @@ export function markedRoom(cells: number, measured = 7_832_678): MarkedRoom {
     state.tokens[id] = make(chars);
     bytes += entry + chars;
   }
+  // Replaced, never changed once measured, as an op leaves a collection: the measures keep sizes per collection object.
+  state.tokens = { ...state.tokens };
+  // The measure counts each creature past its stored bytes (sizeGuard.ts entryBytes), so the last notes are cut to land on it.
+  for (let over = measuredStateBytes(state) - measured; over > 0; over = measuredStateBytes(state) - measured) {
+    const last = Object.keys(state.tokens).at(-1)!;
+    const { [last]: cut, ...rest } = state.tokens;
+    const notes = cut!.notes ?? "";
+    state.tokens = notes.length > 0 ? { ...rest, [last]: { ...cut!, notes: notes.slice(0, Math.max(0, notes.length - over)) } } : rest;
+  }
   const at = measuredStateBytes(state);
   // A full roster's six players, so the per-player reserve reads at its widest, as the far line reads it for a player's op.
   const six = { ...state, members: { ...members, ...Object.fromEntries([3, 4, 5, 6].map((i) => [memberIdAt(i), { ...members[players[0]!]!, id: memberIdAt(i) }])) } };
