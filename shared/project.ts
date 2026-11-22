@@ -5738,7 +5738,12 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
 
 // Hashing for the server's held map (design 7.3).
 
-/** JSON with sorted object keys, so the same value always hashes the same. */
+/**
+ * JSON with sorted object keys, so the same value always hashes the same.
+ * Built by appending, since the fan-out hashes every value a viewer is
+ * projected anew: an array's hole adds nothing between its commas, as
+ * `join` reads one.
+ */
 export function stableStringify(value: unknown): string {
   if (value === null || value === undefined) return "null";
   switch (typeof value) {
@@ -5749,19 +5754,38 @@ export function stableStringify(value: unknown): string {
     case "boolean":
       return value ? "true" : "false";
     case "object": {
-      if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+      if (Array.isArray(value)) {
+        let out = "[";
+        for (let i = 0; i < value.length; i++) {
+          if (i > 0) out += ",";
+          if (i in value) out += stableStringify(value[i]);
+        }
+        return out + "]";
+      }
       const obj = value as Record<string, unknown>;
-      const parts: string[] = [];
+      let out = "{";
+      let first = true;
       for (const key of Object.keys(obj).sort()) {
         const v = obj[key];
         if (v === undefined) continue;
-        parts.push(`${JSON.stringify(key)}:${stableStringify(v)}`);
+        if (!first) out += ",";
+        first = false;
+        out += quotedKey(key) + ":" + stableStringify(v);
       }
-      return `{${parts.join(",")}}`;
+      return out + "}";
     }
     default:
       return "null";
   }
+}
+
+/** A key as JSON.stringify writes it: in plain quotes unless it holds a character JSON escapes. */
+function quotedKey(key: string): string {
+  for (let i = 0; i < key.length; i++) {
+    const c = key.charCodeAt(i);
+    if (c < 0x20 || c === 0x22 || c === 0x5c || (c >= 0xd800 && c <= 0xdfff)) return JSON.stringify(key);
+  }
+  return `"${key}"`;
 }
 
 function rotl(x: number, r: number): number {
@@ -5856,8 +5880,15 @@ export function hash128(text: string): string {
   h2 = (h2 + h1) | 0;
   h3 = (h3 + h1) | 0;
   h4 = (h4 + h1) | 0;
-  const hex = (h: number) => (h >>> 0).toString(16).padStart(8, "0");
-  return hex(h1) + hex(h2) + hex(h3) + hex(h4);
+  return hex8(h1) + hex8(h2) + hex8(h3) + hex8(h4);
+}
+
+/** Each byte's two hex digits. */
+const HEX_BYTES: readonly string[] = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
+
+/** A 32-bit word as 8 hex digits, a byte at a time. */
+function hex8(h: number): string {
+  return HEX_BYTES[(h >>> 24) & 255]! + HEX_BYTES[(h >>> 16) & 255]! + HEX_BYTES[(h >>> 8) & 255]! + HEX_BYTES[h & 255]!;
 }
 
 /** The hash of a projected value for the held map. Different values with the same serialization are the same value. */

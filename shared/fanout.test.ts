@@ -245,6 +245,16 @@ describe("hashing and the held map", () => {
     ]);
   });
 
+  test("stableStringify writes what it wrote by joining its parts: sorted keys quoted as JSON quotes them, holes as nothing", () => {
+    // A hole, which a device never sends but a value built in code may hold.
+    const sparse = [1, , 3];
+    const value = { b: [sparse, undefined, null, -0, NaN, "x\"y"], a: { 'q"': 1, "back\\slash": 2, "tab\t": 3, "\ud800lone": 4, "\u{1F600}pair": 5, plain: undefined }, c: true };
+    assert.equal(stableStringify(value), '{"a":{"back\\\\slash":2,"q\\"":1,"tab\\t":3,"\\ud800lone":4,"\u{1F600}pair":5},"b":[[1,,3],null,null,0,null,"x\\"y"],"c":true}');
+    assert.equal(stableStringify([]), "[]");
+    assert.equal(stableStringify({}), "{}");
+    assert.equal(stableStringify({ gone: undefined }), "{}");
+  });
+
   test("a held value stands for its hash: the very same object is never hashed, an equal one sends nothing, a different one is sent", () => {
     const chunk = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" }, edges: {} };
     let hashed = 0;
