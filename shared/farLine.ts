@@ -318,12 +318,14 @@ const SEAT_TYPES: ReadonlySet<OpType> = new Set<OpType>(["token.create", "templa
 
 /**
  * The kind the live limits judge an op as (shared/limits.ts admitLimits).
- * `restoresMove` says a restore takes back or brings back a move, which is
- * bookkeeping as the move was. Any other restore meets the line as what it
- * brings back would.
+ * `restoresBookkeeping` says a restore takes back or brings back
+ * bookkeeping, which it is as the change was: a move (its step carries
+ * poses), an HP change taken from the log, or a DM's hides, shows, locks
+ * and names alone (restoresToggles). Any other restore meets the line as
+ * what it brings back would.
  */
-export function opKind(op: Op, restoresMove = false): LimitKind {
+export function opKind(op: Op, restoresBookkeeping = false): LimitKind {
   const rule = farRule(op);
-  const far = FAR_TREATMENT[op.t] === "deletion" ? "deletion" : rule === "exempt" || (rule === "restore" && restoresMove) ? "exempt" : "meets";
+  const far = FAR_TREATMENT[op.t] === "deletion" ? "deletion" : rule === "exempt" || (rule === "restore" && restoresBookkeeping) ? "exempt" : "meets";
   return { far, seats: SEAT_TYPES.has(op.t) };
 }
