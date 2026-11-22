@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { FrameBudget } from "#server/rooms/budgets.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
 import { projectState } from "#shared/project.ts";
 import { FORGET_ASK, type ClientMessage, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -10,6 +11,7 @@ import { DM, P1, rng, room, scene, token } from "#shared/testutil.ts";
 import { TOWER, tower, UPPER } from "../features/floors/testing.ts";
 import { serverTime } from "../features/dice/groupSave/lifecycle.ts";
 import {
+  BUILD_RELOAD_NOTE_MS,
   createRoomSocket,
   EPH_PER_SECOND,
   OPEN_TIMEOUT_MS,
@@ -26,6 +28,7 @@ import {
   type SocketLike,
 } from "./socket.ts";
 import { LocalServer } from "../dev/localServer.ts";
+import { shouldReloadForBuild, type BuildReload } from "../lib/buildReload.ts";
 import { sceneGate } from "../lib/scene.ts";
 import { createRoomActions } from "./actions.ts";
 import { createRoomStore, OP_ANSWER_MS, refusalText } from "./store.ts";
@@ -87,7 +90,21 @@ class FakeEnv implements ConnectionEnv {
   }
 }
 
-function setup(opts: { viewer?: Viewer; state?: RoomState; random?: number; recheck?: () => Promise<You | null>; ephPerSecond?: () => number } = {}) {
+/** A page's own build and what its tab kept across reloads, which `kept` stands in for. */
+function fakeBuild(own: number, kept: { tried: number | null | "unknown" } = { tried: null }) {
+  const reloads: number[] = [];
+  const build: BuildReload = {
+    ownOp: own,
+    tried: () => kept.tried,
+    remember: (serverOp) => {
+      if (kept.tried !== "unknown") kept.tried = serverOp;
+    },
+    reload: () => reloads.push(1),
+  };
+  return { build, reloads, kept };
+}
+
+function setup(opts: { viewer?: Viewer; state?: RoomState; random?: number; recheck?: () => Promise<You | null>; ephPerSecond?: () => number; buildReload?: BuildReload } = {}) {
   const viewer = opts.viewer ?? DM;
   const state = opts.state ?? room({ tokens: { g1: token("g1") } });
   const clock = new FakeClock();
@@ -109,6 +126,7 @@ function setup(opts: { viewer?: Viewer; state?: RoomState; random?: number; rech
     frame: (cb) => frames.push(cb),
     ...(opts.recheck ? { recheck: opts.recheck } : {}),
     ...(opts.ephPerSecond ? { ephPerSecond: opts.ephPerSecond } : {}),
+    ...(opts.buildReload ? { buildReload: opts.buildReload } : {}),
   });
   const last = () => sockets.at(-1)!;
   const snapshot = (sceneId = "s1", watermark = 0): ServerMessage => ({
@@ -182,7 +200,7 @@ describe("states", () => {
     assert.equal(s.conn(), "connecting");
     s.last().open();
     const [hello] = s.last().take("hello");
-    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1, ackDetails: true });
+    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1, ackDetails: true, opVersion: OP_VERSION });
     assert.equal(s.conn(), "connecting", "an open socket without its snapshot is not connected");
     s.last().emit(s.snapshot());
     assert.equal(s.conn(), "open");
@@ -1369,5 +1387,173 @@ describe("ids through the socket (docs/design/design-v1-player-limits.md 3.4)", 
     const [again] = s.last().take("op") as Extract<ClientMessage, { t: "op" }>[];
     assert.equal(again?.n, 2);
     assert.notEqual((again!.op as Extract<ClientOp, { t: "token.create" }>).token.id, id);
+  });
+});
+
+describe("a page on older code than the server (build frame)", () => {
+  /** Opens the socket, takes the hello, sends the server's build, then the snapshot, as the server orders them. */
+  function openWith(s: ReturnType<typeof setup>, serverOp: number): void {
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "build", opVersion: serverOp });
+    s.last().emit(s.snapshot());
+  }
+
+  test("a newer server makes the page note the update and reload once, after the note's wait", () => {
+    const b = fakeBuild(10);
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    openWith(s, 11);
+    assert.equal(b.reloads.length, 0, "the reload waits for the note");
+    assert.ok(s.room.store.getState().toasts.some((t) => t.text === "RaccoonVTT was updated. Reloading…"));
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 1);
+    assert.equal(b.kept.tried, 11);
+  });
+
+  test("the same or an older server never reloads", () => {
+    for (const serverOp of [10, 9]) {
+      const b = fakeBuild(10);
+      const s = setup({ buildReload: b.build });
+      s.socket.start();
+      openWith(s, serverOp);
+      s.clock.advance(60_000);
+      assert.equal(b.reloads.length, 0, `server ${serverOp}`);
+    }
+  });
+
+  test("a page that never sent its version is not told, and a hello always carries it", () => {
+    const s = setup();
+    s.socket.start();
+    s.last().open();
+    const [hello] = s.last().take("hello") as Extract<ClientMessage, { t: "hello" }>[];
+    assert.equal(hello?.opVersion, OP_VERSION);
+    s.last().emit({ t: "build", opVersion: OP_VERSION + 1 });
+    s.last().emit(s.snapshot());
+    assert.equal(s.conn(), "open", "no buildReload option, so nothing reloads and nothing breaks");
+    assert.equal(s.room.store.getState().toasts.length, 0);
+  });
+
+  test("a reload that lands on the same old code does not reload again, and a later server version does", () => {
+    const kept = { tried: null as number | null | "unknown" };
+    const first = fakeBuild(10, kept);
+    const s1 = setup({ buildReload: first.build });
+    s1.socket.start();
+    openWith(s1, 11);
+    s1.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(first.reloads.length, 1);
+    // The page comes back from a cache with the same code and the same tab record.
+    const second = fakeBuild(10, kept);
+    const s2 = setup({ buildReload: second.build });
+    s2.socket.start();
+    openWith(s2, 11);
+    s2.clock.advance(60_000);
+    assert.equal(second.reloads.length, 0, "the loop guard stops the second reload");
+    s2.last().drop(1006);
+    s2.clock.advance(10_000);
+    openWith(s2, 11);
+    s2.clock.advance(60_000);
+    assert.equal(second.reloads.length, 0, "a reconnect says the same again and still does not reload");
+    s2.last().drop(1006);
+    s2.clock.advance(10_000);
+    openWith(s2, 12);
+    s2.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(second.reloads.length, 1, "a newer deploy is another reason");
+  });
+
+  test("a tab that keeps no record never reloads, so it cannot loop", () => {
+    const b = fakeBuild(10, { tried: "unknown" });
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    openWith(s, 11);
+    s.clock.advance(60_000);
+    assert.equal(b.reloads.length, 0);
+  });
+
+  test("an edit still unanswered when the room opens gets no update note until it is answered", () => {
+    const b = fakeBuild(10);
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    const n = s.room.dispatch({ t: "token.move", tokenId: "g1", x: 5, y: 5 })!;
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "build", opVersion: 11 });
+    s.last().emit(s.snapshot());
+    assert.equal(s.room.store.getState().toasts.length, 0);
+    s.last().emit({ t: "ev", seq: 1, changes: [], acks: [n] });
+    assert.equal(s.room.store.getState().toasts.length, 1, "the answer starts the note");
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 1);
+  });
+
+  test("queued edits go first: the reload waits until the server has answered them", () => {
+    const b = fakeBuild(10);
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "build", opVersion: 11 });
+    s.last().emit(s.snapshot());
+    s.clock.advance(BUILD_RELOAD_NOTE_MS - 1);
+    const n = s.room.dispatch({ t: "token.move", tokenId: "g1", x: 5, y: 5 })!;
+    s.clock.advance(1);
+    assert.equal(b.reloads.length, 0, "an edit queued during the note holds the reload");
+    s.last().emit({ t: "ev", seq: 1, changes: [], acks: [n] });
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 1, "the answer lets it go");
+  });
+
+  test("shouldReloadForBuild: only a higher server version not already tried", () => {
+    assert.equal(shouldReloadForBuild(11, 10, null), true);
+    assert.equal(shouldReloadForBuild(11, 10, 10), true);
+    assert.equal(shouldReloadForBuild(11, 10, 11), false);
+    assert.equal(shouldReloadForBuild(11, 10, 12), false);
+    assert.equal(shouldReloadForBuild(10, 10, null), false);
+    assert.equal(shouldReloadForBuild(11, 10, "unknown"), false);
+  });
+
+  test("random runs of builds, drops and reloads back on old code never reload twice for one server version", () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const r = rng(seed);
+      const kept = { tried: null as number | null | "unknown" };
+      const seen = new Map<number, number>();
+      let server = 10;
+      /** The version the page was last told, which its reload is for. */
+      let told = 10;
+      let s = setup();
+      let b = fakeBuild(10, kept);
+      const fresh = (): void => {
+        b = fakeBuild(10, kept);
+        s = setup({ buildReload: b.build });
+        s.socket.start();
+      };
+      fresh();
+      for (let step = 0; step < 40; step++) {
+        const roll = r();
+        if (roll < 0.2) server += Math.floor(r() * 2);
+        if (roll < 0.7) {
+          if (s.last().readyState !== 1) {
+            s.clock.advance(10_000);
+            s.last().open();
+            s.last().take("hello");
+            if (r() < 0.9) {
+              told = server;
+              s.last().emit({ t: "build", opVersion: server });
+            }
+            s.last().emit(s.snapshot());
+          } else {
+            s.last().drop(1006);
+          }
+        }
+        s.clock.advance(Math.floor(r() * 3_000));
+        if (b.reloads.length > 0) {
+          const count = (seen.get(told) ?? 0) + 1;
+          seen.set(told, count);
+          // The tab comes back with the same old code.
+          fresh();
+        }
+      }
+      for (const [version, count] of seen) assert.ok(count <= 1, `seed ${seed}: ${count} reloads for server ${version}`);
+    }
   });
 });

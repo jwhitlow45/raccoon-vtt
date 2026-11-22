@@ -4,6 +4,7 @@ import { after, before, describe, test } from "node:test";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
@@ -84,6 +85,22 @@ describe("websocket: hello, ops and acks", () => {
     const wm = await t.pool.query<{ n: string }>("select n::text from client_watermarks where room_id = $1 and client_id = 'c1'", [roomId]);
     assert.equal(wm.rows[0]?.n, "1");
     s.close();
+  });
+
+  test("a hello that carries its op version gets a build frame ahead of the snapshot, and one that does not gets none", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Build");
+    const asks = await t.connect(roomId, dm);
+    asks.send({ t: "hello", clientId: "c1", resumeFrom: 1, opVersion: 1 });
+    await asks.next("snapshot");
+    // Frames of one socket arrive in order, so a build frame already here was sent ahead of the snapshot.
+    assert.ok(asks.received.some((m) => m.t === "build"), "the build frame was already here when the snapshot came");
+    assert.deepEqual(await asks.next("build"), { t: "build", opVersion: OP_VERSION });
+    asks.close();
+    const silent = await t.connect(roomId, dm);
+    await silent.snapshot("c2");
+    assert.equal(await silent.maybe("build"), null);
+    silent.close();
   });
 
   test("several relative ops from one client sent together are applied once each", async () => {

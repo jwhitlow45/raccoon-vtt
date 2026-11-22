@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { HARD } from "#shared/limits.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
 import { clientMessageSchema, type ClientMessage } from "#shared/protocol.ts";
 import { clientIp } from "../auth/clientIp.ts";
 import { renewClosedDisplay } from "../auth/displaySessions.ts";
@@ -261,6 +262,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             }
             conn.helloAllowed = false;
             conn.helloPending = true;
+            // Ahead of the snapshot, so a page on older code knows before it shows the room.
+            if (msg.opVersion !== undefined) conn.send({ t: "build", opVersion: OP_VERSION });
             chain(() => room.hello(conn, msg));
             return;
           case "op":

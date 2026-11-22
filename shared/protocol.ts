@@ -3680,6 +3680,11 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
     sceneId: id.optional(),
     /** Older clients strictly validate events, so acknowledgment details require an explicit opt-in. */
     ackDetails: z.literal(true).optional(),
+    /**
+     * The op version of the page's own code (shared/migrate.ts OP_VERSION). A hello that carries it is answered with
+     * a `build` frame, which an older page never asks for and so never receives.
+     */
+    opVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   }),
   z.strictObject({
     t: z.literal("op"),
@@ -3810,6 +3815,12 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    */
   z.strictObject({ t: z.literal("refusals"), rejects: z.array(rejectSchema).min(1).max(MAX_KEPT_REFUSALS) }),
   z.strictObject({ t: z.literal("pong"), k: z.number().int().min(0) }),
+  /**
+   * The op version the server runs, sent ahead of the snapshot to a hello that carried its own `opVersion`. A page
+   * whose own is lower reloads once (client/lib/buildReload.ts). A frame of its own, sent only on that ask, since
+   * an older page's strict schema would drop a new field and reconnect over it.
+   */
+  z.strictObject({ t: z.literal("build"), opVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) }),
   /**
    * The answer to a `time` probe: `at` is the server's clock in ms since
    * 1970, the clock every op's time reads (docs/design/design-v1-music.md

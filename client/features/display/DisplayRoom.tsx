@@ -18,6 +18,7 @@ import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib
 import { viewBox, type View } from "../../lib/view.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
+import { browserBuildReload } from "../../lib/buildReload.ts";
 import { liftIn } from "../../canvas/boardPick.ts";
 import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
 import { navigate } from "../../lib/navigation.ts";
@@ -119,7 +120,7 @@ export default function DisplayRoom(props: { roomId: string; memberId: string })
   useEffect(() => {
     // A display's projection is a player's who owns nothing, so its store holds the player role (state/store.ts).
     const room = createRoomStore({ roomId, you: { memberId, role: "player" } });
-    const socket = createRoomSocket({ url: `${roomSocketUrl(roomId)}&as=display`, room, env: browserEnv(), recheck: () => recheck(roomId) });
+    const socket = createRoomSocket({ url: `${roomSocketUrl(roomId)}&as=display`, room, env: browserEnv(), recheck: () => recheck(roomId), buildReload: browserBuildReload() });
     socket.start();
     setLive({ room, actions: createRoomActions(room, socket) });
     return () => {

@@ -1,6 +1,8 @@
 import { historyMessageSchema } from "#shared/undoContract.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
 import { serverMessageSchema, type ClientMessage, type EphEvent, type ServerMessage } from "#shared/protocol.ts";
 import { mainFloorId, sameScene } from "#shared/rules/floors.ts";
+import { shouldReloadForBuild, type BuildReload } from "../lib/buildReload.ts";
 import type { RoomStore } from "./store.ts";
 import { backoffDelay, BACKOFF_CAP_MS, realClock, Timer, type Clock } from "./timing.ts";
 import type { You } from "./types.ts";
@@ -192,7 +194,16 @@ export type RoomSocketOptions = {
    * rather than wait on a retry.
    */
   previewOf?: string;
+  /**
+   * What a page does when the server says it runs newer code: notes the
+   * update, then reloads once the queued edits are answered. Without it the
+   * page never reloads itself (a preview, a development room).
+   */
+  buildReload?: BuildReload;
 };
+
+/** How long the update note shows before the reload, so a person sees why the page went blank. */
+export const BUILD_RELOAD_NOTE_MS = 1_500;
 
 export type RoomSocket = {
   start(): void;
@@ -317,6 +328,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const deadline = new Timer(clock);
   const staleTimer = new Timer(clock);
   const sceneRetryTimer = new Timer(clock);
+  const buildReloadTimer = new Timer(clock);
+  /** The server's op version, once a `build` frame said it. */
+  let newerBuild: number | null = null;
+  let unsubscribeStore: (() => void) | null = null;
   /** Wakes the outbox once the op it could not send fits the socket's budget. */
   const paceTimer = new Timer(clock);
   let budget = new SendBudget(clock);
@@ -604,7 +619,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     const sceneId = role() === "dm" ? (wantedScene ?? current ?? undefined) : undefined;
     requestedScene = sceneId ?? null;
     if (sceneId && sceneId !== current) room.trackScene({ t: "request", sceneId });
-    const msg: ClientMessage = { t: "hello", clientId, resumeFrom, ackDetails: true, ...(sceneId ? { sceneId } : {}) };
+    const msg: ClientMessage = { t: "hello", clientId, resumeFrom, ackDetails: true, opVersion: OP_VERSION, ...(sceneId ? { sceneId } : {}) };
     if (!sendRaw(msg)) return;
     const wasOpen = phase === "open";
     phase = "hello";
@@ -623,6 +638,24 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     requestedScene = wantedScene;
     sceneInFlight = true;
     startDeadline();
+  }
+
+  /**
+   * Reloads for newer server code once the socket is open and the queued edits are answered, since a reload drops
+   * what is queued (client/lib/chunkLoad.ts reloadGate). Asked again as each of those changes.
+   */
+  function considerBuildReload(): void {
+    const reload = options.buildReload;
+    if (!reload || previewOf !== undefined || newerBuild === null || buildReloadTimer.pending) return;
+    if (phase !== "open" || room.store.getState().pending.length > 0) return;
+    if (!shouldReloadForBuild(newerBuild, reload.ownOp, reload.tried())) return;
+    const serverOp = newerBuild;
+    room.ui.notify("RaccoonVTT was updated. Reloading…");
+    buildReloadTimer.set(BUILD_RELOAD_NOTE_MS, () => {
+      if (phase !== "open" || room.store.getState().pending.length > 0) return;
+      reload.remember(serverOp);
+      reload.reload();
+    });
   }
 
   function onSnapshot(msg: Extract<ServerMessage, { t: "snapshot" }>): void {
@@ -663,6 +696,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       keepAliveTimer.clear();
     }
     flushEph();
+    considerBuildReload();
   }
 
   function receive(data: unknown): void {
@@ -752,6 +786,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
           room.trackScene({ t: "slow" });
         }
         return;
+      case "build":
+        newerBuild = msg.opVersion;
+        return;
       case "pong":
         if (unansweredK !== null && msg.k >= unansweredK) {
           unansweredK = null;
@@ -832,6 +869,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     start() {
       if (phase !== "idle" || unsubscribeEnv) return;
       room.setOutbox({ send: (msg) => sendRaw(msg, true) });
+      if (options.buildReload) unsubscribeStore = room.store.subscribe(considerBuildReload);
       unsubscribeEnv =
         env?.subscribe({
           wake,
@@ -859,6 +897,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       openPreviews.clear();
       unsubscribeEnv?.();
       unsubscribeEnv = null;
+      unsubscribeStore?.();
+      unsubscribeStore = null;
+      buildReloadTimer.clear();
       room.setOutbox(null);
       try {
         socket?.close(1000, "leaving");
