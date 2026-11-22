@@ -664,7 +664,16 @@ newest first.
   to players as removed, and showing it again as added. The room's size
   limit counts the turn's walks in one fixed share of about 0.3 MiB, fight
   or not, and no longer counts the fight's history, so a fight's start sets
-  no room aside. Where a room's saved size passes 17 MiB, each change's
+  no room aside. The room also keeps more of its size limit for what the
+  players add, by its settings and roster (was 1 MiB): 2.25 MiB for a table
+  of up to six with "Who can move any token" set to "No one" and "Players
+  can apply damage and healing" off, 2.75 MiB with either on, and up to 3.5
+  MiB with 50 members. So the DM's new things stop sooner, at 8.25 MiB of
+  the room's 11 MiB for such a table (was 9.5 MiB). In a room already past
+  that at the update, the DM's new things, edits that add and turning either
+  setting on read "Not saved. The room is full: it keeps the rest for what
+  the players add.", while the players' adds and all play go on. Where a
+  room's saved size passes 17 MiB, each change's
   save drops its oldest DM-only log lines that the log archive already
   holds, then its oldest turn history steps, until it fits. The server logs
   "room is past its stored bound and has nothing left to shed" once a load
