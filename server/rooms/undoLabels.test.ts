@@ -139,6 +139,12 @@ describe("undo step labels", () => {
     assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { light: null } }, s), "putting out the light of Goblin 2");
     assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { partyVision: true } }, s), "letting Goblin 2 share its sight with the party");
     assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { partyVision: false } }, s), "stopping Goblin 2 sharing its sight with the party");
+    assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { visibility: "all" } }, s), "showing Goblin 2");
+    assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { visibility: "dm" } }, s), "hiding Goblin 2");
+    assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { visibility: "dm", locked: true } }, s), "changing Goblin 2", "a patch with more than the show is a change");
+    assert.equal(describeOp({ t: "token.updateMany", tokenIds: ["g2"], patch: { visibility: "all" } }, s), "showing Goblin 2");
+    assert.equal(describeOp({ t: "token.updateMany", tokenIds: ["g2", "g3"], patch: { visibility: "dm" } }, s), "hiding 2 tokens");
+    assert.equal(describeOp({ t: "token.updateMany", tokenIds: ["g2", "g3"], patch: { locked: true } }, s), "changing 2 tokens");
     assert.equal(describeOp({ t: "token.move", tokenId: "g2", x: 4, y: 1, teleport: "wall" }, s), "teleporting Goblin 2");
   });
 

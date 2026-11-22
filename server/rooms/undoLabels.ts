@@ -152,6 +152,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (only && op.patch.partyVision !== undefined) {
         return op.patch.partyVision ? `letting ${token(op.tokenId)} share its sight with the party` : `stopping ${token(op.tokenId)} sharing its sight with the party`;
       }
+      if (only && op.patch.visibility !== undefined) return `${op.patch.visibility === "dm" ? "hiding" : "showing"} ${token(op.tokenId)}`;
       return `changing ${token(op.tokenId)}`;
     }
     case "token.delete":
@@ -411,8 +412,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `saving ${the("handout", op.doc.title)}`;
     case "handoutDoc.delete":
       return `deleting ${the("handout", before.handoutDocs[op.docId]?.title)}`;
-    case "token.updateMany":
-      return manyTokens("changing", op.tokenIds, token);
+    case "token.updateMany": {
+      const only = Object.keys(op.patch).length === 1;
+      return manyTokens(only && op.patch.visibility !== undefined ? (op.patch.visibility === "dm" ? "hiding" : "showing") : "changing", op.tokenIds, token);
+    }
     case "token.deleteMany":
       return manyTokens("deleting", op.tokenIds, token);
     case "actor.effects":
