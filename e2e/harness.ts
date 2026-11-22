@@ -688,8 +688,11 @@ export async function openSideTab(page: Page | Locator, title: string): Promise<
     await waitFor(`the ${title} tab panel`, async () => {
       if (await chosen.isVisible()) return true;
       try {
-        if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup", { timeout: SIDE_TAB_TRY_MS })) === null) await tab.click({ timeout: SIDE_TAB_TRY_MS });
-        else {
+        if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup", { timeout: SIDE_TAB_TRY_MS })) === null) {
+          // A try before may have left More's menu open, and the panel has since become a row tab: the open menu would take the click.
+          if (await menu.isVisible()) await menu.press("Escape", { timeout: SIDE_TAB_TRY_MS });
+          await tab.click({ timeout: SIDE_TAB_TRY_MS });
+        } else {
           // A try before may have left the menu open, and More's tab would close it.
           if (!(await menu.isVisible())) await list.locator('[role="tab"][aria-haspopup="menu"]').click({ timeout: SIDE_TAB_TRY_MS });
           await menu.getByRole("menuitemradio", { name }).click({ timeout: SIDE_TAB_TRY_MS });
@@ -768,8 +771,8 @@ export async function wholeInReach(target: Locator): Promise<boolean> {
  * the old canvas's destroy and the new one's mount finds no canvas: the
  * box is read until there is one.
  */
-export async function mapCanvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
-  const canvas = page.locator(".konvajs-content").first();
+export async function mapCanvasBox(page: Page, only: { visible?: boolean } = {}): Promise<{ x: number; y: number; width: number; height: number }> {
+  const canvas = (only.visible ? page.locator(".konvajs-content").filter({ visible: true }) : page.locator(".konvajs-content")).first();
   return waitFor("the map canvas on the page", () => canvas.boundingBox());
 }
 

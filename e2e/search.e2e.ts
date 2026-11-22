@@ -7,7 +7,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, OpSocket, readCamera, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, OpSocket, readCamera, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { addSound } from "./soundRoom.ts";
 
 /**
@@ -1050,7 +1050,7 @@ describe("the room search", { concurrency: false }, () => {
 
   test("se-11. Enter on a token off screen selects it, frames it and opens its action bar", async () => {
     await fresh();
-    const canvas = (await dm.locator(".konvajs-content").first().boundingBox())!;
+    const canvas = await mapCanvasBox(dm);
     const onScreen = async (x: number, y: number) => {
       const cam = (await readCamera(dm))!;
       const px = cam.x + x * cam.scale;

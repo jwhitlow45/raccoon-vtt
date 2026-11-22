@@ -13,7 +13,7 @@ import { placedOnHex } from "../shared/rules/footprint.ts";
 import { hexAt, type HexGrid } from "../shared/rules/hex.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
-import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The dungeon generator end to end (docs/design/design-v1-dungeon-generator.md
@@ -659,7 +659,7 @@ describe("dungeon generator", { concurrency: false }, () => {
     await waitFor("the build on the DM's page", () => (paintedCells(state(dmSocket), run.sceneId) > 0 ? true : null));
     // Framed on the entrance: zoomed well past a fit of the whole scene, and centered inside it.
     const cam = await waitFor("the camera", () => readCamera(dm));
-    const box = (await dm.locator(".konvajs-content").first().boundingBox())!;
+    const box = await mapCanvasBox(dm);
     const whole = Math.min(box.width / scene.bounds.w, box.height / scene.bounds.h);
     assert.ok(cam.scale > whole * 1.5, `zoom ${cam.scale} against a whole fit of ${whole}`);
     const center = { x: (box.width / 2 - cam.x) / cam.scale, y: (box.height / 2 - cam.y) / cam.scale };

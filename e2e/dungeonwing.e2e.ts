@@ -9,7 +9,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { cornerAt, hexCenter, hexCorners, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import type { RoomState } from "../shared/model.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Add a wing in the Map builder (docs/design: dungeon generator phase 3,
@@ -349,7 +349,7 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
 
     // The area's middle (35 of the scene's 60 across, framed whole) is right of the map's middle, so the pane docks on the left, the map's height between the bars.
     const box = (await pane().boundingBox())!;
-    const canvas = (await dm.locator(".konvajs-content").first().boundingBox())!;
+    const canvas = await mapCanvasBox(dm);
     assert.equal(Math.round(box.width), 296);
     assert.ok(box.x >= canvas.x && box.x <= canvas.x + 80, `docked at the left: ${JSON.stringify(box)} in ${JSON.stringify(canvas)}`);
     assert.ok(box.height > WIDE.height * 0.6, `the map's height: ${box.height}`);

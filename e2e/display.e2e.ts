@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import sharp from "sharp";
 import { addSound, soundProbe, SOUND_TEST_FLAG } from "./soundRoom.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The table display (docs/design/design-v1-dm-tools.md 3.1) where the live play
@@ -241,7 +241,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await menu.waitFor({ state: "detached" });
 
     // Zoomed in on a corner, so the view is far from what Fit the map shows.
-    const box = await dm.locator(".konvajs-content").first().boundingBox();
+    const box = await mapCanvasBox(dm);
     assert.ok(box);
     await dm.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.3);
     for (let i = 0; i < 3; i++) {

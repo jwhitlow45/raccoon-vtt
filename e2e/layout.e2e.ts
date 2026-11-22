@@ -7,7 +7,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { SCENE_GROUP_NAMES } from "./helpers/sceneGroups.ts";
 
@@ -662,7 +662,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       await phone.waitForTimeout(400);
       const cam = await readCamera(phone);
       assert.ok(cam);
-      const canvas = await box(phone.locator(".konvajs-content").first());
+      const canvas = await mapCanvasBox(phone);
       const bounds = phoneSocket.state!.scenes[run.sceneId]!.bounds;
       const sceneBottom = canvas.y + cam.y + bounds.h * cam.scale;
       const below = await foot(phone, "Area");

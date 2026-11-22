@@ -11,7 +11,7 @@ import { PALETTES } from "../client/lib/theme.ts";
 import { lightOnly, normal, parseColor, partColors, ratio, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
 import { versionChar } from "../client/features/dungeon/seed.ts";
 import { openGroup } from "./helpers/groups.ts";
-import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The light theme (docs/design/design-v1-light-theme.md 13): the
@@ -518,7 +518,7 @@ describe("the light theme", { concurrency: false }, () => {
             g.__lt2 = sheet;
           } else g.document.adoptedStyleSheets = g.document.adoptedStyleSheets.filter((s) => s !== g.__lt2);
         }, on);
-      const canvas = (await dm.locator(".konvajs-content").first().boundingBox())!;
+      const canvas = await mapCanvasBox(dm);
       const clip = { x: Math.round(canvas.x), y: Math.round(canvas.y), width: Math.floor(canvas.width), height: Math.floor(canvas.height) };
       const mapColumn = dm.locator('[role="img"][aria-label="Map"][data-rvtt-ring]').locator("..");
       await mapColumn.evaluate((el) => (el as unknown as { setAttribute(n: string, v: string): void }).setAttribute("data-lt2-ground", ""));
@@ -1325,7 +1325,7 @@ async function whiteArtHalo(): Promise<string[]> {
   // Zoomed in, so white art fills the screen under the bars and to the map's edge.
   await dm.getByRole("button", { name: "Fit the map to the screen", exact: true }).click();
   await sleep(300);
-  const box = (await dm.locator(".konvajs-content").first().boundingBox())!;
+  const box = await mapCanvasBox(dm);
   for (let i = 0; i < 6; i++) {
     await dm.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await dm.mouse.wheel(0, -240);

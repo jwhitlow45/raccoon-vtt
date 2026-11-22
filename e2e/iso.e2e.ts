@@ -6,7 +6,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 import type { Op } from "../shared/protocol.ts";
@@ -1526,7 +1526,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const cdp = await patContext.newCDPSession(pat);
     try {
       // The board's middle, on screen at any turn.
-      const board = await pat.locator(".konvajs-content").filter({ visible: true }).first().boundingBox();
+      const board = await mapCanvasBox(pat, { visible: true });
       assert.ok(board, "the board on screen");
       const from = { x: board.x + board.width / 2, y: board.y + board.height / 2 };
       await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...from, id: 0 }] });

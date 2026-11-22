@@ -8,7 +8,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Download, type Page } from "playwright-core";
 import sharp from "sharp";
 import type { RoomState } from "#shared/model.ts";
-import { ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 5 run (docs/design/design-v1-dm-tools.md section 4, 5I): the real
@@ -311,7 +311,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await menu.getByRole("menuitemradio", { name: "Follow the DM" }).click();
     await menu.waitFor({ state: "detached", timeout: 10_000 });
 
-    const box = await dm.locator(".konvajs-content").first().boundingBox();
+    const box = await mapCanvasBox(dm);
     assert.ok(box);
     await dm.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.4);
     for (let i = 0; i < 3; i++) {

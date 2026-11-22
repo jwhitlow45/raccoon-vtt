@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
 import type { Locator, Page } from "playwright-core";
-import { openSideTab, pagePoint, pickTool, Touches, waitFor, wholeInReach } from "./harness.ts";
+import { mapCanvasBox, openSideTab, pagePoint, pickTool, Touches, waitFor, wholeInReach } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import {
   assertNoConsoleErrors,
@@ -199,7 +199,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
 
     // Two fingers pan with the popover open, arriving 50 ms apart, and it stays open, also when one lifts first.
     await stroke.tap();
-    const map = await dm.locator(".konvajs-content").boundingBox();
+    const map = await mapCanvasBox(dm);
     assert.ok(map);
     const cx = map.x + map.width / 2;
     const cy = map.y + map.height / 3;
@@ -294,7 +294,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
       await moreTab.click();
       await menu.waitFor();
       const before = playerSocket.received.length;
-      const desk = await dm.locator(".konvajs-content").boundingBox();
+      const desk = await mapCanvasBox(dm);
       assert.ok(desk);
       await dm.mouse.click(desk.x + desk.width / 2, desk.y + desk.height / 3);
       await menu.waitFor({ state: "detached" });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, OpSocket, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * The resting token bar's room (docs/design/design-v1-bar-compact.md section 1)
@@ -268,7 +268,7 @@ export async function stopProbe(page: Page, ms = 2_000): Promise<(Drawn | null)[
 }
 /** The map's camera once it has held still for 120 ms, and the canvas's place on the page. */
 export async function view(page: Page): Promise<{ cam: { x: number; y: number; scale: number }; box: { x: number; y: number } }> {
-  const box = await page.locator(".konvajs-content").first().boundingBox();
+  const box = await mapCanvasBox(page);
   assert.ok(box, "the map canvas is not on the page");
   let cam = await readCamera(page);
   for (let still = 0, i = 0; still < 2 && i < 50; i++) {

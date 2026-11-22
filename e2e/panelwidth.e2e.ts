@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { namedId, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, readCamera, reopenRoom, Shots, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { mapCanvasBox, namedId, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, readCamera, reopenRoom, Shots, SocketWatch, startServer, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * A side panel that resizes, and a sheet a mouse can grow and shrink
@@ -154,7 +154,7 @@ async function dragEdge(page: Page, dx: number, steps = 10): Promise<void> {
 
 /** The world point at the middle of the map's canvas. */
 async function mapCenter(page: Page): Promise<{ x: number; y: number }> {
-  const box = (await page.locator(".konvajs-content").first().boundingBox())!;
+  const box = await mapCanvasBox(page);
   const cam = (await readCamera(page))!;
   return { x: (box.width / 2 - cam.x) / cam.scale, y: (box.height / 2 - cam.y) / cam.scale };
 }
@@ -582,7 +582,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
       assert.deepEqual(await valueNow(wideDm), { now: 500, max: 640, min: 360, text: "500 pixels" });
       const after = await mapCenter(wideDm);
       assert.ok(Math.abs(after.x - center.x) < 1 && Math.abs(after.y - center.y) < 1, `the map's center stays: ${JSON.stringify(center)} then ${JSON.stringify(after)}`);
-      const mapBox = (await wideDm.locator(".konvajs-content").first().boundingBox())!;
+      const mapBox = await mapCanvasBox(wideDm);
       assert.equal(Math.round(mapBox.width), 940, "the map's column follows");
       await shots.take(wideDm, "pa-1-drawn-500");
 
