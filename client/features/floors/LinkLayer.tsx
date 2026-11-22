@@ -5,7 +5,7 @@ import type { FloorLink, Scene } from "#shared/model.ts";
 import { linkDir } from "#shared/rules/floorLinks.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { useStore } from "zustand";
-import { boardPillsSlot, usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
+import { boardPillsSlot, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
 import { useScoped } from "../../state/scope.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
@@ -104,7 +104,9 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
       }),
     [list, scenes, grid, far, hushed, feet, shown],
   );
-  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens), [ends, markers, scale, iso, tokens]);
+  // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
+  const view = useRestView();
+  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view }), [ends, markers, scale, iso, tokens, view]);
   return (
     <Group listening={false}>
       {list.map((l, i) => {

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { token } from "#shared/testutil.ts";
 import { areaLabelSpot, tokenBoxes } from "../features/areas/labelSpot.ts";
 import { pillReach } from "../features/measure/pillPlace.ts";
+import { LiveCamera } from "../state/liveCamera.ts";
 import { RoomScope } from "../state/scope.ts";
-import { boardPillsSlot, boardViewsOf, pillsExcept, publishPillsEffect, retractPillsEffect, type PillSpec } from "./boardView.ts";
+import { boardPillsSlot, boardViewOf, boardViewsOf, pillsExcept, publishPillsEffect, REST_MS, restViewSlot, retractPillsEffect, watchRestView, type PillSpec } from "./boardView.ts";
 
 test("an area's name keeps off every other layer's pill, never off another area's, so the two never chase each other", () => {
   const marker = { x: 2, y: 3, value: "Moved 20 ft\n10 ft left", size: "screen" as const, small: true, below: true };
@@ -152,4 +153,98 @@ test("FU40B-OPUS-1: the tree that published last is the one a remaining publicat
   assert.deepEqual(p.store.getState().pills["area:a1"], again);
   c.unmount();
   assert.deepEqual(p.store.getState().pills["area:a1"], again, "a republish moves its tree to the back of the line");
+});
+
+/** A phone's canvas and bars, and the rest view's store and camera, with setTimeout and Date mocked. */
+function restRoom() {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const size = { width: 390, height: 844 };
+  const insets = { top: 52, right: 0, bottom: 113, left: 0 };
+  return { size, insets, live: new LiveCamera(), store: new RoomScope().get(restViewSlot), clear: (c: { x: number; y: number; scale: number }) => boardViewOf(c, size, insets) };
+}
+
+test("the rest view is the clear view at once, then follows the camera only once it has held still REST_MS, never on a drawn camera's notice or after it stops (ISO-1-PHONE-EDGE)", () => {
+  const { size, insets, live, store, clear } = restRoom();
+  try {
+    const first = { x: 0, y: 100, scale: 20 };
+    live.write(first);
+    const stop = watchRestView(live, store, size, insets);
+    assert.deepEqual(store.getState().rest, clear(first), "at once");
+    // A pan's frames, each under REST_MS after the last.
+    for (let i = 1; i <= 5; i++) {
+      live.write({ ...first, x: i * 30 });
+      mock.timers.tick(REST_MS - 1);
+      assert.deepEqual(store.getState().rest, clear(first), `frame ${i}`);
+    }
+    mock.timers.tick(1);
+    assert.deepEqual(store.getState().rest, clear({ ...first, x: 150 }), "at rest");
+    // A pinch the same way.
+    live.write({ x: 150, y: 100, scale: 24 });
+    mock.timers.tick(REST_MS - 1);
+    assert.deepEqual(store.getState().rest, clear({ ...first, x: 150 }));
+    mock.timers.tick(1);
+    assert.deepEqual(store.getState().rest, clear({ x: 150, y: 100, scale: 24 }));
+    // The canvas drawing a camera moves nothing.
+    const held = store.getState().rest;
+    live.setDrawn({ x: 999, y: 0, scale: 2 });
+    mock.timers.tick(REST_MS * 2);
+    assert.equal(store.getState().rest, held);
+    // A move just before the board stops, and one after: neither lands.
+    live.write({ x: 5, y: 0, scale: 10 });
+    stop();
+    live.write({ x: 0, y: 0, scale: 10 });
+    mock.timers.tick(REST_MS * 2);
+    assert.equal(store.getState().rest, held, "stopped");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("random runs of pans, pinches, drawn notices and waits: the rest view changes only REST_MS after the last move, then holds that move's clear view, and never writes the box it holds (ISO-1-PHONE-EDGE)", () => {
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (let runNo = 0; runNo < 200; runNo++) {
+    const { size, insets, live, store, clear } = restRoom();
+    try {
+      let cam = { x: 0, y: 0, scale: 20 };
+      live.write(cam);
+      let lastMove = Date.now();
+      const changes: { quiet: boolean; same: boolean }[] = [];
+      let before = store.getState().rest;
+      let started = false;
+      const unsub = store.subscribe((st) => {
+        const b = before;
+        if (started) changes.push({ quiet: Date.now() - lastMove >= REST_MS, same: b !== null && st.rest !== null && JSON.stringify(b) === JSON.stringify(st.rest) });
+        before = st.rest;
+      });
+      const stop = watchRestView(live, store, size, insets);
+      started = true;
+      assert.deepEqual(store.getState().rest, clear(cam), `run ${runNo}: at once`);
+      for (let step = 0; step < 40; step++) {
+        const r = rand();
+        if (r < 0.45) {
+          // A pan or a pinch frame, now and then back to a camera seen before.
+          cam = r < 0.3 ? { ...cam, x: cam.x + Math.round(rand() * 60 - 30) } : r < 0.4 ? { ...cam, scale: Math.max(5, cam.scale + Math.round(rand() * 6 - 3)) } : { x: 0, y: 0, scale: 20 };
+          const wrote = live.camera;
+          live.write(cam);
+          if (live.camera !== wrote) lastMove = Date.now();
+        } else if (r < 0.55) {
+          live.setDrawn({ x: rand() * 100, y: 0, scale: 20 });
+        } else {
+          mock.timers.tick(Math.floor(rand() * REST_MS * 1.5));
+        }
+        // Quiet for REST_MS: the view is the camera's.
+        if (Date.now() - lastMove >= REST_MS) assert.deepEqual(store.getState().rest, clear(live.camera!), `run ${runNo} step ${step}: at rest`);
+      }
+      // The first write is the start's, at once. Every later one comes REST_MS after a move, and none repeats the box held.
+      for (const c of changes) {
+        assert.equal(c.quiet, true, `run ${runNo}: a write mid-gesture`);
+        assert.equal(c.same, false, `run ${runNo}: a write of the box held`);
+      }
+      unsub();
+      stop();
+    } finally {
+      mock.timers.reset();
+    }
+  }
 });

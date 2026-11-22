@@ -61,7 +61,7 @@ import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../l
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, dragAim, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
+import { BoardViewContext, boardViewsOf, useBoardPills, useWriteRestView } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
@@ -1827,6 +1827,8 @@ export function MapStage(props: {
   const layerProps: LayerProps = { scene, role, scale: cam?.scale ?? 1, fog, labelBoxes };
   // The scene on screen and the part of it the bars leave clear, in cells (boardView.ts): readouts slide into the clear part, and drawing culls by the whole.
   const boardView = useMemo(() => (cam && size ? boardViewsOf(cam, size, { top, right, bottom, left }) : null), [cam, size, top, right, bottom, left]);
+  // The same clear part once the camera rests, for the holes' pills to judge their slide from without laying out on every pan frame (boardView.ts restViewSlot).
+  useWriteRestView(size, insets);
   const overlay = fog || OVERLAY_LAYERS.length > 0 || UNDER_DECOR_LAYERS.length > 0;
 
   // What the isometric board reads beside what Top-down's tree does (relief/IsoBoard.tsx).

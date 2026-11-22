@@ -122,20 +122,22 @@ export type DrawSpace = Pick<IsoGround, "turn" | "ground"> | null;
  * units otherwise. An upright pill stands at its point's drawn height, as
  * MarkPill puts it. One lying flat on the ground under the fog covers the
  * view's box round its corners at the ground's height, as the ground plane
- * turns and squashes it.
+ * turns and squashes it. A tight standing pill near the edge of `view`, the
+ * clear part of the screen, slides back inside it as Pill.tsx draws it,
+ * while a flat one keeps its point.
  */
-export function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean, tight = false): Box {
+export function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean, tight = false, view: Box | null = null): Box {
   // A pointed pill's reach spans every place it could slide to, about twice its width, which is the safe box beside a marker. `tight` is the body as drawn, which is what two pills cover of each other.
-  const box = (q: PillSpec) => (tight ? pillPlace({ ...q, scale }, null).box : pillReach({ ...q, scale }));
-  if (!iso) return box(p);
+  const box = (q: PillSpec, slid: Box | null) => (tight ? pillPlace({ ...q, scale }, slid).box : pillReach({ ...q, scale }));
+  if (!iso) return box(p, view);
   if (upright) {
     const v = viewPointOf(iso, p);
-    return box({ ...p, x: v.x, y: v.y });
+    return box({ ...p, x: v.x, y: v.y }, view);
   }
-  const b = box(p);
-  const view = isometric(iso.turn);
+  const b = box(p, null);
+  const turned = isometric(iso.turn);
   const z = iso.ground(p.x, p.y);
-  const corners = [toView(view, { x: b.x0, y: b.y0 }, z), toView(view, { x: b.x1, y: b.y0 }, z), toView(view, { x: b.x0, y: b.y1 }, z), toView(view, { x: b.x1, y: b.y1 }, z)];
+  const corners = [toView(turned, { x: b.x0, y: b.y0 }, z), toView(turned, { x: b.x1, y: b.y0 }, z), toView(turned, { x: b.x0, y: b.y1 }, z), toView(turned, { x: b.x1, y: b.y1 }, z)];
   const xs = corners.map((c) => c.x);
   const ys = corners.map((c) => c.y);
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
@@ -311,11 +313,15 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * under the lowest corner on the screen and a chip over the highest, and
  * in Top-down from the middles of its bottom and top edges. Ends that are
  * not holes keep their own edge, and the holes keep off their pills.
+ * Each pill is judged where it draws: near the edge of `view`, the clear
+ * part of the screen at the camera's rest (canvas/boardView.ts
+ * restViewSlot), a standing pill slides back inside it, which on a phone at
+ * fit can put an outward pill onto its neighbor (ISO-1-PHONE-EDGE).
  * `prune` false searches without the lower bound, which only cuts the
  * search, so a test can check it changes no answer.
  */
-export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = [], options: { prune?: boolean } = {}): Map<string, PlacedPills> {
-  const { prune = true } = options;
+export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = [], options: { view?: Box | null; prune?: boolean } = {}): Map<string, PlacedPills> {
+  const { view = null, prune = true } = options;
   const out = new Map<string, PlacedPills>();
   const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
   const standing = tokens.map((r) => outlineBox(cornersOf({ ...r, loop: null }), iso));
@@ -334,7 +340,7 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
     const edge = edges[i]!;
     if (!e.hole) {
       out.set(e.id, { pill: edge, chip: e.dropPill });
-      for (const p of [edge, e.dropPill]) if (p) fixed.push(drawnBox(p, scale, iso, fits(p), true));
+      for (const p of [edge, e.dropPill]) if (p) fixed.push(drawnBox(p, scale, iso, fits(p), true, view));
       return;
     }
     out.set(e.id, { pill: edge, chip: e.dropPill });
@@ -359,7 +365,7 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
       else if (specs.length === 0 || stands(spec)) specs.push(spec);
       const cands = specs.map((s2) => {
         const up = fits(s2);
-        const box = drawnBox(s2, scale, iso, up, true);
+        const box = drawnBox(s2, scale, iso, up, true, view);
         // The pointer always meets the rim it points at, so only the body can hide the hole.
         const tip = up ? pillGeometry({ ...s2, scale }).pointer / scale : 0;
         const body = chip ? { ...box, y1: box.y1 - tip } : { ...box, y0: box.y0 + tip };

@@ -8,7 +8,7 @@ import type { PillSpec } from "../../canvas/boardView.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { theme } from "../../lib/theme.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
-import { pillGeometry, pillReach } from "../measure/pillPlace.ts";
+import { pillGeometry, pillPlace, pillReach } from "../measure/pillPlace.ts";
 import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, spotsOf, tokenSpots, type DrawSpace, type EndPills } from "./linkMarks.ts";
 
 /*
@@ -158,23 +158,23 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
       dropPill: { value: "10 ft down", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true },
     };
   };
-  const pillBoxes = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true));
+  const pillBoxes = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number, view: Box | null = null) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true, view));
   /** A pill's body without its pointer, which always meets the rim it points at: what hides its own hole. */
-  const bodies = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number) =>
+  const bodies = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number, view: Box | null = null) =>
     [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => {
-      const b = drawnBox(p, scale, iso, true, true);
+      const b = drawnBox(p, scale, iso, true, true, view);
       const tip = iso ? pillGeometry({ ...p, scale }).pointer / scale : 0;
       return p.above ? { ...b, y1: b.y1 - tip } : { ...b, y0: b.y0 + tip };
     });
 
   /** The covers among two ends' pills and squares, each pill against the other end's pills and squares as they draw, and against its own hole. */
-  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: DrawSpace, scale: number): { others: number; own: number; pills: number; cost: number } => {
-    const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, scale));
+  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: DrawSpace, scale: number, view: Box | null = null): { others: number; own: number; pills: number; cost: number } => {
+    const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, scale, view));
     let pills = 0;
     let squares = 0;
     let own = 0;
     ends.forEach((e, i) => {
-      for (const x of bodies(iso, placed, e.id, scale)) if (boxCoversOutline(x, cornersOf(e.o), iso)) own++;
+      for (const x of bodies(iso, placed, e.id, scale, view)) if (boxCoversOutline(x, cornersOf(e.o), iso)) own++;
       ends.forEach((__, j) => {
         if (j <= i) return;
         for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) pills++;
@@ -217,6 +217,52 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
         }
       }
     }
+  });
+
+  test("a standing pill's box past the screen's edge slides back inside it as Pill.tsx draws it, in Top-down and Isometric, and a flat one keeps its point (ISO-1-PHONE-EDGE)", () => {
+    const name = { name: "Down to Undercroft", value: "Not reached yet", x: 15, y: 6, below: true, size: "map" as const, small: true, maxLines: 1 as const, stack: true, side: "right" as const };
+    const scale = 21.375;
+    for (const iso of [null, flat(0), flat(2)]) {
+      const at = viewPointOf(iso, name);
+      const view = { x0: at.x - 6, y0: at.y - 20, x1: at.x + 2, y1: at.y + 20 };
+      const free = drawnBox(name, scale, iso, true, true);
+      const slid = drawnBox(name, scale, iso, true, true, view);
+      assert.ok(free.x1 > view.x1, `${iso ? `turn ${iso.turn}` : "Top-down"}: unslid it crosses the edge`);
+      assert.ok(slid.x1 <= view.x1 && slid.x0 < free.x0, `${iso ? `turn ${iso.turn}` : "Top-down"}: slid back inside`);
+      assert.deepEqual(slid, pillPlace({ ...name, ...at, scale }, view).box);
+      if (iso) assert.deepEqual(drawnBox(name, scale, iso, false, true, view), drawnBox(name, scale, iso, false, true), `turn ${iso.turn}: flat`);
+    }
+  });
+
+  test("on a phone at fit, each pill is judged where the screen's edge slides it, so the pills cover no more than judged unslid and fewer somewhere, in both views on squares and both hex grids (ISO-1-PHONE-EDGE)", () => {
+    const named = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Undercroft", value: "Not reached yet" } });
+    // A 390 px phone's clear part round a 16 by 12 floor at fit, centered on the floor as it draws.
+    const phone = (iso: DrawSpace, scale: number): Box => {
+      const seen = [{ x: 0, y: 0 }, { x: 16, y: 0 }, { x: 0, y: 12 }, { x: 16, y: 12 }].map((c) => viewPointOf(iso, c));
+      const mx = (Math.min(...seen.map((c) => c.x)) + Math.max(...seen.map((c) => c.x))) / 2;
+      const my = (Math.min(...seen.map((c) => c.y)) + Math.max(...seen.map((c) => c.y))) / 2;
+      return { x0: mx - 195 / scale, x1: mx + 195 / scale, y0: my - 330 / scale, y1: my + 330 / scale };
+    };
+    let fewer = 0;
+    for (const g of [grid, sceneGrid({ gridShape: "hexRows" }), sceneGrid({ gridShape: "hexColumns" })]) {
+      for (const ends of [
+        [hole("a", { x: 6, y: 4, w: 2, h: 2 }, g), hole("b", { x: 8, y: 6, w: 1, h: 1 }, g)],
+        [named(hole("a", { x: 8, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 10, y: 7, w: 1, h: 1 }, g))],
+        [named(hole("a", { x: 12, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 14, y: 6, w: 1, h: 1 }, g))],
+      ]) {
+        for (const iso of [null, flat(0), flat(1), flat(2), flat(3)]) {
+          const scale = 21.375;
+          const view = phone(iso, scale);
+          const stands = () => iso !== null;
+          const slid = coversOf(ends, placeEnds(ends, [], scale, iso, stands, [], { view }), iso, scale, view);
+          const unslid = coversOf(ends, placeEnds(ends, [], scale, iso, stands), iso, scale, view);
+          const at = `${ends[0]!.o.loop ? "hexes" : "squares"} ${ends[0]!.o.x.toFixed(2)}, ${iso ? `turn ${iso.turn}` : "Top-down"}`;
+          assert.ok(slid.cost <= unslid.cost, `${at}: ${JSON.stringify(slid)} judged slid, ${JSON.stringify(unslid)} judged unslid`);
+          if (slid.cost < unslid.cost) fewer++;
+        }
+      }
+    }
+    assert.ok(fewer > 0, "somewhere the slide changes the choice");
   });
 
   test("a pill over its own hole beats one over another pill, and loses to one over another end's squares (D-261122-112)", () => {
