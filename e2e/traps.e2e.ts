@@ -996,7 +996,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pane(dm).getByRole("button", { name: "Add squares it hits", exact: true }).click();
     await waitFor("the pane steps aside for the pick", async () => ((await pane(dm).isVisible()) ? null : true));
     const options = dm.getByRole("toolbar", { name: "Trap options" });
-    await options.getByText("Drag across the squares Hidden Pit hits, or tap one square.").waitFor();
+    await options.getByText("Drag across the squares Hidden Pit hits, or click one square.").waitFor();
     await options.getByRole("button", { name: "Done", exact: true }).click();
     await pane(dm).waitFor();
     await hits.getByRole("radio", { name: "Everyone in an area" }).click();

@@ -1246,7 +1246,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickTool(dm, "Map builder");
     await pickOption(dm, "Map builder", "Builder mode", "Walls and doors");
     const bar = buildBar(dm);
-    await bar.locator("[data-options-line]").filter({ hasText: "Tap points for a wall line, then Done, or drag for a straight wall." }).waitFor();
+    await bar.locator("[data-options-line]").filter({ hasText: "Click points for a wall line, then Done, or drag for a straight wall." }).waitFor();
     assert.equal(await bar.getByRole("button", { name: "Snap to hex corners" }).getAttribute("aria-pressed"), "true", "Snap to hex corners is on");
 
     // Each tap a little off its corner: 10 cells along row 4's north points, then down to row 8's.
@@ -1279,7 +1279,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await tapAt(dm, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
     await waitFor("the door open", () => (hallWalls().some((w) => joins(w, p, q) && w.f.state === "open") ? true : null));
     await pickOption(dm, "Map builder", "Edge", "Remove");
-    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Tap a wall, door or window to remove it." }).waitFor();
+    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Click a wall, door or window to remove it." }).waitFor();
     const b = corner(14, 4, 0);
     const c = corner(14, 8, 0);
     await tapAt(dm, { x: b.x + 0.04, y: (b.y + c.y) / 2 });
@@ -1692,7 +1692,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   /** HX-9b's helpers: a hex and its six neighbors, the free walls along their outline, and the Fog tool's bar. */
   const fogBar = (page: Page) => page.getByRole("toolbar", { name: "Fog options" });
-  const ROOM_LINE = "Tap a room closed in by wall lines.";
+  const ROOM_LINE = "Click a room closed in by wall lines.";
   const sevenOf = (g: HexGrid, middle: Hex) => [middle, ...hexNeighbors(g, middle)].map(hexKey).sort();
   function ringWalls(g: HexGrid, keys: string[], door: string | null): { id: string; a: [number, number]; b: [number, number]; f: { kind: "wall" } | { kind: "door"; state: "closed"; secret: false; discovered: false } }[] {
     const outline = hexCellsOutline(g, keys);
@@ -1781,7 +1781,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.ok(!outside.some((k) => cellarRoom.includes(k)), "outside, the rest of the scene and none of the room");
     await discard();
     await tapAt(dm, { x: BOUNDS.w - 0.1, y: hexCenter(G, { col: 0, row: 1 }).y });
-    await fogBar(dm).locator("[data-options-line]").filter({ hasText: "Tap a whole hex inside the map." }).waitFor();
+    await fogBar(dm).locator("[data-options-line]").filter({ hasText: "Click a whole hex inside the map." }).waitFor();
     assert.equal(dmSocket.state?.fogDrafts[run.cellar], undefined, "the half hex past an odd row's end drafts nothing");
   });
 

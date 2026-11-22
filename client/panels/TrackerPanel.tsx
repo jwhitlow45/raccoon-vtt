@@ -55,6 +55,7 @@ import { layoutSize } from "../features/device/layout.ts";
 import { uiScale } from "../features/device/settings.ts";
 import { TURN_SOUND, TURN_SOUND_HELP } from "../features/sound/panel/words.ts";
 import { useLabels } from "../state/labels.ts";
+import { pointerWords } from "../lib/pointerWords.ts";
 
 /**
  * The initiative tracker (features section 10, design 9.4). Players roll at
@@ -591,7 +592,7 @@ function SelectedCreatures() {
     <Section label="Group HP" style={COLUMN}>
       <Switch
         label="Multi-select"
-        help="Tap rows or tokens to pick creatures, then enter damage or healing once for all of them."
+        help={pointerWords("Tap rows or tokens to pick creatures, then enter damage or healing once for all of them.")}
         checked={multi}
         onChange={(on) => ui.setMultiSelect(on)}
       />
@@ -608,7 +609,7 @@ function SelectedCreatures() {
           </Wrap>
         </>
       ) : multi ? (
-        <Help>{picked.length === 1 ? `${displayName(picked[0]!, labels)} is picked. Tap more rows.` : "Tap rows to pick creatures."}</Help>
+        <Help>{pointerWords(picked.length === 1 ? `${displayName(picked[0]!, labels)} is picked. Tap more rows.` : "Tap rows to pick creatures.")}</Help>
       ) : null}
     </Section>
   );
@@ -862,7 +863,7 @@ function DmSettings() {
               actions.dispatch({ t: "encounter.end" });
             }}
           >
-            <TurnWords shown={turnWait.shown}>{confirmEnd ? "Tap again to end the fight" : "End the fight"}</TurnWords>
+            <TurnWords shown={turnWait.shown}>{confirmEnd ? pointerWords("Tap again to end the fight") : "End the fight"}</TurnWords>
           </Button>
         </Wrap>
       </Section>

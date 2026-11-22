@@ -415,7 +415,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
 
   test("6. a pin opens its page for the player, and deleting the page keeps the pin from players", async () => {
     await dm.getByRole("button", { name: "Pin to the map" }).click();
-    await dm.getByText("Tap the map to place the pin for Old map.").waitFor();
+    await dm.getByText("Click the map to place the pin for Old map.").waitFor();
     const scene = dmSocket.state!.scenes[run.sceneId]!;
     await tapCell(dm, scene.bounds, { x: 8, y: 3 });
     const pin = await waitFor("the pin in the DM's state", () => Object.values(dmSocket.state?.pins ?? {})[0]);

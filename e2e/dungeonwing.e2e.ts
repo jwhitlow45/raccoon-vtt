@@ -52,7 +52,7 @@ const KEEP = { w: 60, h: 40 };
 const BURROW = { w: 40, h: 40 };
 const TOOL = "Map builder";
 const ROWS: HexGrid = { shape: "hex", orient: "rows" };
-const WING_TAP = "Tap the wall the wing joins.";
+const WING_TAP = "Click the wall the wing joins.";
 const WING_OFF = "Automatic walls are off on this scene, so a wing would stand without walls. Turn them on in Walls and movement to add one.";
 const WING_HEX_COVERS = "On hexes the wing's area must not cover walls or other build.";
 
@@ -311,7 +311,7 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await drag(dm, { x: 22.5, y: 4.5 }, { x: 47.5, y: 29.5 }, KEEP);
     await lineIs(WING_TAP);
     await tapWorld(dm, { x: 8, y: 8.5 }, KEEP);
-    await lineIs("Tap a wall or door between floor and empty ground.");
+    await lineIs("Click a wall or door between floor and empty ground.");
     // The room's east wall, an automatic wall between floor and rock.
     await tapWorld(dm, { x: 13, y: 8.5 }, KEEP);
     await lineIs("Area 26 by 26 squares, joined at the ringed wall.");

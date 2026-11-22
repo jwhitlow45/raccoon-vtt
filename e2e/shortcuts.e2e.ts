@@ -918,7 +918,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await dm.getByRole("tabpanel").getByRole("button", { name: /^Goblin/ }).first().click();
     for (let i = 0; i < 2; i++) await dm.getByRole("tabpanel").getByRole("button", { name: "How many plus 1", exact: true }).click();
     await dm.getByRole("tabpanel").getByRole("button", { name: "Place 3 on the map", exact: true }).click();
-    const waiting = optionsOf(dm, "Add token").getByText(/Tap the map to place 3 × Goblin/);
+    const waiting = optionsOf(dm, "Add token").getByText(/Click the map to place 3 × Goblin/);
     await waiting.first().waitFor();
     await markSaid(dm);
     await keyOn(dm, "t");

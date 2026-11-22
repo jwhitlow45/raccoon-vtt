@@ -30,6 +30,7 @@ import { Segmented, type SegmentedOption } from "../../components/Segmented.tsx"
 import { Swatches, type SwatchOption } from "../../components/Swatches.tsx";
 import { accessibleName, VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { theme } from "../../lib/theme.ts";
 import { fitRow, heldFit, pinHolds, POPOVER_MIN, SLOT_GAP, type Arrangement, type FitInput, type FitSlot, type RowFit, type SlotForm } from "../../pages/optionsLayout.ts";
 import { useKeyHints, withKey } from "../../state/shortcuts.ts";
@@ -773,7 +774,8 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
   const text: CSSProperties = open
     ? { display: "block", maxHeight: `calc(4 * ${theme.leading.body}em)`, overflowY: "auto", whiteSpace: "normal", overscrollBehavior: "contain" }
     : { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-  const content = pill ? `${props.tool} options hidden. Tap to show.` : line?.content;
+  // A mouse reads "Click" where the app words touch "Tap". Only a plain string is reworded here, so a line built from parts words its own.
+  const content = pill ? pointerWords(`${props.tool} options hidden. Tap to show.`) : typeof line?.content === "string" ? pointerWords(line.content) : line?.content;
   const inner = (
     <span ref={words} style={text}>
       {content}

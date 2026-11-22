@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import type { AreaShape, AreaSlows, AreaTemplate, AreaTrigger } from "#shared/model.ts";
 import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitchOf, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { Icon, type IconName } from "../../components/Icon.tsx";
@@ -496,7 +497,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         tone: "hint",
         content: (
           <>
-            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster, labels)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`}
+            {pointerWords(st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster, labels)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`)}
             {note}
           </>
         ),

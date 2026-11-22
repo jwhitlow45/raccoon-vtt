@@ -621,11 +621,11 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await toolbarTop(), before);
     await tools(player).getByRole("button", { name: "Draw" }).tap();
 
-    // With an area waiting for Place, a tuck leaves "Area options hidden. Tap to show.", whose tap brings Place back.
+    // With an area waiting for Place, a tuck leaves "Area options hidden. Click to show.", whose tap brings Place back.
     await key(dm, "a");
     await tapCellAt(dm, { x: 20, y: 12 });
     await tools(dm).getByRole("button", { name: "Area" }).tap();
-    const pill = dm.getByRole("button", { name: "Area options hidden. Tap to show." });
+    const pill = dm.getByRole("button", { name: "Area options hidden. Click to show." });
     assert.ok(await wholeInReach(pill), "the pill is in reach");
     // The whole pill takes the tap, so a thumb just under its words still lands (LP7-CHROME-3).
     const pillBox = (await dm.locator('[data-options-line="shown"]').boundingBox())!;
@@ -850,7 +850,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
       await selectTool(player, "r");
       // The hint names no diagonal rule, which follows a reading only (D29).
       const line = options(player).locator("[data-options-line]");
-      assert.equal((await line.innerText()).trim(), "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.");
+      assert.equal((await line.innerText()).trim(), "Drag to measure. Click to add a waypoint. Double-click to keep a ruler on the map.");
       if (ui === 1) {
         // Cut short on the phone, the line opens from a tap anywhere 44 px tall around it, though it stands shorter.
         const lineButton = line.getByRole("button");
