@@ -834,10 +834,11 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await playerAt({ width: 1280, height: 800 }, "1");
     try {
       const ledge = "Ledge in the way. No stairs you have seen lead there.";
-      const stopAgain = async () => {
+      const stopAgain = async (select = false) => {
         await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
         await thornAt({ x: 7, y: 14, elevation: 10 });
         await player.waitForTimeout(500);
+        if (select) await tapCell(player, BOUNDS, { x: 7, y: 14 });
         await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
         await thornAt({ x: 8, y: 12, elevation: 10 });
         await stopNote(ledge).getByRole("button", { name: "Teleport here" }).waitFor();
@@ -859,6 +860,10 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         g.removeEventListener("keydown", g.__eatEscape, true);
       });
       // Room's own letting go of the selection closes it with the same press.
+      await player.keyboard.press("Escape");
+      await stopNote(ledge).waitFor({ state: "detached" });
+      // With Thorn selected, as a phone's tap then drag leaves him, the Escape that lets go of him is Room's own and takes the note too.
+      await stopAgain(true);
       await player.keyboard.press("Escape");
       await stopNote(ledge).waitFor({ state: "detached" });
       await stopAgain();
