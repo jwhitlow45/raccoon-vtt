@@ -127,7 +127,17 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   );
 
   // A refused toggle's words, on whichever page is open when the answer comes, so going Back never hides one (5.2).
-  const refusalLine = <ErrorText>{refusal}</ErrorText>;
+  // They stand above a long list, so a refusal that comes with the list scrolled is brought into view, as the stat block editors do.
+  // Rendered only with a refusal, so an empty box adds no gap to the page's grid.
+  const refused = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (refusal) refused.current?.scrollIntoView({ block: "nearest" });
+  }, [refusal]);
+  const refusalLine = refusal ? (
+    <div ref={refused}>
+      <ErrorText>{refusal}</ErrorText>
+    </div>
+  ) : null;
   // Back and Change clear it, so a page never opens on an old refusal.
   const leaving = (go: () => void) => () => {
     setRefusal(null);

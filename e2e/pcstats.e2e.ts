@@ -722,6 +722,47 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     }
   });
 
+  test("4f. knownforms-c: a refusal that comes with the step's list scrolled to its foot and no row focused, as after a tap on a phone, is scrolled into view (LP47FIXA-SHAPEPICKER)", async () => {
+    const ana2 = await routedAna();
+    const { page } = ana2;
+    try {
+      const step = await openKnownFormsStep(page);
+      ana2.route.spoil = true;
+      ana2.route.hold = true;
+      // A click through the page's own script, which focuses nothing, so no focus move brings the list back to the toggled row.
+      await step.getByRole("button", { name: /^Wolf / }).first().evaluate((el) => (el as unknown as { click(): void }).click());
+      await waitFor("the refusal held back", () => (ana2.held() > 0 ? true : null));
+      // The list at its foot while the refusal is in flight, so the words above it are out of view when they come.
+      const scrolled = await step.evaluate((el) => {
+        const style = (globalThis as unknown as { getComputedStyle(n: unknown): { overflowY: string } }).getComputedStyle;
+        const body = [el, ...Array.from(el.querySelectorAll("*"))].find((n) => n.scrollHeight > n.clientHeight + 100 && style(n).overflowY !== "visible");
+        if (!body) return false;
+        // The browser's scroll anchoring would follow the rows the rollback moves and carry the list back up to the words.
+        (body as unknown as { style: { overflowAnchor: string } }).style.overflowAnchor = "none";
+        body.scrollTop = body.scrollHeight;
+        return body.scrollTop > 0;
+      });
+      assert.ok(scrolled, "the known forms step's list scrolls, so the refusal can land out of view");
+      ana2.release();
+      const refusal = step.getByRole("alert").getByText(/^Not saved\. /);
+      await refusal.waitFor();
+      // Against the nearest ancestor that scrolls, which is the dialog's body: a box scrolled out above it is not seen.
+      const inView = () => refusal.evaluate((el) => {
+        const style = (globalThis as unknown as { getComputedStyle(n: unknown): { overflowY: string } }).getComputedStyle;
+        let body = el.parentElement;
+        while (body && !(body.scrollHeight > body.clientHeight && style(body).overflowY !== "visible")) body = body.parentElement;
+        if (!body) return false;
+        const box = el.getBoundingClientRect();
+        const clip = body.getBoundingClientRect();
+        return box.top >= clip.top - 1 && box.bottom <= clip.bottom + 1;
+      });
+      await waitFor("the refusal scrolled into view", async () => ((await inView()) ? true : null));
+      assert.deepEqual(ana2.watch.errors, []);
+    } finally {
+      await ana2.context.close();
+    }
+  });
+
   test("lp2-3b. in Wild Shape the Take a shape button stays: its picker changes the form, and its Change step changes the known forms, removing the last one and adding it again, without ending the shape (D-261024-29)", async () => {
     const panel = await showBree(ana);
     const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
