@@ -229,27 +229,44 @@ function togglesOnly(patch: object): boolean {
 /**
  * Whether a restore puts back only toggles (TOGGLE_FIELDS): each entry a
  * creature or an area `state` holds, with its value as the restore writes
- * it equal to the stored one but in those fields and its rev. A creature's
- * number is read as the reducer writes it (keepNumbering), so a meeting
- * that numbered it since leaves the undo of its hide a toggle. So the undo
- * of a hide is bookkeeping as the show is. Anything else it puts back, or
- * a thing changed since, meets the line as before.
+ * it equal to the stored one but in those fields and its rev, or the fight
+ * with only its rows' `hidden` and its rev apart, every row in its place
+ * (D-261122-043), as a show in a fight also shows the creature's row. A
+ * creature's number is read as the reducer writes it (keepNumbering), so a
+ * meeting that numbered it since leaves the undo of its hide a toggle. So
+ * the undo of a hide is bookkeeping as the show is. Anything else it puts
+ * back, or a thing changed since, meets the line as before.
  */
 export function restoresToggles(op: Op, state: RoomState): boolean {
   if (op.t !== "sys.restore" || op.entries.length === 0) return false;
   return op.entries.every(({ key, value }) => {
     const stored = readEntity(state, key);
-    if (key.startsWith("template:")) return sameButToggles(value, stored);
+    if (key === "encounter") return sameButHiddenRows(value, stored);
+    if (key.startsWith("template:")) return sameBut(value, stored, TOGGLED);
     if (!key.startsWith("token:") || !isRecord(value) || !isRecord(stored)) return false;
-    return sameButToggles(keepNumbering(state, value as Token, stored as Token), stored);
+    return sameBut(keepNumbering(state, value as Token, stored as Token), stored, TOGGLED);
   });
 }
 
-function sameButToggles(restored: unknown, stored: unknown): boolean {
+/** What a toggle's restore may change on a creature or an area: the toggles and the rev every write steps. */
+const TOGGLED: ReadonlySet<string> = new Set(["rev", ...TOGGLE_FIELDS]);
+const FIGHT_TOGGLED: ReadonlySet<string> = new Set(["rev", "entries"]);
+const ROW_TOGGLED: ReadonlySet<string> = new Set(["hidden"]);
+
+function sameButHiddenRows(restored: unknown, stored: unknown): boolean {
+  if (!isRecord(restored) || !isRecord(stored) || !sameBut(restored, stored, FIGHT_TOGGLED)) return false;
+  const [ours, theirs] = [restored.entries, stored.entries];
+  if (!Array.isArray(ours) || !Array.isArray(theirs) || ours.length !== theirs.length) return false;
+  // Each row against the one in its place, its id compared with the rest, so the order and the rows are as stored.
+  return theirs.every((row, i) => sameBut(ours[i], row, ROW_TOGGLED));
+}
+
+/** Whether two things hold the same fields with the same values, but those in `ignored`. */
+function sameBut(restored: unknown, stored: unknown, ignored: ReadonlySet<string>): boolean {
   if (!isRecord(restored) || !isRecord(stored)) return false;
-  const fields = (thing: Record<string, unknown>) => Object.keys(thing).filter((field) => field !== "rev" && !TOGGLE_FIELDS.has(field));
+  const fields = (thing: Record<string, unknown>) => Object.keys(thing).filter((field) => !ignored.has(field));
   const theirs = fields(stored);
-  return fields(restored).length === theirs.length && theirs.every((field) => JSON.stringify(restored[field]) === JSON.stringify(stored[field]));
+  return fields(restored).length === theirs.length && theirs.every((field) => Object.hasOwn(restored, field) && JSON.stringify(restored[field]) === JSON.stringify(stored[field]));
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);

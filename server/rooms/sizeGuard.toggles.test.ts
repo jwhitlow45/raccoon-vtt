@@ -7,7 +7,7 @@ import { movesAnyToken } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { seatView } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { character, DM, env, room, scene, template, token } from "#shared/testutil.ts";
+import { character, DM, entry, env, room, scene, template, token } from "#shared/testutil.ts";
 import { exactCopies, farReadings, farWidths, growthBound, linesHeld, measuredStateBytes, readingAt, type ExactCopy } from "./sizeGuard.ts";
 
 /*
@@ -45,9 +45,10 @@ const SETTINGS = [
  * P1's Hero and a wolf of theirs the DM hid, the DM's goblins (one hidden,
  * one shown), two hidden bandits, a locked statue, a figure whose name the
  * DM hid, the DM's hidden area and an area of P1's the DM hid, with a
- * shared line about the goblin.
+ * shared line about the goblin, and a fight in which the DM hid Hero's row
+ * (shown in the twin `rowShown` makes).
  */
-function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean): RoomState {
+function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean, rowShown = false): RoomState {
   const state = room({
     characters: { c1: character("c1", { ownerIds: ["p1"] }) },
     tokens: {
@@ -67,6 +68,7 @@ function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean): RoomStat
     log: [{ id: "1:0", at: "2026-10-12T20:00:00.000Z", kind: "chat", from: "dm1", text: "The goblin snarls." }],
   });
   state.scenes.s1 = scene("s1", { fogEnabled: false });
+  state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("rhero", { tokenId: "hero", value: 15, hidden: !rowShown }), entry("rgob", { tokenId: "goblin", value: 10, tieOrder: 1 })] };
   state.meta = { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: moveAny as RoomState["meta"]["settings"]["playersMoveAny"], playersApplyDamage: damage } };
   return state;
 }
@@ -83,6 +85,7 @@ const TOGGLES: [string, Op][] = [
   ["a name revealed", { t: "token.update", tokenId: "masked", patch: { nameHidden: false } }],
   ["the goblin's name hidden", { t: "token.update", tokenId: "goblin", patch: { nameHidden: true } }],
   ["P1's wolf's name hidden", { t: "token.update", tokenId: "wolf", patch: { nameHidden: true } }],
+  ["Hero's row shown", { t: "encounter.update", entryId: "rhero", patch: { hidden: false } }],
 ];
 
 const width = (part: ExactCopy) => part.shown - part.sub;
@@ -99,6 +102,8 @@ function toggled(before: RoomState, after: RoomState): Map<string, number> {
     const now = after.templates[id]!;
     if (now.visibility !== was.visibility) out.set(`template:${id}`, JSON.stringify(now).length - JSON.stringify(was).length);
   }
+  const rowsHidden = (state: RoomState) => state.encounter!.entries.map((e) => e.hidden).join();
+  if (rowsHidden(after) !== rowsHidden(before)) out.set("encounter", JSON.stringify(after.encounter).length - JSON.stringify(before.encounter).length);
   return out;
 }
 
@@ -149,6 +154,13 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
           // Only a creature or an area shown or hidden comes into or leaves their copy, and only one the settings put in their part.
           const view = seatView(after, player);
           for (const [key, bytes] of came) {
+            if (key.startsWith("row:")) {
+              // A row of theirs the DM shows comes in as one never hidden counts: at the widths of what their own ops write on it.
+              const row = after.encounter!.entries.find((e) => `row:${e.id}` === key)!;
+              assert.ok(things.has("encounter") && !row.hidden && after.tokens[row.tokenId!]!.ownerIds.includes(player), `${at}: ${key} came in only as their own row was shown`);
+              assert.deepEqual(exactCopies(after, player).get(key), exactCopies(table(moveAny, damage, true), player).get(key), `${at}: ${key} counts as a row never hidden`);
+              continue;
+            }
             const [kind, id] = key.split(":") as ["token" | "template", string];
             assert.ok(things.has(key) && (kind === "token" ? after.tokens[id]!.visibility : after.templates[id]!.visibility) === "all", `${at}: ${key} came in only as it was shown`);
             assert.ok(view.copy(kind, id) !== null, `${at}: their copy holds ${key}`);
@@ -186,7 +198,7 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
         for (const player of ["p1", "p2"]) for (const key of exactChange(before, result.state, player, op).came.keys()) came.add(`${player} ${key}`);
       }
     }
-    for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
+    for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura", "p1 row:rhero"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
   });
 });
 
@@ -200,6 +212,8 @@ function reverse(op: Op, before: RoomState): Op {
       return { ...op, patch: { visibility: before.tokens[op.tokenIds[0]!]!.visibility } };
     case "template.update":
       return { ...op, patch: { visibility: before.templates[op.templateId]!.visibility } };
+    case "encounter.update":
+      return { ...op, patch: { hidden: before.encounter!.entries.find((e) => e.id === op.entryId)!.hidden } };
     default:
       throw new Error(op.t);
   }

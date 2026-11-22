@@ -9,7 +9,7 @@ import type { Op } from "#shared/protocol.ts";
 import { shownName } from "#shared/numbering.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { env, scene, template, token } from "#shared/testutil.ts";
+import { entry, env, scene, template, token } from "#shared/testutil.ts";
 import type { RoomActor } from "./actor.ts";
 import { farRoomBytes, farWidths, projectedSceneBytes } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
@@ -493,6 +493,23 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
 
   test("a lock's Undo past the players' line is taken after another creature's meeting numbered it since", async (t) => {
     await numberedBetween(t, { t: "token.update", tokenId: "wolf1", patch: { locked: true } }, (state) => state.tokens.wolf1!.locked, false);
+  });
+
+  test("past the players' line, a show in a fight that shows the creature's row too, as the action bar sends it, is taken, and so are its Undo and Redo (D-261122-043)", async (t) => {
+    const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
+    f.state.encounter = { rev: 0, round: 1, activeEntryId: "rgob", entries: [entry("rgob", { tokenId: f.goblin, value: 18 }), entry("rlurk", { tokenId: "lurker", value: 12, tieOrder: 1, hidden: true })] } as RoomState["encounter"];
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(ROOM_FULL, "dm")}`, "past the players' line");
+    const group = uuidv7();
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: "lurker", patch: { visibility: "all" } }, group)), "taken", "the show");
+    assert.equal(answer(await dm.send({ t: "encounter.update", entryId: "rlurk", patch: { hidden: false } }, group)), "taken", "its row's");
+    const shown = (state: RoomState) => [state.tokens.lurker!.visibility, state.encounter!.entries.find((e) => e.id === "rlurk")!.hidden];
+    assert.deepEqual(shown(h.actor.committed.state), ["all", false]);
+    assert.equal(answer(await dm.send({ t: "undo", scope: "play", head: dm.head().id })), "taken", "its Undo, one step");
+    assert.deepEqual(shown(h.actor.committed.state), ["dm", true]);
+    assert.equal(answer(await dm.send({ t: "redo", scope: "play", head: dm.head("play", "redo").id })), "taken", "its Redo");
+    assert.deepEqual(shown(h.actor.committed.state), ["all", false]);
   });
 
   test("past the players' line, a name's reveal that meets the creature under its name, numbering both wolves, and its Undo are taken", async (t) => {

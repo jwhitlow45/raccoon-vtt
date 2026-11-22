@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { FAR_TREATMENT, farRule, restoresToggles } from "./farLine.ts";
 import { ID_RULES, clientOps, mintedIds, serverOnlyOps, type Op, type OpType } from "./protocol.ts";
-import { room, template, token } from "./testutil.ts";
+import type { RoomState } from "./model.ts";
+import { entry, room, template, token } from "./testutil.ts";
 
 function allTypes(): OpType[] {
   const typeOf = (schema: unknown) => (schema as { shape?: { t?: { value?: string } } }).shape?.t?.value;
@@ -89,6 +90,24 @@ describe("every op type and the far line", () => {
     assert.equal(restoresToggles(restore([{ key: "token:g", value: null }]), state), false, "a creature taken away");
     assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, visibility: "dm" } }, { key: "encounter", value: null }]), state), false, "beside a fight");
     assert.equal(restoresToggles(restore([]), state), false, "nothing");
+  });
+
+  test("LP47A-SHOW-1 (D-261122-043): a restore of a show in a fight, the fight with only rows' hidden and its rev apart, is bookkeeping, and any other change to the fight is not", () => {
+    const fight = { rev: 3, round: 2, activeEntryId: "r1", entries: [entry("r1", { tokenId: "g", value: 15 }), entry("r2", { tokenId: "h", value: 9, hidden: true })], turnStart: { entryId: "r1", tokenId: "g", sceneId: "s1", x: 3, y: 3, elevation: 0, seen: true, seq: 7 }, startSeq: 2 };
+    const state = room({ tokens: { g: token("g"), h: token("h", { visibility: "dm" }) }, encounter: fight as RoomState["encounter"] });
+    const restore = (encounter: unknown, more: { key: string; value: unknown }[] = []): Op => ({ t: "sys.restore", entries: [...more, { key: "encounter", value: encounter }], from: "redo" }) as Op;
+    const row = (i: number, patch: object) => fight.entries.map((e, j) => (j === i ? { ...e, ...patch } : e));
+    const shown = { key: "token:h", value: { ...state.tokens.h!, visibility: "all" } };
+    assert.equal(restoresToggles(restore({ ...fight, rev: 4, entries: row(1, { hidden: false }) }, [shown]), state), true, "a show with its row's");
+    assert.equal(restoresToggles(restore({ ...fight, entries: row(0, { hidden: true }) }), state), true, "a row hidden alone");
+    assert.equal(restoresToggles(restore({ ...fight, entries: row(1, { hidden: false, value: 10 }) }, [shown]), state), false, "and its value");
+    assert.equal(restoresToggles(restore({ ...fight, entries: [...fight.entries].reverse() }), state), false, "rows in another order");
+    assert.equal(restoresToggles(restore({ ...fight, entries: row(1, { id: "r3" }) }), state), false, "another row");
+    assert.equal(restoresToggles(restore({ ...fight, entries: fight.entries.slice(0, 1) }), state), false, "a row fewer");
+    for (const [field, value] of [["round", 3], ["activeEntryId", "r2"], ["turnStart", undefined], ["startSeq", 5]] as const) {
+      assert.equal(restoresToggles(restore({ ...fight, [field]: value, entries: row(1, { hidden: false }) }), state), false, `and its ${field}`);
+    }
+    assert.equal(restoresToggles(restore(null), state), false, "the fight ended");
     assert.equal(restoresToggles({ t: "token.update", tokenId: "g", patch: { visibility: "dm" } }, state), false, "a live op");
   });
 });
