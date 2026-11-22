@@ -361,7 +361,7 @@ export function OptionsStrip(props: {
     task?.(under);
     return () => task?.(false);
   }, [task, under]);
-  const description = useStripDescription(frame, outer, props.description ?? null);
+  const description = useStripDescription(frame, outer, props.description === undefined ? null : pointerWords(props.description));
   const rowless = frame?.rowless;
   const none = slots.length === 0;
   useLayoutEffect(() => {
