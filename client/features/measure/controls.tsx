@@ -221,7 +221,11 @@ export type LineTone = "hint" | "reading" | "warning" | "status";
  * controls stand where the answer will need them rather than drop for
  * the wait and rise again with the answer.
  */
-export type StripLine = { tone: LineTone; content: ReactNode; finding?: boolean };
+/**
+ * `worded` says a string's words are done: it holds names from the room, so its source chose Tap or Click
+ * with pointerWords(template, names) and the line never reads them again.
+ */
+export type StripLine = { tone: LineTone; content: ReactNode; finding?: boolean; worded?: true };
 
 /**
  * A wait's words in the options line: the small loading line, muted,
@@ -774,8 +778,8 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
   const text: CSSProperties = open
     ? { display: "block", maxHeight: `calc(4 * ${theme.leading.body}em)`, overflowY: "auto", whiteSpace: "normal", overscrollBehavior: "contain" }
     : { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-  // A mouse reads "Click" where the app words touch "Tap". Only a plain string is reworded here, so a line built from parts words its own.
-  const content = pill ? pointerWords(`${props.tool} options hidden. Tap to show.`) : typeof line?.content === "string" ? pointerWords(line.content) : line?.content;
+  // A mouse reads "Click" where the app words touch "Tap". Only a plain string of fixed words is reworded here: a line with names in it, or built from parts, words its own.
+  const content = pill ? pointerWords(`${props.tool} options hidden. Tap to show.`) : typeof line?.content === "string" && line.worded !== true ? pointerWords(line.content) : line?.content;
   const inner = (
     <span ref={words} style={text}>
       {content}

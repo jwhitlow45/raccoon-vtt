@@ -1,6 +1,7 @@
 import { useStore } from "zustand";
 import type { TokenKind } from "#shared/model.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomUi } from "../../state/view.ts";
 import { ChoiceRows, OptButton, OptionsStrip, PickCloses, ValueChip } from "../measure/controls.tsx";
@@ -85,7 +86,7 @@ function PlaceOptions() {
       <OptionsStrip
         tool="Add token"
         task
-        line={{ tone: "hint", content: `Tap the map to place ${describePending(pending)}.` }}
+        line={{ tone: "hint", content: pointerWords("Tap the map to place {what}.", { what: describePending(pending) }), worded: true }}
         slots={[
           {
             id: "cancel",

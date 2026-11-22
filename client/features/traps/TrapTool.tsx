@@ -4,6 +4,7 @@ import type { Scene, Trap, TrapAction, TrapZone } from "#shared/model.ts";
 import { cellWord, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { LEVEL_BANDS, trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { lightAt, LIGHT_REACH_PX } from "../builder/lightTap.ts";
@@ -246,7 +247,7 @@ function TrapOptions() {
       <OptionsStrip
         tool="Trap"
         task
-        line={{ tone: "reading", content: pickLine(g, picking.what, pickName ?? "the trap") }}
+        line={{ tone: "reading", content: pointerWords(pickLine(g, picking.what, "{trap}"), { trap: pickName ?? "the trap" }), worded: true }}
         slots={[
           {
             id: "done",

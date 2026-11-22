@@ -2,6 +2,7 @@ import { useStore } from "zustand";
 import { LIMITS } from "#shared/limits.ts";
 import type { Pin } from "#shared/model.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { memberColorName } from "../../components/Swatches.tsx";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -135,7 +136,7 @@ function PinOptions() {
       <OptionsStrip
         tool="Pin"
         task
-        line={{ tone: "reading", content: `Tap the map to place the pin for ${placing.title}.` }}
+        line={{ tone: "reading", content: pointerWords("Tap the map to place the pin for {title}.", { title: placing.title }), worded: true }}
         slots={[
           {
             id: "cancel",

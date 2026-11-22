@@ -441,16 +441,11 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
   const resolved = resolvedChoice(env, creatures);
   const control = fromOffers({ labels: env.labels, creatures, draft: null, saved: resolved, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
   const casting = resolved !== null ? creatures.find((c) => c.tokenId === resolved) : undefined;
-  const hint =
-    control.form === "disabled"
-      ? `${NO_CREATURE} ${IDLE_HINT}`
-      : casting
-        ? idleHint(st.shape, casting.name)
-        : IDLE_HINT;
+  const hint = pointerWords(control.form === "disabled" ? `${NO_CREATURE} ${IDLE_HINT}` : casting ? idleHint(st.shape, "{caster}") : IDLE_HINT, { caster: casting?.name ?? "" });
   return (
     <OptionsStrip
       tool="Area"
-      line={{ tone: "hint", content: hint }}
+      line={{ tone: "hint", content: hint, worded: true }}
       slots={[
         control.form !== "none" && { id: "from", priority: 1, compact: true, control: <FromControl control={control} onPick={(offer) => pickFrom(env, null, offer)} /> },
         { id: "shape", priority: 1, compact: true, glyph: true, control: <ShapeChip value={st.shape} onChange={(shape) => pickAreaShape(env, shape)} /> },
@@ -497,7 +492,12 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         tone: "hint",
         content: (
           <>
-            {pointerWords(st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster, labels)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`)}
+            {st.pickCaster
+              ? pointerWords("Tap the caster.")
+              : pointerWords(`${caster ? "Cast by {caster}. " : ""}${placementHint({ ...d, targetName: "{target}" }, castsYours(env, d, creatures))}`, {
+                  caster: caster ? displayName(caster, labels) : "",
+                  target: d.targetName ?? "target",
+                })}
             {note}
           </>
         ),
@@ -638,7 +638,7 @@ function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDr
     <OptionsStrip
       tool="Area"
       task
-      line={t ? inAreaLine({ env, t, moving: st.moving, title }) : { tone: "hint", content: `Tap the map where ${trapName}'s area starts.` }}
+      line={t ? inAreaLine({ env, t, moving: st.moving, title }) : { tone: "hint", content: pointerWords("Tap the map where {trap}'s area starts.", { trap: trapName }), worded: true }}
       slots={[
         { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => pickAreaShape(env, shape)} /> },
         { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },

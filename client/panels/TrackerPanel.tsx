@@ -609,7 +609,7 @@ function SelectedCreatures() {
           </Wrap>
         </>
       ) : multi ? (
-        <Help>{pointerWords(picked.length === 1 ? `${displayName(picked[0]!, labels)} is picked. Tap more rows.` : "Tap rows to pick creatures.")}</Help>
+        <Help>{picked.length === 1 ? pointerWords("{name} is picked. Tap more rows.", { name: displayName(picked[0]!, labels) }) : pointerWords("Tap rows to pick creatures.")}</Help>
       ) : null}
     </Section>
   );
