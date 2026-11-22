@@ -9,6 +9,7 @@ import type { Op } from "#shared/protocol.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { env, scene, template, token } from "#shared/testutil.ts";
+import type { RoomActor } from "./actor.ts";
 import { farRoomBytes, farWidths, projectedSceneBytes } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
@@ -290,12 +291,12 @@ describe("a creature crossing floors past a scene's line answers alike whatever 
   const said = (event: { rejects?: { message: string }[] | undefined }) => event.rejects?.[0]?.message ?? "taken";
 
   /** Ana's answers to `steps` on each world, which must look alike to her. */
-  async function answers(t: TestContext, worlds: RoomState[], steps: (ana: ScopeClient) => Promise<string[]>): Promise<string[][]> {
+  async function answers(t: TestContext, worlds: RoomState[], steps: (ana: ScopeClient, actor: RoomActor) => Promise<string[]>): Promise<string[][]> {
     assert.ok(worlds.every((w) => copyOf(w) === copyOf(worlds[0]!)), "Ana's copies are alike");
     const out: string[][] = [];
     for (const state of worlds) {
       const h = await scopeActor(t, state, { idGate: false, sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
-      out.push(await steps(await h.connect(state.members.p1!, "player")));
+      out.push(await steps(await h.connect(state.members.p1!, "player"), h.actor));
     }
     return out;
   }
@@ -311,15 +312,15 @@ describe("a creature crossing floors past a scene's line answers alike whatever 
   test("the DM's hidden area riding Thorn goes with him as he falls, flies down or climbs, and each answer is taken, with the area or without", async (t) => {
     const ride = (state: RoomState, on: string): RoomState => ({ ...state, templates: { ...state.templates, ride: template("ride", { sceneId: on, attachedTo: "thorn", visibility: "dm", ownerId: "dm1", size: 5 }) } });
     const steps = [
-      [{ sceneId: UPPER, x: 4, y: 6 }, { t: "token.move", tokenId: "thorn", x: 6, y: 6 }, withOpening, UPPER],
-      [{ sceneId: UPPER, x: 6, y: 6, elevation: 5 }, { t: "token.climb", tokenId: "thorn", linkId: "o1" }, withOpening, UPPER],
-      [{}, { t: "token.climb", tokenId: "thorn", linkId: "l1" }, withStairs, GROUND],
+      [{ sceneId: UPPER, x: 4, y: 6 }, { t: "token.move", tokenId: "thorn", x: 6, y: 6 }, withOpening, UPPER, GROUND],
+      [{ sceneId: UPPER, x: 6, y: 6, elevation: 5 }, { t: "token.climb", tokenId: "thorn", linkId: "o1" }, withOpening, UPPER, GROUND],
+      [{}, { t: "token.climb", tokenId: "thorn", linkId: "l1" }, withStairs, GROUND, UPPER],
     ] as const;
-    for (const [at, op, build, from] of steps) {
+    for (const [at, op, build, from, to] of steps) {
       const base = build(tower({ tokens: { thorn: thornToken(at) } }));
       const worlds = [world(base, null, GROUND), ride(world(base, null, GROUND), from), ride(world(base, from, GROUND), from)];
-      const got = await answers(t, worlds, async (ana) => [said(await ana.send(op as never))]);
-      assert.deepEqual(got, [["taken"], ["taken"], ["taken"]], `${op.t} ${JSON.stringify(op)}: ${JSON.stringify(got)}`);
+      const got = await answers(t, worlds, async (ana, actor) => [said(await ana.send(op as never)), actor.committed.state.templates.ride?.sceneId ?? "none"]);
+      assert.deepEqual(got, [["taken", "none"], ["taken", to], ["taken", to]], `${op.t} ${JSON.stringify(op)}: ${JSON.stringify(got)}`);
     }
   });
 
