@@ -180,6 +180,25 @@ describe("the DM's caps over the rest", () => {
     const held = seatHeld(state, "s1");
     assert.ok(held.tokens.has("hero"));
   });
+
+  test("a seat past its number holds its member's first things by id, whatever order the room holds them in", () => {
+    const state = table();
+    for (let i = SEAT.tokens + 5; i >= 0; i--) state.tokens[`k${pad(i)}`] = token(`k${pad(i)}`, { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 1 + (i % 30), y: 1 });
+    const byId = ["hero", ...Array.from({ length: SEAT.tokens + 6 }, (_, i) => `k${pad(i)}`)].sort();
+    assert.deepEqual([...seatHeld(state, "s1").tokens], byId.slice(0, SEAT.tokens));
+  });
+
+  test("the DM's token cap counts the creatures on every floor of the scene, from whichever floor it is met", () => {
+    const state = keep();
+    for (let i = 0; i < 300; i++) state.tokens[`g${pad(i)}`] = token(`g${pad(i)}`);
+    for (let i = 300; i < LIMITS.tokensPerScene; i++) state.tokens[`g${pad(i)}`] = token(`g${pad(i)}`, { sceneId: "up" });
+    for (const floor of ["s1", "up"]) {
+      const past = withAdded(state, (s) => { s.tokens.gz = token("gz", { sceneId: floor }); });
+      assert.equal(admitLimits(past, floor, state, DM, CREATE).ok, false, `the DM's 501st across the floors, on ${floor}`);
+    }
+    const elsewhere = withAdded(state, (s) => { s.tokens.gz = token("gz", { sceneId: "s2" }); });
+    assert.deepEqual(admitLimits(elsewhere, "s2", state, DM, CREATE), { ok: true }, "another scene's first");
+  });
 });
 
 describe("the far line", () => {

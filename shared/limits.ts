@@ -1823,23 +1823,55 @@ function firstPlayer(state: RoomState, ownerIds: readonly string[]): string | un
   return first;
 }
 
-function byId<T extends { id: string }>(list: T[]): T[] {
-  return list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-}
-
-/** Each member's things of one seat's class, first by id, up to `most` each. */
+/**
+ * Each member's things of one seat's class, first by id, up to `most`
+ * each. A thing no member's seat holds takes no place, so only the owned
+ * are put in order (a stable sort, as before, should two share an id).
+ */
 function heldFirst<T extends { id: string }>(things: Iterable<T>, ownerOf: (thing: T) => string | undefined, most: number): T[] {
+  const owned: { thing: T; owner: string }[] = [];
+  for (const thing of things) {
+    const owner = ownerOf(thing);
+    if (owner !== undefined) owned.push({ thing, owner });
+  }
+  owned.sort((a, b) => (a.thing.id < b.thing.id ? -1 : a.thing.id > b.thing.id ? 1 : 0));
   const per = new Map<string, number>();
   const out: T[] = [];
-  for (const thing of byId([...things])) {
-    const owner = ownerOf(thing);
-    if (owner === undefined) continue;
+  for (const { thing, owner } of owned) {
     const held = per.get(owner) ?? 0;
     if (held >= most) continue;
     per.set(owner, held + 1);
     out.push(thing);
   }
   return out;
+}
+
+/**
+ * A tokens collection's tokens by the floor they stand on, each floor's in
+ * the collection's order and the floors in the order a token first stands
+ * on them, and apart those with a character a seat may count them by
+ * (seatCharacter). Kept per collection object, which is replaced and never
+ * changed (writable.ts), so the counts of the state before an op read
+ * what the op before it kept, and a seat reads only the tokens it can hold.
+ */
+export type TokenFloors = { readonly byFloor: ReadonlyMap<string, readonly Token[]>; readonly seatable: readonly Token[] };
+
+const tokenFloorsKept = new WeakMap<object, TokenFloors>();
+
+export function tokenFloors(tokens: RoomState["tokens"]): TokenFloors {
+  let kept = tokenFloorsKept.get(tokens);
+  if (kept) return kept;
+  const byFloor = new Map<string, Token[]>();
+  const seatable: Token[] = [];
+  for (const token of Object.values(tokens)) {
+    const on = byFloor.get(token.sceneId);
+    if (on) on.push(token);
+    else byFloor.set(token.sceneId, [token]);
+    if (token.companion?.of !== undefined || "ref" in token.actor) seatable.push(token);
+  }
+  kept = { byFloor, seatable };
+  if (!isWritable(tokens)) tokenFloorsKept.set(tokens, kept);
+  return kept;
 }
 
 /**
@@ -1852,8 +1884,9 @@ function heldFirst<T extends { id: string }>(things: Iterable<T>, ownerOf: (thin
 export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
   const group: ReadonlySet<string> = sceneId === null ? new Set() : sceneGroup(state, sceneId);
   const player = (id: string) => (ownEntry(state.members, id)?.kind === "player" ? id : undefined);
+  // A token with no seat character has no owner here, so only the seatable are read.
   const tokens = heldFirst(
-    Object.values(state.tokens).filter((t) => group.has(t.sceneId)),
+    tokenFloors(state.tokens).seatable.filter((t) => group.has(t.sceneId)),
     (t) => {
       const character = seatCharacter(state, t);
       return character ? firstPlayer(state, character.ownerIds) : undefined;
@@ -2083,7 +2116,8 @@ type SceneCounts = { tokens: number; templates: number; drawings: number; points
 function sceneCounts(state: RoomState, sceneId: string): SceneCounts {
   const group = sceneGroup(state, sceneId);
   const counts: SceneCounts = { tokens: 0, templates: 0, drawings: 0, points: 0 };
-  for (const t of Object.values(state.tokens)) if (group.has(t.sceneId)) counts.tokens++;
+  const byFloor = tokenFloors(state.tokens).byFloor;
+  for (const floor of group) counts.tokens += byFloor.get(floor)?.length ?? 0;
   for (const t of Object.values(state.templates)) if (group.has(t.sceneId)) counts.templates++;
   for (const d of Object.values(state.drawings)) {
     if (d.sceneId !== sceneId) continue;

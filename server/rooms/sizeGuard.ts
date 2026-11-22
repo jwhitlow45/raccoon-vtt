@@ -4,7 +4,7 @@ import { AUTO_CHARS, CHUNK_CELLS, FALL_RIDERS_MOST, KNOWN_CHARS, UP_DIR_CHARS, t
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, HARD, keptForPlayers, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type FarLineOf, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, HARD, keptForPlayers, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, tokenFloors, utf8Bytes, WIDEST_REV, type CopiedKind, type FarLineOf, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, SHED_STEPS_MOST, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
@@ -2120,7 +2120,7 @@ export function heldBytes(state: RoomState, sceneIds?: readonly string[], pooled
     for (const t of Object.values(state.templates)) if (player(t.ownerId)) floors.add(t.sceneId);
     for (const d of Object.values(state.drawings)) if (player(d.ownerId)) floors.add(d.sceneId);
     // Any floor with a token: which tokens a seat holds is seatHeld's to say.
-    for (const t of Object.values(state.tokens)) floors.add(t.sceneId);
+    for (const floor of tokenFloors(state.tokens).byFloor.keys()) floors.add(floor);
   }
   const tokens = new Set<string>();
   const templates = new Set<string>();
