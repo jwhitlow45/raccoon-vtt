@@ -11,6 +11,7 @@ import {
   BLOCKS_AT_QUOTA,
   BLOCKS_ROOM_TOO_FULL,
   exploredReserve,
+  FAR,
   HANDOUT_PAGES_FULL,
   LIMITS,
   NO_ROOM_TO_EXPLORE,
@@ -26,11 +27,11 @@ import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
 import type { Actor, ClassResource, FreeWall, MapPhase, Member, PcStats, RoomState, Trap } from "#shared/model.ts";
-import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
+import { ASK_LOST, FORGET_ASK, MAX_NOTES, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { JOIN_CHANGED, WING_MOVED, type WingClear } from "#shared/rules/wingClear.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
+import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, scene as testScene, template as testTemplate, token as testToken } from "#shared/testutil.ts";
 import { ASK_CHAIN_MS, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
@@ -44,7 +45,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, discoveryReserve, growthBound, heldBytes, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, discoveryReserve, farRoomBytes, growthBound, heldBytes, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, numberingAdjust, ownHeldBytes, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 import { STANDING_CLOCK } from "./undoScopeTesting.ts";
@@ -2933,6 +2934,26 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       {},
       { sizeLimits: { stateLimit } },
     );
+  });
+
+  test("a player's save of their character's block, refused at the players' far line, reads in the blocks' words", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    // The DM's hidden notes on scenes of their own, until the room's far reading as the player reads it is past its line.
+    const reading = () => farRoomBytes(state, true, measuredStateBytes(state), ownHeldBytes(state, player.id));
+    for (let k = 0; reading() <= FAR.roomBytes; k++) {
+      const sceneId = `pad-${k}`;
+      const pads = Array.from({ length: 100 }, (_, i) => testToken(`pad-${k}-${i}`, { sceneId, visibility: "dm", x: i, y: 0, notes: "n".repeat(MAX_NOTES) }));
+      state.scenes = { ...state.scenes, [sceneId]: testScene(sceneId, { order: 10 + k }) };
+      state.tokens = { ...state.tokens, ...Object.fromEntries(pads.map((t) => [t.id, t])) };
+    }
+    await withSockets(state, dm, player, async (actor, { player: p }) => {
+      await actor.op(p.conn, 1, pcStats({ saves: ["dex"] }, characterId));
+      assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+      await actor.op(p.conn, 2, { t: "character.update", characterId, patch: { name: "Bree Tallow" } });
+      assert.deepEqual(await answer(p.sent, 2), { code: "quota", message: sizeRemedy(ROOM_FULL, "player") }, "another edit keeps the room's words");
+    });
   });
 
   /*
