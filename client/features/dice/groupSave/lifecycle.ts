@@ -7,7 +7,7 @@ import { realClock, type Clock } from "../../../state/timing.ts";
 import type { RoomViewStore } from "../../../state/view.ts";
 import type { ReceiptTracker } from "../useReceipt.ts";
 import { creatureKey } from "../options.ts";
-import { askAnswered, holdsPageScene, markGone, syncRequests, type Page } from "./chain.ts";
+import { askAnswered, holdsPageScene, markGone, rowPresent, syncRequests, type Page } from "./chain.ts";
 import { writeSaveDraft } from "./draftStorage.ts";
 import { SAVE_ANNOUNCED, type SaveDraft } from "./reopenContract.ts";
 import { draftOf, reconcileSave, SAVE_MEMORY_ONLY, type SaveAuthority, type SaveHistory, type SaveReceipt, type SaveReopen, type SaveSession } from "./reopen.ts";
@@ -160,7 +160,7 @@ export function bindSaveLifecycle(options: SaveLifecycleOptions): () => void {
                 queuedRequests.delete(request.rollId);
               }
             }
-            page = markGone(page, holdsPageScene(confirmed, view.sceneId, page), (row) => confirmed.tokens[row.tokenId] !== undefined);
+            page = markGone(page, holdsPageScene(confirmed, view.sceneId, page), (row) => rowPresent(page, confirmed, row));
             current = { ...current, page };
           }
 

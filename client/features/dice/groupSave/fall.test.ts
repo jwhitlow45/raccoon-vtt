@@ -5,7 +5,7 @@ import { opSchema } from "#shared/protocol.ts";
 import { actor, character, customMonster, room, scene, token } from "#shared/testutil.ts";
 import { GROUND, UPPER, fallCard, run, thornToken, tower as floorsTower, withFalls } from "#shared/floorLinksTestutil.ts";
 import type { DiceView } from "../creature.ts";
-import { mark, newPage, sourceIds, type Page, type Source } from "./chain.ts";
+import { mark, markGone, newPage, rowPresent, sourceIds, type Page, type Source } from "./chain.ts";
 import { fallFill, FALL_NAME } from "./fills.ts";
 import { applyWaits, buildPlan, OFF_SCENE_WORDS, rowOutcome, UNHURT_FALL } from "./plan.ts";
 import { captureChoices, restoreChoices } from "./reopen.ts";
@@ -269,6 +269,25 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     const after = run(moved, plan);
     assert.equal(hp(after, "thorn"), 14, "Thorn takes it once");
     assert.equal(after.falls?.["120:0"], undefined, "and the card leaves with the token on the other scene too");
+  });
+
+  test("through the lifecycle, the DM's view without the moved token keeps its holder, which takes the fall once and leaves the card (FU8-SOL-1)", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page } = cardPage(state, state.falls!["120:0"]!);
+    const { thorn: _left, ...tokens } = state.tokens;
+    const projected: RoomState = { ...state, tokens: { ...tokens, thorn2: { ...state.tokens.thorn2!, sceneId: GROUND } } };
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: projected, srd: { monsters: [], rolls: {} } };
+    const held = markGone(page, true, (row) => rowPresent(page, projected, row));
+    assert.deepEqual(Object.values(held.states).filter((s) => s.gone), [], "no holder is gone");
+    const plan = buildPlan(held, dice, SIX, ids())!;
+    assert.deepEqual(plan.targets.map((t) => t.target).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [{ tokenId: "horse" }, { tokenId: "thorn2" }]);
+    const moved: RoomState = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: "s2" } } };
+    const after = run(moved, plan);
+    assert.deepEqual([hp(after, "thorn2"), after.falls?.["120:0"]], [14, undefined], "damaged once, and the card goes");
+    // A holder with no token the view holds is still gone.
+    const bare: RoomState = { ...state, tokens: { horse: state.tokens.horse! } };
+    const gone = markGone(page, true, (row) => rowPresent(page, bare, row));
+    assert.deepEqual(page.rows.filter((r) => gone.states[r.holder]?.gone).map((r) => r.name), ["Thorn"]);
   });
 
   test("a page whose creatures all moved to another scene says so, not that they left its floor (FLR4-OPUS-10)", () => {

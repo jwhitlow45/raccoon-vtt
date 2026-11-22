@@ -6,6 +6,7 @@ import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
 import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
+import { holderOf } from "../targets.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import type { SaveOutcomeFields, SavePageAskFields, SavePageCloseFields } from "#shared/saveOutcomeContract.ts";
@@ -709,6 +710,21 @@ export function holdsPageScene(state: Pick<RoomState, "scenes">, viewing: string
  * The view holds only the scene on screen (with its floors), so with the DM on another scene a missing token says
  * nothing about whether it was deleted, and every row keeps what it had (`held` false).
  */
+/**
+ * Whether a row's creature is still in `view`: by its own token, or on a fall
+ * card by any other token of its holder the card names, since the row's
+ * token may have moved to another scene while the creature's other one
+ * stayed (plan.ts reachedBy, FLR4CARDS-ROWTOKEN).
+ */
+export function rowPresent(page: Pick<Page, "source">, view: Pick<RoomState, "tokens">, row: RowBase): boolean {
+  if (view.tokens[row.tokenId] !== undefined) return true;
+  if (page.source.kind !== "fall") return false;
+  return page.source.tokenIds.some((id) => {
+    const t = view.tokens[id];
+    return t !== undefined && holderOf(t) === row.holder;
+  });
+}
+
 export function markGone(page: Page, held: boolean, present: (row: RowBase) => boolean): Page {
   if (!held) return page;
   let next = page;
