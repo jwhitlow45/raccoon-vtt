@@ -1517,7 +1517,7 @@ export type KeptRoom = { readonly meta: { readonly settings: Pick<RoomState["met
 export function keptForPlayers(room: KeptRoom): number {
   const { playersMoveAny, playersApplyDamage } = room.meta.settings;
   const ids = Object.keys(room.members);
-  const anyCreature = playersApplyDamage || (playersMoveAny !== undefined && playersMoveAny !== "none");
+  const anyCreature = playersApplyDamage || playersMoveAny === "all" || (Array.isArray(playersMoveAny) && playersMoveAny.length > 0);
   const creatures = anyCreature ? FAR.tokens : SEAT.tokens + LIMITS.tokensPerScene;
   const idMost = ids.reduce((most, id) => Math.max(most, utf8Bytes(JSON.stringify(id))), 0);
   const lines = KEPT_SHARED_LINES * (EXACT_WIDTH.line + EXACT_WIDTH.lineReaderLists * rosterListBytes(ids));

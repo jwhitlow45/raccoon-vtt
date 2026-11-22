@@ -67,6 +67,16 @@ describe("the far line's bytes", () => {
     assert.doesNotMatch(KEPT_FOR_PLAYERS_FULL, /\d/, "the words name no size");
   });
 
+  test("LP47A: Who can move any token set to Chosen players keeps as No one while nobody is chosen, and as Every player once someone is", () => {
+    const ids = Array.from({ length: 6 }, (_, i) => `0190f000-0000-7000-8000-${String(i).padStart(12, "0")}`);
+    const members = Object.fromEntries(ids.map((id) => [id, {}]));
+    const chosen = (playersMoveAny: string[], playersApplyDamage = false) => keptForPlayers({ meta: { settings: { playersMoveAny, playersApplyDamage } }, members });
+    assert.equal(chosen([]), kept(false, false, 6), "nobody chosen");
+    assert.equal(chosen([ids[1]!]), kept(true, false, 6), "one player chosen");
+    assert.equal(chosen([], true), kept(false, true, 6), "nobody chosen, Players apply damage on");
+    assert.ok(chosen([ids[1]!]) > chosen([]), "choosing a player keeps more");
+  });
+
   test("the DM's part reads in steps, the players' exactly", () => {
     const line = farByteLine("meets", "room", "players")!;
     const step = FAR.byteStep;
