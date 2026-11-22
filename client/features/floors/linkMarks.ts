@@ -311,8 +311,11 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * under the lowest corner on the screen and a chip over the highest, and
  * in Top-down from the middles of its bottom and top edges. Ends that are
  * not holes keep their own edge, and the holes keep off their pills.
+ * `prune` false searches without the lower bound, which only cuts the
+ * search, so a test can check it changes no answer.
  */
-export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = []): Map<string, PlacedPills> {
+export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = [], options: { prune?: boolean } = {}): Map<string, PlacedPills> {
+  const { prune = true } = options;
   const out = new Map<string, PlacedPills>();
   const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
   const standing = tokens.map((r) => outlineBox(cornersOf({ ...r, loop: null }), iso));
@@ -381,7 +384,7 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
   let nodes = 0;
   const pick: Cand[] = [];
   const search = (at: number, cost: number): void => {
-    if (cost + (rest[at] ?? 0) >= best.cost) return;
+    if (cost + (prune ? (rest[at] ?? 0) : 0) >= best.cost) return;
     if (at === slots.length) {
       best.cost = cost;
       best.pick = pick.slice();

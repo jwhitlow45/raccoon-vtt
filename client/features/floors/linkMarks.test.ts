@@ -330,6 +330,57 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     assert.ok(over(off) < over(lone) / 4, `and covers ${over(off)} of it, against ${over(lone)} over the highest corner`);
   });
 
+  test("on hex rows and hex columns too, a hole's name moves off a creature under it in Top-down and its chip off one over it in Isometric (LP48FIXA-R1)", () => {
+    const over = (p: PillSpec, scale: number, iso: DrawSpace, rect: FloorLink["rect"]) => {
+      const b = drawnBox(p, scale, iso, true, true);
+      const t = outlineBox(cornersOf({ ...rect, loop: null }), iso);
+      return Math.max(0, Math.min(b.x1, t.x1) - Math.max(b.x0, t.x0)) * Math.max(0, Math.min(b.y1, t.y1) - Math.max(b.y0, t.y0));
+    };
+    for (const shape of ["hexRows", "hexColumns"] as const) {
+      const g = sceneGrid({ gridShape: shape });
+      const small = hole("a", { x: 8, y: 6, w: 1, h: 1 }, g);
+      // Top-down on a phone: a Medium creature's box just under the bottom edge's middle, where the name hangs.
+      const scale = 21.375;
+      const under = { x: small.first!.x - 0.5, y: small.o.y + small.o.h, w: 1, h: 1 };
+      const lone = placeEnds([small], [], scale, null, () => false).get("a")!.pill!;
+      const moved = placeEnds([small], [], scale, null, () => false, [under]).get("a")!.pill!;
+      assert.ok(over(lone, scale, null, under) > 0, `${shape}: the name alone covers the creature`);
+      // A hex's side corner lies inside the creature's width, so the name hung outward from it keeps a strip of the creature.
+      assert.ok(over(moved, scale, null, under) < over(lone, scale, null, under) / 2, `${shape}: and moves off most of it, covering ${over(moved, scale, null, under)}`);
+      // Isometric turn 0: a creature's box just up the screen from the highest corner, where the chip stands.
+      const iso = flat(0);
+      const chip = placeEnds([small], [], 40, iso, () => true).get("a")!.chip!;
+      const top = { x: chip.x - 1, y: chip.y - 1, w: 1, h: 1 };
+      const off = placeEnds([small], [], 40, iso, () => true, [top]).get("a")!.chip!;
+      assert.ok(over(chip, 40, iso, top) > 0, `${shape}: the chip alone covers the creature`);
+      assert.ok(over(off, 40, iso, top) < over(chip, 40, iso, top) / 4, `${shape}: and moves off it, covering ${over(off, 40, iso, top)} against ${over(chip, 40, iso, top)}`);
+    }
+  });
+
+  test("the search's lower bound changes no placement on lp48's layouts, in either view, on squares and both hex grids (LP48FIXA-R1)", () => {
+    const named = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Undercroft", value: "Not reached yet" } });
+    const creatures = [{ x: 7, y: 7, w: 1, h: 1 }, { x: 9, y: 3, w: 2, h: 2 }];
+    let ran = 0;
+    for (const g of [grid, sceneGrid({ gridShape: "hexRows" }), sceneGrid({ gridShape: "hexColumns" })]) {
+      for (const ends of [
+        [hole("a", { x: 6, y: 4, w: 2, h: 2 }, g), hole("b", { x: 8, y: 6, w: 1, h: 1 }, g)],
+        [named(hole("a", { x: 8, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 10, y: 7, w: 1, h: 1 }, g))],
+        [named(hole("a", { x: 6, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 8, y: 6, w: 1, h: 1 }, g))],
+      ]) {
+        for (const scale of [40, 21.375]) {
+          for (const iso of [null, flat(0), flat(1), flat(2), flat(3)]) {
+            for (const tokens of [[], creatures]) {
+              const stands = () => iso !== null;
+              assert.deepEqual(placeEnds(ends, [], scale, iso, stands, tokens), placeEnds(ends, [], scale, iso, stands, tokens, { prune: false }), `${ends[0]!.o.loop ? "hexes" : "squares"} at ${scale}, ${iso ? `turn ${iso.turn}` : "Top-down"}`);
+              ran++;
+            }
+          }
+        }
+      }
+    }
+    assert.equal(ran, 180);
+  });
+
   test("the tokens a hole's pills keep off are each token's squares on the floor shown, and only there", () => {
     const placed = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }), at: thornToken({ id: "at", sceneId: ATTIC, x: 1, y: 1 }) } });
     // A hole in Upper floor and one in Attic, each floor with its creature.
