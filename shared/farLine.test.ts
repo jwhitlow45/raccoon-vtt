@@ -58,7 +58,7 @@ describe("every op type and the far line", () => {
     assert.equal(farRule({ t: "template.update", templateId: "a", patch: { label: "Fire" } }), "meets");
   });
 
-  test("LP47A-SHOW-1: a hide or a show, of a creature, a group or an area, and a lock, are bookkeeping alone, and a hidden name or anything beside them meets the line", () => {
+  test("LP47A-SHOW-1: a hide or a show, of a creature, a group, an area or a name, and a lock, are bookkeeping alone, and anything beside them meets the line", () => {
     for (const visibility of ["all", "dm"] as const) {
       assert.equal(farRule({ t: "token.update", tokenId: "t", patch: { visibility } }), "exempt", `a creature's ${visibility}`);
       assert.equal(farRule({ t: "token.updateMany", tokenIds: ["t", "u"], patch: { visibility } }), "exempt", `a group's ${visibility}`);
@@ -66,7 +66,8 @@ describe("every op type and the far line", () => {
     }
     assert.equal(farRule({ t: "token.update", tokenId: "t", patch: { locked: true } }), "exempt", "a lock");
     assert.equal(farRule({ t: "token.updateMany", tokenIds: ["t"], patch: { visibility: "all", locked: false } }), "exempt", "a show and an unlock");
-    assert.equal(farRule({ t: "token.update", tokenId: "t", patch: { nameHidden: false } }), "meets", "a name shown");
+    assert.equal(farRule({ t: "token.update", tokenId: "t", patch: { nameHidden: false } }), "exempt", "a name shown (D-261122-042)");
+    assert.equal(farRule({ t: "token.updateMany", tokenIds: ["t"], patch: { locked: true } }), "exempt", "a group locked");
     assert.equal(farRule({ t: "token.update", tokenId: "t", patch: { visibility: "all", name: "Orc" } }), "meets", "a show with a name");
     assert.equal(farRule({ t: "token.updateMany", tokenIds: ["t"], patch: { visibility: "all", disposition: "ally" } }), "meets", "a group's show with a side");
     assert.equal(farRule({ t: "template.update", templateId: "a", patch: { visibility: "all", label: "Fire" } }), "meets", "an area's show with a label");
@@ -80,7 +81,8 @@ describe("every op type and the far line", () => {
     assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, visibility: "dm" } }, { key: "token:h", value: { ...state.tokens.h!, locked: true } }]), state), true, "a group's");
     assert.equal(restoresToggles(restore([{ key: "template:a", value: { ...state.templates.a!, visibility: "dm", rev: 1 } }]), state), true, "an area's");
     assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, visibility: "dm", x: 9 } }]), state), false, "a hide and a move");
-    assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, nameHidden: true } }]), state), false, "a hidden name");
+    assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, nameHidden: true } }]), state), true, "a name hidden");
+    assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, publicName: "Hooded figure" } }]), state), false, "a public name");
     assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, notes: "x" } }]), state), false, "a field added");
     assert.equal(restoresToggles(restore([{ key: "token:g", value: { ...g, visibility: "dm", name: "Orc" } }]), state), false, "a name");
     assert.equal(restoresToggles(restore([{ key: "token:z", value: { ...g, id: "z" } }]), state), false, "a creature brought back");

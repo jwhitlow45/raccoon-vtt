@@ -43,8 +43,9 @@ const SETTINGS = [
 
 /**
  * P1's Hero and a wolf of theirs the DM hid, the DM's goblins (one hidden,
- * one shown), two hidden bandits, a locked statue, the DM's hidden area
- * and an area of P1's the DM hid, with a shared line about the goblin.
+ * one shown), two hidden bandits, a locked statue, a figure whose name the
+ * DM hid, the DM's hidden area and an area of P1's the DM hid, with a
+ * shared line about the goblin.
  */
 function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean): RoomState {
   const state = room({
@@ -57,6 +58,7 @@ function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean): RoomStat
       flank1: token("flank1", { name: "Bandit", visibility: "dm", x: 9, y: 2 }),
       flank2: token("flank2", { name: "Bandit", visibility: "dm", x: 9, y: 3 }),
       statue: token("statue", { name: "Statue", kind: "object", locked: true, x: 12, y: 12 }),
+      masked: token("masked", { name: "Bandit chief of the Black Road", nameHidden: true, publicName: "Hooded figure", x: 10, y: 10 }),
     },
     templates: {
       zone: template("zone", { ownerId: "dm1", visibility: "dm", origin: { x: 14, y: 4, z: 0 } }),
@@ -78,6 +80,9 @@ const TOGGLES: [string, Op][] = [
   ["P1's area shown", { t: "template.update", templateId: "aura", patch: { visibility: "all" } }],
   ["the statue unlocked", { t: "token.update", tokenId: "statue", patch: { locked: false } }],
   ["the goblin locked", { t: "token.update", tokenId: "goblin", patch: { locked: true } }],
+  ["a name revealed", { t: "token.update", tokenId: "masked", patch: { nameHidden: false } }],
+  ["the goblin's name hidden", { t: "token.update", tokenId: "goblin", patch: { nameHidden: true } }],
+  ["P1's wolf's name hidden", { t: "token.update", tokenId: "wolf", patch: { nameHidden: true } }],
 ];
 
 const width = (part: ExactCopy) => part.shown - part.sub;
@@ -88,7 +93,7 @@ function toggled(before: RoomState, after: RoomState): Map<string, number> {
   const out = new Map<string, number>();
   for (const [id, was] of Object.entries(before.tokens)) {
     const now = after.tokens[id]!;
-    if (now.visibility !== was.visibility || now.locked !== was.locked) out.set(`token:${id}`, JSON.stringify(now).length - JSON.stringify(was).length);
+    if (now.visibility !== was.visibility || now.locked !== was.locked || now.nameHidden !== was.nameHidden) out.set(`token:${id}`, JSON.stringify(now).length - JSON.stringify(was).length);
   }
   for (const [id, was] of Object.entries(before.templates)) {
     const now = after.templates[id]!;
@@ -97,14 +102,22 @@ function toggled(before: RoomState, after: RoomState): Map<string, number> {
   return out;
 }
 
-/** What a toggle changes in `player`'s exact part, asserting that what stays keeps its place and widths: the widths of what came in or left. */
-function exactChange(before: RoomState, after: RoomState, player: string): { came: Map<string, number>; left: Map<string, number> } {
+/**
+ * What a toggle changes in `player`'s exact part, asserting that what stays
+ * keeps its place and widths: the widths of what came in or left. A name
+ * shown or hidden moves the name between what the copy holds and what it
+ * hides, so only a creature whose name `op` toggled may change its hidden
+ * bytes, and still keeps its width.
+ */
+function exactChange(before: RoomState, after: RoomState, player: string, op?: Op): { came: Map<string, number>; left: Map<string, number> } {
+  const renamed = op?.t === "token.update" && "nameHidden" in op.patch ? `token:${op.tokenId}` : null;
   const [was, is] = [exactCopies(before, player), exactCopies(after, player)];
   const came = new Map<string, number>();
   const left = new Map<string, number>();
   for (const [key, part] of is) {
     const old = was.get(key);
     if (!old) came.set(key, width(part));
+    else if (key === renamed) assert.deepEqual([part.on, width(part)], [old.on, width(old)], `${player}'s ${key} keeps its place and width`);
     else assert.deepEqual([part.on, width(part), part.hidden], [old.on, width(old), old.hidden], `${player}'s ${key} keeps its place and widths`);
   }
   for (const [key, part] of was) if (!is.has(key)) left.set(key, width(part));
@@ -132,7 +145,7 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
         assert.equal(farWidths(after), farWidths(before), `${what}: the far line's widths are as they were`);
         for (const player of ["p1", "p2"]) {
           const at = `${what}, ${player}`;
-          const { came, left } = exactChange(before, after, player);
+          const { came, left } = exactChange(before, after, player, op);
           // Only a creature or an area shown or hidden comes into or leaves their copy, and only one the settings put in their part.
           const view = seatView(after, player);
           for (const [key, bytes] of came) {
@@ -170,7 +183,7 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
         const before = table(moveAny, damage);
         const result = applyOp(before, op, DM, env(5));
         assert.ok(result.ok);
-        for (const player of ["p1", "p2"]) for (const key of exactChange(before, result.state, player).came.keys()) came.add(`${player} ${key}`);
+        for (const player of ["p1", "p2"]) for (const key of exactChange(before, result.state, player, op).came.keys()) came.add(`${player} ${key}`);
       }
     }
     for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
@@ -181,6 +194,7 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
 function reverse(op: Op, before: RoomState): Op {
   switch (op.t) {
     case "token.update":
+      if ("nameHidden" in op.patch) return { ...op, patch: { nameHidden: before.tokens[op.tokenId]!.nameHidden } };
       return { ...op, patch: "visibility" in op.patch ? { visibility: before.tokens[op.tokenId]!.visibility } : { locked: before.tokens[op.tokenId]!.locked } };
     case "token.updateMany":
       return { ...op, patch: { visibility: before.tokens[op.tokenIds[0]!]!.visibility } };

@@ -6,6 +6,7 @@ import { GROUND, UPPER, thornToken, tower, withOpening, withStairs } from "#shar
 import type { RoomState } from "#shared/model.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
+import { shownName } from "#shared/numbering.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { env, scene, template, token } from "#shared/testutil.ts";
@@ -406,6 +407,7 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
     for (const id of ["lurker", "flank1", "flank2"]) f.state.tokens[id] = token(id, { sceneId: f.sceneId, name: "Bandit", x: 2, y: 9, visibility: "dm" });
     f.state.templates.zone = template("zone", { sceneId: f.sceneId, ownerId: f.dm.id, visibility: "dm" });
     f.state.tokens.statue = token("statue", { sceneId: f.sceneId, name: "Statue", x: 6, y: 9, locked: true });
+    f.state.tokens.masked = token("masked", { sceneId: f.sceneId, name: "Bandit chief of the Black Road", nameHidden: true, x: 7, y: 9 });
     const near = line(f.state) - farRoomBytes(f.state, true) - FAR.byteStep;
     assert.ok(near > 0, "filled short of the line");
     for (let pad = near; !past(f.state); pad += 16 * 1024) f.state.tokens.n0 = { ...f.state.tokens.n0!, notes: "p".repeat(pad) };
@@ -419,6 +421,8 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
       ["an area's show", { t: "template.update", templateId: "zone", patch: { visibility: "all" } }],
       // An unlock stores a byte more ("false"), as a show does.
       ["an unlock", { t: "token.update", tokenId: "statue", patch: { locked: false } }],
+      // So does a name's reveal ("false"), whatever the name (D-261122-042).
+      ["a name's reveal", { t: "token.update", tokenId: "masked", patch: { nameHidden: false } }],
     ] as const;
 
   const stroke = (f: ReturnType<typeof filled>, ownerId: string) => ({ t: "drawing.create", drawing: { id: uuidv7(), sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } });
@@ -434,7 +438,7 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
       assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm")}`, "the DM's create");
       for (const [what, op] of shows(f)) assert.equal(answer(await dm.send(op)), "taken", what);
       const state = h.actor.committed.state;
-      assert.deepEqual([state.tokens.lurker!.visibility, state.tokens.flank2!.visibility, state.templates.zone!.visibility, state.tokens.statue!.locked], ["all", "all", "all", false]);
+      assert.deepEqual([state.tokens.lurker!.visibility, state.tokens.flank2!.visibility, state.templates.zone!.visibility, state.tokens.statue!.locked, state.tokens.masked!.nameHidden], ["all", "all", "all", false, false]);
     });
 
     test(`${named}: past the players' line, inside the bookkeeping reserve, each is taken, and so are a hide's Undo and Redo`, async (t) => {
@@ -489,5 +493,22 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
 
   test("a lock's Undo past the players' line is taken after another creature's meeting numbered it since", async (t) => {
     await numberedBetween(t, { t: "token.update", tokenId: "wolf1", patch: { locked: true } }, (state) => state.tokens.wolf1!.locked, false);
+  });
+
+  test("past the players' line, a name's reveal that meets the creature under its name, numbering both wolves, and its Undo are taken", async (t) => {
+    const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
+    f.state.tokens.wolf1 = token("wolf1", { sceneId: f.sceneId, name: "Wolf", x: 8, y: 9, met: 2 });
+    f.state.tokens.wolf2 = token("wolf2", { sceneId: f.sceneId, name: "Wolf", x: 9, y: 9, nameHidden: true, met: 3 });
+    const scene = f.state.scenes[f.sceneId]!;
+    f.state.scenes[f.sceneId] = { ...scene, numbers: { names: { ...scene.numbers?.names, Wolf: [2, 1], [shownName(f.state.tokens.wolf2)]: [3, 1] } } };
+    f.state.numbering = { rev: 0, groups: 3 };
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(ROOM_FULL, "dm")}`, "past the players' line");
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: "wolf2", patch: { nameHidden: false } })), "taken", "the reveal");
+    await until(() => (h.actor.committed.state.tokens.wolf2!.number === 2 && h.actor.committed.state.tokens.wolf1!.number === 1 ? true : undefined), "both wolves numbered by the meeting");
+    const scope = dm.history().setup?.undo.head ? "setup" : "play";
+    assert.equal(answer(await dm.send({ t: "undo", scope, head: dm.head(scope).id })), "taken", "its Undo");
+    assert.equal(h.actor.committed.state.tokens.wolf2!.nameHidden, true);
   });
 });

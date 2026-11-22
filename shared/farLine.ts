@@ -200,18 +200,19 @@ const FIXED_ACTOR_FIELDS = new Set(["hp", "ac", "speeds", "senses", "initBonus",
 const AREA_POSE_FIELDS = new Set(["origin", "faceOffset", "anchor", "yaw", "pitch", "size", "width", "height"]);
 
 /**
- * The switches that hide or show a creature or an area, or lock a creature
- * (D-261122-041, 050), which a `token.update`, `token.updateMany` or
- * `template.update` of them alone changes as bookkeeping. Each is stored
- * whatever its state, one byte apart, and a player's exact part counts the
- * thing at the same width either way, so a toggle adds no entity and leaves
- * every player's widths as they were (server/rooms/sizeGuard.toggles.test.ts).
- * A shown creature comes into the exact part of a player who may move any
- * or apply damage as any creature coming into sight does, at a width the
- * room keeps for every creature (shared/limits.ts keptForPlayers). A hidden
- * name is not one: showing it puts a name of any length in their copies.
+ * The switches that hide or show a creature, an area or a creature's name,
+ * or lock a creature (D-261122-041, 042, 050), which a `token.update`,
+ * `token.updateMany` or `template.update` of them alone changes as
+ * bookkeeping. Each is stored whatever its state, one byte apart, and a
+ * player's exact part counts the thing at the same width either way, so a
+ * toggle adds no entity and leaves every player's widths as they were
+ * (server/rooms/sizeGuard.toggles.test.ts). A shown creature comes into the
+ * exact part of a player who may move any or apply damage as any creature
+ * coming into sight does, at a width the room keeps for every creature
+ * (shared/limits.ts keptForPlayers). A name shown moves it from what the
+ * copy hides to what it holds, which changes no width.
  */
-const TOGGLE_FIELDS = new Set(["visibility", "locked"]);
+const TOGGLE_FIELDS = new Set(["visibility", "locked", "nameHidden"]);
 
 function fixedActorOnly(patch: object): boolean {
   const keys = Object.keys(patch);
