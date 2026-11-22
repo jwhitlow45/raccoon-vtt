@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
-import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
+import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
@@ -1664,7 +1664,7 @@ export class RoomActor {
       }
       // Admission failures preserve both directions, including a retained step being discarded.
       if (this.replayFailed || this.readOnly) {
-        this.#refuse(key, wm, n, "quota", this.replayFailed ? "the room could not be fully loaded and is read-only" : "the room is full: it is at its storage quota, so only deletions are accepted");
+        this.#refuse(key, wm, n, "quota", this.replayFailed ? "the room could not be fully loaded and is read-only" : roomAtQuota(viewer.role));
         return;
       }
       if (op.discard) {
@@ -1774,7 +1774,7 @@ export class RoomActor {
       return;
     }
     if (this.readOnly && !DELETIONS.has(op.t) && !removesPcStats(op) && !quietensSound(op, this.#staged.state)) {
-      this.#refuse(key, wm, n, "quota", isBlockSave(op) ? blocksAtQuota(viewer.role) : "the room is full: it is at its storage quota, so only deletions are accepted");
+      this.#refuse(key, wm, n, "quota", isBlockSave(op) ? blocksAtQuota(viewer.role) : roomAtQuota(viewer.role));
       return;
     }
     // The ids the device made for new things meet the gate (createIds.ts) after a receipt answered a resend and before

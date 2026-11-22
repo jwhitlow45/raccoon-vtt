@@ -17,6 +17,8 @@ import {
   HANDOUT_PAGES_FULL,
   LIMITS,
   NO_ROOM_TO_EXPLORE,
+  ROOM_AT_QUOTA,
+  ROOM_AT_QUOTA_DM,
   ROOM_FULL,
   serializedBytes,
   SHOWING_COUNTS_AGAIN,
@@ -2810,7 +2812,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
     );
   });
 
-  test("a room at its storage quota takes a block's delete from its player and the DM, and refuses a save in the blocks' words", async () => {
+  test("a room at its storage quota takes a block's delete from its player and the DM, refuses a save in the blocks' words, and every other change in its role's words", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, characterId } = breeRoom(dm, player);
@@ -2831,9 +2833,16 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
         await actor.op(d.conn, 2, { t: "companionBlock.delete", blockId: "owl" });
         assert.equal(await answer(d.sent, 2), null);
         assert.deepEqual(actor.committed.state.companionBlocks, {});
-        // Other ops keep the room's own words.
+        // Other ops read the room's storage words, in the words each role can act on (LP47A-QUOTA-1).
         await actor.op(d.conn, 3, { t: "log.chat", text: "hi" });
-        assert.equal((await answer(d.sent, 3))?.message, "the room is full: it is at its storage quota, so only deletions are accepted");
+        assert.deepEqual(await answer(d.sent, 3), { code: "quota", message: ROOM_AT_QUOTA_DM });
+        await actor.op(p.conn, 4, { t: "log.chat", text: "hi" });
+        assert.deepEqual(await answer(p.sent, 4), { code: "quota", message: ROOM_AT_QUOTA });
+        // So does an Undo, here of the DM's delete, which would bring the block back.
+        const history = historyMessageSchema.parse((d.sent as (ServerMessage | HistoryMessage)[]).findLast((m) => m.t === "history"));
+        const scope = history.setup?.undo.head ? "setup" : "play";
+        await sendWithHistory(actor, d.conn, 4, { t: "undo", scope });
+        assert.deepEqual(await answer(d.sent, 4), { code: "quota", message: ROOM_AT_QUOTA_DM });
       },
       { readOnly: true },
     );

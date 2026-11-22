@@ -1078,6 +1078,12 @@ export const BLOCKS_AT_QUOTA_DM = "The room is at its storage limit, so stat blo
 export function blocksAtQuota(role: "dm" | "player"): string {
   return role === "dm" ? BLOCKS_AT_QUOTA_DM : BLOCKS_AT_QUOTA;
 }
+/** Any other change a room at its storage quota refuses, in the words its sender's role can act on: a player asks the DM, who frees the space. */
+export const ROOM_AT_QUOTA = "The room is at its storage limit. Ask the DM to free some space.";
+export const ROOM_AT_QUOTA_DM = "The room is at its storage limit. Free some space in the Library, then try again.";
+export function roomAtQuota(role: "dm" | "player"): string {
+  return role === "dm" ? ROOM_AT_QUOTA_DM : ROOM_AT_QUOTA;
+}
 
 /*
  * The admission refusals of a tagged op (docs/design/design-v1-dice.md 1.2 and
