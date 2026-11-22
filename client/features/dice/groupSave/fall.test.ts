@@ -290,6 +290,23 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     assert.deepEqual(page.rows.filter((r) => gone.states[r.holder]?.gone).map((r) => r.name), ["Thorn"]);
   });
 
+  test("a row whose own token was deleted is reached through its holder's other token, as the plan reaches it, so Apply is not held up (FU8-R1-3)", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page } = cardPage(state, state.falls!["120:0"]!);
+    const { thorn: _deleted, ...tokens } = state.tokens;
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: { ...state, tokens }, srd: { monsters: [], rolls: {} } };
+    assert.equal(applyWaits(page, dice, SIX), null);
+    // Beside a creature that left the scene, which alone would read "moved to another scene".
+    const withBree = room4(["horse", "thorn", "thorn2", "bree"], { bree: "s2" });
+    const beside = cardPage(withBree, withBree.falls!["120:0"]!);
+    const { thorn: _gone, ...rest } = withBree.tokens;
+    const pair = { ...beside.page, rows: beside.page.rows.filter((r) => r.name === "Thorn" || r.name === "Bree") };
+    assert.equal(applyWaits(pair, { ...beside.dice, view: { ...withBree, tokens: rest } }, SIX), null, "Thorn's other token still reaches the page");
+    const bare: DiceView = { ...dice, view: { ...state, tokens: { horse: state.tokens.horse! } } };
+    const only = { ...page, rows: page.rows.filter((r) => r.name === "Thorn") };
+    assert.equal(applyWaits(only, bare, SIX), null, "no token at all is a creature gone, not one moved away");
+  });
+
   test("a page whose creatures all moved to another scene says so, not that they left its floor (FLR4-OPUS-10)", () => {
     const state = room4(["horse", "thorn"]);
     const { page } = cardPage(state, state.falls!["120:0"]!);

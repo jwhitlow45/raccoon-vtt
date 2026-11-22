@@ -296,9 +296,10 @@ export function offFloorWords(page: Page, dice: DiceView): string | null {
   const live = page.rows.filter((r) => !stateOf(page, r).gone && stateOf(page, r).mark !== "skip");
   let elsewhere = false;
   for (const row of live) {
+    // A row whose own token is gone, but whose holder has another the card names on the page, is reached as buildPlan reaches it.
+    if (reachedBy(page, row, dice)) return null;
     const own = dice.view.tokens[row.tokenId];
     if (!own || holderOf(own) !== row.holder) continue;
-    if (reachedBy(page, row, dice)) return null;
     elsewhere = true;
   }
   if (!elsewhere) return null;
