@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
-import { BLOCKS_ROOM_TOO_FULL, HANDOUT_PAGES_FULL, KEPT_FOR_PLAYERS_FULL, LIMITS, ROOM_FULL, SCENE_FULL, SHOWING_COUNTS_AGAIN, sizeRemedy, SOUND_LIMITS, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, soundUseFits, stillFitsVideo, utf8Bytes } from "./limits.ts";
+import { BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, blocksAtQuota, blocksRoomTooFull, HANDOUT_PAGES_FULL, KEPT_FOR_PLAYERS_FULL, LIMITS, ROOM_FULL, SCENE_FULL, SHOWING_COUNTS_AGAIN, sizeRemedy, SOUND_LIMITS, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, soundUseFits, stillFitsVideo, utf8Bytes } from "./limits.ts";
 import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
 import { FADES } from "./sound.ts";
 import { actor, character, companionBlock, customMonster, drawing, entry, room, srdImage, token } from "./testutil.ts";
@@ -393,5 +393,8 @@ describe("the words of a full room (size refusals name a remedy and no size)", (
   test("words that are not a byte line's pass through, and a block save's words stay a player's own", () => {
     assert.equal(sizeRemedy("the room is full: it can hold at most 50 scenes", "dm"), "the room is full: it can hold at most 50 scenes");
     assert.equal(BLOCKS_ROOM_TOO_FULL, "The room is too full to save this stat block. Ask the DM to delete scenes they are done with, then save again.");
+    assert.equal(blocksRoomTooFull("player"), BLOCKS_ROOM_TOO_FULL);
+    assert.equal(blocksAtQuota("player"), BLOCKS_AT_QUOTA);
+    for (const words of [blocksRoomTooFull("dm"), blocksAtQuota("dm")]) assert.ok(!/the DM/.test(words), `a DM is not told to ask the DM: ${words}`);
   });
 });

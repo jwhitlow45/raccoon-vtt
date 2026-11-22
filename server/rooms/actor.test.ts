@@ -9,7 +9,9 @@ import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
 import {
   BLOCK_SAVES_TOO_FAST,
   BLOCKS_AT_QUOTA,
+  BLOCKS_AT_QUOTA_DM,
   BLOCKS_ROOM_TOO_FULL,
+  BLOCKS_ROOM_TOO_FULL_DM,
   exploredReserve,
   FAR,
   HANDOUT_PAGES_FULL,
@@ -2825,7 +2827,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
         await actor.op(p.conn, 3, { t: "companionBlock.delete", blockId: "moth" });
         assert.equal(await answer(p.sent, 3), null);
         await actor.op(d.conn, 1, { t: "companionBlock.update", blockId: "owl", patch: { ac: 13 } });
-        assert.deepEqual(await answer(d.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+        assert.deepEqual(await answer(d.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA_DM });
         await actor.op(d.conn, 2, { t: "companionBlock.delete", blockId: "owl" });
         assert.equal(await answer(d.sent, 2), null);
         assert.deepEqual(actor.committed.state.companionBlocks, {});
@@ -2853,9 +2855,9 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
         assert.equal(await answer(p.sent, 1), null);
         const { rev: _rev, ...big } = testBlock(uuidv7(), characterId, { traits: [{ name: "", text: "x".repeat(3_000) }] });
         await actor.op(p.conn, 2, { t: "companionBlock.create", block: big });
-        assert.deepEqual(await answer(p.sent, 2), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        assert.deepEqual(await answer(p.sent, 2), { code: "quota", message: BLOCKS_ROOM_TOO_FULL_DM });
         await actor.op(p.conn, 3, { t: "companionBlock.update", blockId: "moth", patch: { traits: [{ name: "", text: "x".repeat(3_000) }] } });
-        assert.deepEqual(await answer(p.sent, 3), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        assert.deepEqual(await answer(p.sent, 3), { code: "quota", message: BLOCKS_ROOM_TOO_FULL_DM });
         await actor.op(p.conn, 4, { t: "token.update", tokenId: pcId, patch: { notes: "n".repeat(3_000) } });
         assert.deepEqual(await answer(p.sent, 4), { code: "quota", message: sizeRemedy(ROOM_FULL, "dm") });
         // A delete never grows the room.
@@ -2906,7 +2908,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       player,
       async (actor, { dm: p }) => {
         await actor.op(p.conn, 1, pcStats({ saves: ["dex"] }, characterId));
-        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA_DM });
         await actor.op(p.conn, 2, { t: "character.update", characterId, patch: { stats: null, name: "Bree" } });
         assert.equal((await answer(p.sent, 2))?.code, "quota", "a removal with another change is an edit");
         await actor.op(p.conn, 3, pcStats(null, characterId));
@@ -2929,7 +2931,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       async (actor, { dm: p }) => {
         const rolls = Array.from({ length: 30 }, (_, i) => ({ id: `r${i}`, name: "x".repeat(60), kind: "other", dice: [{ formula: "1d6".padEnd(40, " ") }] }));
         await actor.op(p.conn, 1, pcStats({ rolls }, characterId));
-        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL_DM });
       },
       {},
       { sizeLimits: { stateLimit } },
@@ -3005,7 +3007,7 @@ describe("companion stat blocks at the room actor (docs/design/design-v1-compani
       player,
       async (actor, { dm: p }) => {
         await actor.op(p.conn, 1, big);
-        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL_DM });
         await actor.op(p.conn, 2, resync(characterId, 6));
         assert.equal(await answer(p.sent, 2), null, "a small one fits");
       },

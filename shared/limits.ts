@@ -1056,6 +1056,12 @@ function checkJournal(state: RoomState): LimitCheck {
 export const BLOCK_SAVES_TOO_FAST = "Too many stat block saves at once. Wait a few seconds, then save again.";
 /** A block save the room's state limit refuses, in place of the size guard's words (section 3.4). */
 export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat block. Ask the DM to delete scenes they are done with, then save again.";
+/** A DM's block save refused by the state limit: the DM is the one to delete, so no words send them to the DM. */
+export const BLOCKS_ROOM_TOO_FULL_DM = "The room is too full to save this stat block. Delete scenes you are done with, then save again.";
+/** The state limit's refusal of a block save, in the words its sender's role can act on. */
+export function blocksRoomTooFull(role: "dm" | "player"): string {
+  return role === "dm" ? BLOCKS_ROOM_TOO_FULL_DM : BLOCKS_ROOM_TOO_FULL;
+}
 /**
  * The refusal of a `character.update` whose `expect` no longer matches the
  * character (docs/design/design-v1-resync.md 4): one code and these words whatever
@@ -1065,6 +1071,12 @@ export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat bloc
 export const CHARACTER_CHANGED = "This character changed since you looked. Check it again.";
 /** A block save at the room's storage quota, in place of the quota's words (section 3.4). Deleting is still accepted. */
 export const BLOCKS_AT_QUOTA = "The room is at its storage limit, so stat blocks cannot be saved until the DM frees space. Deleting a stat block still works.";
+/** The same for the DM, who is the one to free the space. */
+export const BLOCKS_AT_QUOTA_DM = "The room is at its storage limit, so stat blocks cannot be saved until you free space. Deleting a stat block still works.";
+/** The quota's refusal of a block save, in the words its sender's role can act on. */
+export function blocksAtQuota(role: "dm" | "player"): string {
+  return role === "dm" ? BLOCKS_AT_QUOTA_DM : BLOCKS_AT_QUOTA;
+}
 
 /*
  * The admission refusals of a tagged op (docs/design/design-v1-dice.md 1.2 and

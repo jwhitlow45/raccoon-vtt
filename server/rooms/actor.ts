@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
-import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, HARD, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
+import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
@@ -1773,7 +1773,7 @@ export class RoomActor {
       return;
     }
     if (this.readOnly && !DELETIONS.has(op.t) && !removesPcStats(op) && !quietensSound(op, this.#staged.state)) {
-      this.#refuse(key, wm, n, "quota", isBlockSave(op) ? BLOCKS_AT_QUOTA : "the room is full: it is at its storage quota, so only deletions are accepted");
+      this.#refuse(key, wm, n, "quota", isBlockSave(op) ? blocksAtQuota(viewer.role) : "the room is full: it is at its storage quota, so only deletions are accepted");
       return;
     }
     // The ids the device made for new things meet the gate (createIds.ts) after a receipt answered a resend and before
@@ -2313,7 +2313,7 @@ export class RoomActor {
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
     if (!size.ok) {
       const refused = withFloorWords(op, this.#staged.state, size, this.#sizes.refusedScene);
-      return isBlockSave(op) ? { ...refused, message: BLOCKS_ROOM_TOO_FULL } : refused;
+      return isBlockSave(op) ? { ...refused, message: blocksRoomTooFull(viewer.role) } : refused;
     }
     // Only the DM's ops grow players' memory by what they build: a player's door is touched, which drops its entries.
     // An op that asks is refused only past a cap, so it is scanned as applied: nearly every one goes on to its map step.
