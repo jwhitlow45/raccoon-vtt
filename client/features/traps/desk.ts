@@ -180,16 +180,22 @@ export function fallers(view: Pick<RoomState, "tokens">, card: Fall): string[] {
   return [card.tokenId, ...(card.riders ?? [])].filter((id) => ownEntry(view.tokens, id) !== undefined);
 }
 
+/** Whose creature a token is: its character's, shared by every token of it, else its own. */
+export function holderIdOf(view: Pick<RoomState, "tokens">, id: string): string {
+  const token = ownEntry(view.tokens, id);
+  return token ? holderOf(token) : `token:${id}`;
+}
+
 /**
  * The first token of each holder, which is all a card's words name: a
  * character shown by two tokens, one riding and one carried, is one
  * creature that fell once (LP47B-FALL-1). Apply still takes every token.
  */
+
 export function fallNamed(view: Pick<RoomState, "tokens">, ids: readonly string[]): string[] {
   const seen = new Set<string>();
   return ids.filter((id) => {
-    const token = ownEntry(view.tokens, id);
-    const holder = token ? holderOf(token) : `token:${id}`;
+    const holder = holderIdOf(view, id);
     if (seen.has(holder)) return false;
     seen.add(holder);
     return true;
@@ -211,19 +217,22 @@ const FALL_NAMES_KEPT = 200;
  * scene's tokens alone and no room-wide list of where each one is, so
  * nothing else names it, and after a reload such a card reads "A creature".
  */
-export type FallNames = Map<string, string>;
+export type FallNames = Map<string, { name: string; holder: string }>;
 
-function keepName(known: FallNames, id: string, name: string): void {
+function keepName(known: FallNames, id: string, name: string, holder: string): void {
   known.delete(id);
-  known.set(id, name);
+  known.set(id, { name, holder });
   if (known.size > FALL_NAMES_KEPT) known.delete(known.keys().next().value!);
 }
 
-/** "Giant", "Horse and Thorn": a gone card's names as `known` last read them. */
+/** "Giant", "Horse and Thorn": a gone card's names as `known` last read them, a holder named once as the card names it while its tokens are on the scene. */
 function knownNames(known: FallNames | undefined, ids: readonly string[]): { name: string; count: number } | null {
+  const seen = new Set<string>();
   const names = ids.flatMap((id) => {
-    const name = known?.get(id);
-    return name === undefined ? [] : [name];
+    const entry = known?.get(id);
+    if (entry === undefined || seen.has(entry.holder)) return [];
+    seen.add(entry.holder);
+    return [entry.name];
   });
   if (names.length === 0) return null;
   const shown = names.slice(0, FALL_NAMES_SHOWN);
@@ -246,7 +255,7 @@ export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall,
   const floor = landedOn(view, card);
   const tokenIds = fallers(view, card);
   if (tokenIds.length > 0) {
-    if (known) for (const id of tokenIds) keepName(known, id, nameOf(view, id, labels));
+    if (known) for (const id of tokenIds) keepName(known, id, nameOf(view, id, labels), holderIdOf(view, id));
     const named = fallNamed(view, tokenIds);
     const name = fallNames(view, named, labels);
     const dice = fallDice(card.ft);

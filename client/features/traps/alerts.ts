@@ -8,7 +8,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
-import { fallers, fallNamed, fallNames } from "./desk.ts";
+import { fallers, fallNamed, fallNames, holderIdOf } from "./desk.ts";
 import { placeName } from "../floors/words.ts";
 
 /*
@@ -112,8 +112,9 @@ export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scene
 /** The most fall cards one op toasts one by one. */
 export const FALL_TOASTS_MOST = 3;
 
-function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes">, viewing: string | null): FallAlert {
-  const creatures = cards.reduce((n, card) => n + 1 + (card.riders?.length ?? 0), 0);
+function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null): FallAlert {
+  // A character shown by two tokens is one creature, as a card names it (fallNamed), and a token the copy no longer holds counts for itself.
+  const creatures = new Set(cards.flatMap((card) => [card.tokenId, ...(card.riders ?? [])]).map((id) => holderIdOf(state, id))).size;
   // A new card past the room's cap drops the oldest in the same op (writeCard), so an op whose cards fill the room may have made more.
   const count = cards.length >= LIMITS.fallsPerRoom ? `${creatures} or more creatures` : `${creatures} creatures`;
   const sceneId = cards[0]!.sceneId;

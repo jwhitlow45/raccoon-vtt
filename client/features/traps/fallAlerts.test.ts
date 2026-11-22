@@ -69,10 +69,17 @@ describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
     assert.deepEqual(fallAlerts(crowd(4), view(), "upper", NO_LABELS), [{ text: "4 creatures fell to Ground floor.", show: { sceneId: "ground" } }]);
   });
 
+  test("a character shown by two tokens counts once in a crowd (LP47B-FALL-1)", () => {
+    const state = { ...view(), characters: { c1: character("c1", { name: "Thorn", ownerIds: ["p1"] }) } };
+    const tokens = { ...state.tokens, a: token("a", { sceneId: "ground", kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" } }), b: token("b", { sceneId: "ground", kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" } }) };
+    const cards = crowd(4).map((c, i) => ({ ...c, tokenId: ["a", "b", "c2", "c3"][i]! }));
+    assert.deepEqual(fallAlerts(cards, { ...state, tokens }, "ground", NO_LABELS), [{ text: "3 creatures fell to Ground floor." }]);
+  });
+
   test("each op on its own, and floors of more than one landing named as the floors below", () => {
     const two = [...crowd(4, 130), ...crowd(1, 140)];
     assert.deepEqual(fallAlerts(two, view(), "ground", NO_LABELS).map((a) => a.text), ["4 creatures fell to Ground floor.", "A creature no longer on the map fell 10 ft to Ground floor."]);
-    const mixed = [...crowd(3, 150), ...crowd(1, 150, { sceneId: "crypt" }).map((c) => ({ ...c, id: "150:9" }))];
+    const mixed = [...crowd(3, 150), ...crowd(1, 150, { sceneId: "crypt", tokenId: "c9" }).map((c) => ({ ...c, id: "150:9" }))];
     assert.deepEqual(fallAlerts(mixed, view(), "ground", NO_LABELS), [{ text: "4 creatures fell to the floors below." }]);
   });
 

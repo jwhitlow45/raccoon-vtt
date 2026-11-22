@@ -135,6 +135,21 @@ describe("fall cards on the DM desk", () => {
     assert.deepEqual(fallAlerts([c], twice, "upper", NO_LABELS).map((a) => a.text), ["Horse and Thorn fell 10 ft to Ground floor."]);
   });
 
+  test("two tokens of one character read as one name once both have left the scene shown too (LP47B-FALL-1)", () => {
+    const known: FallNames = new Map();
+    const withTwo = view({
+      tokens: {
+        ...view().tokens,
+        horse: token("horse", { sceneId: "ground", name: "Horse" }),
+        carried: token("carried", { sceneId: "ground", kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" } }),
+      },
+    });
+    const c = card({ tokenId: "horse", riders: ["thorn", "carried"] });
+    assert.equal(fallRead(withTwo, c, "upper", NO_LABELS, known).line, "Horse and Thorn fell 10 ft to Ground floor: each 1d6 Bludgeoning, Prone.");
+    const gone = fallRead(view({ tokens: {} }), c, "upper", NO_LABELS, known);
+    assert.deepEqual([gone.kind, gone.line, gone.region, gone.whose], ["gone", "Horse and Thorn fell 10 ft to Ground floor and are not on this scene now.", "Fall: Horse and Thorn", "Horse and Thorn's fall"]);
+  });
+
   test("Apply's page: the creature that fell, by the card's id, in the Dice panel", () => {
     const input = fallStart(card(), ["thorn"]);
     assert.deepEqual(input.source, { kind: "fall", fallId: "120:0", tokenIds: ["thorn"] });
