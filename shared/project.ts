@@ -5537,8 +5537,8 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
       const comma = at.indexOf(",");
       const tx = Number(at.slice(0, comma));
       const ty = Number(at.slice(comma + 1));
-      // A range's tiles are whole numbers, so a tile that reads as no number is never one of them.
-      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      // A range's tiles are whole numbers, so a tile that reads as no whole number is never one of them.
+      if (!Number.isInteger(tx) || !Number.isInteger(ty)) continue;
       box.tx0 = Math.min(box.tx0, tx);
       box.ty0 = Math.min(box.ty0, ty);
       box.tx1 = Math.max(box.tx1, tx);
