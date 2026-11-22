@@ -121,7 +121,7 @@ describe("the words by kind (3, D-261119-093)", () => {
         "Too big for these stairs. Squeeze to fit.",
         "Too big for these stairs.",
         "the stairs changed",
-        "Those squares already have stairs to Attic.",
+        "Those squares already have stairs to Attic on Cellar.",
         "That would change the ground under the stairs to Attic. Remove them first.",
         "That would block the stairs to Attic. Remove them first.",
         "Stairs join A and B. Remove them before putting a floor between.",
@@ -132,7 +132,7 @@ describe("the words by kind (3, D-261119-093)", () => {
         "Too big for this ladder. Squeeze to fit.",
         "Too big for this ladder.",
         "the ladder changed",
-        "Those squares already have a ladder to Attic.",
+        "Those squares already have a ladder to Attic on Cellar.",
         "That would change the ground under the ladder to Attic. Remove it first.",
         "That would block the ladder to Attic. Remove it first.",
         "A ladder joins A and B. Remove it before putting a floor between.",
@@ -145,7 +145,7 @@ describe("the words by kind (3, D-261119-093)", () => {
         LINK_WORDS.tooBigSqueeze(kind),
         LINK_WORDS.tooBig(kind),
         LINK_WORDS.changed(kind),
-        LINK_WORDS.overEnd(kind, "Attic"),
+        LINK_WORDS.overEnd(kind, "Attic", "Cellar"),
         LINK_WORDS.changeGround(kind, "Attic"),
         LINK_WORDS.block(kind, "Attic"),
         LINK_WORDS.between(kind, "A", "B"),
@@ -172,7 +172,7 @@ describe("the words by kind (3, D-261119-093)", () => {
         LINK_WORDS.tooBigSqueeze("opening"),
         LINK_WORDS.tooBig("opening"),
         LINK_WORDS.changed("opening"),
-        LINK_WORDS.overEnd("opening", "Ground floor"),
+        LINK_WORDS.overEnd("opening", "Ground floor", "Upper floor"),
         LINK_WORDS.notNextFor("opening"),
         LINK_WORDS.changeGround("opening", "Ground floor"),
         LINK_WORDS.block("opening", "Ground floor"),
@@ -189,7 +189,7 @@ describe("the words by kind (3, D-261119-093)", () => {
         "Too big for this opening. Squeeze to fit.",
         "Too big for this opening.",
         "the opening changed",
-        "Those squares already have an opening to Ground floor.",
+        "Those squares already have an opening to Ground floor on Upper floor.",
         "An opening joins a floor and the floor just above or below it.",
         "That would change the ground under the opening to Ground floor. Remove it first.",
         "That would block the opening to Ground floor. Remove it first.",
@@ -259,7 +259,7 @@ describe("the put rules by kind (3, 8.2)", () => {
     assert.equal(linkProblem(walled, stairs), null);
     assert.equal(linkProblem(walled, { ...stairs, pairRect: { x: 8, y: 3, w: 2, h: 1 } }), LINK_WORDS.wall("Upper floor"));
     const ladder = withStairs(tower(), { id: "l3", pairId: "l4", rect: { x: 12, y: 3, w: 1, h: 1 }, kind: "ladder" });
-    assert.equal(linkProblem(ladder, { ...stairs, pairRect: { x: 11, y: 3, w: 2, h: 1 } }), LINK_WORDS.overEnd("ladder", "Ground floor"));
+    assert.equal(linkProblem(ladder, { ...stairs, pairRect: { x: 11, y: 3, w: 2, h: 1 } }), LINK_WORDS.overEnd("ladder", "Ground floor", "Upper floor"));
     assert.equal(linkProblem(tower(), { ...stairs, pairRect: { x: 19, y: 3, w: 2, h: 1 } }), LINK_WORDS.pastEdge("Upper floor"));
   });
 });

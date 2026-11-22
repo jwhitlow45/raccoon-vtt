@@ -104,7 +104,7 @@ describe("ends moved and resized (8.2)", () => {
     const walled = run(withStairs(), { t: "build.edge", sceneId: UPPER, edges: [{ key: "9,5,w", feature: { kind: "wall" } }] });
     assert.equal(refusal(walled, update("l2", { rect: rect(8, 5, 2, 1) })), LINK_WORDS.wall("Upper floor"));
     const two = withStairs(withStairs(), { id: "l3", pairId: "l4", rect: rect(10, 10), kind: "ladder" });
-    assert.equal(refusal(two, update("l1", { rect: rect(10, 10, 2, 1) })), LINK_WORDS.overEnd("ladder", "Upper floor"));
+    assert.equal(refusal(two, update("l1", { rect: rect(10, 10, 2, 1) })), LINK_WORDS.overEnd("ladder", "Upper floor", "Ground floor"));
     assert.equal(refusal(withStairs(), update("l1", { rect: rect(19, 3, 2, 1) })), LINK_WORDS.pastEdge("Ground floor"));
   });
 

@@ -77,7 +77,7 @@ export const LINK_WORDS = {
   twoHeights: (floor: string) => `Those squares aren't one height on ${floor}.`,
   pit: (floor: string) => `A pit trap lies under those squares on ${floor}.`,
   pastEdge: (floor: string) => `${floor} ends before those squares.`,
-  overEnd: (kind: Kind, floor: string) => `Those squares already have ${KIND_WORDS[kind].bare} to ${floor}.`,
+  overEnd: (kind: Kind, to: string, on: string) => `Those squares already have ${KIND_WORDS[kind].bare} to ${to} on ${on}.`,
   tooMany: (scene: string) => `${scene} has ${LIMITS.floorLinksPerScene} stairs, ladders and openings, the most a scene can hold.`,
   notNext: "Stairs join a floor and the floor just above or below it.",
   /** notNext for any kind (phase 4, 3): "An opening joins a floor and the floor just above or below it." */
@@ -570,7 +570,7 @@ export function linkProblem(state: RoomState, draft: LinkDraft): string | null {
   for (const [floor, rect] of floors) if (!rectInScene(floor, rect)) return LINK_WORDS.pastEdge(floorName(state, floor.id));
   for (const [floor, rect] of floors) {
     const over = linksOn(state, floor.id).find((l) => l.id !== draft.id && l.id !== draft.pairId && rectsOverlap(l.rect, rect));
-    if (over) return LINK_WORDS.overEnd(over.kind, floorName(state, over.to));
+    if (over) return LINK_WORDS.overEnd(over.kind, floorName(state, over.to), floorName(state, floor.id));
   }
   if (pairsOn(state, here.id) >= LIMITS.floorLinksPerScene) return LINK_WORDS.tooMany(here.name);
   for (const [floor, rect] of floors) {

@@ -93,7 +93,7 @@ describe("the draft's reason", () => {
 
   test("squares over another end, and past the floor's edge, read 7.3's words", () => {
     const state = withStairs();
-    assert.equal(judgeDraft(state, GROUND, UPPER, { x: 4, y: 3, w: 2, h: 1 }, "stairs").problem, LINK_WORDS.overEnd("stairs", "Upper floor"));
+    assert.equal(judgeDraft(state, GROUND, UPPER, { x: 4, y: 3, w: 2, h: 1 }, "stairs").problem, LINK_WORDS.overEnd("stairs", "Upper floor", "Ground floor"));
     assert.equal(judgeDraft(state, GROUND, UPPER, { x: 19, y: 3, w: 2, h: 1 }, "ladder").problem, LINK_WORDS.pastEdge("Ground floor"));
   });
 

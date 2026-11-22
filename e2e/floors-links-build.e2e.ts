@@ -344,7 +344,7 @@ describe("raccoon-vtt stairs and ladders: the DM's building side", { timeout: 90
     };
 
     // Over another end: the pair FLRK-2 made a ladder.
-    await refuses({ x: 7, y: 5 }, { x: 7, y: 7 }, LINK_WORDS.overEnd("ladder", "Upper floor"), { x: 7, y: 7 });
+    await refuses({ x: 7, y: 5 }, { x: 7, y: 7 }, LINK_WORDS.overEnd("ladder", "Upper floor", "Ground floor"), { x: 7, y: 7 });
     // A wall inside the squares, on Ground floor.
     await ops.send({ t: "build.edge", sceneId: run.towerId, edges: [{ key: "15,3,w", feature: { kind: "wall" } }] });
     await refuses({ x: 14, y: 3 }, { x: 15, y: 3 }, LINK_WORDS.wall("Ground floor"));

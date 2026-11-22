@@ -49,7 +49,7 @@ describe("a drag of an end's body", () => {
     const base = withStairs(tower(), { rect: { x: 3, y: 3, w: 2, h: 1 } });
     assert.equal(judgeChange(base, end(base, "l1"), { rect: { x: 19, y: 3, w: 2, h: 1 } }), LINK_WORDS.pastEdge("Ground floor"));
     const two = withStairs(base, { id: "l3", pairId: "l4", rect: { x: 10, y: 10, w: 2, h: 1 } });
-    assert.equal(judgeChange(two, end(two, "l1"), { rect: { x: 10, y: 10, w: 2, h: 1 } }), LINK_WORDS.overEnd("stairs", "Upper floor"));
+    assert.equal(judgeChange(two, end(two, "l1"), { rect: { x: 10, y: 10, w: 2, h: 1 } }), LINK_WORDS.overEnd("stairs", "Upper floor", "Ground floor"));
   });
 
   test("onto a wall inside the new squares is refused in the wall's words for the floor it is on", () => {

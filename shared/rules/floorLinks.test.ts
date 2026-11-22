@@ -219,7 +219,7 @@ describe("the words (6.3, 7.3, 8)", () => {
     assert.equal(restoredLinkWords(run(gone, raise(GROUND, ["3,3", "4,3"], 5)), ends), "That would change the ground under the stairs to Upper floor.");
     assert.equal(restoredLinkWords(run(gone, raise(UPPER, ["3,3", "4,3"], 5)), ends), "That would change the ground under the stairs to Ground floor.");
     const other = run(gone, { t: "floorLink.put", link: { id: "m1", pairId: "m2", sceneId: GROUND, to: UPPER, rect: { x: 4, y: 3, w: 1, h: 1 }, kind: "ladder" } });
-    assert.equal(restoredLinkWords(other, ends), "Those squares already have a ladder to Upper floor.");
+    assert.equal(restoredLinkWords(other, ends), "Those squares already have a ladder to Upper floor on Ground floor.");
     for (const words of [LINK_WORDS.wall("Upper floor"), "That would change the ground under the stairs to Upper floor."]) assert.equal(isStairsRefusal(words), false, words);
   });
 
@@ -258,7 +258,7 @@ describe("the words (6.3, 7.3, 8)", () => {
   test("no em dash or semicolon in any of them", () => {
     const all = [
       LINK_WORDS.noStairs, LINK_WORDS.locked, LINK_WORDS.notNext,
-      ...(["stairs", "ladder"] as const).flatMap((k) => [LINK_WORDS.carried("Thorn", k), LINK_WORDS.tooBig(k), LINK_WORDS.tooBigSqueeze(k), LINK_WORDS.changed(k), LINK_WORDS.overEnd(k, "Attic"), LINK_WORDS.changeGround(k, "Attic"), LINK_WORDS.block(k, "Attic"), LINK_WORDS.between(k, "A", "B"), LINK_WORDS.pitUnder(k)]),
+      ...(["stairs", "ladder"] as const).flatMap((k) => [LINK_WORDS.carried("Thorn", k), LINK_WORDS.tooBig(k), LINK_WORDS.tooBigSqueeze(k), LINK_WORDS.changed(k), LINK_WORDS.overEnd(k, "Attic", "Cellar"), LINK_WORDS.changeGround(k, "Attic"), LINK_WORDS.block(k, "Attic"), LINK_WORDS.between(k, "A", "B"), LINK_WORDS.pitUnder(k)]),
     ];
     for (const words of all) assert.doesNotMatch(words, /[\u2014;]/, words);
   });
