@@ -4,10 +4,12 @@ import { linkDir, rectKeys, rectsOverlap, type LinkEnd } from "#shared/rules/flo
 import { footprintRect, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { hexKey } from "#shared/rules/hex.ts";
+import { rectHexes } from "#shared/rules/traps.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import type { IsoGround } from "../../canvas/relief/context.ts";
 import type { Box } from "../../lib/boardText.ts";
+import { hexOutline } from "../../lib/scene.ts";
 import { isometric, toView } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
 import { turnMoverId } from "../attach/turns.ts";
@@ -91,7 +93,7 @@ export type DrawSpace = Pick<IsoGround, "turn" | "ground"> | null;
  * view's box round its corners at the ground's height, as the ground plane
  * turns and squashes it.
  */
-function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean): Box {
+export function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean): Box {
   if (!iso) return pillReach({ ...p, scale });
   if (upright) {
     const v = viewPointOf(iso, p);
@@ -154,4 +156,119 @@ export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number },
   // Under the end can meet the marker too (Isometric on a phone), and then moving only trades one cover for another.
   const under: PillSpec = { ...pill, x: bottom.x, y: bottom.y, above: false, below: true };
   return meetsMarker(under) ? pill : under;
+}
+
+/** An end's squares as the board draws them: a box in cells, and on hexes the outline of its hexes. */
+export type Outline = { x: number; y: number; w: number; h: number; loop: number[] | null };
+
+export function outlineOf(g: Grid, rect: FloorLink["rect"]): Outline {
+  if (!isHex(g)) return { ...rect, loop: null };
+  const loop = hexOutline(g, rectHexes([rect]));
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i + 1 < loop.length; i += 2) {
+    x0 = Math.min(x0, loop[i]!);
+    x1 = Math.max(x1, loop[i]!);
+    y0 = Math.min(y0, loop[i + 1]!);
+    y1 = Math.max(y1, loop[i + 1]!);
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, loop };
+}
+
+/** Where the name hangs: over the middle of the top edge, or under the bottom edge's, and on hexes the extreme point or side nearest the middle, so it never points at the notch between two hexes. */
+export function nameAnchor(o: Outline, edge: "top" | "bottom" = "top"): { x: number; y: number } {
+  const mid = o.x + o.w / 2;
+  const y0 = edge === "top" ? o.y : o.y + o.h;
+  if (!o.loop) return { x: mid, y: y0 };
+  let best = { x: mid, y: y0 };
+  let gap = Infinity;
+  for (let i = 0; i + 1 < o.loop.length; i += 2) {
+    const x = o.loop[i]!;
+    const y = o.loop[i + 1]!;
+    if (Math.abs(y - y0) > 1e-9) continue;
+    if (Math.abs(x - mid) < gap) {
+      gap = Math.abs(x - mid);
+      best = { x, y };
+    }
+  }
+  return best;
+}
+
+/** An end's corners: a box's four, and on hexes the outline's points. */
+export function cornersOf(o: Outline): { x: number; y: number }[] {
+  if (o.loop) {
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i + 1 < o.loop.length; i += 2) out.push({ x: o.loop[i]!, y: o.loop[i + 1]! });
+    return out;
+  }
+  return [
+    { x: o.x, y: o.y },
+    { x: o.x + o.w, y: o.y },
+    { x: o.x, y: o.y + o.h },
+    { x: o.x + o.w, y: o.y + o.h },
+  ];
+}
+
+
+/** The squares an end covers as they draw in Isometric: the box round its corners at the ground's height, as a flat pill's is (drawnBox). */
+export function outlineBox(corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>): Box {
+  const seen = corners.map((c) => viewPointOf(iso, c));
+  return { x0: Math.min(...seen.map((c) => c.x)), y0: Math.min(...seen.map((c) => c.y)), x1: Math.max(...seen.map((c) => c.x)), y1: Math.max(...seen.map((c) => c.y)) };
+}
+
+function boxesMeet(a: Box, b: Box): boolean {
+  return Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
+}
+
+/** One end's pills before they are placed: the name and the height chip as the end would hang them alone (LinkLayer.tsx). */
+export type EndPills = { id: string; o: Outline; hole: boolean; first: PillSpec | null; dropPill: PillSpec | null };
+
+/** One end's pills where they hang: `pill` is its name, `chip` its height. */
+export type PlacedPills = { pill: PillSpec | null; chip: PillSpec | null };
+
+/**
+ * Every end's pills on the floor shown, placed in order of id so each reads
+ * the ones before it (LP47B-ISO-1). In Isometric a hole's pill hangs from
+ * a corner of its own, and two holes a square apart let one hole's name
+ * cover the other hole or its pills as the view turns. A hole's pill takes
+ * the first corner where it stands (`stands`), clears the turn's marker and
+ * meets neither another end's squares nor an earlier end's pill, else the
+ * first that meets no earlier pill, else it keeps the end's own edge. The later end is the one that moves, so the
+ * two never chase each other. Top-down hangs each pill from its fixed edge.
+ */
+export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean): Map<string, PlacedPills> {
+  const out = new Map<string, PlacedPills>();
+  const boxes = ends.map((e) => (iso ? outlineBox(cornersOf(e.o), iso) : null));
+  const pillBoxes: Box[][] = [];
+  ends.forEach((e, i) => {
+    const { o, hole, first, dropPill } = e;
+    // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
+    const placed = first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? stands(first) : true) : null;
+    const corners = cornersOf(o);
+    const squares: Box[] = [];
+    boxes.forEach((b, j) => {
+      if (b && j !== i) squares.push(b);
+    });
+    const pills: Box[] = [];
+    for (let j = 0; j < i; j++) pills.push(...pillBoxes[j]!);
+    const meets = (p: PillSpec, taken: readonly Box[]) => taken.some((b) => boxesMeet(drawnBox(p, scale, iso, true), b));
+    // Where no corner keeps off the other ends' squares too, as at a phone's scale where a pill is wider than the gap, keeping off the pills is what reads, and past that the corner a lone hole would take.
+    const tiers = [(p: PillSpec) => !meets(p, squares) && !meets(p, pills), (p: PillSpec) => !meets(p, pills), () => true];
+    const hung = (spec: PillSpec, hangs: "under" | "over", also: (p: PillSpec) => boolean) => {
+      for (const tier of tiers) {
+        const got = cornerPill(spec, corners, iso!, hangs, (p) => stands(p) && also(p) && tier(p));
+        if (got) return got;
+        // The end's own edge is a place too, and the one a lone hole keeps where no corner serves.
+        if (tier !== tiers.at(-1) && stands(spec) && also(spec) && tier(spec)) return spec;
+      }
+      return spec;
+    };
+    const pill = placed && hole && iso ? hung(placed, "under", (p) => !meetsTurnMarker(p, markers, scale, iso, true)) : placed;
+    const chip = dropPill && iso ? hung(dropPill, "over", () => true) : dropPill;
+    pillBoxes.push([pill, chip].flatMap((p) => (p && iso ? [drawnBox(p, scale, iso, stands(p))] : [])));
+    out.set(e.id, { pill, chip });
+  });
+  return out;
 }

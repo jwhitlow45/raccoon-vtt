@@ -3,8 +3,7 @@ import { memo, useMemo } from "react";
 import { Circle, Group, Path, Shape } from "react-konva";
 import type { FloorLink, Scene } from "#shared/model.ts";
 import { linkDir } from "#shared/rules/floorLinks.ts";
-import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { rectHexes } from "#shared/rules/traps.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { useStore } from "zustand";
 import { boardPillsSlot, usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -12,13 +11,12 @@ import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
 import { pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
-import { hexOutline } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
-import { clearOfMarkers, cornerPill, linkLabel, meetsTurnMarker, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { linkLabel, nameAnchor, notReachedLinks, outlineOf, placeEnds, quietLinks, type Outline } from "./linkMarks.ts";
 import { holeDrops } from "./openingView.ts";
 
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
@@ -76,11 +74,41 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const far = useMemo(() => new Set(notReached.split(" ")), [notReached]);
   const hushed = useMemo(() => new Set(quiet.split(" ")), [quiet]);
   const feet = useMemo(() => dropsById(drops), [drops]);
+  // The turn's marker is the one pill the name keeps off (clearOfMarkers), read from the markers' own key.
+  const markers = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
+  const iso = useIsoGround();
+  const { scale } = props;
+  const shown = trapNameShown(scale);
+  // Every end's pills are placed together, in order of id, so a hole's pills can keep off the other ends and the pills before them (placeEnds).
+  const ends = useMemo(
+    () =>
+      list.map((link) => {
+        const o = outlineOf(grid, link.rect);
+        const dir = linkDir({ scenes }, link);
+        const label = linkLabel({ scenes }, link);
+        // A hole's name hangs under it, so its height chip can sit on the rim over it.
+        const hole = link.kind === "opening" && dir === "down";
+        const at = nameAnchor(o, hole ? "bottom" : "top");
+        const marks = linkMarksLine({ hidden: link.hidden === true, notReached: far.has(link.id) });
+        const named = label !== null && !hushed.has(link.id) && shown;
+        const first: PillSpec | null = named
+          ? { name: label, ...(marks !== null ? { value: marks } : {}), x: at.x, y: at.y, ...(hole ? { below: true } : { above: true }), size: "map", small: true, maxLines: 1, stack: true }
+          : null;
+        const top = nameAnchor(o, "top");
+        const drop = feet.get(link.id) ?? null;
+        const dropPill: PillSpec | null = hole && drop !== null && named ? { value: dropChip(drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
+        return { id: link.id, o, hole, dir, first, dropPill };
+      }),
+    [list, scenes, grid, far, hushed, feet, shown],
+  );
+  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale })), [ends, markers, scale, iso]);
   return (
     <Group listening={false}>
-      {list.map((l) => (
-        <LinkMark key={l.id} link={l} scenes={scenes} grid={grid} scale={props.scale} notReached={far.has(l.id)} quiet={hushed.has(l.id)} drop={feet.get(l.id) ?? null} />
-      ))}
+      {list.map((l, i) => {
+        const end = ends[i]!;
+        const got = placed.get(l.id);
+        return <LinkMark key={l.id} link={l} o={end.o} dir={end.dir} hole={end.hole} pill={got?.pill ?? null} chip={got?.chip ?? null} scale={scale} />;
+      })}
     </Group>
   );
 });
@@ -123,59 +151,6 @@ function OpeningRim(props: { o: Outline; hole: boolean; color: string }) {
   );
 }
 
-/** An end's squares as the board draws them: a box in cells, and on hexes the outline of its hexes. */
-type Outline = { x: number; y: number; w: number; h: number; loop: number[] | null };
-
-function outlineOf(g: Grid, rect: FloorLink["rect"]): Outline {
-  if (!isHex(g)) return { ...rect, loop: null };
-  const loop = hexOutline(g, rectHexes([rect]));
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (let i = 0; i + 1 < loop.length; i += 2) {
-    x0 = Math.min(x0, loop[i]!);
-    x1 = Math.max(x1, loop[i]!);
-    y0 = Math.min(y0, loop[i + 1]!);
-    y1 = Math.max(y1, loop[i + 1]!);
-  }
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, loop };
-}
-
-/** Where the name hangs: over the middle of the top edge, or under the bottom edge's, and on hexes the extreme point or side nearest the middle, so it never points at the notch between two hexes. */
-function nameAnchor(o: Outline, edge: "top" | "bottom" = "top"): { x: number; y: number } {
-  const mid = o.x + o.w / 2;
-  const y0 = edge === "top" ? o.y : o.y + o.h;
-  if (!o.loop) return { x: mid, y: y0 };
-  let best = { x: mid, y: y0 };
-  let gap = Infinity;
-  for (let i = 0; i + 1 < o.loop.length; i += 2) {
-    const x = o.loop[i]!;
-    const y = o.loop[i + 1]!;
-    if (Math.abs(y - y0) > 1e-9) continue;
-    if (Math.abs(x - mid) < gap) {
-      gap = Math.abs(x - mid);
-      best = { x, y };
-    }
-  }
-  return best;
-}
-
-/** An end's corners: a box's four, and on hexes the outline's points. */
-function cornersOf(o: Outline): { x: number; y: number }[] {
-  if (o.loop) {
-    const out: { x: number; y: number }[] = [];
-    for (let i = 0; i + 1 < o.loop.length; i += 2) out.push({ x: o.loop[i]!, y: o.loop[i + 1]! });
-    return out;
-  }
-  return [
-    { x: o.x, y: o.y },
-    { x: o.x + o.w, y: o.y },
-    { x: o.x, y: o.y + o.h },
-    { x: o.x + o.w, y: o.y + o.h },
-  ];
-}
-
 /** A closed loop of points, x then y, as the path to clip or stroke. */
 function trace(ctx: Konva.Context, loop: readonly number[]): void {
   ctx.beginPath();
@@ -184,31 +159,10 @@ function trace(ctx: Konva.Context, loop: readonly number[]): void {
   ctx.closePath();
 }
 
-const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readonly<Record<string, Scene>>; grid: Grid; scale: number; notReached: boolean; quiet: boolean; drop: number | null }) {
-  const { link, scale } = props;
-  const o = useMemo(() => outlineOf(props.grid, link.rect), [props.grid, link.rect]);
-  const dir = linkDir({ scenes: props.scenes }, link);
-  const label = linkLabel({ scenes: props.scenes }, link);
-  // A hole's name hangs under it, so its height chip can sit on the rim over it.
-  const hole = link.kind === "opening" && dir === "down";
-  const at = nameAnchor(o, hole ? "bottom" : "top");
-  // The turn's marker is the one pill the name keeps off (clearOfMarkers), read from the markers' own key.
-  const markers = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
-  const marks = linkMarksLine({ hidden: link.hidden === true, notReached: props.notReached });
-  const shown = label !== null && !props.quiet && trapNameShown(scale);
-  const first: PillSpec | null = shown
-    ? { name: label, ...(marks !== null ? { value: marks } : {}), x: at.x, y: at.y, ...(hole ? { below: true } : { above: true }), size: "map", small: true, maxLines: 1, stack: true }
-    : null;
+const LinkMark = memo(function LinkMark(props: { link: FloorLink; o: Outline; dir: "up" | "down" | null; hole: boolean; pill: PillSpec | null; chip: PillSpec | null; scale: number }) {
+  const { link, scale, o, dir, hole, pill, chip } = props;
   const iso = useIsoGround();
-  // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
-  const placed = first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...first, scale }) : true) : null;
-  const top = nameAnchor(o, "top");
-  const dropPill: PillSpec | null = hole && props.drop !== null && shown ? { value: dropChip(props.drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
-  // On the isometric board a hole's pills hang from its lowest and highest corners on the screen, where they stand: a map edge can be the screen's top, and a pill under it covers a small hole.
-  const corners = useMemo(() => cornersOf(o), [o]);
   const standing = (p: PillSpec) => iso !== null && pillStands(iso.fog, { ...p, scale });
-  const pill = placed && hole && iso ? cornerPill(placed, corners, iso, "under", (p) => standing(p) && !meetsTurnMarker(p, markers, scale, iso, true)) ?? placed : placed;
-  const chip = dropPill && iso ? cornerPill(dropPill, corners, iso, "over", standing) ?? dropPill : dropPill;
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";
   const pills = [pill, chip].filter((p): p is PillSpec => p !== null);

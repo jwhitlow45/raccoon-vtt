@@ -3,10 +3,11 @@ import { describe, test } from "node:test";
 import { ATTIC, GROUND, UPPER, onThornsTurn, run, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
-import { clearOfMarkers, cornerPill, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { clearOfMarkers, cornerPill, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -167,5 +168,75 @@ describe("a hole's pills stand clear of the hole in Isometric", () => {
     assert.ok(second.x !== lowest.x || second.y !== lowest.y);
     assert.ok(screenY(0, second) <= screenY(0, lowest));
     assert.equal(cornerPill(name, corners, flat(0), "under", () => false), null);
+  });
+});
+
+describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)", () => {
+  const SCALE = 40;
+  const grid: Grid = { shape: "squares" } as Grid;
+  const flat = (turn: Turn) => ({ turn, ground: () => 0 });
+  const meet = (a: Box, b: Box) => Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
+  // A 2 by 2 hole and a 1 by 1 hole, each named and with its height chip.
+  const hole = (id: string, rect: { x: number; y: number; w: number; h: number }): EndPills => {
+    const o = outlineOf(grid, rect);
+    return {
+      id,
+      o,
+      hole: true,
+      first: { name: "Down to Ground floor", x: o.x + o.w / 2, y: o.y + o.h, below: true, size: "map", small: true, maxLines: 1, stack: true },
+      dropPill: { value: "10 ft down", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true },
+    };
+  };
+  const pillBoxes = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true));
+
+  test("at every turn no pill meets another end's squares or an earlier end's pill, where the lowest corner would have", () => {
+    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 12, y: 8, w: 1, h: 1 })];
+    let crowded = 0;
+    for (const turn of [0, 1, 2, 3] as const) {
+      const iso = flat(turn);
+      const placed = placeEnds(ends, [], SCALE, iso, () => true);
+      const own = ends.map((e) => outlineBox(cornersOf(e.o), iso));
+      const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, SCALE));
+      ends.forEach((_, i) => {
+        for (const b of boxes[i]!) {
+          ends.forEach((__, j) => {
+            if (j !== i) assert.ok(!meet(b, own[j]!), `turn ${turn}: end ${i}'s pill covers end ${j}'s squares`);
+          });
+          if (i > 0) for (const earlier of boxes[0]!) assert.ok(!meet(b, earlier), `turn ${turn}: end ${i}'s pill covers the first end's pill`);
+        }
+      });
+      // Without the rule: each end's pills where a lone hole puts them.
+      const lone = ends.map((e) => placeEnds([e], [], SCALE, iso, () => true).get(e.id)!);
+      const loneBoxes = lone.map((l) => [l.pill!, l.chip!].map((p) => drawnBox(p, SCALE, iso, true)));
+      if (loneBoxes[1]!.some((b) => meet(b, own[0]!) || loneBoxes[0]!.some((c) => meet(b, c))) || loneBoxes[0]!.some((b) => meet(b, own[1]!))) crowded++;
+    }
+    assert.ok(crowded > 0, "the example crowds at some turn without the rule, so the test proves something");
+  });
+
+  test("where a phone's scale leaves no corner fully clear, a pill covers no more than where a lone hole would put it", () => {
+    const tight = 20;
+    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 10, y: 7, w: 1, h: 1 })];
+    for (const turn of [0, 1, 2, 3] as const) {
+      const iso = flat(turn);
+      const own = outlineBox(cornersOf(ends[0]!.o), iso);
+      const covered = (placed: ReturnType<typeof placeEnds>) => {
+        const mine = pillBoxes(iso, placed, "b", tight);
+        const theirs = pillBoxes(iso, placed, "a", tight);
+        return mine.filter((b) => meet(b, own)).length + mine.flatMap((b) => theirs.filter((c) => meet(b, c))).length;
+      };
+      const both = placeEnds(ends, [], tight, iso, () => true);
+      const lone = placeEnds([ends[1]!], [], tight, iso, () => true);
+      // The lone hole is measured against the first hole's pills as they sit in the pair.
+      const alone = new Map([...both, ...lone]);
+      alone.set("b", lone.get("b")!);
+      assert.ok(covered(both) <= covered(alone), `turn ${turn}: the pair covers more than a lone hole's pills would`);
+    }
+  });
+
+  test("an end whose pills fit no corner keeps its own edge, and Top-down keeps each end's own edge", () => {
+    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 12, y: 8, w: 1, h: 1 })];
+    const blocked = placeEnds(ends, [], SCALE, flat(0), () => false);
+    for (const e of ends) assert.deepEqual(blocked.get(e.id), { pill: e.first, chip: e.dropPill });
+    assert.deepEqual(placeEnds(ends, [], SCALE, null, () => true).get("b"), { pill: ends[1]!.first, chip: ends[1]!.dropPill });
   });
 });
