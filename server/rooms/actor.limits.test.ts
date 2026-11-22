@@ -396,10 +396,10 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
   const createLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
 
   /**
-   * The fixture under `setting`, with the DM's hidden bandits and area and a
-   * locked statue, its
-   * reading at its widest filled with the DM's notes to near `line` and
-   * then padded until `past` holds of it.
+   * The fixture under `setting`, with the DM's hidden bandits and area, a
+   * locked statue and a creature whose name is hidden, its reading at its
+   * widest filled with the DM's notes to near `line` and then padded until
+   * `past` holds of it.
    */
   function room(setting: Setting, line: (state: RoomState) => number, past: (state: RoomState) => boolean) {
     const f = filled(4 * MIB);
