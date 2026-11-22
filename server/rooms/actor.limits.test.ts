@@ -531,7 +531,7 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
     assert.deepEqual(shown(h.actor.committed.state), ["all", false]);
   });
 
-  test("past the players' line, a name's reveal that meets the creature under its name, numbering both wolves, and its Undo are taken", async (t) => {
+  test("past the players' line, a name's reveal that meets the creature under its name, numbering both wolves, and its Undo are taken, and its Redo is refused", async (t) => {
     const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
     f.state.tokens.wolf1 = token("wolf1", { sceneId: f.sceneId, name: "Wolf", x: 8, y: 9, met: 2 });
     f.state.tokens.wolf2 = token("wolf2", { sceneId: f.sceneId, name: "Wolf", x: 9, y: 9, nameHidden: true, met: 3 });
@@ -546,5 +546,9 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
     const scope = dm.history().setup?.undo.head ? "setup" : "play";
     assert.equal(answer(await dm.send({ t: "undo", scope, head: dm.head(scope).id })), "taken", "its Undo");
     assert.equal(h.actor.committed.state.tokens.wolf2!.nameHidden, true);
+    // The Redo numbers the creature again, which meets the limit as an edit does (LP47FIXA-NAMEHIDE-UNDO).
+    const redo = answer(await dm.send({ t: "redo", scope, head: dm.head(scope, "redo").id }));
+    assert.match(redo, /^quota: could not redo changing Wolf: the room is full\./, "its Redo is refused");
+    assert.equal(h.actor.committed.state.tokens.wolf2!.nameHidden, true, "and the name stays hidden");
   });
 });
