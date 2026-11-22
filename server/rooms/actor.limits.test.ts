@@ -531,6 +531,27 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
     assert.deepEqual(shown(h.actor.committed.state), ["all", false]);
   });
 
+  test("past the players' line, a name's hide is taken and its Undo, which puts the earlier numbering back, is refused as an edit is (LP47FIXA-NAMEHIDE-UNDO)", async (t) => {
+    const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
+    f.state.tokens.wolf1 = token("wolf1", { sceneId: f.sceneId, name: "Wolf", x: 8, y: 9, met: 2 });
+    f.state.tokens.wolf2 = token("wolf2", { sceneId: f.sceneId, name: "Wolf", x: 9, y: 9, nameHidden: true, met: 3 });
+    const scene = f.state.scenes[f.sceneId]!;
+    f.state.scenes[f.sceneId] = { ...scene, numbers: { names: { ...scene.numbers?.names, Wolf: [2, 1], [shownName(f.state.tokens.wolf2)]: [3, 1] } } };
+    f.state.numbering = { rev: 0, groups: 3 };
+    const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+    const dm = await h.connect(f.dm);
+    const wolf2 = () => h.actor.committed.state.tokens.wolf2!;
+    assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(ROOM_FULL, "dm")}`, "past the players' line");
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: "wolf2", patch: { nameHidden: false } })), "taken", "the reveal");
+    assert.equal(wolf2().number, 2, "numbered under its name");
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: "wolf2", patch: { nameHidden: true } })), "taken", "the hide");
+    assert.equal(wolf2().number, 3, "the hide numbers it again under the name players read");
+    const scope = dm.history().setup?.undo.head ? "setup" : "play";
+    const undo = answer(await dm.send({ t: "undo", scope, head: dm.head(scope).id }));
+    assert.match(undo, /^quota: could not undo changing Wolf 2: the room is full\./, "its Undo puts the number back and is refused");
+    assert.deepEqual([wolf2().nameHidden, wolf2().number], [true, 3], "and nothing changes");
+  });
+
   test("past the players' line, a name's reveal that meets the creature under its name, numbering both wolves, and its Undo are taken, and its Redo is refused", async (t) => {
     const f = room(SETTINGS[0], () => createLine, (state) => farRoomBytes(state, false) > createLine);
     f.state.tokens.wolf1 = token("wolf1", { sceneId: f.sceneId, name: "Wolf", x: 8, y: 9, met: 2 });
