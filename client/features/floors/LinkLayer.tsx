@@ -16,7 +16,7 @@ import type { LayerProps } from "../layers.ts";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
-import { linkLabel, nameAnchor, notReachedLinks, outlineOf, placeEnds, quietLinks, type Outline } from "./linkMarks.ts";
+import { tokenSpots, linkLabel, nameAnchor, notReachedLinks, outlineOf, placeEnds, quietLinks, spotsOf, type Outline } from "./linkMarks.ts";
 import { holeDrops } from "./openingView.ts";
 
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
@@ -63,6 +63,9 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const quiet = useTreeShownView((s) => quietLinks(s.floorView, props.scene.id, props.role).join(" "));
   // Each hole's drop, read from the whole copy, which holds the floor below (openingView.ts).
   const drops = useTreeShownView((s) => (s.view ? holeDrops(s.view, props.scene.id) : ""));
+  // The tokens a hole's pills keep off, so a pill wider than its hole does not hide a creature standing beside it.
+  const spots = useTreeShownView((s) => tokenSpots(s.floorView, props.scene.id));
+  const tokens = useMemo(() => spotsOf(spots), [spots]);
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   const list = useMemo(
     () =>
@@ -101,7 +104,7 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
       }),
     [list, scenes, grid, far, hushed, feet, shown],
   );
-  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale })), [ends, markers, scale, iso]);
+  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens), [ends, markers, scale, iso, tokens]);
   return (
     <Group listening={false}>
       {list.map((l, i) => {

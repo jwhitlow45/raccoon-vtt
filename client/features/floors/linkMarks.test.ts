@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ATTIC, GROUND, UPPER, onThornsTurn, run, tower, withStairs } from "#shared/floorLinksTestutil.ts";
+import { ATTIC, GROUND, UPPER, onThornsTurn, run, thornToken, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
 import type { Box } from "../../lib/boardText.ts";
+import { theme } from "../../lib/theme.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillGeometry, pillReach } from "../measure/pillPlace.ts";
-import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
+import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, spotsOf, tokenSpots, type DrawSpace, type EndPills } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -157,17 +158,17 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
       dropPill: { value: "10 ft down", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true },
     };
   };
-  const pillBoxes = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true));
+  const pillBoxes = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true));
   /** A pill's body without its pointer, which always meets the rim it points at: what hides its own hole. */
-  const bodies = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) =>
+  const bodies = (iso: DrawSpace, placed: ReturnType<typeof placeEnds>, id: string, scale: number) =>
     [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => {
       const b = drawnBox(p, scale, iso, true, true);
-      const tip = pillGeometry({ ...p, scale }).pointer / scale;
+      const tip = iso ? pillGeometry({ ...p, scale }).pointer / scale : 0;
       return p.above ? { ...b, y1: b.y1 - tip } : { ...b, y0: b.y0 + tip };
     });
 
   /** The covers among two ends' pills and squares, each pill against the other end's pills and squares as they draw, and against its own hole. */
-  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: ReturnType<typeof flat>, scale: number): { others: number; own: number; pills: number; cost: number } => {
+  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: DrawSpace, scale: number): { others: number; own: number; pills: number; cost: number } => {
     const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, scale));
     let pills = 0;
     let squares = 0;
@@ -184,7 +185,7 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     // The search's order of costs (D-261122-112): a pill over a pill, then over its own hole, then over another end's squares.
     return { others: pills + squares, own, pills, cost: pills * 100 + own * 10 + squares };
   };
-  const alone = (ends: readonly EndPills[], iso: ReturnType<typeof flat>, scale: number) => new Map(ends.flatMap((e) => [...placeEnds([e], [], scale, iso, () => true)]));
+  const alone = (ends: readonly EndPills[], iso: DrawSpace, scale: number) => new Map(ends.flatMap((e) => [...placeEnds([e], [], scale, iso, () => true)]));
 
   test("where the pills can be placed clear, no pill meets another end's squares or pills or covers its own hole, at every turn", () => {
     const scale = 40;
@@ -280,7 +281,64 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     }
   });
 
-  test("an end whose pills fit no corner keeps its own edge, and Top-down keeps each end's own edge", () => {
+  test("in Top-down the holes' pills are placed together too: a lone hole's hang from its edges' middles, and two holes' pills keep off each other (LP47-POLISH)", () => {
+    const one = hole("a", { x: 4, y: 4, w: 2, h: 2 });
+    assert.deepEqual(placeEnds([one], [], 21.375, null, () => false).get("a"), { pill: one.first, chip: one.dropPill }, "a lone hole keeps its edges' middles, standing or not");
+    const named = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Undercroft", value: "Not reached yet" } });
+    let fewer = 0;
+    for (const ends of [
+      [hole("a", { x: 6, y: 4, w: 2, h: 2 }), hole("b", { x: 8, y: 6, w: 1, h: 1 })],
+      [named(hole("a", { x: 8, y: 4, w: 2, h: 2 })), named(hole("b", { x: 10, y: 7, w: 1, h: 1 }))],
+      [named(hole("a", { x: 6, y: 4, w: 2, h: 2 })), named(hole("b", { x: 8, y: 6, w: 1, h: 1 }))],
+    ]) {
+      for (const scale of [40, 21.375]) {
+        const together = coversOf(ends, placeEnds(ends, [], scale, null, () => false), null, scale);
+        const apart = coversOf(ends, alone(ends, null, scale), null, scale);
+        assert.ok(together.cost <= apart.cost, `${JSON.stringify(together)} together, ${JSON.stringify(apart)} at the edges' middles`);
+        if (together.pills < apart.pills) fewer++;
+      }
+    }
+    assert.ok(fewer > 0, "some layout covers fewer pills than at the edges' middles");
+  });
+
+  test("a hole's pills keep off a token beside the hole, in Top-down and in Isometric (LP47-POLISH)", () => {
+    const small = hole("a", { x: 8, y: 6, w: 1, h: 1 });
+    const name = (placed: ReturnType<typeof placeEnds>) => placed.get("a")!.pill!;
+    const chip = (placed: ReturnType<typeof placeEnds>) => placed.get("a")!.chip!;
+    // Top-down on a phone: a creature just under the hole, where its name hangs from the bottom edge's middle.
+    const under = { x: 8, y: 7, w: 1, h: 1 };
+    const scale = 21.375;
+    assert.deepEqual(name(placeEnds([small], [], scale, null, () => false)), small.first);
+    const moved = placeEnds([small], [], scale, null, () => false, [under]);
+    assert.notDeepEqual(name(moved), small.first, "the name moves off the creature");
+    assert.equal(coversOf([small], moved, null, scale).own, 0, "and not onto its own hole");
+    // At most the sliver a pointer's end reaches past its corner, where every spot off the hole meets the creature.
+    const box = drawnBox(name(moved), scale, null, true, true);
+    const sliver = Math.max(0, Math.min(box.x1, 9) - Math.max(box.x0, 8)) * Math.max(0, Math.min(box.y1, 8) - Math.max(box.y0, 7));
+    assert.ok(sliver <= theme.radius.sm / scale + 1e-9, `the name still covers ${sliver} of the creature's square`);
+    // Isometric: a creature where the chip stands over the highest corner.
+    const iso = flat(0);
+    const lone = chip(placeEnds([small], [], 40, iso, () => true));
+    const top = { x: 7, y: 5, w: 1, h: 1 };
+    const off = chip(placeEnds([small], [], 40, iso, () => true, [top]));
+    assert.ok(off.x !== lone.x || off.y !== lone.y || off.side !== lone.side, "the chip moves off the creature");
+    const token = outlineBox(cornersOf({ ...top, loop: null }), iso);
+    const over = (p: PillSpec) => {
+      const b = drawnBox(p, 40, iso, true, true);
+      return Math.max(0, Math.min(b.x1, token.x1) - Math.max(b.x0, token.x0)) * Math.max(0, Math.min(b.y1, token.y1) - Math.max(b.y0, token.y0));
+    };
+    assert.ok(over(off) < over(lone) / 4, `and covers ${over(off)} of it, against ${over(lone)} over the highest corner`);
+  });
+
+  test("the tokens a hole's pills keep off are each token's squares on the floor shown, and only there", () => {
+    const s = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }) } });
+    assert.deepEqual(spotsOf(tokenSpots(s, GROUND)), [{ x: 3, y: 3, w: 1, h: 1 }]);
+    assert.deepEqual(spotsOf(tokenSpots(s, UPPER)), [{ x: 6, y: 2, w: 1, h: 1 }]);
+    assert.deepEqual(spotsOf(tokenSpots(s, "nowhere")), []);
+    assert.deepEqual(spotsOf(tokenSpots(null, GROUND)), []);
+  });
+
+  test("an end whose pills fit no corner keeps its own edge, and Top-down keeps each end's own edge where nothing is covered", () => {
     const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 12, y: 8, w: 1, h: 1 })];
     const blocked = placeEnds(ends, [], SCALE, flat(0), () => false);
     for (const e of ends) assert.deepEqual(blocked.get(e.id), { pill: e.first, chip: e.dropPill });

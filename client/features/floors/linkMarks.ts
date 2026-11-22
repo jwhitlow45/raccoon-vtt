@@ -83,6 +83,34 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
     .sort();
 }
 
+/**
+ * The squares each token on a floor stands on, as one string so the
+ * board places its holes' pills again only when a token moves, which
+ * a hole's pills keep off (placeEnds).
+ */
+export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes"> | null | undefined, sceneId: string): string {
+  const scene = view ? ownEntry(view.scenes, sceneId) : undefined;
+  if (!view || !scene) return "";
+  const g = sceneGrid(scene);
+  return Object.values(view.tokens)
+    .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)
+    .map((t) => {
+      const r = footprintRect(g, t);
+      return `${r.x},${r.y},${r.w},${r.h}`;
+    })
+    .sort()
+    .join(" ");
+}
+
+/** The squares back from tokenSpots. */
+export function spotsOf(key: string): FloorLink["rect"][] {
+  if (key === "") return [];
+  return key.split(" ").map((part) => {
+    const [x, y, w, h] = part.split(",").map(Number);
+    return { x: x!, y: y!, w: w!, h: h! };
+  });
+}
+
 /** What places a pill in Isometric: the view's turn and the drawn ground. Null in Top-down. */
 export type DrawSpace = Pick<IsoGround, "turn" | "ground"> | null;
 
@@ -193,8 +221,8 @@ export function cornersOf(o: Outline): { x: number; y: number }[] {
   ];
 }
 
-/** The squares an end covers as they draw in Isometric: the box round its corners at the ground's height, as a flat pill's is (drawnBox). */
-export function outlineBox(corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>): Box {
+/** The squares an end covers as they draw: in Isometric the box round its corners at the ground's height, as a flat pill's is (drawnBox), and in Top-down the box round them. */
+export function outlineBox(corners: readonly { x: number; y: number }[], iso: DrawSpace): Box {
   const seen = corners.map((c) => viewPointOf(iso, c));
   return { x0: Math.min(...seen.map((c) => c.x)), y0: Math.min(...seen.map((c) => c.y)), x1: Math.max(...seen.map((c) => c.x)), y1: Math.max(...seen.map((c) => c.y)) };
 }
@@ -233,7 +261,7 @@ function hullOf(points: readonly { x: number; y: number }[]): { x: number; y: nu
  * along an edge is no cover. The bounding box would count the empty corners
  * of a diamond.
  */
-export function boxCoversOutline(box: Box, corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>): boolean {
+export function boxCoversOutline(box: Box, corners: readonly { x: number; y: number }[], iso: DrawSpace): boolean {
   const hull = hullOf(corners.map((c) => viewPointOf(iso, c)));
   if (hull.length < 3) return false;
   const E = 1e-9;
@@ -260,25 +288,29 @@ function covers(a: Box, b: Box, charge: number): number {
 const PILL_ON_PILL = 1_000_000;
 const PILL_ON_OWN = 300_000;
 const PILL_ON_SQUARES = 100_000;
+/** A creature under a pill is hidden as a hole's squares are (LP47-POLISH). */
+const PILL_ON_TOKEN = PILL_ON_SQUARES;
 
 /**
- * Every end's pills on the floor shown (LP47B-ISO-1). In Isometric a
- * hole's pill hangs from a corner of its own, and holes near each other
- * let one's name cover the other hole or its pills as the view turns. The
+ * Every end's pills on the floor shown (LP47B-ISO-1). A hole's pills are
+ * wider than a small hole, and holes near each other let one's name cover
+ * the other hole or its pills, or a creature beside it (LP47-POLISH). The
  * holes' pills are placed together: each name hangs under, and each chip
- * over, one corner of its hole where it stands (`stands`) and clears the
- * turn's marker, centered or reaching outward from the hole, or keeps the
- * end's own edge, and the choice with the fewest covers wins: a pill over
- * a pill counts most, then one over its own hole, then one over another
- * end's squares, then the least area (D-261122-112). The search keeps the
- * first of equal choices, so a lone hole's pills hang where its corners
- * put them: a name under the lowest corner on the screen and a chip over
- * the highest. Ends that are not holes, and every end in Top-down, keep
- * their own edge, and the holes keep off their pills.
+ * over, one corner of its hole where it stands (`stands`, always in
+ * Top-down) and clears the turn's marker, centered or reaching outward
+ * from the hole, or keeps the end's own edge, and the choice with the
+ * fewest covers wins: a pill over a pill counts most, then one over its
+ * own hole, then one over another end's squares or a token, then the
+ * least area (D-261122-112). The search keeps the first of equal choices,
+ * so a lone hole's pills hang where they would alone: in Isometric a name
+ * under the lowest corner on the screen and a chip over the highest, and
+ * in Top-down from the middles of its bottom and top edges. Ends that are
+ * not holes keep their own edge, and the holes keep off their pills.
  */
-export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean): Map<string, PlacedPills> {
+export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = []): Map<string, PlacedPills> {
   const out = new Map<string, PlacedPills>();
-  const squares = ends.map((e) => (iso ? outlineBox(cornersOf(e.o), iso) : null));
+  const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
+  const standing = tokens.map((r) => outlineBox(cornersOf({ ...r, loop: null }), iso));
   type Cand = { spec: PillSpec; box: Box; solo: number };
   type Slot = { end: number; chip: boolean; cands: Cand[] };
   const slots: Slot[] = [];
@@ -288,11 +320,13 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
     // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
     return first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? stands(first) : true) : null;
   });
+  // Every pill stands in Top-down.
+  const fits = (p: PillSpec) => iso === null || stands(p);
   ends.forEach((e, i) => {
     const edge = edges[i]!;
-    if (!(e.hole && iso)) {
+    if (!e.hole) {
       out.set(e.id, { pill: edge, chip: e.dropPill });
-      for (const p of [edge, e.dropPill]) if (p && iso) fixed.push(drawnBox(p, scale, iso, stands(p), true));
+      for (const p of [edge, e.dropPill]) if (p) fixed.push(drawnBox(p, scale, iso, fits(p), true));
       return;
     }
     out.set(e.id, { pill: edge, chip: e.dropPill });
@@ -311,11 +345,12 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
         const x = seen[corners.indexOf(c)]!;
         return x < mid - 1e-9 ? [at(c, "left")] : x > mid + 1e-9 ? [at(c, "right")] : [];
       });
-      const specs = [...ordered.map(({ c }) => at(c)), ...outward].filter((p) => stands(p) && (chip || !meetsTurnMarker(p, markers, scale, iso, true)));
-      // The end's own edge is the last choice, and the only one where no corner serves.
-      if (specs.length === 0 || stands(spec)) specs.push(spec);
+      const specs = [...ordered.map(({ c }) => at(c)), ...outward].filter((p) => fits(p) && (chip || !meetsTurnMarker(p, markers, scale, iso, true)));
+      // In Isometric the end's own edge is the last choice, and the only one where no corner serves. In Top-down it is the first, as a lone hole's name and chip hang from its edges' middles.
+      if (!iso) specs.unshift(spec);
+      else if (specs.length === 0 || stands(spec)) specs.push(spec);
       const cands = specs.map((s2) => {
-        const up = stands(s2);
+        const up = fits(s2);
         const box = drawnBox(s2, scale, iso, up, true);
         // The pointer always meets the rim it points at, so only the body can hide the hole.
         const tip = up ? pillGeometry({ ...s2, scale }).pointer / scale : 0;
@@ -326,10 +361,10 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
       slots.push({ end: i, chip, cands });
     }
   });
-  // What a pill covers apart from the other holes' pills: another end's squares and the pills that stay put.
+  // What a pill covers apart from the other holes' pills: another end's squares, the tokens, and the pills that stay put.
   for (const slot of slots) {
     for (const c of slot.cands) {
-      c.solo += squares.reduce((n, b, j) => (b && j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) + fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
+      c.solo += squares.reduce((n, b, j) => (j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) + standing.reduce((n, b) => n + covers(c.box, b, PILL_ON_TOKEN), 0) + fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
     }
     // Cheapest first, so the first path is already good when the node limit cuts the search short. The sort is stable, so equal choices keep their corner order.
     slot.cands.sort((a, b) => a.solo - b.solo);
