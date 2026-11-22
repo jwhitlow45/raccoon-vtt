@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Stamp, Viewer } from "#shared/model.ts";
-import { applyChanges, projectState, rankedStamp, stableStringify, stampOrder, stampRanks, type ProjectedState } from "#shared/project.ts";
+import { applyChanges, diffProjection, hashValue, projectState, rankedStamp, stableStringify, stampOrder, stampRanks, type ProjectedState } from "#shared/project.ts";
 import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, env, rng, room } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
-import { buildSnapshot, newStampTable, publishBatch, rankStamps, stampRanksOf, type StampTable } from "./fanout.ts";
+import { buildSnapshot, newStampTable, publishBatch, rankStamps as rankStampsOver, stampRanksOf, type RankedProjection, type StampTable } from "./fanout.ts";
+
+/** The projection a connection reads once the stamps it holds at another rank take their place, key for key in the projection's order. */
+function viewed(r: RankedProjection): ReadonlyMap<EntityKey, unknown> {
+  return r.over === undefined ? r.projection : new Map([...r.projection].map(([key, value]) => [key, r.over!.get(key) ?? value] as const));
+}
+const rankStamps = (table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>) => viewed(rankStampsOver(table, next, more));
 
 /**
  * A player's stamps through the server's fan-out: each connection keeps
@@ -144,11 +150,12 @@ describe("ranking one connection's candidates", () => {
     const table = newStampTable();
     const next = new Map<EntityKey, unknown>([[keys.log("1:0"), { id: "1:0" }]]);
     let asked = 0;
-    const out = rankStamps(table, next, () => {
+    const out = rankStampsOver(table, next, () => {
       asked++;
       return new Map();
     });
-    assert.equal(out, next);
+    assert.equal(out.projection, next);
+    assert.equal(out.over, undefined);
     assert.equal(asked, 0);
   });
 
@@ -177,7 +184,7 @@ describe("ranking one connection's candidates", () => {
   });
 });
 
-describe("a large projection is copied only for a stamp that has to change", () => {
+describe("a large projection is never copied for the stamps that take their rank", () => {
   const source = (id: string, z: number, sceneId = "s1") => rankedStamp(stamp(id, z, { sceneId }), 0);
   const large = (stamps: [string, Stamp][]): Map<EntityKey, unknown> => {
     const next = new Map<EntityKey, unknown>();
@@ -186,23 +193,50 @@ describe("a large projection is copied only for a stamp that has to change", () 
     return next;
   };
 
-  test("stamps already at their ranks leave the projection as it was, and one that is not copies it and leaves the class's alone", () => {
+  test("a lone stamp at its rank leaves the projection and its overlay as they were", () => {
     const table = newStampTable();
     const first = large([["a", source("a", 1)]]);
-    assert.equal(rankStamps(table, first, () => new Map()), first, "the lone stamp ranks 0, the rank its projection holds");
+    const out = rankStampsOver(table, first, () => new Map());
+    assert.equal(out.projection, first, "the lone stamp ranks 0, the rank its projection holds");
+    assert.equal(out.over, undefined);
     const again = large([["a", source("a", 1)]]);
-    assert.equal(rankStamps(table, again, () => new Map()), again);
-    // A second stamp below it ranks `a` 1, so the class's `a` at rank 0 has to change.
-    const shared = large([["b", source("b", 0)]]);
-    const before = [...shared];
-    const out = rankStamps(table, shared, (more) => new Map(more.map((key) => [key, source(key.slice(6), 1)])));
-    assert.notEqual(out, shared);
-    assert.deepEqual([...shared], before, "the class's projection is never changed");
-    assert.equal((out.get(keys.stamp("a")) as Stamp).z, 1);
-    assert.equal((out.get(keys.stamp("b")) as Stamp).z, 0);
+    assert.equal(rankStampsOver(table, again, () => new Map()).projection, again);
   });
 
-  /** The version before the copy became lazy: the whole projection copied once any stamp is in it. Its answers are the oracle. */
+  test("a whole batch of several stamps keeps the shared projection as it is, and the stamps at another rank come back as the overlay, equal in bytes to a copy", () => {
+    const table = newStampTable();
+    const whole = large([["a", source("a", 1)], ["b", source("b", 2)], ["c", source("c", 3)]]);
+    const before = [...whole];
+    const out = rankStampsOver(table, whole, () => new Map());
+    assert.equal(out.projection, whole, "no copy of the large projection");
+    assert.deepEqual([...whole], before, "the class's projection is never changed");
+    assert.deepEqual([...out.over!.keys()], [keys.stamp("b"), keys.stamp("c")], "only the stamps that are not at rank 0");
+    assert.equal(out.over!.get(keys.stamp("b")), rankedStamp(whole.get(keys.stamp("b")) as Stamp, 1), "the same copy every connection reuses");
+    // What a copy would have held.
+    const copy = new Map(whole);
+    for (const [key, value] of out.over!) copy.set(key, value);
+    const diff = diffProjection(new Map(), whole, hashValue, out.over);
+    const want = diffProjection(new Map(), copy, hashValue);
+    assert.equal(JSON.stringify(diff.changes), JSON.stringify(want.changes));
+    assert.equal(JSON.stringify([...diff.held]), JSON.stringify([...want.held]));
+    // The next whole batch for a connection that holds those, the way they change nothing.
+    const held = diff.held as Map<EntityKey, never>;
+    const again = diffProjection(held, whole, hashValue, rankStampsOver(table, whole, () => new Map()).over);
+    assert.deepEqual(again.changes, []);
+  });
+
+  test("a stamp that joins through `more` is the one case that copies, sorted as the candidates are", () => {
+    const table = newStampTable();
+    rankStampsOver(table, large([["a", source("a", 1)], ["c", source("c", 9)]]), () => new Map());
+    const next = large([["b", source("b", 5)]]);
+    const out = rankStampsOver(table, next, (more) => new Map(more.map((key) => [key, source(key.slice(6), 9)])));
+    assert.notEqual(out.projection, next);
+    assert.equal([...next.keys()].includes(keys.stamp("c")), false, "the class's projection is never changed");
+    const order = [...out.projection.keys()].filter((key) => key.startsWith("stamp:"));
+    assert.deepEqual(order, [...order].sort());
+  });
+
+  /** The version before the overlay: the whole projection copied once any stamp is in it. Its answers are the oracle. */
   function copiedAlways(table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>): ReadonlyMap<EntityKey, unknown> {
     const own = (id: string, sceneId: string, order: number) => {
       let orders = table.scenes.get(sceneId);
@@ -271,16 +305,21 @@ describe("a large projection is copied only for a stamp that has to change", () 
 
   const tableOf = (t: StampTable) => JSON.stringify([[...t.scenes].map(([k, v]) => [k, [...v]]), [...t.where], [...t.ranks]]);
 
-  test("random batches give the answers the always-copying version gave, key for key in order, and the same tables", () => {
+  test("random batches, whole or not, send the bytes the always-copying version sent, in the same order, and leave the same tables and held maps", () => {
     for (let seed = 1; seed <= 150; seed++) {
       const r = rng(seed);
       const lazy = newStampTable();
       const eager = newStampTable();
+      let heldLazy = new Map<EntityKey, never>();
+      let heldEager = new Map<EntityKey, never>();
       /** What the room holds: id to its stored order and scene, or absent. */
       const stored = new Map<string, { z: number; sceneId: string }>();
       for (let step = 0; step < 12; step++) {
         const batch = new Map<EntityKey, unknown>();
         for (let i = Math.floor(r() * 30); i > 0; i--) batch.set(keys.log(`${seed}:${step}:${i}`), { id: `${i}` });
+        // A whole batch brings every stamp the room holds, at rank 0, as the class's projection does.
+        const whole = r() < 0.4;
+        for (const [id, have] of stored) if (whole) batch.set(keys.stamp(id), source(id, have.z, have.sceneId));
         for (let i = Math.floor(r() * 4); i > 0; i--) {
           const id = `st${Math.floor(r() * 7)}`;
           if (r() < 0.25) {
@@ -298,10 +337,17 @@ describe("a large projection is copied only for a stamp that has to change", () 
           const have = stored.get(key.slice(6));
           return [key, have ? source(key.slice(6), have.z, have.sceneId) : null] as const;
         }));
-        const got = rankStamps(lazy, batch, more);
+        const got = rankStampsOver(lazy, batch, more);
         const want = copiedAlways(eager, batch, more);
-        assert.deepEqual([...got].map(([k, v]) => [k, JSON.stringify(v)]), [...want].map(([k, v]) => [k, JSON.stringify(v)]), `seed ${seed} step ${step}`);
+        const shared = [...batch];
+        const diffLazy = diffProjection(heldLazy, got.projection, hashValue, got.over);
+        const diffEager = diffProjection(heldEager, want, hashValue);
+        assert.equal(JSON.stringify(diffLazy.changes), JSON.stringify(diffEager.changes), `seed ${seed} step ${step}: the changes sent`);
+        assert.equal(JSON.stringify([...diffLazy.held]), JSON.stringify([...diffEager.held]), `seed ${seed} step ${step}: the held map`);
         assert.equal(tableOf(lazy), tableOf(eager), `seed ${seed} step ${step}: tables`);
+        assert.deepEqual([...batch], shared, `seed ${seed} step ${step}: the class's projection is untouched`);
+        heldLazy = diffLazy.held as Map<EntityKey, never>;
+        heldEager = diffEager.held as Map<EntityKey, never>;
       }
     }
   });

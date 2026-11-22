@@ -5938,12 +5938,16 @@ export type ProjectionDiff<E extends HeldEntry = HeldEntry> = { changes: Change[
  * now null. Returns the held map as it should be after the send. The input
  * map is not changed. `hash` lets the server hash a value that several
  * connections receive once per batch, such as a sight tile every player
- * gets (docs/design/design-v1-maps-vision.md 4.3.5).
+ * gets (docs/design/design-v1-maps-vision.md 4.3.5). `over` holds values
+ * for keys of `next` that the connection reads in their place, so a large
+ * projection shared by a class is not copied to change a few: each key is
+ * read at its place in `next`, as it would be in a copy.
  */
-export function diffProjection<E extends HeldEntry>(held: ReadonlyMap<EntityKey, E>, next: ReadonlyMap<EntityKey, unknown>, hash: (projected: unknown) => string = hashValue): ProjectionDiff<E> {
+export function diffProjection<E extends HeldEntry>(held: ReadonlyMap<EntityKey, E>, next: ReadonlyMap<EntityKey, unknown>, hash: (projected: unknown) => string = hashValue, over?: ReadonlyMap<EntityKey, unknown>): ProjectionDiff<E> {
   const out = new Map<EntityKey, E | string>(held);
   const changes: Change[] = [];
-  for (const [key, value] of next) {
+  for (const [key, shared] of next) {
+    const value = over?.get(key) ?? shared;
     if (value === null || value === undefined) {
       if (out.has(key)) {
         out.delete(key);

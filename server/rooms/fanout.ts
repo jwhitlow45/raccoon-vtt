@@ -448,16 +448,22 @@ function dropStamp(table: StampTable, id: string, sceneId: SceneId): void {
  * whose rank moved joins the projection, projected through `more`. Then
  * every stamp in the projection takes its current rank, so a stamp edited
  * out of sight at rank 1 is compared at rank 1 and never at 0. The table is
- * changed in place. The projection is copied only when a stamp in it has to
- * change (a rank that is not the one it holds, or one projected again), since
- * its class shares it. A stamp already at its rank is the same object, so a
- * large projection with stamps at their ranks is handed back as it was.
+ * changed in place.
+ *
+ * The class shares its projection, so it is never changed and, mostly, never
+ * copied: the stamps at a rank other than the one they hold come back as
+ * `over`, which `diffProjection` reads before the projection, in the
+ * projection's own order. A whole batch brings every stamp of a scene at rank
+ * 0, so a scene with two or more stamps has some to change, and the large
+ * projection around them stays as it was. Only a stamp that joins the
+ * projection through `more` changes its key set, and that copy is sorted
+ * again, as the candidates are.
  */
-export function rankStamps(table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>): ReadonlyMap<EntityKey, unknown> {
-  let out: Map<EntityKey, unknown> | null = null;
-  const edit = (): Map<EntityKey, unknown> => (out ??= new Map(next));
+export type RankedProjection = { projection: ReadonlyMap<EntityKey, unknown>; over?: ReadonlyMap<EntityKey, Stamp> };
+
+export function rankStamps(table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>): RankedProjection {
+  let joined: Map<EntityKey, unknown> | null = null;
   let sawStamp = false;
-  let grown = false;
   let facts: Iterable<[EntityKey, unknown]> = next;
   while (true) {
     const dirty = new Set<SceneId>();
@@ -483,34 +489,34 @@ export function rankStamps(table: StampTable, next: ReadonlyMap<EntityKey, unkno
       putStamp(table, id, stamp.sceneId, order);
       dirty.add(stamp.sceneId);
     }
-    if (!sawStamp) return next;
+    if (!sawStamp) return { projection: next };
     const moved: EntityKey[] = [];
     for (const sceneId of dirty) {
       for (const [id, rank] of stampRanks(table.scenes.get(sceneId) ?? new Map())) {
         if (table.ranks.get(id) === rank) continue;
         table.ranks.set(id, rank);
         const key = keys.stamp(id);
-        if (!(out ?? next).has(key)) moved.push(key);
+        if (!(joined ?? next).has(key)) moved.push(key);
       }
     }
     if (moved.length === 0) break;
     // A stamp the batch did not touch projects as before, so this changes nothing in the table but its rank, unless the copy and the table had drifted.
     const projected = more(moved);
-    for (const [key, value] of projected) edit().set(key, value);
-    grown = true;
+    joined ??= new Map(next);
+    for (const [key, value] of projected) joined.set(key, value);
     facts = projected;
   }
+  const over = new Map<EntityKey, Stamp>();
   // In key order, as the candidates are, so where a change sits never tells whether the batch touched it.
-  if (grown) out = new Map([...(out ?? next)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  const ranked = out ?? next;
-  for (const [key, value] of ranked) {
+  const whole = joined === null ? next : new Map([...joined].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  for (const [key, value] of whole) {
     if (!value || !key.startsWith("stamp:")) continue;
     const rank = table.ranks.get(key.slice("stamp:".length));
     if (rank === undefined) continue;
     const copy = rankedStamp(value as Stamp, rank);
-    if (copy !== value) edit().set(key, copy);
+    if (copy !== value) over.set(key, copy);
   }
-  return out ?? next;
+  return over.size === 0 ? { projection: whole } : { projection: whole, over };
 }
 
 /*
@@ -597,13 +603,14 @@ export function publishBatch(
       known.set(cls, next);
     }
     let mine: ReadonlyMap<EntityKey, unknown> = next;
+    let over: ReadonlyMap<EntityKey, Stamp> | undefined;
     let table: StampTable | null = null;
     if (conn.viewer.role !== "dm") {
       table = stampTables.get(conn.held) ?? newStampTable();
       const floors = held.get(conn)!;
-      mine = rankStamps(table, next, (more) => projector.project(conn, more, floors));
+      ({ projection: mine, over } = rankStamps(table, next, (more) => projector.project(conn, more, floors)));
     }
-    const diff = diffProjection(conn.held, mine, hashOf);
+    const diff = diffProjection(conn.held, mine, hashOf, over);
     conn.held = diff.held;
     if (table) stampTables.set(diff.held, table);
     const key = conn.key;
