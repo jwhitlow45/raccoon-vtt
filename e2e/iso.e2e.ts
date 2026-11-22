@@ -11,6 +11,7 @@ import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 import type { Op } from "../shared/protocol.ts";
 import { placedOnHex } from "../shared/rules/footprint.ts";
+import { standsInScene } from "../shared/rules/sceneEdge.ts";
 import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
 /**
@@ -3013,6 +3014,93 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       throw new Error(`${err.message}: ${JSON.stringify(dmWalls)}`);
     });
     await shots.take(dm, "dg2m-iso-4-secret-door-dm");
+  });
+
+  test("DROPMAP-1. a token dropped far past the map's edge lands inside it, by Pat's finger in Isometric and Top-down, by a mouse on hex columns, and a changed page cannot send it there", async () => {
+    const patId = patSocket.you!.memberId;
+    const before = patSocket.state!.meta.playerSceneId!;
+    const squares = { id: uuidv7(), bounds: { w: 12, h: 8 }, bree: uuidv7() };
+    const hexes = { id: uuidv7(), bounds: { w: 14, h: 9 }, grum: uuidv7() };
+    const hexGrid: HexGrid = { shape: "hex", orient: "columns" };
+    await ops.send({ t: "scene.create", scene: { id: squares.id, name: "The ledge", bounds: squares.bounds, fogEnabled: false } });
+    await ops.send({ t: "scene.create", scene: { id: hexes.id, name: "The hex ledge", bounds: hexes.bounds, fogEnabled: false, gridShape: "hexColumns" } });
+    const grumAt = placedOnHex(hexGrid, { size: "medium", x: 0, y: 0 }, { col: 6, row: 4 });
+    await ops.send(tokenOp(squares.bree, { sceneId: squares.id, kind: "npc", name: "Bree", x: 6, y: 4, ownerIds: [patId], disposition: "ally" }));
+    await ops.send(tokenOp(hexes.grum, { sceneId: hexes.id, kind: "npc", name: "Grum", x: grumAt.x, y: grumAt.y, ownerIds: [patId], disposition: "ally" }));
+    const topDown = async () => {
+      await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("topDown"));
+      await untilShown(pat, "top-down");
+    };
+    const goTo = async (id: string) => {
+      await ops.send({ t: "room.setPlayerScene", sceneId: id });
+      await waitFor("Pat on the scene", () => (patSocket.state?.meta.playerSceneId === id ? true : null));
+      await pat.waitForTimeout(500);
+    };
+    // Pat's own copy, which the server answers: the DM's page holds the scene it shows.
+    const standsAt = (id: string) => patSocket.state?.tokens[id];
+    const settled = (id: string, moved: () => boolean) => waitFor("the move taken", () => (moved() ? standsAt(id) : null));
+    const viewport = pat.viewportSize()!;
+    const onScreen = (p: { x: number; y: number }) => p.x > 4 && p.y > 4 && p.x < viewport.width - 4 && p.y < viewport.height - 4;
+    const cdp = await patContext.newCDPSession(pat);
+    try {
+      // Isometric, by touch: down past the map's near corner, as far as the screen holds.
+      await goTo(squares.id);
+      await isoOn(pat, 0);
+      const from = await isoPoint(pat, { x: 6.5, y: 4.5 }, 0);
+      let target: { x: number; y: number } | null = null;
+      let y = 12.5;
+      for (; y > squares.bounds.h + 0.6 && !target; y -= 1) {
+        const p = await isoPoint(pat, { x: 6.5, y }, 0);
+        if (onScreen(p)) target = p;
+      }
+      assert.ok(target, "a point past the map's edge shows on the phone's screen");
+      await touchDrag(pat, cdp, from, target, squares.bree);
+      const dropped = await settled(squares.bree, () => standsAt(squares.bree)?.y !== 4);
+      assert.ok(dropped!.y <= squares.bounds.h - 1 && dropped!.y >= 0 && dropped!.x >= 0 && dropped!.x <= squares.bounds.w - 1, `Isometric touch: Bree lands inside, on ${dropped!.x}, ${dropped!.y}`);
+      assert.equal(dropped!.y, squares.bounds.h - 1, "on the edge it was dragged past");
+      await shots.take(pat, "dropmap-1-iso-touch");
+
+      // Top-down, by touch: up past the top edge.
+      await topDown();
+      const bree = await pagePoint(pat, squares.bounds, { x: dropped!.x + 0.5, y: dropped!.y + 0.5 });
+      const above = await pagePoint(pat, squares.bounds, { x: dropped!.x + 0.5, y: -2.5 });
+      assert.ok(onScreen(above), "a point above the map shows on the phone's screen");
+      await touchDrag(pat, cdp, bree, above, squares.bree);
+      const up = await settled(squares.bree, () => standsAt(squares.bree)?.y === 0);
+      assert.ok(up!.x >= 0 && up!.x <= squares.bounds.w - 1, `Top-down touch: Bree on ${up!.x}, ${up!.y}`);
+      await shots.take(pat, "dropmap-1-top-down-touch");
+
+      // Hex columns, Top-down, by mouse: far above the top row, where row -10 was.
+      await goTo(hexes.id);
+      await topDown();
+      const grum = await pagePoint(pat, hexes.bounds, hexCenter(hexGrid, { col: 6, row: 4 }));
+      const top = { x: grum.x, y: 6 };
+      await pat.mouse.move(grum.x, grum.y);
+      await pat.mouse.down();
+      await pat.mouse.move(grum.x, (grum.y + top.y) / 2, { steps: 6 });
+      await pat.mouse.move(top.x, top.y, { steps: 6 });
+      await pat.mouse.up();
+      const grumNow = await settled(hexes.grum, () => standsAt(hexes.grum)?.y !== grumAt.y);
+      assert.equal(standsInScene(hexGrid, hexes.bounds, { size: "medium", x: grumNow!.x, y: grumNow!.y }), true, `hex mouse: Grum on ${grumNow!.x}, ${grumNow!.y} stands on the scene`);
+      assert.ok(grumNow!.y < 2, "at the top of the scene");
+      await shots.take(pat, "dropmap-1-hex-mouse");
+
+      // A changed page: Pat's own socket sends the move the board never would, and the server refuses it.
+      const cookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+      await assert.rejects(patOps.send({ t: "token.move", tokenId: hexes.grum, x: grumAt.x, y: -10 }), /a move ends inside the map/);
+      await goTo(squares.id);
+      await assert.rejects(patOps.send({ t: "token.move", tokenId: squares.bree, x: -3, y: 4 }), /a move ends inside the map/);
+      await ops.send({ t: "scene.update", sceneId: squares.id, patch: { blockMovement: true } });
+      await assert.rejects(patOps.send({ t: "token.move", tokenId: squares.bree, x: 6, y: 40 }), /a move ends inside the map/);
+      // A move that ends on the map is taken, with the walls stopping moves or not.
+      await patOps.send({ t: "token.move", tokenId: squares.bree, x: 5, y: 3 });
+      await waitFor("Bree's move inside the map taken", () => (standsAt(squares.bree)?.x === 5 && standsAt(squares.bree)?.y === 3 ? true : null));
+    } finally {
+      await cdp.detach();
+      await goTo(before);
+      await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string | null): void } }).__rvttIsoHook.pick("follow"));
+    }
   });
 
   test("ISO-12. no page logged an error", () => {
