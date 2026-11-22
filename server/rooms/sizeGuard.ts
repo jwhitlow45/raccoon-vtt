@@ -16,6 +16,7 @@ import { turnUnderWay } from "#shared/rules/path.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { isWritable } from "#shared/writable.ts";
+import { ABSENT, keptPart, markAccepted, newAccepted, releaseAccepted, type Part } from "#shared/accepted.ts";
 import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
 
 /**
@@ -151,6 +152,8 @@ export class SizeGuard {
   #refusedScene: string | null = null;
   /** By how many bytes the room is past the far line at its widest, at the last exact reading (overFarLine). */
   #over = 0;
+  /** What the room keeps of its measures over its accepted state (shared/accepted.ts). */
+  readonly #accepted = newAccepted();
 
   constructor(opts: { stateLimit?: number; sceneLimit?: number } = {}) {
     this.stateLimit = opts.stateLimit ?? LIMITS.stateBytes;
@@ -161,6 +164,25 @@ export class SizeGuard {
   stateMeasured(bytes: number, state?: RoomState): void {
     this.#state = { bytes, growth: 0 };
     if (state) this.#over = Math.max(0, farRoomBytes(state, true, bytes) - FAR.roomBytes);
+  }
+
+  /**
+   * The room accepted an op or a server op, or loaded: `state` is what it
+   * left, and the measures every later state of the room reads move on to
+   * it (shared/accepted.ts). A trial an op is checked on never moves them,
+   * so what a read costs is the op's own writes, whatever was tried or
+   * thrown away before it and whatever other rooms did.
+   */
+  accept(state: RoomState): void {
+    markAccepted(this.#accepted, state);
+    storedBytes(state, true);
+    numberingAdjust(state, true);
+    farWidthsByFloor(state, true);
+  }
+
+  /** The room is gone, and what it kept goes with it. */
+  release(): void {
+    releaseAccepted(this.#accepted);
   }
 
   /** By how many bytes the room was past the far line at its widest at the last exact reading, 0 under it (the DM's `over`). */
@@ -672,72 +694,25 @@ const SHELL_BYTES = 2 + (ROOM_LEVEL.length + SCENE_LEVEL.length + OUTSIDE.length
 const valueSizes = new WeakMap<object, number>();
 const collectionSizes = new WeakMap<object, number>();
 
-/** No entry under a key, apart from an entry whose value is undefined. */
-const ABSENT: unique symbol = Symbol("absent");
-
-/** Past this many entries that differ, a record is summed whole, as one from another room or mostly replaced would be. */
-const MOST_CHANGED = 64;
-
 /**
- * The entries a kept sum was last taken over, by key, as they stood then.
- * The sum steps from these and never from the record they came from,
- * since a room built in code may be measured, filled in place and only
- * then replaced by a copy.
+ * A record's entries as JSON, without its braces and commas, and how many
+ * it holds: what collectionBytes adds around them. Kept per field of the
+ * room over its accepted state (shared/accepted.ts).
  */
-type Taken<T> = Map<string, T>;
-
-/** An entry that differs between what a sum was taken over and a record: its value on each side, ABSENT where that side lacks it. */
-type EntryChange<T> = { key: string; was: T | typeof ABSENT; now: T | typeof ABSENT };
-
-function takenOf<T>(record: Readonly<Record<string, T>>, keys: readonly string[]): Taken<T> {
-  return new Map(keys.map((key) => [key, record[key]!]));
-}
-
-/**
- * The entries of `next`, whose keys are `keys`, that differ from `taken`
- * by value object, or null past MOST_CHANGED of them. A sum kept over
- * `taken` is the one over `next` once each change takes off what its entry
- * added and adds what it adds now: values are replaced and never changed
- * (writable.ts), so an entry with the same object adds what it added.
- */
-function changesFrom<T>(taken: Taken<T>, next: Readonly<Record<string, T>>, keys: readonly string[]): EntryChange<T>[] | null {
-  const out: EntryChange<T>[] = [];
-  let shared = 0;
-  for (const key of keys) {
-    const now = next[key]!;
-    const held = taken.has(key);
-    if (held) {
-      shared++;
-      if (taken.get(key) === now) continue;
+const ENTRY_BYTES: Part<{ entries: number; count: number }> = {
+  whole: (record, keys) => {
+    let entries = 0;
+    for (const key of keys) entries += fieldBytes(key) + valueBytes(record[key]);
+    return { entries, count: keys.length };
+  },
+  step: ({ entries }, changes, keys) => {
+    for (const { key, was, now } of changes) {
+      if (was !== ABSENT) entries -= fieldBytes(key) + valueBytes(was);
+      if (now !== ABSENT) entries += fieldBytes(key) + valueBytes(now);
     }
-    if (out.length === MOST_CHANGED) return null;
-    out.push({ key, was: held ? taken.get(key)! : ABSENT, now });
-  }
-  if (shared < taken.size) {
-    for (const [key, was] of taken) {
-      if (Object.hasOwn(next, key)) continue;
-      if (out.length === MOST_CHANGED) return null;
-      out.push({ key, was, now: ABSENT });
-    }
-  }
-  return out;
-}
-
-/** `taken` moved on to the record its changes were read against. */
-function takeChanges<T>(taken: Taken<T>, changes: readonly EntryChange<T>[]): void {
-  for (const { key, now } of changes) {
-    if (now === ABSENT) taken.delete(key);
-    else taken.set(key, now);
-  }
-}
-
-/**
- * What each field of the room had its entries summed over last
- * (collectionBytes with a field), with their sum. A batch replaces the
- * records it writes into, mostly with a few entries changed, so the next
- * record of that field steps from it (changesFrom).
- */
-const lastSummed = new Map<string, { taken: Taken<unknown>; entries: number }>();
+    return { entries, count: keys.length };
+  },
+};
 
 function valueBytes(value: unknown): number {
   if (value === null || typeof value !== "object") return serializedBytes(value);
@@ -751,36 +726,21 @@ function valueBytes(value: unknown): number {
 
 /**
  * A collection as JSON, a record or an array, from its entries' sizes. A
- * record of the room's `field` sums from the last record of that field
- * summed (lastSummed).
+ * record of the room's `field` in `state` is read from what the room keeps
+ * over its accepted state (shared/accepted.ts), and `take` moves that on.
  */
-function collectionBytes(collection: unknown, field?: string): number {
+function collectionBytes(collection: unknown, field?: string, state?: RoomState, take = false): number {
   if (collection === null || typeof collection !== "object") return valueBytes(collection);
   let bytes = collectionSizes.get(collection);
-  if (bytes !== undefined) return bytes;
+  if (bytes !== undefined && !take) return bytes;
   if (Array.isArray(collection)) {
+    if (bytes !== undefined) return bytes;
     bytes = 2 + Math.max(0, collection.length - 1);
     for (const item of collection) bytes += valueBytes(item);
   } else {
     const record = collection as Readonly<Record<string, unknown>>;
-    const keys = Object.keys(record);
-    const entryBytes = (key: string, value: unknown) => fieldBytes(key) + valueBytes(value);
-    const kept = field !== undefined && !isWritable(record) ? lastSummed.get(field) : undefined;
-    const changes = kept ? changesFrom(kept.taken, record, keys) : null;
-    let entries = 0;
-    if (kept && changes) {
-      entries = kept.entries;
-      for (const { key, was, now } of changes) {
-        if (was !== ABSENT) entries -= entryBytes(key, was);
-        if (now !== ABSENT) entries += entryBytes(key, now);
-      }
-      takeChanges(kept.taken, changes);
-      kept.entries = entries;
-    } else {
-      for (const key of keys) entries += entryBytes(key, record[key]);
-      if (field !== undefined && !isWritable(record)) lastSummed.set(field, { taken: takenOf(record, keys), entries });
-    }
-    bytes = 2 + Math.max(0, keys.length - 1) + entries;
+    const { entries, count } = field !== undefined && state !== undefined ? keptPart(state, field, record, ENTRY_BYTES, take) : ENTRY_BYTES.whole(record, Object.keys(record));
+    bytes = 2 + Math.max(0, count - 1) + entries;
   }
   if (!isWritable(collection)) collectionSizes.set(collection, bytes);
   return bytes;
@@ -802,7 +762,7 @@ export function roomLevelBytes(state: RoomState): number {
     else if (name === "encounter") bytes += fieldBytes(name) + valueBytes(state.encounter) - encounterLists(state.encounter).extra + encounterLists(state.encounter).count * widestListExtra(state.members);
     else if (name === "encounterHistory") bytes += historyBytes(state);
     // Each scene's rev at its widest and its creature numbers left out (numberingAdjust).
-    else if (name === "scenes") bytes += fieldBytes(name) + collectionBytes(state.scenes) + scenesNumbering(state.scenes);
+    else if (name === "scenes") bytes += fieldBytes(name) + collectionBytes(state.scenes) + scenesNumbering(state);
     else bytes += fieldBytes(name) + (name === "meta" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
   }
   // The clock is the one room-level field a room may lack (docs/design/design-v1-calendar.md 6.7): there, it adds its
@@ -1489,48 +1449,48 @@ export function tokenNumbering(token: Token): number {
 }
 
 /** What a scene adds to a measure beyond its stored bytes: its rev widened, its numbers and the comma before them taken out. */
-function sceneNumbering(scene: Scene): number {
+export function sceneNumbering(scene: Scene): number {
   const numbers = scene.numbers === undefined ? 0 : serializedBytes({ numbers: scene.numbers }) - 1;
   return WIDEST_REV_BYTES - serializedBytes(scene.rev) - numbers;
 }
 
-const numberingSums = new WeakMap<(value: never) => number, WeakMap<object, number>>();
-
-/** What each part was last summed over, with the sum, which the next collection steps from (changesFrom). */
-const numberingLast = new Map<(value: never) => number, { taken: Taken<unknown>; sum: number }>();
-
-/** Each value's part summed, kept per part and per collection object, which is replaced and never changed, and summed from the last collection's sum. */
-function numberingSum<T>(collection: Record<string, T>, part: (value: T) => number): number {
-  let sums = numberingSums.get(part);
-  if (!sums) numberingSums.set(part, (sums = new WeakMap()));
-  let bytes = sums.get(collection);
-  if (bytes === undefined) {
-    const keys = Object.keys(collection);
-    const writable = isWritable(collection);
-    const kept = writable ? undefined : (numberingLast.get(part) as { taken: Taken<T>; sum: number } | undefined);
-    const changes = kept ? changesFrom(kept.taken, collection, keys) : null;
-    let sum = 0;
-    if (kept && changes) {
-      sum = kept.sum;
+/** A part summed over each value of a record, kept per field of the room (shared/accepted.ts). */
+function sumOf<T>(part: (value: T) => number): Part<number, T> {
+  return {
+    whole: (record, keys) => {
+      let sum = 0;
+      for (const key of keys) sum += part(record[key]!);
+      return sum;
+    },
+    step: (sum, changes) => {
       for (const { was, now } of changes) {
         if (was !== ABSENT) sum -= part(was);
         if (now !== ABSENT) sum += part(now);
       }
-      takeChanges(kept.taken, changes);
-      kept.sum = sum;
-    } else {
-      for (const key of keys) sum += part(collection[key]!);
-      if (!writable) numberingLast.set(part, { taken: takenOf(collection, keys) as Taken<unknown>, sum });
-    }
-    bytes = sum;
-    if (!writable) sums.set(collection, bytes);
-  }
+      return sum;
+    },
+  };
+}
+
+const TOKENS_NUMBERING = sumOf(tokenNumbering);
+const SCENES_NUMBERING = sumOf(sceneNumbering);
+
+const numberingSums = new WeakMap<Part<number, never>, WeakMap<object, number>>();
+
+/** Each value's part summed, kept per part and per record object, which is replaced and never changed, and read from what the room keeps over its accepted state. */
+function numberingSum<T>(state: RoomState, field: string, collection: Record<string, T>, part: Part<number, T>, take: boolean): number {
+  let sums = numberingSums.get(part as Part<number, never>);
+  if (!sums) numberingSums.set(part as Part<number, never>, (sums = new WeakMap()));
+  let bytes = sums.get(collection);
+  if (bytes !== undefined && !take) return bytes;
+  bytes = keptPart(state, field, collection, part, take);
+  if (!isWritable(collection)) sums.set(collection, bytes);
   return bytes;
 }
 
 /** The scenes' part of the adjust, which the room-level part of every DM's projection holds. */
-function scenesNumbering(scenes: RoomState["scenes"]): number {
-  return numberingSum(scenes, sceneNumbering);
+function scenesNumbering(state: RoomState, take = false): number {
+  return numberingSum(state, "scenes", state.scenes, SCENES_NUMBERING, take);
 }
 
 /**
@@ -1538,15 +1498,15 @@ function scenesNumbering(scenes: RoomState["scenes"]): number {
  * the tokens' part, the scenes' part, and the room's group count, with the
  * comma before it, taken out.
  */
-export function numberingAdjust(state: RoomState): number {
+export function numberingAdjust(state: RoomState, take = false): number {
   const count = state.numbering === undefined ? 0 : serializedBytes({ numbering: state.numbering }) - 1;
-  return numberingSum(state.tokens, tokenNumbering) + scenesNumbering(state.scenes) - count;
+  return numberingSum(state, "tokens", state.tokens, TOKENS_NUMBERING, take) + scenesNumbering(state, take) - count;
 }
 
 /** What a scene's measure counts beyond a DM's projection of it for creature numbers: every scene's part, and the tokens' on its floors. */
 export function projectionNumbering(state: RoomState, sceneId: string): number {
   const floors = new Set(floorsOf(state, sceneId).map((scene) => scene.id));
-  return scenesNumbering(state.scenes) + sum(Object.values(state.tokens), (token) => (floors.has(token.sceneId) ? tokenNumbering(token) : 0));
+  return scenesNumbering(state) + sum(Object.values(state.tokens), (token) => (floors.has(token.sceneId) ? tokenNumbering(token) : 0));
 }
 
 /**
@@ -1560,7 +1520,7 @@ export function projectionNumbering(state: RoomState, sceneId: string): number {
 export function scenesOverByNumbering(state: RoomState, share: number, sceneLimit: number = LIMITS.projectedSceneBytes): string[] {
   const room = roomLevelBytes(state);
   const owns = allScenesOwnBytes(state);
-  const scenesPart = scenesNumbering(state.scenes);
+  const scenesPart = scenesNumbering(state);
   const tokensPart = new Map<string, number>();
   for (const token of Object.values(state.tokens)) tokensPart.set(token.sceneId, (tokensPart.get(token.sceneId) ?? 0) + tokenNumbering(token));
   const out: string[] = [];
@@ -1633,13 +1593,13 @@ const SINGLE_FIELDS: ReadonlySet<string> = new Set(["meta", "encounter", "clock"
  * batch's close reads it exactly for about the work of what it wrote
  * (design 1.4).
  */
-export function storedBytes(state: RoomState): number {
+export function storedBytes(state: RoomState, take = false): number {
   let bytes = 2;
   let fields = 0;
   for (const [name, value] of Object.entries(state)) {
     if (value === undefined) continue;
     fields++;
-    bytes += fieldBytes(name) + (value !== null && typeof value === "object" && !SINGLE_FIELDS.has(name) ? collectionBytes(value, name) : valueBytes(value));
+    bytes += fieldBytes(name) + (value !== null && typeof value === "object" && !SINGLE_FIELDS.has(name) ? collectionBytes(value, name, state, take) : valueBytes(value));
   }
   return bytes + Math.max(0, fields - 1);
 }
@@ -2749,58 +2709,73 @@ function widthsOf(fields: readonly WidthField[], thing: Readonly<Record<string, 
 /** Each floor's FAR_WIDTHS bytes, kept per tokens collection, which is replaced and never changed, with what else they read. */
 const byFloorKept = new WeakMap<object, { templates: object; room: string; out: Map<string, number> }>();
 
-/** The creatures and areas the floors' widths were last worked out over, which the next ones step from where the room's facts are the same (changesFrom). */
-let byFloorLast: { tokens: Taken<Token>; templates: Taken<AreaTemplate>; room: string; out: Map<string, number> } | null = null;
+type Widths = ReadonlyMap<string, number>;
+
+/** The parts that sum a kind's FAR_WIDTHS bytes by floor, one for each set of the room's facts they read. */
+const widthParts = new Map<string, Part<Widths, { sceneId: string }>>();
+
+/** A kind's FAR_WIDTHS bytes on each floor where they are more than 0, kept per field of the room (shared/accepted.ts). */
+function widthsPart(fields: readonly WidthField[], kind: string, room: WidthsRoom, sign: string): Part<Widths, { sceneId: string }> {
+  const name = `${kind}:${sign}`;
+  let part = widthParts.get(name);
+  if (part) return part;
+  const extraOf = (thing: { sceneId: string }) => Math.max(0, widthsOf(fields, thing as unknown as Record<string, unknown>, room));
+  part = {
+    whole: (record, keys) => {
+      const out = new Map<string, number>();
+      for (const key of keys) {
+        const thing = record[key]!;
+        const extra = extraOf(thing);
+        if (extra > 0) out.set(thing.sceneId, (out.get(thing.sceneId) ?? 0) + extra);
+      }
+      return out;
+    },
+    step: (widths, changes) => {
+      const out = new Map(widths);
+      const add = (by: 1 | -1, thing: { sceneId: string }) => {
+        const extra = extraOf(thing);
+        if (extra === 0) return;
+        const sum = (out.get(thing.sceneId) ?? 0) + by * extra;
+        if (sum === 0) out.delete(thing.sceneId);
+        else out.set(thing.sceneId, sum);
+      };
+      for (const { was, now } of changes) {
+        if (was !== ABSENT) add(-1, was);
+        if (now !== ABSENT) add(1, now);
+      }
+      return out;
+    },
+  };
+  if (widthParts.size > 64) widthParts.clear();
+  widthParts.set(name, part);
+  return part;
+}
 
 /**
  * The FAR_WIDTHS bytes of the creatures and areas on each floor: each
- * thing's where it is more than 0, so a floor with none is left out.
+ * thing's where it is more than 0, so a floor with none is left out. Read
+ * from what the room keeps over its accepted state, and `take` moves that
+ * on (shared/accepted.ts).
  */
-export function farWidthsByFloor(state: RoomState): Map<string, number> {
+export function farWidthsByFloor(state: RoomState, take = false): Map<string, number> {
   const room = widthsRoom(state);
   const sign = `${room.sceneIdMost}:${room.listWidth}:${room.damage}`;
   const hit = byFloorKept.get(state.tokens);
-  if (hit && hit.templates === state.templates && hit.room === sign) return hit.out;
-  const tokenKeys = Object.keys(state.tokens);
-  const templateKeys = Object.keys(state.templates);
-  const extraOf = (fields: readonly WidthField[], thing: { sceneId: string }) => Math.max(0, widthsOf(fields, thing as unknown as Record<string, unknown>, room));
-  const keeps = !isWritable(state.tokens) && !isWritable(state.templates);
-  const last = keeps && byFloorLast?.room === sign ? byFloorLast : null;
-  const tokenChanges = last ? changesFrom(last.tokens, state.tokens, tokenKeys) : null;
-  const templateChanges = last && tokenChanges ? changesFrom(last.templates, state.templates, templateKeys) : null;
-  let out: Map<string, number>;
-  if (last && tokenChanges && templateChanges) {
-    out = new Map(last.out);
-    const step = (by: 1 | -1, fields: readonly WidthField[], thing: { sceneId: string }) => {
-      const extra = extraOf(fields, thing);
-      if (extra === 0) return;
-      const sum = (out.get(thing.sceneId) ?? 0) + by * extra;
-      if (sum === 0) out.delete(thing.sceneId);
-      else out.set(thing.sceneId, sum);
-    };
-    for (const { was, now } of tokenChanges) {
-      if (was !== ABSENT) step(-1, FAR_WIDTHS.token, was);
-      if (now !== ABSENT) step(1, FAR_WIDTHS.token, now);
-    }
-    for (const { was, now } of templateChanges) {
-      if (was !== ABSENT) step(-1, FAR_WIDTHS.template, was);
-      if (now !== ABSENT) step(1, FAR_WIDTHS.template, now);
-    }
-    takeChanges(last.tokens, tokenChanges);
-    takeChanges(last.templates, templateChanges);
-    last.out = out;
-  } else {
-    const full = new Map<string, number>();
-    const add = (fields: readonly WidthField[], thing: { sceneId: string }) => {
-      const extra = extraOf(fields, thing);
-      if (extra > 0) full.set(thing.sceneId, (full.get(thing.sceneId) ?? 0) + extra);
-    };
-    for (const id of tokenKeys) add(FAR_WIDTHS.token, state.tokens[id]!);
-    for (const id of templateKeys) add(FAR_WIDTHS.template, state.templates[id]!);
-    out = full;
-    if (keeps) byFloorLast = { tokens: takenOf(state.tokens, tokenKeys), templates: takenOf(state.templates, templateKeys), room: sign, out };
-  }
-  if (keeps) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
+  if (!take && hit && hit.templates === state.templates && hit.room === sign) return hit.out;
+  const tokens = keptPart(state, "tokens", state.tokens, widthsPart(FAR_WIDTHS.token, "token", room, sign), take);
+  const templates = keptPart(state, "templates", state.templates, widthsPart(FAR_WIDTHS.template, "template", room, sign), take);
+  const out = new Map(tokens);
+  for (const [floor, extra] of templates) out.set(floor, (out.get(floor) ?? 0) + extra);
+  if (!isWritable(state.tokens) && !isWritable(state.templates)) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
+  return out;
+}
+
+/** farWidthsByFloor worked out whole, in one plain pass over the creatures and areas, as tests read it against the kept one. */
+export function farWidthsByFloorWhole(state: RoomState): Map<string, number> {
+  const room = widthsRoom(state);
+  const sign = `${room.sceneIdMost}:${room.listWidth}:${room.damage}`;
+  const out = new Map(widthsPart(FAR_WIDTHS.token, "token", room, sign).whole(state.tokens, Object.keys(state.tokens)));
+  for (const [floor, extra] of widthsPart(FAR_WIDTHS.template, "template", room, sign).whole(state.templates, Object.keys(state.templates))) out.set(floor, (out.get(floor) ?? 0) + extra);
   return out;
 }
 

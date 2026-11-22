@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HARD } from "#shared/limits.ts";
+import { HARD, serializedBytes } from "#shared/limits.ts";
 import { DM_LINE_BASE, lineAudience, liveStart } from "#shared/logRings.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { AT, DM, env, P1, randomOp, randomState, rng, room, token } from "#shared/testutil.ts";
 import { fullRoom } from "./limitsTesting.ts";
-import { farWidthsByFloor, measuredFromStored, measuredStateBytes, numberingAdjust, shedOf, storedBytes } from "./sizeGuard.ts";
+import { farWidthsByFloor, farWidthsByFloorWhole, measuredFromStored, measuredStateBytes, numberingAdjust, sceneNumbering, shedOf, SizeGuard, storedBytes, tokenNumbering } from "./sizeGuard.ts";
+
+const sum = <T>(items: readonly T[], of: (item: T) => number) => items.reduce((total, item) => total + of(item), 0);
 
 /*
  * The stored bound's measure and shed (design 1.4): storedBytes is the
@@ -38,28 +40,50 @@ describe("storedBytes is the snapshot's size, from the sizes kept per entity", (
     for (const [what, state] of states) assert.equal(storedBytes(state), snapshotBytes(state), what);
   });
 
-  test("along random ops, each room's size, numbers and widths stepped from the room before it read as summed whole", () => {
-    for (let seed = 1; seed <= 12; seed++) {
+  test("each room's size, numbers and widths, read from what it keeps, are their direct sums: beside another room, on trials thrown away, and after a delete and re-add", () => {
+    // The direct sums: the snapshot's JSON, every creature's and scene's numbering part and the room's group count, and a plain widths pass.
+    const direct = (state: RoomState) => ({
+      stored: snapshotBytes(state),
+      numbering: sum(Object.values(state.tokens), tokenNumbering) + sum(Object.values(state.scenes), sceneNumbering) - (state.numbering === undefined ? 0 : serializedBytes({ numbering: state.numbering }) - 1),
+      widths: [...farWidthsByFloorWhole(state)].sort(),
+    });
+    const read = (state: RoomState) => ({ stored: storedBytes(state), numbering: numberingAdjust(state), widths: [...farWidthsByFloor(state)].sort() });
+    for (let seed = 1; seed <= 8; seed++) {
       const r = rng(seed);
-      let state = randomState(r);
-      // More creatures than a stepped sum reads apart, so a copy of a room, every entry a new object, is summed whole.
-      for (let k = 0; k < 150; k++) state.tokens[`many${k}`] = token(`many${k}`, { sceneId: k % 3 === 0 ? "s2" : "s1", kind: k % 2 === 0 ? "monster" : "npc", x: k % 30, y: Math.floor(k / 30) });
-      const steps: { state: RoomState; stored: number; numbering: number; widths: [string, number][] }[] = [];
-      for (let i = 0; i < 40; i++) {
+      // Two rooms of one process, each with more creatures than a part reads apart, taking turns.
+      const rooms = [0, 1].map((n) => {
+        let state = randomState(rng(seed * 10 + n));
+        state = { ...state, meta: { ...state.meta } };
+        for (let k = 0; k < 150; k++) state.tokens[`many${k}`] = token(`many${k}`, { sceneId: k % 3 === 0 ? "s2" : "s1", kind: k % 2 === 0 ? "monster" : "npc", x: k % 30, y: Math.floor(k / 30) });
+        const guard = new SizeGuard();
+        guard.accept(state);
+        return { state, guard };
+      });
+      let read_ = 0;
+      for (let i = 0; i < 60; i++) {
+        const room = rooms[i % 2]!;
         const who = i % 4 === 3 ? P1 : DM;
-        const result = applyOp(state, randomOp(r, state, who), who, env(100 + i));
+        const result = applyOp(room.state, randomOp(r, room.state, who), who, env(100 + i));
         if (!result.ok) continue;
-        state = result.state;
-        steps.push({ state, stored: storedBytes(state), numbering: numberingAdjust(state), widths: [...farWidthsByFloor(state)].sort() });
+        assert.deepEqual(read(result.state), direct(result.state), `seed ${seed} op ${i}: the trial`);
+        read_++;
+        // Every third trial is thrown away, as an op the room refuses after reading it.
+        if (i % 3 === 2) continue;
+        room.guard.accept(result.state);
+        room.state = result.state;
+        assert.deepEqual(read(room.state), direct(room.state), `seed ${seed} op ${i}: accepted`);
+        if (i % 10 === 5) {
+          // A creature deleted and the very same object put back, each accepted.
+          const [id, gone] = Object.entries(room.state.tokens).at(-1)!;
+          const { [id]: _gone, ...rest } = room.state.tokens;
+          for (const tokens of [rest, { ...rest, [id]: gone }]) {
+            room.state = { ...room.state, tokens };
+            room.guard.accept(room.state);
+            assert.deepEqual(read(room.state), direct(room.state), `seed ${seed} op ${i}: ${tokens === rest ? "deleted" : "put back"}`);
+          }
+        }
       }
-      assert.ok(steps.length > 20, `seed ${seed}: ${steps.length} ops applied`);
-      // Read after the walk, so no copy stands between one room and the next as the last one summed.
-      for (const [i, step] of steps.entries()) {
-        const whole = structuredClone(step.state);
-        assert.equal(step.stored, snapshotBytes(step.state), `seed ${seed} step ${i}: stored`);
-        assert.equal(step.numbering, numberingAdjust(whole), `seed ${seed} step ${i}: numbering`);
-        assert.deepEqual(step.widths, [...farWidthsByFloor(whole)].sort(), `seed ${seed} step ${i}: widths`);
-      }
+      assert.ok(read_ > 30, `seed ${seed}: ${read_} ops read`);
     }
   });
 

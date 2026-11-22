@@ -685,6 +685,7 @@ export class RoomActor {
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
+    this.#sizes.accept(loaded.state);
     this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state), loaded.state);
     // A room this build saved keeps its layers within their caps already. One from before measures every layer once, so
     // a map held above its scene's fixed share forgets its oldest tiles at the room's first batch.
@@ -1235,7 +1236,7 @@ export class RoomActor {
         if (this.#snapshotting) await this.#snapshotting;
         await this.#writeSnapshot();
       }
-    })();
+    })().finally(() => this.#sizes.release());
     return this.#closing;
   }
 
@@ -2328,6 +2329,7 @@ export class RoomActor {
     // The install. The op's ids and the roll its ask took join the batch with it, so no op is stored without them.
     batch.ops.push(record);
     this.#staged = { state: result.state, seq };
+    this.#sizes.accept(result.state);
     // Ids recorded without the gate are the server's rows, outside every budget and every device's ask. Only a version 7
     // id the gate does not hold yet gets one: no other can come back in a live create, and a plan applied again keeps
     // its first row's time.
@@ -3026,6 +3028,7 @@ export class RoomActor {
     const grew = growthBound(state, result.state, result.touched);
     batch.ops.push({ seq, pub: this.#pub, at, actor: SERVER_ACTOR, op: checked.op, log: result.log });
     this.#staged = { state: result.state, seq };
+    this.#sizes.accept(result.state);
     for (const key of result.touched) batch.touched.push(key);
     if (result.global) batch.global = true;
     this.#sizes.grew(grew, op.t === "sys.meet" ? creatureFloors(result.state, result.touched) : op.t === "sys.rideEnd" || op.t === "sys.share" || op.t === "sys.shed" ? [] : [op.sceneId]);
@@ -3285,6 +3288,7 @@ export class RoomActor {
     this.retrying = false;
     this.#log.error({ err, roomId: this.roomId, ops: batch.ops.length }, "batch abandoned at shutdown");
     this.#staged = this.#committed;
+    this.#sizes.accept(this.#committed.state);
     // The numbers it handed out stay handed out: only the stored one goes back.
     this.#pub = this.#committedStored;
     // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
