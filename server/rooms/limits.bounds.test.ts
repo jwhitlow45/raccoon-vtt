@@ -159,18 +159,22 @@ describe("the room the DM's adds leave the players at the far lines", () => {
     return bytes;
   };
   const dmLineOf = (state: RoomState) => farByteLine("meets", "room", { dmKept: keptForPlayers(state) })!;
-  const runs: ReadonlyArray<{ fight: boolean; lines: NonNullable<FullRoomOptions["lines"]>; whose: string }> = [
+  // The kept bytes hold a shared line at its widest kinds with REVERT_MOST, and no door: an HP line whose revert ends a
+  // concentration with its span, and the doors of the players' scene, rest on the margin (shared/limits.ts EXACT_WIDTH).
+  const runs: ReadonlyArray<{ fight: boolean; lines: NonNullable<FullRoomOptions["lines"]>; whose: string; doors?: number }> = [
     { fight: true, lines: "spread", whose: "each player's rolls in turn" },
     { fight: false, lines: "spread", whose: "each player's rolls in turn" },
     { fight: false, lines: "one", whose: "the first player's rolls alone" },
     { fight: false, lines: "hp", whose: "the DM's HP changes on a creature every player sees" },
+    { fight: false, lines: "concentration", whose: "the DM's HP changes on a creature every player sees, each ending a concentration with a span" },
+    { fight: false, lines: "concentration", whose: "the DM's HP changes each ending a concentration with a span, with 400 closed doors on the players' scene", doors: 400 },
   ];
 
-  for (const { fight, lines, whose } of runs) {
+  for (const { fight, lines, whose, doors } of runs) {
     for (const [what, set] of settings) {
       test(`with ${what} on, ${fight ? "a fight" : "no fight"} and the shared lines ${whose}, each player keeps more than 0.75 MiB less their own rolls', asks' and rulers' widths once the DM's adds stop`, () => {
         const players = farByteLine("meets", "room", "players")!;
-        const full = fullRoom({ roomBytes: dmLineOf, fight, settings: set, lines });
+        const full = fullRoom({ roomBytes: dmLineOf, fight, settings: set, lines, ...(doors ? { doors } : {}) });
         // The DM's reading rounds its stepped part up, so their adds stop within a step of their line.
         const dmLine = dmLineOf(full.state);
         const dm = farRoomBytes(full.state, true);
@@ -182,6 +186,15 @@ describe("the room the DM's adds leave the players at the far lines", () => {
           const own = ownMade(full.state, player);
           assert.ok(keeps > 0.75 * MIB - own, `${player} keeps ${keeps} bytes, their own rolls, asks and rulers ${own}`);
         }
+        // The row's HP lines count past the kept width of a line, and its doors are in the players' exact parts.
+        const first = exactCopies(full.state, full.players[0]!);
+        if (lines === "concentration") {
+          const kept = EXACT_WIDTH.line + EXACT_WIDTH.lineReaderLists * rosterListBytes(Object.keys(full.state.members));
+          const hp = full.state.log.find((line) => line.data?.type === "hp")!;
+          const part = first.get(keys.log(hp.id))!;
+          assert.ok(part.shown - part.sub > kept, `an HP line counts ${part.shown - part.sub} bytes, the kept width ${kept}`);
+        }
+        if (doors) assert.ok([...first.keys()].some((key) => key.startsWith("chunk:")), "the doors are in the players' exact parts");
         // Either setting puts every creature their copy holds in their exact part, far more than a seat's.
         const most = new Map<string, number>();
         for (const player of full.players.slice(0, 3)) {

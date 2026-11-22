@@ -1444,6 +1444,17 @@ export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as co
  * roll request counts `rollRequest` and, for each target, `rollTarget` and
  * who answered at the roster's widest id. limits.bounds.test.ts holds each
  * at or above what a thing of its kind takes.
+ *
+ * Two widths the DM's play puts in every player's exact part are not held
+ * here and rest on the margin: what the room keeps past these widths and
+ * the 0.75 MiB. Each condition with a save or a span that an HP line's
+ * revert carries counts past `line`, about 330 B for a concentration ended
+ * with its span and up to about 14 KiB for 32 conditions with both, and a
+ * door on a scene the player holds counts a few bytes past what it stores.
+ * The floor test holds the margin under a ring of HP lines that each end a
+ * concentration with its span, and with 400 doors on the players' scene.
+ * Holding every line at the most conditions a revert carries would keep
+ * about 2.7 MiB more, leaving the DM's line near 5.5 MiB, so it is not.
  */
 export const EXACT_WIDTH = { creature: 256, character: 5 * 1024, area: 256, unseenArea: 3328, line: 640, lineReaderLists: 2, rollRequest: 32, rollTarget: 480 } as const;
 

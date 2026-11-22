@@ -1,15 +1,16 @@
 import { FAR, HISTORY_BYTES, LIMITS, MARKED_POOL, MOST_SIGHT_HOLDERS, exploredReserve, roundUp, seatHeld, serializedBytes } from "#shared/limits.ts";
-import { holderTileKey, tileKey } from "#shared/keys.ts";
+import { chunkKey, holderTileKey, tileKey } from "#shared/keys.ts";
 import { DM_LINE_BASE, MAX_LOG, PARTY_LINE_BASE, PARTY_SLOT, memberRing, ringed, rosterRanks } from "#shared/logRings.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { CompanionBlock, DiceRoll, Effect, EncounterSnapshot, InitEntry, LogEntry, Member, RemindedPairs, RoomSettings, RoomState, Token } from "#shared/model.ts";
+import { CHUNK_CELLS, type BuildChunk, type CompanionBlock, type DiceRoll, type Effect, type EncounterSnapshot, type InitEntry, type LogEntry, type Member, type RemindedPairs, type RoomSettings, type RoomState, type Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { MAX_CHAT, MAX_EFFECT_LEVEL, MAX_NAME, MAX_NOTES, MAX_PATH_CORNERS, MAX_PATH_STOPS } from "#shared/protocol.ts";
+import { MAX_CHAT, MAX_EFFECT_LEVEL, MAX_NAME, MAX_NOTES, MAX_PATH_CORNERS, MAX_PATH_STOPS, type Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { EFFECTS_PER_CLASS } from "#shared/rules/effects.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { SAVE_OUTCOME_LEDGER_BYTES, SAVE_OUTCOME_RECORD_BYTES, SAVE_OUTCOME_RECORDS, type SaveOutcomeLedger, type SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
-import { actor, castAsk, character, companionBlock, drawing, entry, room, scene, token } from "#shared/testutil.ts";
+import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, room, scene, token } from "#shared/testutil.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
@@ -76,9 +77,12 @@ export type FullRoomOptions = {
   /**
    * Who wrote the shared log's lines: each a player's roll in turn (the
    * default), every one the first player's, or each the DM's HP change on
-   * a creature every player sees.
+   * a creature every player sees, with nothing in its revert or, as the
+   * reducer writes it, ending one concentration that runs for a span.
    */
-  lines?: "spread" | "one" | "hp";
+  lines?: "spread" | "one" | "hp" | "concentration";
+  /** Closed doors on the players' scene, which every player's copy holds. None unless set. */
+  doors?: number;
 };
 
 function roster(count: number): { members: Record<string, Member>; dms: string[]; players: string[] } {
@@ -112,6 +116,7 @@ export function fullRoom(opts: FullRoomOptions = {}): FullRoom {
   });
   addCharacters(state, players);
   addTokens(state, sceneId);
+  addDoors(state, sceneId, opts.doors ?? 0);
   if (opts.fight !== false) {
     addFight(state, sceneId);
     addWalks(state);
@@ -149,6 +154,37 @@ function addTokens(state: RoomState, sceneId: string): void {
       : token(id, { ...at, visibility: i % 2 === 0 ? "dm" : "all", actor: { inline: actor({ notes: "", dmNotes: "" }) } });
     state.tokens[id] = t;
   }
+}
+
+/** `count` closed doors on the scene, one on the north edge of each square of the first two rows of each chunk. */
+function addDoors(state: RoomState, sceneId: string, count: number): void {
+  const across = LIMITS.sceneCells / CHUNK_CELLS;
+  for (let i = 0; i < count; i++) {
+    const chunk = Math.floor(i / (2 * CHUNK_CELLS));
+    const [cx, cy] = [chunk % across, Math.floor(chunk / across)];
+    const key = chunkKey(sceneId, cx, cy);
+    const held: BuildChunk = state.buildChunks[key] ?? { sceneId, cx, cy, rev: 1, cells: {}, edges: {} };
+    const x = cx * CHUNK_CELLS + (i % CHUNK_CELLS);
+    const y = cy * CHUNK_CELLS + Math.floor((i % (2 * CHUNK_CELLS)) / CHUNK_CELLS);
+    held.edges[`${x},${y},n`] = { kind: "door", state: "closed", secret: false, discovered: false };
+    state.buildChunks[key] = held;
+  }
+}
+
+/**
+ * The DM's HP line as the reducer writes it for damage that drops a
+ * creature to 0 HP and so ends its concentration, which runs on a clock for
+ * a span: its revert carries the concentration off with its span. Made
+ * through the reducer on a room of its own, then copied onto `tokenId`.
+ */
+function concentrationEnded(tokenId: string): LogEntry {
+  const state = room();
+  const conc = effect("conc", { key: "concentrating", spell: "Bless", ends: { span: 600, at: 99_999, clock: "clock-1" } });
+  state.tokens.t = token("t", { x: 1, y: 1, actor: { inline: actor({ hp: { cur: 5, max: 20, temp: 0 }, dmNotes: "", effects: [conc] }) } });
+  const r = applyOp(state, { t: "actor.hp", target: { tokenId: "t" }, change: { kind: "damage", amount: 5 } } as Op, DM, env(1));
+  const line = r.ok ? r.state.log.find((l) => l.data?.type === "hp") : undefined;
+  if (line?.data?.type !== "hp" || line.data.revert?.removed?.length !== 1) throw new Error("the damage ends the concentration in its HP line");
+  return { ...line, data: { ...line.data, tokenId } };
 }
 
 /** The far rows, one for each token and then rows of their own. */
@@ -299,8 +335,9 @@ function addLog(state: RoomState, dms: readonly string[], players: readonly stri
   const vitals = { hp: { cur: 5, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
   const hp = (): LogEntry =>
     ({ id: `${seq++}:0`, at: AT, kind: "event", data: { type: "hp", change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert: { before: vitals, after: vitals, added: [], removed: [] }, tokenId: seen, seen: true } }) as never;
+  const ended = lines === "concentration" ? concentrationEnded(seen) : undefined;
   const shared = (): LogEntry =>
-    lines === "hp" ? hp() : { id: `${seq++}:0`, at: AT, kind: "event", data: { type: "dice", by: lines === "one" ? players[0]! : players[seq % players.length]!, to: "all", rolls: widestRolls(tokenId, LIMITS.diceRollsPerOp, LIMITS.dicePerOp) } };
+    ended ? { ...ended, id: `${seq++}:0`, at: AT } : lines === "hp" ? hp() : { id: `${seq++}:0`, at: AT, kind: "event", data: { type: "dice", by: lines === "one" ? players[0]! : players[seq % players.length]!, to: "all", rolls: widestRolls(tokenId, LIMITS.diceRollsPerOp, LIMITS.dicePerOp) } };
   log.push(shared());
   const dmLine = (id: string, rolls: number): LogEntry => ({ id, at: AT, kind: "event", data: { type: "dice", by: dms[0]!, to: "dm", rolls: widestRolls(tokenId, rolls, LIMITS.dicePerOp) } });
   const dmLineAt = (at: number): LogEntry => {
