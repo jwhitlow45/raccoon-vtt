@@ -70,6 +70,11 @@ export const PLAYER_OPS: Partial<Record<OpType, { op: (state: RoomState) => Op; 
   "dice.roll": { op: (s) => rolled(s, { t: "dice.roll", tag: "t1", to: "all", rolls: [{ formula: "1d20", label: "Bite", creature: { tokenId: "pet" } }] } as DiceOp) },
   "token.moveMany": { op: () => ({ t: "token.moveMany", moves: [{ tokenId: "pet", x: 13, y: 12 }, { tokenId: "lent", x: 14, y: 12 }] }) as Op },
   "token.update": { op: () => ({ t: "token.update", tokenId: "lent", patch: { notes: "A borrowed wolf" } }) as Op },
+  // A seat on the scene: the random rooms stand many tokens past their scene's edge, where a player's seat is refused (DROP-OFF-MAP).
+  "token.attach": {
+    room: (s) => (s.tokens.pet = { ...s.tokens.pet!, size: "large" }),
+    op: () => ({ t: "token.attach", tokenId: "hero", to: "pet", kind: "ride", x: 3, y: 2, elevation: 0 }) as Op,
+  },
   "door.set": { op: () => ({ t: "door.set", sceneId: "s1", door: { edge: "3,2,w" }, state: "open", by: "hero" }) as Op },
   // An HP change that drops their companion to 0, ending its concentrations, some hidden from players, into its line.
   "actor.hp": {

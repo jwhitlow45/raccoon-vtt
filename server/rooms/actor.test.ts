@@ -29,7 +29,7 @@ import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
+import { MOVE_OFF_MAP, MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
 import type { Actor, ClassResource, FreeWall, MapPhase, Member, PcStats, RoomState, Trap } from "#shared/model.ts";
 import { ASK_LOST, FORGET_ASK, MAX_NOTES, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { JOIN_CHANGED, WING_MOVED, type WingClear } from "#shared/rules/wingClear.ts";
@@ -4543,6 +4543,52 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       },
       { sizeLimits: { stateLimit } },
     );
+  });
+
+  test("a player's move that ends past the scene's edge is refused and the token stays, with or without walls that stop moves, while the DM's is taken (DROP-OFF-MAP)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = darkRoom(dm, player);
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      const table = connect(actor, dm);
+      await hello(actor, phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      const { w, h } = actor.committed.state.scenes[sceneId]!.bounds;
+      let n = 0;
+      let tableN = 0;
+      const tryMove = async (x: number, y: number) => {
+        n++;
+        await actor.op(phone.conn, n, { t: "token.move", tokenId: pcId, x, y });
+        const answer = await answerTo(phone.sent, n);
+        assert.notEqual(answer, "stuck");
+        return answer !== "stuck" ? answer.rejects?.find((r) => r.n === n) : undefined;
+      };
+      for (const blocking of [false, true]) {
+        tableN++;
+        await actor.op(table.conn, tableN, { t: "scene.update", sceneId, patch: { blockMovement: blocking } });
+        await answerTo(table.sent, tableN);
+        for (const [x, y] of [[-1, 2], [2, -10], [w, 2], [2, h]] as const) {
+          const refused = await tryMove(x, y);
+          assert.equal(refused?.code, "forbidden", `${blocking} ${x},${y}`);
+          assert.equal(refused?.message, MOVE_OFF_MAP);
+          assert.deepEqual([actor.committed.state.tokens[pcId]!.x, actor.committed.state.tokens[pcId]!.y], [2, 2], "the token stays");
+        }
+        assert.equal(await tryMove(w - 1, h - 1), undefined);
+        assert.deepEqual([actor.committed.state.tokens[pcId]!.x, actor.committed.state.tokens[pcId]!.y], [w - 1, h - 1]);
+        assert.equal(await tryMove(2, 2), undefined);
+      }
+      tableN++;
+      await actor.op(table.conn, tableN, { t: "token.move", tokenId: pcId, x: -3, y: -3 });
+      await answerTo(table.sent, tableN);
+      assert.deepEqual([actor.committed.state.tokens[pcId]!.x, actor.committed.state.tokens[pcId]!.y], [-3, -3], "the DM may park a token past the edge");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
   });
 
   test("a player's walk up a stair onto a platform their copy does not hold lands at the platform's height, as does Teleport here (vision step 5)", async () => {

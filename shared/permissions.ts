@@ -12,6 +12,7 @@ import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walke
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove, planWalks, walkedIn, wayOf, type MovedToken } from "./rules/moveLeg.ts";
 import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
+import { standsInScene } from "./rules/sceneEdge.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hexAt, hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
@@ -2999,6 +3000,26 @@ const COMPANION_LANDING_TRIES = 160;
 export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
 
 /**
+ * A player's plain move, seat or get-off ends with the token wholly inside the scene, as a teleport does (DROP-OFF-MAP,
+ * D-261122-160). The words name no creature and no square: the answer reads the token's own footprint and the scene's bounds.
+ */
+export const MOVE_OFF_MAP = "a move ends inside the map";
+
+/**
+ * The edge rule of a player's move that is no teleport. A token that stays where it stands is never refused, so one the DM
+ * parked past the edge or a smaller scene left there can still change its height or its facing. A permission rule, never a
+ * reducer one, so stored moves replay as they were made.
+ */
+function endInside(c: Check, tokenId: string, to: StoredEnd): Decision {
+  const token = ownEntry(c.state.tokens, tokenId);
+  const scene = token ? ownEntry(c.state.scenes, token.sceneId) : undefined;
+  if (!token || !scene || (to.x === token.x && to.y === token.y)) return OK;
+  const { squeeze: _was, ...full } = token;
+  const placed = { ...full, x: to.x, y: to.y, ...(to.squeeze === true ? { squeeze: true as const } : {}) };
+  return standsInScene(sceneGrid(scene), scene.bounds, placed) ? OK : refuse("forbidden", MOVE_OFF_MAP);
+}
+
+/**
  * Walls, doors and ledges stop a player's move on a scene that blocks
  * movement (docs/design/design-v1-maps-vision.md 4.1). A permission rule, never a
  * reducer one, so stored moves replay as they were made. A teleport skips
@@ -3016,6 +3037,8 @@ function legCheck(c: Check, tokenId: string, to: StoredEnd, teleport: boolean): 
   if (!token || !scene) return OK;
   const end = legEndOf(scene, to, token.elevation);
   if (teleport) return insideScene(scene, token, end) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
+  const edge = endInside(c, tokenId, to);
+  if (!edge.ok) return edge;
   if (scene.blockMovement !== true) return OK;
   // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges, as its route and the drag's own check do (rules/attach.ts walkerFor).
   const walker = walkerFor(c.state, token, seenAllIn(c));
@@ -3039,7 +3062,11 @@ function legCheck(c: Check, tokenId: string, to: StoredEnd, teleport: boolean): 
 function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RoutePiece[])[], to: StoredEnd): Decision {
   const token = ownEntry(c.state.tokens, tokenId);
   const scene = token ? ownEntry(c.state.scenes, token.sceneId) : undefined;
-  if (!token || !scene || scene.blockMovement !== true) return OK;
+  if (!token || !scene) return OK;
+  // The walk's end is a move's end, on a scene that stops moves or not.
+  const edge = endInside(c, tokenId, to);
+  if (!edge.ok) return edge;
+  if (scene.blockMovement !== true) return OK;
   // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges until clear of it, as the drag searched it (rules/attach.ts walkerFor).
   let at: Token & Walker = walkerFor(c.state, token, seenAllIn(c));
   for (const [n, route] of routes.entries()) {
