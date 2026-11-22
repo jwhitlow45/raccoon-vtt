@@ -5,9 +5,9 @@ import { DM_LINE_BASE, lineAudience, liveStart } from "#shared/logRings.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { AT, DM, randomState, rng, room } from "#shared/testutil.ts";
+import { AT, DM, env, P1, randomOp, randomState, rng, room, token } from "#shared/testutil.ts";
 import { fullRoom } from "./limitsTesting.ts";
-import { measuredFromStored, measuredStateBytes, shedOf, storedBytes } from "./sizeGuard.ts";
+import { farWidthsByFloor, measuredFromStored, measuredStateBytes, numberingAdjust, shedOf, storedBytes } from "./sizeGuard.ts";
 
 /*
  * The stored bound's measure and shed (design 1.4): storedBytes is the
@@ -36,6 +36,31 @@ describe("storedBytes is the snapshot's size, from the sizes kept per entity", (
     marked.dmLogShed = `12:${DM_LINE_BASE + 3}`;
     states.push(["shed", marked]);
     for (const [what, state] of states) assert.equal(storedBytes(state), snapshotBytes(state), what);
+  });
+
+  test("along random ops, each room's size, numbers and widths stepped from the room before it read as summed whole", () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      const r = rng(seed);
+      let state = randomState(r);
+      // More creatures than a stepped sum reads apart, so a copy of a room, every entry a new object, is summed whole.
+      for (let k = 0; k < 150; k++) state.tokens[`many${k}`] = token(`many${k}`, { sceneId: k % 3 === 0 ? "s2" : "s1", kind: k % 2 === 0 ? "monster" : "npc", x: k % 30, y: Math.floor(k / 30) });
+      const steps: { state: RoomState; stored: number; numbering: number; widths: [string, number][] }[] = [];
+      for (let i = 0; i < 40; i++) {
+        const who = i % 4 === 3 ? P1 : DM;
+        const result = applyOp(state, randomOp(r, state, who), who, env(100 + i));
+        if (!result.ok) continue;
+        state = result.state;
+        steps.push({ state, stored: storedBytes(state), numbering: numberingAdjust(state), widths: [...farWidthsByFloor(state)].sort() });
+      }
+      assert.ok(steps.length > 20, `seed ${seed}: ${steps.length} ops applied`);
+      // Read after the walk, so no copy stands between one room and the next as the last one summed.
+      for (const [i, step] of steps.entries()) {
+        const whole = structuredClone(step.state);
+        assert.equal(step.stored, snapshotBytes(step.state), `seed ${seed} step ${i}: stored`);
+        assert.equal(step.numbering, numberingAdjust(whole), `seed ${seed} step ${i}: numbering`);
+        assert.deepEqual(step.widths, [...farWidthsByFloor(whole)].sort(), `seed ${seed} step ${i}: widths`);
+      }
+    }
   });
 
   test("the shed line's id is outside both measures", () => {
