@@ -3,6 +3,7 @@ import type { EntityKey } from "#shared/keys.ts";
 import type { HeldEntry } from "#shared/project.ts";
 import type { Viewer } from "#shared/model.ts";
 import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
+import { inSortedOrder } from "#shared/sortedJson.ts";
 import { FrameBudget, OpRate, TokenBucket, type Clock } from "./budgets.ts";
 
 /** Close codes from design section 7.1. */
@@ -43,6 +44,20 @@ export type ConnectionOptions = {
 };
 
 let nextId = 1;
+
+/**
+ * A message's text for a socket that is not a DM's own: a player's, a
+ * table display's or a DM's view as a player. The message's own fields
+ * keep the order the server writes them in, and every value they carry
+ * lists its keys in sorted order at every depth (shared/sortedJson.ts), so
+ * the same values always give the same text, whatever order the room's
+ * records were made in. A DM's own socket is sent JSON.stringify's text.
+ */
+function playerFrame(msg: ServerMessage): string {
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(msg)) out[field] = inSortedOrder(value, field);
+  return JSON.stringify(out);
+}
 
 /**
  * One WebSocket bound to a grant (design 10.2): the session, the member and
@@ -165,7 +180,7 @@ export class Connection {
   /** Sends one message, returning its size in UTF-8 bytes as it goes on the wire, or 0 when the socket is gone. */
   send(msg: ServerMessage): number {
     if (this.closed || this.socket.readyState !== this.socket.OPEN) return 0;
-    const text = JSON.stringify(msg);
+    const text = this.role === "dm" ? JSON.stringify(msg) : playerFrame(msg);
     this.socket.send(text);
     const bytes = Buffer.byteLength(text);
     this.bytesSent += bytes;

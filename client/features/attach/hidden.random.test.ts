@@ -11,6 +11,7 @@ import { RIDE_ON_YOUR_TURN, canApply, mayMoveToken } from "#shared/permissions.t
 import { applyChanges, inSightOfNonOwners, isPartyMember, ownsToken, projectState, type ProjectedState } from "#shared/project.ts";
 import type { Change, ClientOp, EphEvent, EphEventOut, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { sortedJson } from "#shared/sortedJson.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot, withinReach } from "#shared/rules/attach.ts";
@@ -759,14 +760,16 @@ function compareFeeds(fa: readonly Feed[], fb: readonly Feed[], a: RoomState, b:
     const [x, y] = [fa[i]!, fb[i]!];
     assert.deepEqual(sent(x), sent(y), `${where}: ${x.who.memberId} receives other changes from the two rooms`);
     // The tokens, the tracker and the log, which links and turns change: the map's own keys have the fan-out tests (fanout.test.ts).
-    // Each value as JSON, as the socket carries it, which keeps the projection's own order of fields.
+    // Each value as JSON as a player's socket writes it, every object's keys sorted (shared/sortedJson.ts), the snapshot's values read from the
+    // projection itself.
+    const wire = (value: unknown) => (value === undefined ? undefined : sortedJson(value));
     for (const [f, state] of [[x, a], [y, b]] as const) {
       const view = f.view as unknown as RoomState;
       const fresh = copyOf(state, f.who);
       for (const id of new Set([...Object.keys(view.tokens), ...Object.keys(fresh.tokens)])) {
-        assert.equal(JSON.stringify(view.tokens[id]), JSON.stringify(fresh.tokens[id]), `${where}: ${f.who.memberId}'s socket copy of ${id} drifts from the room`);
+        assert.equal(wire(view.tokens[id]), wire(fresh.tokens[id]), `${where}: ${f.who.memberId}'s socket copy of ${id} drifts from the room`);
       }
-      assert.equal(JSON.stringify([view.encounter, view.log]), JSON.stringify([fresh.encounter, fresh.log]), `${where}: ${f.who.memberId}'s socket copy of the tracker or the log drifts from the room`);
+      assert.equal(wire([view.encounter, view.log]), wire([fresh.encounter, fresh.log]), `${where}: ${f.who.memberId}'s socket copy of the tracker or the log drifts from the room`);
       f.changes = [];
     }
   }
