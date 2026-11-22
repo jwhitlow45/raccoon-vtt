@@ -717,7 +717,9 @@ function freePort(): Promise<number> {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test("a deploy's stop of the real server with a DM and a player on exits 0 within 5 s and saves the room at its last op (LP44-OPS-1)", { timeout: 60_000 }, async () => {
+// Off Windows only: Windows has no SIGTERM a process can catch, so kill("SIGTERM") ends the server at once there.
+// Deploys stop the server on Linux, and the desktop app stops it through its channel (server/local/local.itest.ts).
+test("a deploy's stop of the real server with a DM and a player on exits 0 within 5 s and saves the room at its last op (LP44-OPS-1)", { timeout: 60_000, skip: process.platform === "win32" ? "Windows has no catchable SIGTERM" : false }, async () => {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["server/main.ts"], {

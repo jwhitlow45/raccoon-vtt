@@ -452,10 +452,13 @@ describe("the supervisor's channel (IPC)", () => {
   // Each way the supervisor stops its server, sent the moment the server starts and again once it listens. Sent at
   // once, the message lands while the server binds (its "shutting down" comes before "Server listening"), the
   // channel's close before it binds, and SIGTERM before its handler, which Node's default ends.
+  // Windows has no SIGTERM a process can catch: kill("SIGTERM") ends it at once, which is why the supervisor stops
+  // the server through its channel there. The channel's two ways run on every system, SIGTERM off Windows only.
   const stops = { shutdown: (c: ChildProcess) => c.send({ type: "shutdown" }), disconnect: (c: ChildProcess) => c.disconnect(), SIGTERM: (c: ChildProcess) => c.kill("SIGTERM") };
   for (const [name, stop] of Object.entries(stops)) {
+    const skip = name === "SIGTERM" && process.platform === "win32" ? "Windows has no catchable SIGTERM" : false;
     for (const when of ["at once", "once listening"] as const) {
-      test(`${name} ${when} ends the process`, async () => {
+      test(`${name} ${when} ends the process`, { skip }, async () => {
         const s = await spawnServer();
         try {
           if (when === "once listening") await until(() => /listening/i.test(s.output()), 30_000, "the server to listen");
