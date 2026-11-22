@@ -18,6 +18,7 @@ import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { ownEntry } from "#shared/records.ts";
+import { pulledInside, standsInScene } from "#shared/rules/sceneEdge.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
 import { dragWalkers } from "../attach/groups.ts";
 import { riderSeat } from "./riderSeat.ts";
@@ -34,7 +35,8 @@ import type { Labels } from "../../lib/labels.ts";
  * Only a player's walk on a scene whose walls stop moves is stopped. The
  * DM's moves never are, and on other scenes nothing is, but a creature that
  * can squeeze still lands squeezed where it is dropped into a narrow
- * opening, whoever drops it.
+ * opening, whoever drops it. Every landing, a walk's too, ends inside the
+ * scene for every role (`keptOnScene`).
  */
 
 export type Role = "dm" | "player";
@@ -51,6 +53,18 @@ export type Point = { x: number; y: number };
 export function dropGrid(state: Pick<BuildState, "scenes">, token: Pick<DropToken, "sceneId">): Grid {
   const scene = state.scenes[token.sceneId];
   return scene ? sceneGrid(scene) : SQUARES;
+}
+
+/**
+ * `to` moved the least to put the token's whole footprint inside its scene
+ * (shared/rules/sceneEdge.ts), whoever drops it and whatever the scene's
+ * walls: every landing ends on the scene as a teleport and a placement do,
+ * and the server refuses a player's move that does not (DROP-OFF-MAP,
+ * D-261122-160).
+ */
+export function keptOnScene(state: Pick<BuildState, "scenes">, token: DropToken, to: Point): Point {
+  const scene = state.scenes[token.sceneId];
+  return scene ? pulledInside(sceneGrid(scene), scene.bounds, token, to) : to;
 }
 
 /** The token fields a drop reads, and where it is drawn in its box (free.ts). */
@@ -277,6 +291,9 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
   const size = footprintSize(token);
   const to = snapPosition(g, raw.x, raw.y, size);
   const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
+  // A squeeze past the scene's edge is no opening: the drop lands full size inside it (keptOnScene).
+  const scene = state.scenes[token.sceneId];
+  if (scene && !standsInScene(g, scene.bounds, { ...token, x: spot.x, y: spot.y, squeeze: true })) return null;
   const land = landing(state, walkerOf(state, token), { ...spot, elevation: dropLanding(state, token, spot) }, mode);
   return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
 }
@@ -566,7 +583,7 @@ export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclu
   const squeezed = stand ? null : squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const g = dropGrid(state, token);
-  const to = stand ?? snapPosition(g, raw.x, raw.y, footprintSize(token));
+  const to = keptOnScene(state, token, stand ?? snapPosition(g, raw.x, raw.y, footprintSize(token)));
   if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
   const elevation = dropLanding(state, token, to);
   // Walked as the route search, the server's check and the route walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
@@ -949,7 +966,8 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
   const held: DropPlan["held"] = [];
   for (const token of tokens) {
     const g = dropGrid(state, token);
-    const to = snapPosition(g, token.x + dx, token.y + dy, footprintSize(token));
+    // Each token on its own, so a group dropped past an edge stands along it, and its label reads this same spot (stageHooks.ts groupFields).
+    const to = keptOnScene(state, token, snapPosition(g, token.x + dx, token.y + dy, footprintSize(token)));
     if (to.x === token.x && to.y === token.y) continue;
     const elevation = dropLanding(state, token, to);
     const from = { x: token.x, y: token.y, elevation: token.elevation };

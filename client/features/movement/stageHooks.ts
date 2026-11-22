@@ -16,7 +16,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfCreature, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfCreature, keptOnScene, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
@@ -507,7 +507,7 @@ export function dragStops(deps: DragDeps): DragStops {
       const full = view?.tokens[token.id];
       if (!view || !full) return {};
       const spot = rulesSpot(full, at);
-      return { ft: groupReading(view, full, snapPosition(dropGrid(view, full), spot.x, spot.y, footprintSize(full)), role).dragFt };
+      return { ft: groupReading(view, full, keptOnScene(view, full, snapPosition(dropGrid(view, full), spot.x, spot.y, footprintSize(full))), role).dragFt };
     },
     press(node, drawn, drawnGroup) {
       const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : rulesSpot(drawn, { x: node.x(), y: node.y() });
