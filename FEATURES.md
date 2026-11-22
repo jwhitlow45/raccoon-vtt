@@ -255,6 +255,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
 - The app's icon is a raccoon face on a white rounded square, the shape of an iPhone app icon, in the browser tab, on the Home Screen, on Home and About, and over the docs.
 - Phones load a smaller copy of each map, and the map redraws only when something changes.
+- A page open on older code than the server reloads itself once. The server sends its version as the room opens, and a page on a lower one shows "RaccoonVTT was updated. Reloading…", waits until its changes are saved, and reloads. If the reload brings the same old code back, as a cached page does, it does not reload again for that version.
 - A panel that cannot load, offline or after the site was updated, says so inside itself, and the rest of the room keeps running. Its Reload waits until your changes are saved and the connection is back, and opens the panel again. The SRD monster list and stat blocks offer the same Reload when they did not load.
 
 ## Scenes and maps
@@ -696,7 +697,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - On the DM's board, a creature the party has not yet seen shows in brackets, with outlined initials, the number it would take if the party saw it now, "Goblin (3)", and its Token panel says "Not yet seen by the party. It takes this number when they see it, if they have seen no other first." A lone creature of a name the party has not seen shows none.
   - A creature shown to players under another name reads "Orc (as Goblin 2)" for the DM and its owners, with the initials players see, and its Token panel says "Players read Goblin 2."
   - Renamed and named back while the party watches, a creature takes the next number: "Goblin 2", "Orc 3", then "Goblin 4". Undo and Redo give the numbers back exactly.
-  - A creature keeps its number when it is attached to a character, and a duplicate takes its own number when the party sees it. A companion of a character a player plays is never numbered.
+  - A creature attached to a character keeps showing its number while no player plays that character, and a duplicate takes its own number when the party sees it. A companion of a character a player plays is never numbered.
   - A scene keeps numbers for 100 creature names the party has seen there. Past that, new names get no number, and the Token panel says "The party has met 100 creature names on this scene, the most it keeps numbers for. New names get no number here."
 - Each creature shows its AC on a small shield in the bottom left corner of its token. The DM sees every creature's, a player sees the AC of the creatures whose stats they have: their own character and creatures they own. A dead creature's shield hides, and on a token too small for it the action bar still says its AC.
 - Names, condition chips and badges draw above every token and the fog. They scale with the map and make way when crowded. On a top-down board a name also stays between the screen's sides, so beside an edge it is cut with an ellipsis or moves to another side of its token.
