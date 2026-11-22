@@ -30,7 +30,7 @@ import { Segmented, type SegmentedOption } from "../../components/Segmented.tsx"
 import { Swatches, type SwatchOption } from "../../components/Swatches.tsx";
 import { accessibleName, VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
-import { pointerWords } from "../../lib/pointerWords.ts";
+import { passWords, pointerWords } from "../../lib/pointerWords.ts";
 import { theme } from "../../lib/theme.ts";
 import { fitRow, heldFit, pinHolds, POPOVER_MIN, SLOT_GAP, type Arrangement, type FitInput, type FitSlot, type RowFit, type SlotForm } from "../../pages/optionsLayout.ts";
 import { useKeyHints, withKey } from "../../state/shortcuts.ts";
@@ -779,7 +779,7 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
     ? { display: "block", maxHeight: `calc(4 * ${theme.leading.body}em)`, overflowY: "auto", whiteSpace: "normal", overscrollBehavior: "contain" }
     : { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
   // A mouse reads "Click" where the app words touch "Tap". Only a plain string of fixed words is reworded here: a line with names in it, or built from parts, words its own.
-  const content = pill ? pointerWords(`${props.tool} options hidden. Tap to show.`) : typeof line?.content === "string" && line.worded !== true ? pointerWords(line.content) : line?.content;
+  const content = pill ? pointerWords(`${props.tool} options hidden. Tap to show.`) : typeof line?.content === "string" ? passWords(line.content, line.worded) : line?.content;
   const inner = (
     <span ref={words} style={text}>
       {content}
@@ -1628,19 +1628,24 @@ const ARMED_MS = 4000;
  * never moves what stands beside it (6.2), `short` is its compact form's
  * armed words ("Delete?"), and its second press closes the popover it
  * stands in (7.2).
+ *
+ * A mouse reads "Click" for the "Tap" in `confirm` and `short`. `worded` says
+ * the caller did that with pointerWords(template, names) because the words
+ * hold a name.
  */
-export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean }) {
+export function ConfirmButton(props: { label: string; confirm: string; worded?: true; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <ConfirmFace {...props} armed={false} form={place.form} />;
   return <LiveConfirm {...props} place={place} />;
 }
 
-function confirmWords(props: { label: string; confirm: string; short?: string }, form: SlotForm, armed: boolean): string {
+function confirmWords(props: { label: string; confirm: string; short?: string; worded?: true }, form: SlotForm, armed: boolean): string {
   if (!armed) return props.label;
-  return form === "compact" && props.short !== undefined ? props.short : props.confirm;
+  const words = form === "compact" && props.short !== undefined ? props.short : props.confirm;
+  return passWords(words, props.worded);
 }
 
-function ConfirmFace(props: { label: string; confirm: string; short?: string; disabled?: boolean; armed: boolean; form: SlotForm; icon?: IconName }) {
+function ConfirmFace(props: { label: string; confirm: string; short?: string; worded?: true; disabled?: boolean; armed: boolean; form: SlotForm; icon?: IconName }) {
   const all = [props.label, confirmWords(props, props.form, true)];
   return (
     <Button size="sm" variant="danger" armed={props.armed} icon={props.icon} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
@@ -1649,7 +1654,7 @@ function ConfirmFace(props: { label: string; confirm: string; short?: string; di
   );
 }
 
-function LiveConfirm(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean; place: SlotPlace | null }) {
+function LiveConfirm(props: { label: string; confirm: string; worded?: true; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean; place: SlotPlace | null }) {
   const [armed, setArmed] = useState(false);
   const { task } = usePopoverClose();
   useEffect(() => {

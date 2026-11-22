@@ -2,6 +2,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { MapPhase, MapVideo, PhaseGrid, Scene } from "#shared/model.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
 import { NOT_SAME_SHAPE, phaseProblem, TOO_SMALL } from "#shared/reducer/phases.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 
 /**
  * The phase list the Scenes panel edits (docs/design/design-v1-maps-vision.md
@@ -117,11 +118,12 @@ export function movePhase(scene: Scene, phaseId: string, delta: -1 | 1): MapPhas
  * What a phase's Remove says once armed. Removing the phase showing
  * switches the map to the first phase left, on the players' screens too
  * when they are on this scene, so the visible words say so, not only the
- * button's title, which a phone never shows.
+ * button's title, which a phone never shows. It holds the phase's name, so
+ * the words are chosen here and the button takes them as `worded`.
  */
-export function removeConfirmText(phases: readonly MapPhase[], phaseId: string, showing: boolean): string {
+export function removeConfirmText(phases: readonly MapPhase[], phaseId: string, showing: boolean, touch?: boolean): string {
   const next = showing ? phases.find((p) => p.id !== phaseId) : undefined;
-  return next ? `Tap again: the map switches to ${next.name}` : "Tap again to remove";
+  return next ? pointerWords("Tap again: the map switches to {name}", { name: next.name }, touch) : pointerWords("Tap again to remove", {}, touch);
 }
 
 /**

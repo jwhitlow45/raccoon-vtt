@@ -3,6 +3,7 @@ import { Button } from "../../components/Button.tsx";
 import { fieldStyle } from "../../components/Field.tsx";
 import { useHeld } from "../../components/Held.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
+import { passWords } from "../../lib/pointerWords.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -164,15 +165,18 @@ export function Slider(props: { label: string; value: number; min: number; max: 
  * line wrap inside the button, which grows taller, as the token panel's
  * ConfirmButton does (features/tokens/ui.tsx), rather than run past the
  * panel's edge or be cut, since they say what the second tap takes.
+ *
+ * A mouse reads "Click" for the "Tap" in `confirm`. `worded` says the caller
+ * did that with pointerWords(template, names) because the words hold a name.
  */
-export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; shrink?: boolean; wrap?: boolean }) {
+export function ConfirmButton(props: { label: string; confirm: string; worded?: true; title?: string; onConfirm(): void; disabled?: boolean; shrink?: boolean; wrap?: boolean }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
     const t = setTimeout(() => setArmed(false), 4000);
     return () => clearTimeout(t);
   }, [armed]);
-  const label = armed ? props.confirm : props.label;
+  const label = armed ? passWords(props.confirm, props.worded) : props.label;
   return (
     <Button
       size="sm"

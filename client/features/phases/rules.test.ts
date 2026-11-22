@@ -166,10 +166,17 @@ describe("editing the list", () => {
 
   test("removing the phase showing says, once armed, which phase the map switches to", () => {
     const list = [DAY, NIGHT, FIRE];
-    assert.equal(removeConfirmText(list, DAY.id, true), `Tap again: the map switches to ${NIGHT.name}`);
-    assert.equal(removeConfirmText(list, NIGHT.id, true), `Tap again: the map switches to ${DAY.name}`);
+    assert.equal(removeConfirmText(list, DAY.id, true, true), `Tap again: the map switches to ${NIGHT.name}`);
+    assert.equal(removeConfirmText(list, NIGHT.id, true, true), `Tap again: the map switches to ${DAY.name}`);
     // A phase not showing changes nothing anyone sees.
-    assert.equal(removeConfirmText(list, FIRE.id, false), "Tap again to remove");
+    assert.equal(removeConfirmText(list, FIRE.id, false, true), "Tap again to remove");
+  });
+
+  test("a mouse reads Click in those words, and a phase named Tap keeps its name", () => {
+    const list = [DAY, { ...NIGHT, name: "Tap" }, FIRE];
+    assert.equal(removeConfirmText(list, DAY.id, true, false), "Click again: the map switches to Tap");
+    assert.equal(removeConfirmText(list, DAY.id, true, true), "Tap again: the map switches to Tap");
+    assert.equal(removeConfirmText(list, FIRE.id, false, false), "Click again to remove");
   });
 });
 

@@ -14,3 +14,14 @@ import { pointerWordsFor } from "./pointerRules.ts";
 export function pointerWords(template: string, names: Readonly<Record<string, string>> = {}, touch: boolean = isCoarsePointer()): string {
   return pointerWordsFor(template, names, touch);
 }
+
+/**
+ * The central pass a shared component runs on the words it was given: a
+ * mouse reads "Click" where they say "Tap". A caller whose words hold a name
+ * from the room, or text a person typed, words them itself with
+ * pointerWords(template, names) and passes `worded`, so the pass never
+ * reads the name.
+ */
+export function passWords(words: string, worded?: true, touch: boolean = isCoarsePointer()): string {
+  return worded === true ? words : pointerWords(words, {}, touch);
+}

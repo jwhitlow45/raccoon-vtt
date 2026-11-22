@@ -5,6 +5,7 @@ import { buttonLook } from "../../components/looks.ts";
 import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect, useRowHint } from "../../components/Field.tsx";
 import { useHeld } from "../../components/Held.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
+import { passWords } from "../../lib/pointerWords.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -399,12 +400,15 @@ export function Stepper(props: {
  * `describedBy` names what the delete takes with it, in both states, so a
  * screen reader hears it with "Tap again to delete" too. `wrap` lets a
  * long label, such as a character's name, wrap inside the button and
- * break inside a long word, where a line is narrower than it.
+ * break inside a long word, where a line is narrower than it. A mouse
+ * reads "Click" for the "Tap" in `confirm`, and `worded` says the caller
+ * did that with pointerWords(template, names) because the words hold a name.
  */
 export function ConfirmButton(props: {
   onConfirm(): void;
   children: ReactNode;
   confirm: string;
+  worded?: true;
   label?: string;
   grow?: boolean;
   busy?: boolean;
@@ -420,7 +424,8 @@ export function ConfirmButton(props: {
     const timer = setTimeout(() => setArmed(false), 4000);
     return () => clearTimeout(timer);
   }, [armed]);
-  const label = armed ? props.confirm : props.label;
+  const confirm = passWords(props.confirm, props.worded);
+  const label = armed ? confirm : props.label;
   return (
     <Button
       size="sm"
@@ -443,7 +448,7 @@ export function ConfirmButton(props: {
         ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere", textAlign: "center" } : { whiteSpace: "nowrap" }),
       }}
     >
-      {armed ? props.confirm : props.children}
+      {armed ? confirm : props.children}
     </Button>
   );
 }

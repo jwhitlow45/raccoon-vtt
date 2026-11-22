@@ -253,6 +253,7 @@ function PhaseRow(props: {
             <ConfirmButton
               label="Remove"
               confirm={props.removeConfirm}
+              worded
               title={props.showing ? `Remove ${phase.name}. The map shows the first phase left.` : `Remove ${phase.name}`}
               shrink
               onConfirm={props.onRemove}
