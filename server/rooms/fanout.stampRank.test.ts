@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "#shared/keys.ts";
 import type { RoomState, Stamp, Viewer } from "#shared/model.ts";
-import { applyChanges, projectState, rankedStamp, stableStringify, type ProjectedState } from "#shared/project.ts";
+import { applyChanges, projectState, rankedStamp, stableStringify, stampOrder, stampRanks, type ProjectedState } from "#shared/project.ts";
 import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, P1, env, room } from "#shared/testutil.ts";
+import { DM, P1, env, rng, room } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
-import { buildSnapshot, newStampTable, publishBatch, rankStamps, stampRanksOf } from "./fanout.ts";
+import { buildSnapshot, newStampTable, publishBatch, rankStamps, stampRanksOf, type StampTable } from "./fanout.ts";
 
 /**
  * A player's stamps through the server's fan-out: each connection keeps
@@ -174,5 +174,135 @@ describe("ranking one connection's candidates", () => {
     });
     assert.deepEqual(asked, [[keys.stamp("b"), keys.stamp("c")]]);
     assert.deepEqual([...out].map(([key, v]) => [key, (v as Stamp).z]), [["stamp:b", 2], ["stamp:c", 3], ["stamp:d", 1]]);
+  });
+});
+
+describe("a large projection is copied only for a stamp that has to change", () => {
+  const source = (id: string, z: number, sceneId = "s1") => rankedStamp(stamp(id, z, { sceneId }), 0);
+  const large = (stamps: [string, Stamp][]): Map<EntityKey, unknown> => {
+    const next = new Map<EntityKey, unknown>();
+    for (let i = 0; i < 2000; i++) next.set(keys.log(`${i}:0`), { id: `${i}:0` });
+    for (const [id, value] of stamps) next.set(keys.stamp(id), value);
+    return next;
+  };
+
+  test("stamps already at their ranks leave the projection as it was, and one that is not copies it and leaves the class's alone", () => {
+    const table = newStampTable();
+    const first = large([["a", source("a", 1)]]);
+    assert.equal(rankStamps(table, first, () => new Map()), first, "the lone stamp ranks 0, the rank its projection holds");
+    const again = large([["a", source("a", 1)]]);
+    assert.equal(rankStamps(table, again, () => new Map()), again);
+    // A second stamp below it ranks `a` 1, so the class's `a` at rank 0 has to change.
+    const shared = large([["b", source("b", 0)]]);
+    const before = [...shared];
+    const out = rankStamps(table, shared, (more) => new Map(more.map((key) => [key, source(key.slice(6), 1)])));
+    assert.notEqual(out, shared);
+    assert.deepEqual([...shared], before, "the class's projection is never changed");
+    assert.equal((out.get(keys.stamp("a")) as Stamp).z, 1);
+    assert.equal((out.get(keys.stamp("b")) as Stamp).z, 0);
+  });
+
+  /** The version before the copy became lazy: the whole projection copied once any stamp is in it. Its answers are the oracle. */
+  function copiedAlways(table: StampTable, next: ReadonlyMap<EntityKey, unknown>, more: (keys: EntityKey[]) => Map<EntityKey, unknown>): ReadonlyMap<EntityKey, unknown> {
+    const own = (id: string, sceneId: string, order: number) => {
+      let orders = table.scenes.get(sceneId);
+      if (!orders) table.scenes.set(sceneId, (orders = new Map()));
+      orders.set(id, order);
+      table.where.set(id, sceneId);
+    };
+    const drop = (id: string, sceneId: string) => {
+      const orders = table.scenes.get(sceneId);
+      orders?.delete(id);
+      if (orders?.size === 0) table.scenes.delete(sceneId);
+      table.where.delete(id);
+      table.ranks.delete(id);
+    };
+    let out: Map<EntityKey, unknown> | null = null;
+    let grown = false;
+    let facts: Iterable<[EntityKey, unknown]> = next;
+    while (true) {
+      const dirty = new Set<string>();
+      for (const [key, value] of facts) {
+        if (!key.startsWith("stamp:")) continue;
+        out ??= new Map(next);
+        const id = key.slice("stamp:".length);
+        const was = table.where.get(id);
+        const st = value as Stamp | null | undefined;
+        if (!st) {
+          if (was !== undefined) {
+            drop(id, was);
+            dirty.add(was);
+          }
+          continue;
+        }
+        const order = stampOrder(st);
+        if (was === st.sceneId && table.scenes.get(was)!.get(id) === order) continue;
+        if (was !== undefined) {
+          drop(id, was);
+          dirty.add(was);
+        }
+        own(id, st.sceneId, order);
+        dirty.add(st.sceneId);
+      }
+      if (out === null) return next;
+      const moved: EntityKey[] = [];
+      for (const sceneId of dirty) {
+        for (const [id, rank] of stampRanks(table.scenes.get(sceneId) ?? new Map())) {
+          if (table.ranks.get(id) === rank) continue;
+          table.ranks.set(id, rank);
+          const key = keys.stamp(id);
+          if (!out.has(key)) moved.push(key);
+        }
+      }
+      if (moved.length === 0) break;
+      const projected = more(moved);
+      for (const [key, value] of projected) out.set(key, value);
+      grown = true;
+      facts = projected;
+    }
+    if (grown) out = new Map([...out].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    for (const [key, value] of out) {
+      if (!value || !key.startsWith("stamp:")) continue;
+      const rank = table.ranks.get(key.slice("stamp:".length));
+      if (rank !== undefined) out.set(key, rankedStamp(value as Stamp, rank));
+    }
+    return out;
+  }
+
+  const tableOf = (t: StampTable) => JSON.stringify([[...t.scenes].map(([k, v]) => [k, [...v]]), [...t.where], [...t.ranks]]);
+
+  test("random batches give the answers the always-copying version gave, key for key in order, and the same tables", () => {
+    for (let seed = 1; seed <= 150; seed++) {
+      const r = rng(seed);
+      const lazy = newStampTable();
+      const eager = newStampTable();
+      /** What the room holds: id to its stored order and scene, or absent. */
+      const stored = new Map<string, { z: number; sceneId: string }>();
+      for (let step = 0; step < 12; step++) {
+        const batch = new Map<EntityKey, unknown>();
+        for (let i = Math.floor(r() * 30); i > 0; i--) batch.set(keys.log(`${seed}:${step}:${i}`), { id: `${i}` });
+        for (let i = Math.floor(r() * 4); i > 0; i--) {
+          const id = `st${Math.floor(r() * 7)}`;
+          if (r() < 0.25) {
+            stored.delete(id);
+            batch.set(keys.stamp(id), null);
+          } else {
+            const z = Math.floor(r() * 6);
+            const sceneId = r() < 0.8 ? "s1" : "s2";
+            stored.set(id, { z, sceneId });
+            batch.set(keys.stamp(id), source(id, z, sceneId));
+          }
+        }
+        // A stamp the batch did not touch projects as the room stores it, so the callback answers from what is stored.
+        const more = (asked: EntityKey[]) => new Map(asked.map((key) => {
+          const have = stored.get(key.slice(6));
+          return [key, have ? source(key.slice(6), have.z, have.sceneId) : null] as const;
+        }));
+        const got = rankStamps(lazy, batch, more);
+        const want = copiedAlways(eager, batch, more);
+        assert.deepEqual([...got].map(([k, v]) => [k, JSON.stringify(v)]), [...want].map(([k, v]) => [k, JSON.stringify(v)]), `seed ${seed} step ${step}`);
+        assert.equal(tableOf(lazy), tableOf(eager), `seed ${seed} step ${step}: tables`);
+      }
+    }
   });
 });
