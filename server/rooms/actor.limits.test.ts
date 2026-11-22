@@ -8,7 +8,7 @@ import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { env, scene, token } from "#shared/testutil.ts";
+import { env, scene, template, token } from "#shared/testutil.ts";
 import { farRoomBytes, farWidths, projectedSceneBytes } from "./sizeGuard.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
@@ -305,6 +305,21 @@ describe("a creature crossing floors past a scene's line answers alike whatever 
       const base = withOpening(tower({ tokens: { thorn: thornToken({ sceneId: UPPER, x: 4, y: 6, ...thorn }) } }));
       const got = await answers(t, [null, UPPER, "at"].map((goblin) => world(base, goblin, GROUND)), async (ana) => [said(await ana.send(op as never))]);
       assert.ok(got.every((g) => g[0] === got[0]![0]), `${op.t}: ${JSON.stringify(got)}`);
+    }
+  });
+
+  test("the DM's hidden area riding Thorn goes with him as he falls, flies down or climbs, and each answer is taken, with the area or without", async (t) => {
+    const ride = (state: RoomState, on: string): RoomState => ({ ...state, templates: { ...state.templates, ride: template("ride", { sceneId: on, attachedTo: "thorn", visibility: "dm", ownerId: "dm1", size: 5 }) } });
+    const steps = [
+      [{ sceneId: UPPER, x: 4, y: 6 }, { t: "token.move", tokenId: "thorn", x: 6, y: 6 }, withOpening, UPPER],
+      [{ sceneId: UPPER, x: 6, y: 6, elevation: 5 }, { t: "token.climb", tokenId: "thorn", linkId: "o1" }, withOpening, UPPER],
+      [{}, { t: "token.climb", tokenId: "thorn", linkId: "l1" }, withStairs, GROUND],
+    ] as const;
+    for (const [at, op, build, from] of steps) {
+      const base = build(tower({ tokens: { thorn: thornToken(at) } }));
+      const worlds = [world(base, null, GROUND), ride(world(base, null, GROUND), from), ride(world(base, from, GROUND), from)];
+      const got = await answers(t, worlds, async (ana) => [said(await ana.send(op as never))]);
+      assert.deepEqual(got, [["taken"], ["taken"], ["taken"]], `${op.t} ${JSON.stringify(op)}: ${JSON.stringify(got)}`);
     }
   });
 
