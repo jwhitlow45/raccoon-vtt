@@ -21,5 +21,6 @@ describe("pointerWords", () => {
     assert.equal(pointerWords("{name} is picked. Tap more rows.", { name: "Tap" }, false), "Tap is picked. Click more rows.");
     assert.equal(pointerWords("{name} is picked. Tap more rows.", { name: "Tap" }, true), "Tap is picked. Tap more rows.");
     assert.equal(pointerWords("Cast by {a}.", { a: "{b}", b: "x" }, false), "Cast by {b}.", "a name is never read for holes");
+    assert.equal(pointerWords("Keep {constructor} and {toString} as written.", {}, false), "Keep {constructor} and {toString} as written.", "only the names given fill a hole");
   });
 });
