@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { AutoWalls, BuildChunk, Label, RoomState } from "#shared/model.ts";
-import { projectState } from "#shared/project.ts";
+import { projectState, stableStringify } from "#shared/project.ts";
 import type { StampInput } from "#shared/protocol.ts";
 import { decodeTile, rasterizeFogOps } from "#shared/rules/fog.ts";
 import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
@@ -55,7 +55,7 @@ function edgesOf(chunks: readonly BuildChunk[]): Record<string, unknown> {
 function drawn(chunks: readonly BuildChunk[], rule: AutoWalls | undefined): { cells: string[]; walls: string[] } {
   const build = indexBuild(chunks.filter((c) => c.sceneId === "s1"));
   const walls = deriveWalls(build, "export", { rule: rule ?? "all" });
-  return { cells: [...build.cells].map(([id, terrain]) => `${id} ${terrain}`).sort(), walls: walls.edges.map((e) => `${e.x},${e.y},${e.side} ${JSON.stringify(e.feature)}`).sort() };
+  return { cells: [...build.cells].map(([id, terrain]) => `${id} ${terrain}`).sort(), walls: walls.edges.map((e) => `${e.x},${e.y},${e.side} ${stableStringify(e.feature)}`).sort() };
 }
 
 function sortedLabels(labels: readonly Label[]): string[] {

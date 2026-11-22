@@ -72,6 +72,7 @@ import type { Change } from "./protocol.ts";
 import { lengthAs, type FiredEffect, type MusicRun, type Playing, type Playlist, type Sound, type SoundId } from "./sound.ts";
 import type { Env } from "./reducer/tx.ts";
 import { isWritable } from "./writable.ts";
+import { inSortedOrder } from "./sortedJson.ts";
 import { autoWallBetween, autoWallsOf, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
@@ -1797,7 +1798,8 @@ function byCoordinates(a: FreeWall, b: FreeWall): number {
 export function projectChunkForPlayer(all: Readonly<Record<string, BuildChunk>>, chunk: BuildChunk, autoWalls: AutoWalls | undefined): BuildChunk | null {
   const hit = playerChunks.get(chunk);
   if (hit && hit.all === all && hit.autoWalls === autoWalls) return hit.out;
-  const out = playerChunkOf(all, chunk, autoWalls);
+  // Its keys sorted once here, which a player's socket would otherwise sort in every frame that carries it (shared/sortedJson.ts).
+  const out = inSortedOrder(playerChunkOf(all, chunk, autoWalls)) as BuildChunk | null;
   playerChunks.set(chunk, { all, autoWalls, out });
   return out;
 }
@@ -4819,10 +4821,11 @@ function projectClockCtx(ctx: Ctx): ProjectedClock | null {
   return clock.shown ? { id: clock.id, rev: 0, t: clock.t, calendar: clock.calendar, ...(clock.daylight ? { daylight: clock.daylight } : {}) } : null;
 }
 
+/** A collection's projection, in id order, which a player's socket sends as it is (shared/sortedJson.ts). */
 function projectMap<T, P>(map: Record<string, T>, project: (value: T) => P | null): Record<string, P> {
   const out: Record<string, P> = {};
-  for (const [id, value] of Object.entries(map)) {
-    const projected = project(value);
+  for (const id of Object.keys(map).sort()) {
+    const projected = project(map[id]!);
     if (projected !== null) out[id] = projected;
   }
   return out;
