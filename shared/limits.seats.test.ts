@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { opKind } from "./farLine.ts";
-import { FAR, LIMITS, SEAT, SEAT_FULL, admitLimits, farLimits, seatCheck, seatCounts, seatHeld, serializedBytes, type LimitSender } from "./limits.ts";
+import { FAR, LIMITS, SEAT, SEAT_FULL, admitLimits, farLimits, seatCheck, seatCounts, seatHeld, seatWork, serializedBytes, type LimitSender } from "./limits.ts";
 import type { RoomState } from "./model.ts";
 import { seatView } from "./project.ts";
 import type { Op } from "./protocol.ts";
-import { castAsk, character, companionBlock, drawing, entry, room, scene, template, token } from "./testutil.ts";
+import { castAsk, character, companionBlock, drawing, entry, rng, room, scene, template, token } from "./testutil.ts";
 
 const P1: LimitSender = { role: "player", memberId: "p1", viewOf: (state) => seatView(state, "p1") };
 const DM: LimitSender = { role: "dm" };
@@ -186,6 +186,25 @@ describe("the DM's caps over the rest", () => {
     for (let i = SEAT.tokens + 5; i >= 0; i--) state.tokens[`k${pad(i)}`] = token(`k${pad(i)}`, { companion: { of: "c1", turn: "own" }, ownerIds: ["p1"], x: 1 + (i % 30), y: 1 });
     const byId = ["hero", ...Array.from({ length: SEAT.tokens + 6 }, (_, i) => `k${pad(i)}`)].sort();
     assert.deepEqual([...seatHeld(state, "s1").tokens], byId.slice(0, SEAT.tokens));
+  });
+
+  test("the seats put every thing in id order, whoever owns it: the DM's hidden areas or a player's, and hidden creatures with a character or none, make as many comparisons", () => {
+    // One shuffle for every twin, so only who owns the things and what they are differ.
+    const r = rng(9);
+    const order = Array.from({ length: 150 }, (_, i) => i).sort(() => r() - 0.5);
+    const compared = (fill: (state: RoomState, i: number) => void) => {
+      const state = table();
+      for (const i of order) fill(state, i);
+      const was = { ...seatWork };
+      seatHeld(state, "s1");
+      return { compared: seatWork.compared - was.compared, read: seatWork.read - was.read };
+    };
+    const areas = (["dm1", "p2"] as const).map((ownerId) => compared((s, i) => { s.templates[`t${pad(i)}`] = template(`t${pad(i)}`, { ownerId, visibility: "dm" }); }));
+    assert.ok(areas[0]!.compared > 0 && areas[0]!.read > 0);
+    assert.deepEqual(areas[1], areas[0], "the DM's areas or P2's");
+    const creatures = [false, true].map((theirs) => compared((s, i) => { s.tokens[`m${pad(i)}`] = token(`m${pad(i)}`, { visibility: "dm", ...(theirs ? { companion: { of: "c1", turn: "own" as const } } : {}) }); }));
+    assert.ok(creatures[0]!.compared > 0 && creatures[0]!.read > 0);
+    assert.deepEqual(creatures[1], creatures[0], "hidden creatures with a character's companionship or none");
   });
 
   test("the DM's token cap counts the creatures on every floor of the scene, from whichever floor it is met", () => {

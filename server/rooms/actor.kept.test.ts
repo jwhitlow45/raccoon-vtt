@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { keptWork, MOST_CHANGED } from "#shared/accepted.ts";
+import { seatWork } from "#shared/limits.ts";
 import type { Op } from "#shared/protocol.ts";
 import { token } from "#shared/testutil.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
@@ -11,7 +12,8 @@ import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTe
  * player's op costs its own writes: the same work whatever the DM did out
  * of their sight before it in the batch, had refused, or deleted without a
  * far check, and whatever another room did. The work is counted, never
- * timed: the keys and entries the kept parts read.
+ * timed: the keys and entries the kept parts read, and the seats' id
+ * comparisons and things read.
  */
 
 const HIDDEN = 150;
@@ -25,10 +27,10 @@ function hiddenRoom(extra = 0) {
   return f;
 }
 
-type Work = { keys: number; entries: number };
+type Work = { keys: number; entries: number; compared: number; read: number };
 
 function counted(): Work {
-  return { keys: keptWork.keys, entries: keptWork.entries };
+  return { keys: keptWork.keys, entries: keptWork.entries, compared: seatWork.compared, read: seatWork.read };
 }
 
 /**
@@ -64,7 +66,7 @@ async function playerWork(t: TestContext, f: ReturnType<typeof hiddenRoom>, befo
   for (const m of shared) assert.equal(await answered(dm, m), batch, "the DM's op shares the player's batch");
   assert.ok(!player.sent.some((m) => m.t === "ev" && m.rejects?.some((r) => r.n === n)), "the player's walk is taken");
   refusedOf.set(dm, shared.filter((m) => dm.sent.some((e) => e.t === "ev" && e.rejects?.some((r) => r.n === m))).length);
-  return { keys: now.keys - was.keys, entries: now.entries - was.entries };
+  return { keys: now.keys - was.keys, entries: now.entries - was.entries, compared: now.compared - was.compared, read: now.read - was.read };
 }
 
 /** How many of the DM's ops in the player's batch the room refused, by the DM's client. */

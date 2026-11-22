@@ -1,5 +1,6 @@
 import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
+import { ABSENT, keptPart, type Part } from "./accepted.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type AreaTemplate, type BuildChunk, type Character, type CompanionBlock, type CustomMonster, type Drawing, type InitEntry, type JournalPage, type RoomState, type Scene, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
 import { floorsOf, openFloor } from "./rules/floors.ts";
@@ -1823,21 +1824,35 @@ function firstPlayer(state: RoomState, ownerIds: readonly string[]): string | un
   return first;
 }
 
+/** Comparisons the seats' id orders made and things the seats read, counted for tests that hold them alike whoever owns what. */
+export const seatWork = { compared: 0, read: 0 };
+
+function compareIds(a: string, b: string): number {
+  seatWork.compared++;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function byId<T extends { id: string }>(list: T[]): T[] {
+  return list.sort((a, b) => compareIds(a.id, b.id));
+}
+
 /**
  * Each member's things of one seat's class, first by id, up to `most`
- * each. A thing no member's seat holds takes no place, so only the owned
- * are put in order (a stable sort, as before, should two share an id).
+ * each. Every thing is put in order, whoever owns it, so the order's work
+ * never reads whose a thing is.
  */
 function heldFirst<T extends { id: string }>(things: Iterable<T>, ownerOf: (thing: T) => string | undefined, most: number): T[] {
-  const owned: { thing: T; owner: string }[] = [];
-  for (const thing of things) {
-    const owner = ownerOf(thing);
-    if (owner !== undefined) owned.push({ thing, owner });
-  }
-  owned.sort((a, b) => (a.thing.id < b.thing.id ? -1 : a.thing.id > b.thing.id ? 1 : 0));
+  return heldInOrder(byId([...things]), ownerOf, most);
+}
+
+/** heldFirst over things already in id order. */
+function heldInOrder<T>(things: readonly T[], ownerOf: (thing: T) => string | undefined, most: number): T[] {
   const per = new Map<string, number>();
   const out: T[] = [];
-  for (const { thing, owner } of owned) {
+  for (const thing of things) {
+    seatWork.read++;
+    const owner = ownerOf(thing);
+    if (owner === undefined) continue;
     const held = per.get(owner) ?? 0;
     if (held >= most) continue;
     per.set(owner, held + 1);
@@ -1846,15 +1861,51 @@ function heldFirst<T extends { id: string }>(things: Iterable<T>, ownerOf: (thin
   return out;
 }
 
+/** Where `id` goes in a list in id order: the index of the first id at or after it. */
+function slotOf(ids: readonly string[], id: string): number {
+  let lo = 0;
+  let hi = ids.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (compareIds(ids[mid]!, id) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * A tokens collection's keys in id order (a token's key is its id), kept
+ * over the room's accepted state (shared/accepted.ts): a later collection
+ * keeps the list while no token came or went, and places only those that
+ * did. Every token is in it, whoever owns it and whatever it is.
+ */
+const TOKEN_ORDER: Part<readonly string[], Token> = {
+  whole: (_record, keys) => [...keys].sort(compareIds),
+  step: (ids, changes) => {
+    let out: string[] | null = null;
+    for (const { key, was, now } of changes) {
+      if ((was === ABSENT) === (now === ABSENT)) continue;
+      out ??= [...ids];
+      const at = slotOf(out, key);
+      if (now === ABSENT) out.splice(at, 1);
+      else out.splice(at, 0, key);
+    }
+    return out ?? ids;
+  },
+};
+
+/** A state's token keys in id order. `take` is for an accepted state alone (acceptSeats). */
+function tokenOrder(state: RoomState, take = false): readonly string[] {
+  return keptPart(state, "tokens", state.tokens, TOKEN_ORDER, take);
+}
+
 /**
  * A tokens collection's tokens by the floor they stand on, each floor's in
  * the collection's order and the floors in the order a token first stands
- * on them, and apart those with a character a seat may count them by
- * (seatCharacter). Kept per collection object, which is replaced and never
- * changed (writable.ts), so the counts of the state before an op read
- * what the op before it kept, and a seat reads only the tokens it can hold.
+ * on them. Kept per collection object, which is replaced and never
+ * changed (writable.ts), and built from every token.
  */
-export type TokenFloors = { readonly byFloor: ReadonlyMap<string, readonly Token[]>; readonly seatable: readonly Token[] };
+export type TokenFloors = { readonly byFloor: ReadonlyMap<string, readonly Token[]> };
 
 const tokenFloorsKept = new WeakMap<object, TokenFloors>();
 
@@ -1862,16 +1913,20 @@ export function tokenFloors(tokens: RoomState["tokens"]): TokenFloors {
   let kept = tokenFloorsKept.get(tokens);
   if (kept) return kept;
   const byFloor = new Map<string, Token[]>();
-  const seatable: Token[] = [];
   for (const token of Object.values(tokens)) {
     const on = byFloor.get(token.sceneId);
     if (on) on.push(token);
     else byFloor.set(token.sceneId, [token]);
-    if (token.companion?.of !== undefined || "ref" in token.actor) seatable.push(token);
   }
-  kept = { byFloor, seatable };
+  kept = { byFloor };
   if (!isWritable(tokens)) tokenFloorsKept.set(tokens, kept);
   return kept;
+}
+
+/** An accepted state's token order and floors, worked out as the op that left it is accepted, so the next op reads them kept. */
+export function acceptSeats(state: RoomState): void {
+  tokenOrder(state, true);
+  tokenFloors(state.tokens);
 }
 
 /**
@@ -1884,9 +1939,13 @@ export function tokenFloors(tokens: RoomState["tokens"]): TokenFloors {
 export function seatHeld(state: RoomState, sceneId: string | null): SeatHeld {
   const group: ReadonlySet<string> = sceneId === null ? new Set() : sceneGroup(state, sceneId);
   const player = (id: string) => (ownEntry(state.members, id)?.kind === "player" ? id : undefined);
-  // A token with no seat character has no owner here, so only the seatable are read.
-  const tokens = heldFirst(
-    tokenFloors(state.tokens).seatable.filter((t) => group.has(t.sceneId)),
+  const inGroup: Token[] = [];
+  for (const id of tokenOrder(state)) {
+    const token = state.tokens[id]!;
+    if (group.has(token.sceneId)) inGroup.push(token);
+  }
+  const tokens = heldInOrder(
+    inGroup,
     (t) => {
       const character = seatCharacter(state, t);
       return character ? firstPlayer(state, character.ownerIds) : undefined;
