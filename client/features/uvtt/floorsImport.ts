@@ -1,5 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
+import { MAX_NAME } from "#shared/protocol.ts";
 import { freeName } from "#shared/reducer/floors.ts";
 import { floorNameOf } from "../scenes/floorSource.ts";
 import { fileSceneName, outcomeText, type ImportOutcome } from "./rules.ts";
@@ -35,8 +36,8 @@ export function rowsOf(files: readonly File[]): FloorRow[] {
     });
 }
 
-/** What the scene name field takes, as New scene and Scene settings do: more than the start value, which is cut like a floor's name. */
-export const SCENE_NAME_CHARS = 80;
+/** What the scene name field takes, the protocol's name limit, as New scene and Scene settings do with 80: more than the start value, which is cut like a floor's name. */
+export const SCENE_NAME_CHARS = MAX_NAME;
 
 /** The scene's name to start from: the first file's, cut like a floor's name so the two read alike. */
 export function sceneNameOf(rows: readonly FloorRow[]): string {
