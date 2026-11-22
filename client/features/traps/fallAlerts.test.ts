@@ -76,6 +76,14 @@ describe("one toast for a crowd that fell in one op (LP46A polish)", () => {
     assert.deepEqual(fallAlerts(cards, { ...state, tokens }, "ground", NO_LABELS), [{ text: "3 creatures fell to Ground floor." }]);
   });
 
+  test("four tokens of one character read as one creature, not 1 creatures", () => {
+    const state = view();
+    const tokens = { ...state.tokens };
+    for (const id of ["a", "b", "c", "d"]) tokens[id] = token(id, { sceneId: "ground", kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" } });
+    const cards = crowd(4).map((c, i) => ({ ...c, tokenId: ["a", "b", "c", "d"][i]! }));
+    assert.deepEqual(fallAlerts(cards, { ...state, tokens }, "ground", NO_LABELS), [{ text: "1 creature fell to Ground floor." }]);
+  });
+
   test("each op on its own, and floors of more than one landing named as the floors below", () => {
     const two = [...crowd(4, 130), ...crowd(1, 140)];
     assert.deepEqual(fallAlerts(two, view(), "ground", NO_LABELS).map((a) => a.text), ["4 creatures fell to Ground floor.", "A creature no longer on the map fell 10 ft to Ground floor."]);

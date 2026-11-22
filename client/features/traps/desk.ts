@@ -191,7 +191,6 @@ export function holderIdOf(view: Pick<RoomState, "tokens">, id: string): string 
  * character shown by two tokens, one riding and one carried, is one
  * creature that fell once (LP47B-FALL-1). Apply still takes every token.
  */
-
 export function fallNamed(view: Pick<RoomState, "tokens">, ids: readonly string[]): string[] {
   const seen = new Set<string>();
   return ids.filter((id) => {

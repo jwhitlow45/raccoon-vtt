@@ -116,7 +116,7 @@ function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "t
   // A character shown by two tokens is one creature, as a card names it (fallNamed), and a token the copy no longer holds counts for itself.
   const creatures = new Set(cards.flatMap((card) => [card.tokenId, ...(card.riders ?? [])]).map((id) => holderIdOf(state, id))).size;
   // A new card past the room's cap drops the oldest in the same op (writeCard), so an op whose cards fill the room may have made more.
-  const count = cards.length >= LIMITS.fallsPerRoom ? `${creatures} or more creatures` : `${creatures} creatures`;
+  const count = cards.length >= LIMITS.fallsPerRoom ? `${creatures} or more creatures` : `${creatures} ${creatures === 1 ? "creature" : "creatures"}`;
   const sceneId = cards[0]!.sceneId;
   if (!cards.every((card) => card.sceneId === sceneId)) return { text: `${count} fell to the floors below.` };
   const scene = ownEntry(state.scenes, sceneId);
