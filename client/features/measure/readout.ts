@@ -12,8 +12,10 @@ type Measure = (text: string, px: number) => number;
  * is 1, since the full name is a tap away in its panel. A named value
  * that does not fit beside the whole name is cut as above, or with `stack`
  * goes on the line under the name instead, when both fit a line each.
+ * `stacked` puts it there even where both fit one line, for a narrower
+ * pill in a crowd.
  */
-export function pillLines(input: { value?: string; name?: string | null; px: number; maxWidth: number; maxLines?: 1 | 2; stack?: boolean }, measure: Measure): string[] {
+export function pillLines(input: { value?: string; name?: string | null; px: number; maxWidth: number; maxLines?: 1 | 2; stack?: boolean; stacked?: boolean }, measure: Measure): string[] {
   const { value, px, maxWidth } = input;
   const name = input.name?.trim() || null;
   if (value !== undefined) {
@@ -21,9 +23,10 @@ export function pillLines(input: { value?: string; name?: string | null; px: num
     if (!name) return valueLines;
     if (valueLines.length > 1) return [measure(name, px) <= maxWidth ? name : (cutName(name, undefined, maxWidth, px, measure) ?? name), ...valueLines];
     const one = `${name} · ${value}`;
-    if (measure(one, px) <= maxWidth) return [one];
+    if (measure(one, px) <= maxWidth && !input.stacked) return [one];
     // A stacked pill keeps a name that fits whole and puts the value under it, rather than cutting the name to share a line.
-    if (input.stack && measure(name, px) <= maxWidth && measure(value, px) <= maxWidth) return [name, value];
+    if ((input.stack || input.stacked) && measure(name, px) <= maxWidth && measure(value, px) <= maxWidth) return [name, value];
+    if (measure(one, px) <= maxWidth) return [one];
     const room = maxWidth - measure(` · ${value}`, px);
     const cut = room > 0 ? cutName(name, undefined, room, px, measure) : null;
     return cut ? [`${cut} · ${value}`] : [value];

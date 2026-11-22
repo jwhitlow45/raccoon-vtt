@@ -265,6 +265,35 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     assert.ok(fewer > 0, "somewhere the slide changes the choice");
   });
 
+  test("on a phone at fit, a name with a value takes two lines where two one-line names side by side would meet, and a lone hole with room keeps one line (ISO-1-PHONE-EDGE)", () => {
+    const crypt = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Crypt", value: "Not reached yet" } });
+    const scale = 21.375;
+    // At the fallback widths "Down to Crypt · Not reached yet" is over twice as wide as its two lines.
+    assert.ok(pillGeometry({ ...crypt(hole("x", { x: 0, y: 0, w: 1, h: 1 })).first!, scale }).width > 1.9 * pillGeometry({ ...crypt(hole("x", { x: 0, y: 0, w: 1, h: 1 })).first!, stacked: true, scale }).width);
+    let stacked = 0;
+    for (const g of [grid, sceneGrid({ gridShape: "hexRows" }), sceneGrid({ gridShape: "hexColumns" })]) {
+      for (const ends of [
+        [crypt(hole("a", { x: 6, y: 4, w: 2, h: 2 }, g)), crypt(hole("b", { x: 8, y: 6, w: 1, h: 1 }, g))],
+        [crypt(hole("a", { x: 8, y: 4, w: 2, h: 2 }, g)), crypt(hole("b", { x: 10, y: 7, w: 1, h: 1 }, g))],
+      ]) {
+        for (const iso of [null, flat(0), flat(1), flat(2), flat(3)]) {
+          // A screen 320 px wide round the holes.
+          const c = viewPointOf(iso, { x: (ends[0]!.o.x + ends[1]!.o.x) / 2 + 1, y: 6 });
+          const view = { x0: c.x - 160 / scale, x1: c.x + 160 / scale, y0: c.y - 330 / scale, y1: c.y + 330 / scale };
+          const placed = placeEnds(ends, [], scale, iso, () => iso !== null, [], { view });
+          stacked += [...placed.values()].filter((p) => p.pill!.stacked).length;
+          const [a, b] = ends.map((e) => pillBoxes(iso, placed, e.id, scale, view));
+          for (const x of a!) for (const y of b!) assert.ok(!meet(x, y), `${ends[0]!.o.loop ? "hexes" : "squares"} ${ends[0]!.o.x.toFixed(2)}, ${iso ? `turn ${iso.turn}` : "Top-down"}: two pills meet`);
+        }
+      }
+    }
+    assert.ok(stacked > 0, "some name takes two lines");
+    for (const iso of [null, flat(0)]) {
+      const lone = crypt(hole("a", { x: 8, y: 6, w: 2, h: 2 }));
+      assert.equal(placeEnds([lone], [], 40, iso, () => iso !== null).get("a")!.pill!.stacked, undefined, `${iso ? "Isometric" : "Top-down"}: a lone hole's name keeps one line`);
+    }
+  });
+
   test("a pill over its own hole beats one over another pill, and loses to one over another end's squares (D-261122-112)", () => {
     // Turn 0: a's lowest corner is 8,6, and its name hung there meets b's squares, and b's chip where b keeps one.
     const iso = flat(0);

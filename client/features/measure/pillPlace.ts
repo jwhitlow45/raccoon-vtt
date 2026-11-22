@@ -42,6 +42,8 @@ export type PillProps = {
   maxLines?: 1 | 2;
   /** A value that does not fit beside the whole name goes under it instead of cutting the name (a stairs end's "Not reached yet"). */
   stack?: boolean;
+  /** The value goes under the name even where both fit one line, for a narrower pill where the wide one has no room (a hole's name on a phone). */
+  stacked?: boolean;
   small?: boolean;
   /** Screen px between the point and the pill: down and right of it by default, along the pointer for `above` and `below`. */
   offsetPx?: number;
@@ -61,7 +63,7 @@ export function pillGeometry(props: Omit<PillProps, "x" | "y" | "color">): { lin
   const designPx = props.small ? 12 : 15;
   const fontSize = props.size === "screen" ? screenPx(designPx) : props.small ? boardSizes(props.scale).pillPx : Math.max(screenPx(designPx), boardSizes(props.scale).pillPx);
   const padding = Math.round(((props.small ? 4 : 6) * fontSize) / designPx);
-  const lines = pillLines({ value: props.value, name: props.name, px: fontSize, maxWidth: screenPx(PILL_MAX_PX), maxLines: props.maxLines, stack: props.stack }, (t, px) => measurePill(t, px, theme.font.body));
+  const lines = pillLines({ value: props.value, name: props.name, px: fontSize, maxWidth: screenPx(PILL_MAX_PX), maxLines: props.maxLines, stack: props.stack, stacked: props.stacked }, (t, px) => measurePill(t, px, theme.font.body));
   const width = Math.max(0, ...lines.map((l) => measurePill(l, fontSize, theme.font.body))) + 2 * padding;
   const height = lines.length * fontSize * LEADING + 2 * padding;
   return { lines, fontSize, padding, width, height, pointer: screenPx(POINTER_PX) };

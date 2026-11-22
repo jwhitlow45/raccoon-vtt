@@ -376,6 +376,10 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
       // In Isometric the end's own edge is the last choice, and the only one where no corner serves. In Top-down it is the first, as a lone hole's name and chip hang from its edges' middles.
       if (!iso) specs.unshift(spec);
       else if (specs.length === 0 || stands(spec)) specs.push(spec);
+      // A name with a value can also take two lines, the value under it: narrower, for a phone at fit, where two names side by side are wider than the screen. After every one-line choice, so it serves only where it covers less.
+      if (pillGeometry({ ...spec, stacked: true, scale }).width < pillGeometry({ ...spec, scale }).width) {
+        specs.push(...specs.map((p) => ({ ...p, stacked: true })).filter((p) => fits(p) && !meetsTurnMarker(p, markers, scale, iso, true)));
+      }
       const cands = specs.map((s2) => {
         const up = fits(s2);
         const box = drawnBox(s2, scale, iso, up, true, view);

@@ -47,4 +47,12 @@ describe("pill text", () => {
     // A name too long for a line of its own is still cut beside the value.
     assert.equal(pillLines({ ...input, name: "Up to the Very Long Floor Name Of The Keep", stack: true }, measure).length, 1);
   });
+
+  test("a stacked pill puts its value under its name even where both fit one line, for a narrower pill in a crowd (ISO-1-PHONE-EDGE)", () => {
+    const input = { name: "Up to Upper floor", value: "Not reached yet", px: 12, maxWidth: 240 };
+    assert.deepEqual(pillLines(input, measure), ["Up to Upper floor · Not reached yet"]);
+    assert.deepEqual(pillLines({ ...input, stacked: true }, measure), ["Up to Upper floor", "Not reached yet"]);
+    assert.equal(pillLines({ ...input, name: "Up to the Very Long Floor Name Of The Keep", stacked: true }, measure).length, 1, "a name too long for its own line is still cut beside the value");
+    assert.deepEqual(pillLines({ value: "10 ft down", px: 12, maxWidth: 240, stacked: true }, measure), ["10 ft down"], "a value alone");
+  });
 });
