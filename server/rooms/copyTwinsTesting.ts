@@ -6,7 +6,7 @@ import { projectState, seatView, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { drawing, effect, entry, env, randomState, rng, scene, template, token } from "#shared/testutil.ts";
-import { exactOver, growthBound, linesHeld, playerReadings, SizeGuard, touchedScenes, type ExactCopy, type FarParts } from "./sizeGuard.ts";
+import { exactOver, growthBound, linesHeld, playerReadings, readingAt, sameScope, SizeGuard, touchedScenes, type ExactCopy, type FarParts, type FarScope } from "./sizeGuard.ts";
 
 /*
  * Twins of a random room apart only in what P1's copy leaves out
@@ -128,7 +128,7 @@ export const knownBy = (state: RoomState, memberId: string) => {
  * byte line refused, the scope whose line it was: "room" or the scene by
  * its main floor.
  */
-export type FarAnswer = { said: string; next: RoomState | null; scope?: string };
+export type FarAnswer = { said: string; next: RoomState | null; scope?: FarScope };
 
 const MIB = 1024 * 1024;
 
@@ -157,7 +157,8 @@ export function farAnswer(before: RoomState, op: Op, who: Viewer, at: number): F
   const far = who.role === "player" ? "widest" : kind.far === "exempt" ? "today" : "dmAdd";
   const check = guard.check(measured.state, scenes, growthBound(before, measured.state, measured.touched), before, who.role, far, kind.far === "exempt", who.role === "player" ? who.memberId : undefined);
   if (check.ok) return { said: "taken", next: result.state };
-  const scope = check.message === ROOM_FULL ? "room" : check.message === SCENE_FULL ? (guard.refusedScene ?? undefined) : undefined;
+  const refusedScene = guard.refusedScene;
+  const scope: FarScope | undefined = check.message === ROOM_FULL ? { kind: "room" } : check.message === SCENE_FULL && refusedScene !== null ? { kind: "scene", main: refusedScene } : undefined;
   return { said: `${check.code}: ${check.message}`, next: null, ...(scope !== undefined ? { scope } : {}) };
 }
 
@@ -195,18 +196,18 @@ const partsApart = (x: ReadonlyMap<EntityKey, ExactCopy>, y: ReadonlyMap<EntityK
  * carried one across a step. Exact parts apart before the op explain
  * nothing: P1's copies were alike then.
  */
-export function readingsApart(a: [RoomState, RoomState], b: [RoomState, RoomState], refused: ReadonlyArray<string | undefined>, memberId = "p1"): "own copy" | "step" | null {
+export function readingsApart(a: [RoomState, RoomState], b: [RoomState, RoomState], refused: ReadonlyArray<FarScope | undefined>, memberId = "p1"): "own copy" | "step" | null {
   const [ea, eb] = [exactOver(a[0], a[1], memberId), exactOver(b[0], b[1], memberId)];
   if (partsApart(ea.before, eb.before).length > 0) return null;
   const apart = partsApart(ea.after, eb.after);
   const wrote = ([before, after]: [RoomState, RoomState], key: string) => stableStringify(storedAt(before, key)) !== stableStringify(storedAt(after, key));
   if (apart.length > 0) return apart.every((key) => (wrote(a, key) || wrote(b, key)) && copyAt(a[1], key, memberId) !== copyAt(b[1], key, memberId)) ? "own copy" : null;
   const [ra, rb] = [playerReadings(a[0], a[1], memberId), playerReadings(b[0], b[1], memberId)];
-  const order = [...ra.keys()];
-  const scope = refused.filter((at): at is string => at !== undefined && order.includes(at)).sort((x, y) => order.indexOf(x) - order.indexOf(y))[0];
+  const place = (scope: FarScope) => ra.findIndex((reading) => sameScope(reading.scope, scope));
+  const scope = refused.filter((at): at is FarScope => at !== undefined && place(at) >= 0).sort((x, y) => place(x) - place(y))[0];
   if (scope === undefined) return null;
   const rounded = (parts: FarParts | undefined) => (parts ? roundUp(Math.max(0, parts.stepped), FAR.byteStep) : null);
-  const [x, y] = [ra.get(scope), rb.get(scope)];
+  const [x, y] = [readingAt(ra, scope), readingAt(rb, scope)];
   return rounded(x?.before) !== rounded(y?.before) || rounded(x?.after) !== rounded(y?.after) ? "step" : null;
 }
 
@@ -225,10 +226,10 @@ export type Past = "room" | "scene" | "sight";
  */
 export function parked(twins: RoomState[], past: Past, sceneId: string, offset: number): void {
   const [first] = twins;
-  const scope = past === "scene" ? (first!.scenes[sceneId]!.floor?.of ?? sceneId) : "room";
+  const scope: FarScope = past === "scene" ? { kind: "scene", main: first!.scenes[sceneId]!.floor?.of ?? sceneId } : { kind: "room" };
   const line = past === "scene" ? FAR.sceneBytes : FAR.roomBytes;
   const reading = () => {
-    const at = twins.map((twin) => playerReadings(twin, twin, "p1").get(scope)!.after);
+    const at = twins.map((twin) => readingAt(playerReadings(twin, twin, "p1"), scope)!.after);
     const stepped = Math.max(...at.map((parts) => parts.stepped));
     return { reading: farReading(stepped, at[0]!.exact), stepped, exact: at[0]!.exact };
   };

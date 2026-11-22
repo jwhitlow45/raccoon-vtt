@@ -10,7 +10,7 @@ import { DM, actor, character, effect, entry, env, P1, rng, room, scene, token, 
 import { GROUND, UPPER, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import { farAnswer, hiddenCreatures, knownBy, OMITTED, parked, readingsApart, twinBase, type FarAnswer, type Past } from "./copyTwinsTesting.ts";
 import { scopeFixture } from "./undoScopeTesting.ts";
-import { exactCopies, farWidths, growthBound, ownHeldBytes, playerReadings, projectedSceneBytes, SizeGuard } from "./sizeGuard.ts";
+import { exactCopies, farWidths, growthBound, ownHeldBytes, playerReadings, projectedSceneBytes, readingAt, SizeGuard } from "./sizeGuard.ts";
 
 /*
  * D-261121-060, 074, 121: past the far line a player's op is refused only
@@ -401,7 +401,7 @@ describe("D-261121-120 and 125: no fight's start or end, and no walk, moves a re
         const fought: [RoomState, RoomState] = [started.state, twins[1]];
         const apart = (a: RoomState, b: RoomState) => {
           const [ra, rb] = [playerReadings(a, a, "p1"), playerReadings(b, b, "p1")];
-          return Math.max(...[...ra.keys()].map((scope) => Math.abs(ra.get(scope)!.after.stepped + ra.get(scope)!.after.exact - (rb.get(scope)?.after.stepped ?? 0) - (rb.get(scope)?.after.exact ?? 0))));
+          return Math.max(...ra.map(({ scope, after }) => Math.abs(after.stepped + after.exact - (readingAt(rb, scope)?.after.stepped ?? 0) - (readingAt(rb, scope)?.after.exact ?? 0))));
         };
         assert.ok(apart(...fought) < 8 * 1024, `the fight moves a reading by ${apart(...fought)} bytes`);
         const run = runTwins(fought, [p1({ t: "log.chat", text: "in the dark" }), p1(line("l-dark")), p1({ t: "token.move", tokenId: "hero", x: 5, y: 5 })], `${past} at ${offset}`);
@@ -538,7 +538,7 @@ describe("D-261121-073 and 075: what hidden bytes may still decide, and no store
     const op: Op = { t: "encounter.next", from: { entry: "p1-row", round: state.encounter!.round } } as Op;
     const r = applyOp(state, op, p1v, env(200));
     assert.ok(r.ok);
-    const reading = playerReadings(state, r.state, f.player.id).get(f.sceneId)!;
+    const reading = readingAt(playerReadings(state, r.state, f.player.id), { kind: "scene", main: f.sceneId })!;
     const whole = (parts: { stepped: number; exact: number }) => farReading(parts.stepped, parts.exact);
     assert.ok(reading.after.exact > reading.before!.exact && whole(reading.after) < whole(reading.before!), `the turn's line grows the exact part and the walks' end lowers the whole: ${JSON.stringify(reading)}`);
     assert.equal(answer(state, op, p1v).said, `quota: ${SCENE_FULL}`);

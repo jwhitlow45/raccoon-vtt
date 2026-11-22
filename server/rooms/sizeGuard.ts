@@ -462,12 +462,11 @@ export class SizeGuard {
    * counting, serve the DM's ops alone.
    */
   #farPlayer(next: RoomState, before: RoomState | undefined, widest: boolean, kind: "meets" | "exempt", player: string): LimitCheck {
-    for (const [scope, { before: was, after }] of farReadings(before, next, player, widest)) {
-      const room = scope === "room";
-      if (!farBytesOver(room ? "room" : "scene", kind, "players", after.stepped, after.exact, true)) continue;
+    for (const { scope, before: was, after } of farReadings(before, next, player, widest)) {
+      if (!farBytesOver(scope.kind, kind, "players", after.stepped, after.exact, true)) continue;
       if (was !== undefined && !readingGrew(was, after)) continue;
-      if (room) return roomFull();
-      this.#refusedScene = scope;
+      if (scope.kind === "room") return roomFull();
+      this.#refusedScene = scope.main;
       return sceneFull();
     }
     return { ok: true };
@@ -3094,6 +3093,26 @@ export function exactOver(before: RoomState | undefined, after: RoomState, membe
 export type FarParts = { stepped: number; exact: number };
 
 /**
+ * Where a far reading is read: the room, or a scene by its main floor. The
+ * two are apart by kind, never by id, since a scene's id may be any word,
+ * "room" among them.
+ */
+export type FarScope = { readonly kind: "room" } | { readonly kind: "scene"; readonly main: string };
+
+/** A far reading of one scope before and after an op (farReadings). */
+export type ScopeReading = { readonly scope: FarScope; readonly before?: FarParts; readonly after: FarParts };
+
+/** Whether two scopes are one. */
+export function sameScope(a: FarScope, b: FarScope): boolean {
+  return a.kind === "room" ? b.kind === "room" : b.kind === "scene" && a.main === b.main;
+}
+
+/** The reading of `scope` among `readings`, if it holds one. */
+export function readingAt(readings: readonly ScopeReading[], scope: FarScope): ScopeReading | undefined {
+  return readings.find((reading) => sameScope(reading.scope, scope));
+}
+
+/**
  * A player's far readings of the room and of each scene by its main floor,
  * exactly, before and after their op over one membership (exactOver), at
  * the widest per-player reserves unless `widest` is false: what the far
@@ -3102,7 +3121,7 @@ export type FarParts = { stepped: number; exact: number };
  * scene the room did not hold before, or any scope with no state before,
  * has no reading before.
  */
-export function farReadings(before: RoomState | undefined, after: RoomState, memberId: string, widest = true): Map<string, { before?: FarParts; after: FarParts }> {
+export function farReadings(before: RoomState | undefined, after: RoomState, memberId: string, widest = true): ScopeReading[] {
   const parts = exactOver(before, after, memberId);
   const [was, now] = [copyBytesOf(parts.before), copyBytesOf(parts.after)];
   const room = (state: RoomState, own: OwnCopyBytes): FarParts => {
@@ -3115,16 +3134,16 @@ export function farReadings(before: RoomState | undefined, after: RoomState, mem
     const held = heldIn(state, own, floors);
     return { stepped: projectedSceneBytes(state, main, MEMORY_CAP, "dm") + farWidths(state, floors) - held.sub, exact: held.shown };
   };
-  const out = new Map<string, { before?: FarParts; after: FarParts }>([["room", { ...(before ? { before: room(before, was) } : {}), after: room(after, now) }]]);
+  const out: ScopeReading[] = [{ scope: { kind: "room" }, ...(before ? { before: room(before, was) } : {}), after: room(after, now) }];
   for (const floors of sceneGroups(after)) {
     const main = floors[0]!.floor?.of ?? floors[0]!.id;
-    out.set(main, { ...(before?.scenes[main] ? { before: scene(before, was, main) } : {}), after: scene(after, now, main) });
+    out.push({ scope: { kind: "scene", main }, ...(before?.scenes[main] ? { before: scene(before, was, main) } : {}), after: scene(after, now, main) });
   }
   return out;
 }
 
 /** farReadings with a state before, as the twin tests read it. */
-export function playerReadings(before: RoomState, after: RoomState, memberId: string, widest = true): Map<string, { before?: FarParts; after: FarParts }> {
+export function playerReadings(before: RoomState, after: RoomState, memberId: string, widest = true): ScopeReading[] {
   return farReadings(before, after, memberId, widest);
 }
 

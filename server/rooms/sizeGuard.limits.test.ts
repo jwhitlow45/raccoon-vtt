@@ -245,6 +245,33 @@ function playerJudged(state: RoomState, op: Op, memberId: string): ReturnType<Si
   return guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state, "player", "widest", false, memberId);
 }
 
+describe("a scene whose id is \"room\" is read as a scene, and the room as the room", () => {
+  /** P1's room on a scene with the id "room", and `fill` bytes of the DM's notes on it and on scenes of their own. */
+  const roomScene = (onScene: number, elsewhere: number): RoomState => {
+    const base = room();
+    base.scenes = { ...base.scenes, room: scene("room", { order: 1 }) };
+    base.meta = { ...base.meta, playerSceneId: "room" };
+    const state = filled(base, elsewhere);
+    for (let i = 0; i * 4_000 < onScene; i++) state.tokens[`here${i}`] = token(`here${i}`, { sceneId: "room", notes: "n".repeat(4_000) });
+    return state;
+  };
+  const judgedOn = (state: RoomState) => {
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(state), state);
+    const r = applyOp(state, line("d1", "room"), P1, env(9));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    return { answer: guard.check(r.state, ["room"], growthBound(state, r.state, r.touched), state, "player", "widest", false, "p1"), scene: guard.refusedScene };
+  };
+
+  test("P1's line on it is refused by the scene's line while that scene is past it, and by the room's while the room is", () => {
+    const scenePast = roomScene(FAR.sceneBytes, 0);
+    assert.ok(farRoomBytes(scenePast, true) < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, "the room under its line");
+    assert.deepEqual(judgedOn(scenePast), { answer: { ok: false, code: "quota", message: SCENE_FULL }, scene: "room" });
+    const roomPast = roomScene(0, FAR.roomBytes);
+    assert.deepEqual(judgedOn(roomPast), { answer: { ok: false, code: "quota", message: ROOM_FULL }, scene: null });
+  });
+});
+
 describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing is", () => {
   test("twin rooms whose one difference is an upstairs area's owner, P2 or the DM, answer P1's line alike at every fill around the line", () => {
     const twin = (owner: string) => {
