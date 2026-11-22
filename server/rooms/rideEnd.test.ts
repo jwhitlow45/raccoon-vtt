@@ -78,6 +78,22 @@ describe("a rider ends with its owner's sight", () => {
     assert.equal(viewOf(room.clients.p1.sent).templates[AREA], undefined, "P1's copy lets it go");
   });
 
+  test("a player who joins the room's sight holders in the batch is read after they join, so their area on a creature their own sight holds stays", async (t) => {
+    const state = areaOn(withGuide(limitsRoom()), GUIDE);
+    state.scenes.s1 = { ...state.scenes.s1!, vision: { on: true, light: "bright", perPlayer: true } };
+    // Nobody holds sight yet: P1 owns Ayla, who sees the guide, and joins when the batch's explore step runs.
+    state.holders = {};
+    state.tokens[BREE] = { ...state.tokens[BREE]!, ownerIds: [] };
+    state.characters[BREE] = { ...state.characters[BREE]!, ownerIds: [] };
+    const room = new Room(t, "R", state, { idGate: true });
+    await room.load();
+    await room.apply("p1", { t: "log.chat", text: "ready" } as Op);
+    assert.deepEqual(room.state.holders.s1?.entries, [{ memberId: "p1", on: true }], "P1 joined in that batch");
+    assert.ok(viewOf(room.clients.p1.sent).tokens[GUIDE], "and sees the guide for themselves");
+    assert.ok(room.state.templates[AREA], "the area stays");
+    assert.equal(room.db.stored.some((op) => op.t === "sys.rideEnd"), false, "nothing ends, as it would if the step read P1 before they joined");
+  });
+
   test("an area on a creature a player still sees stays through the DM's moves", async (t) => {
     const room = await opened(t, areaOn(limitsRoom(), OGRE));
     await room.apply("dm", { t: "token.move", tokenId: OGRE, x: 9, y: 6 } as Op);
