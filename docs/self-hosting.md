@@ -641,6 +641,7 @@ Each release's formats, from `shared/migrate.ts` at its tag:
 
 | Release | Room format | Change format |
 | --- | --- | --- |
+| v0.4.0 | 49 | 65 |
 | v0.3.1 | 31 | 40 |
 | v0.3.0 | 31 | 40 |
 | v0.2.0 | 26 | 25 |
@@ -652,7 +653,9 @@ formats at the top of `shared/migrate.ts`, as `SNAPSHOT_VERSION` and
 `OP_VERSION`. Each note sits under the first release that has its update,
 newest first.
 
-**Since v0.3.1**
+**Since v0.4.0**
+
+**v0.4.0**
 
 - **Walks end with their turn, and the stored bound**
   ([design](design/design-v1-player-limits.md)): room format 49, change
@@ -743,8 +746,8 @@ newest first.
   MiB together, at most 192 KiB a scene, so in a room with many such scenes a
   remembered map may forget its oldest ground once. The room's first saved
   change removes each area or kept ruler a player left on a creature that
-  player can't see. A room's stored state can now reach about 15.5 MiB and a
-  DM's snapshot about 12.3 MiB, so the server holds up to 17 MiB for one slow
+  player can't see. A room's stored state can now reach about 15.2 MiB and a
+  DM's snapshot about 12.6 MiB, so the server holds up to 18 MiB for one slow
   device (was 7 MiB). A room over its size limit logs "room is over its far
   size limit: creates and growing edits are refused until it is smaller" as it
   loads. New ids are checked against the server's clock: a clock set back to
