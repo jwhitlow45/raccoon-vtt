@@ -506,11 +506,25 @@ jobs:
           TAG: ${{ github.ref_name }}
           NOTES: ${{ needs.release-notes.outputs.content }}
         run: |
+          # A Release body holds 125,000 characters. A release whose notes pass 100,000 gets a short body that links
+          # its changelog section, so the create call never fails on size. Every body ends with a pointer to the
+          # update notes. The body goes in a file, so no argument carries it.
+          notes_file=$(mktemp)
+          repo_url="https://github.com/$GITHUB_REPOSITORY"
+          if [ "$(printf '%s' "$NOTES" | wc -m)" -gt 100000 ]; then
+            heading=$(printf '%s\n' "$NOTES" | grep -m1 '^## ' | sed 's/^## //' | tr 'A-Z' 'a-z' | tr -d '.()' | tr ' ' '-' || true)
+            printf 'The notes for this release are too long for a Release page. Read the [%s section of the changelog](%s/blob/%s/CHANGELOG.md#%s).\n' \
+              "$TAG" "$repo_url" "$TAG" "$heading" > "$notes_file"
+          else
+            printf '%s\n' "$NOTES" > "$notes_file"
+          fi
+          printf '\nBefore updating a server, read the [update notes](%s/blob/%s/docs/self-hosting.md#update-notes).\n' \
+            "$repo_url" "$TAG" >> "$notes_file"
           if found=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "Release $TAG already exists. Leaving it unchanged."
           elif [ "$found" = "release not found" ]; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --verify-tag --title "$TAG" --notes "$NOTES"
+              --verify-tag --title "$TAG" --notes-file "$notes_file"
           else
             printf '%s\n' "$found" >&2
             exit 1

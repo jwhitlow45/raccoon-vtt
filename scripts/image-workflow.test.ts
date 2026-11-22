@@ -158,11 +158,18 @@ function jobBlock(name: string): string {
   return block.split(/\n  [\w-]+:\n/)[0]!;
 }
 
-function publishRelease(state: "exists" | "missing" | "unreachable"): { status: number | null; calls: string[] } {
+function publishRelease(state: "exists" | "missing" | "unreachable", notes = "Release notes\n\nWith paragraphs."): { status: number | null; calls: string[]; body: string | undefined } {
   const dir = mkdtempSync(path.join(tmpdir(), "raccoon-release-step-"));
   try {
     writeFileSync(path.join(dir, "gh"), `#!/bin/bash
 printf '%s\\n' "$1 $2" >> "$CALLS"
+if [ "$2" = create ]; then
+  for arg in "$@"; do
+    if [ "$prev" = --notes-file ]; then cat "$arg" > "$BODY"; fi
+    if [ "$prev" = --notes ]; then echo "notes passed as an argument" >&2; exit 2; fi
+    prev=$arg
+  done
+fi
 if [ "$2" = view ]; then
   case "$STATE" in
     exists) exit 0 ;;
@@ -175,9 +182,10 @@ fi
     chmodSync(path.join(dir, "gh"), 0o755);
     const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript("Publish the GitHub Release")], {
       encoding: "utf8",
-      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, STATE: state, CALLS: path.join(dir, "calls"), TAG: "v0.2.0", GITHUB_REPOSITORY: "example/raccoon-vtt", NOTES: "Release notes\n\nWith paragraphs." },
+      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, STATE: state, CALLS: path.join(dir, "calls"), TAG: "v0.2.0", GITHUB_REPOSITORY: "example/raccoon-vtt", NOTES: notes, BODY: path.join(dir, "body") },
     });
-    return { status: result.status, calls: readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n") };
+    const body = existsSync(path.join(dir, "body")) ? readFileSync(path.join(dir, "body"), "utf8") : undefined;
+    return { status: result.status, calls: readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n"), body };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -199,19 +207,40 @@ describe("GitHub Releases follow successful image publication", () => {
     const release = jobBlock("release");
     assert.match(release, /needs: \[publish, release-notes\]/);
     assert.match(release, /NOTES: \$\{\{ needs.release-notes.outputs.content \}\}/);
+    assert.match(release, /--notes-file "\$notes_file"/);
+    assert.doesNotMatch(release, /--notes "/);
     assert.doesNotMatch(release, /uses:/);
   });
 
   test("an existing Release is left unchanged", () => {
-    assert.deepEqual(publishRelease("exists"), { status: 0, calls: ["release view"] });
+    assert.deepEqual(publishRelease("exists"), { status: 0, calls: ["release view"], body: undefined });
   });
 
   test("a missing Release is created after checking for it", () => {
-    assert.deepEqual(publishRelease("missing"), { status: 0, calls: ["release view", "release create"] });
+    const made = publishRelease("missing");
+    assert.deepEqual({ status: made.status, calls: made.calls }, { status: 0, calls: ["release view", "release create"] });
+    assert.ok(made.body?.startsWith("Release notes\n\nWith paragraphs.\n"));
   });
 
   test("a failed lookup never creates a Release", () => {
-    assert.deepEqual(publishRelease("unreachable"), { status: 1, calls: ["release view"] });
+    assert.deepEqual(publishRelease("unreachable"), { status: 1, calls: ["release view"], body: undefined });
+  });
+
+  const POINTER = "[update notes](https://github.com/example/raccoon-vtt/blob/v0.2.0/docs/self-hosting.md#update-notes)";
+
+  test("every Release body ends with a pointer to the update notes", () => {
+    assert.match(publishRelease("missing").body ?? "", new RegExp(`${POINTER.replace(/[[\]().]/g, "\\$&")}\\.\\n$`));
+  });
+
+  test("notes past 100,000 characters become a short body linking the changelog section, still with the pointer", () => {
+    const long = `## v0.2.0 (2026-11-22)\n\n${"- a line of notes\n".repeat(7000)}`;
+    assert.ok(long.length > 100_000);
+    const at = publishRelease("missing", long).body ?? "";
+    assert.ok(at.length < 1000, `${at.length} characters`);
+    assert.match(at, /blob\/v0\.2\.0\/CHANGELOG\.md#v020-2026-11-22\)/);
+    assert.ok(at.includes(POINTER));
+    const edge = publishRelease("missing", `## v0.2.0 (2026-11-22)\n${"x".repeat(100_000 - 24)}`).body ?? "";
+    assert.ok(edge.length > 99_000, "100,000 characters stay whole");
   });
 });
 
