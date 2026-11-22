@@ -7,7 +7,7 @@ import { floorsOf } from "#shared/rules/floors.ts";
 import { apply, room } from "#shared/testutil.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { convertUvtt, type ImportPlan } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, willBeText, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
 import { readUvtt } from "./schema.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 import { withPlayersSee } from "../scenes/create.ts";
@@ -198,6 +198,36 @@ describe("a new scene from several files: the one Setup group", () => {
       ],
       "only the first add names the floor beside",
     );
+  });
+
+  test("the names the dialog shows are the names the floors are made with, for emptied, typed and file-name repeats", () => {
+    const inputs = [CELLAR, ROOF, HALL, CELLAR];
+    const cases: { what: string; files: string[]; typed: (string | undefined)[] }[] = [
+      { what: "an emptied name", files: ["a.uvtt", "b.uvtt", "c.uvtt"], typed: ["", undefined, ""] },
+      { what: "typed repeats", files: ["a.uvtt", "b.uvtt", "c.uvtt", "d.uvtt"], typed: ["Crypt", "Crypt", "Nave", "Crypt"] },
+      { what: "file names that repeat after the cut", files: ["The_Sunken_Cathedral_of_Saint_Varnholm_Level_1.uvtt", "The_Sunken_Cathedral_of_Saint_Varnholm_Level_2.uvtt", "The_Sunken_Cathedral_of_Saint_Varnholm_Level_3.uvtt"], typed: [undefined, undefined, undefined] },
+      { what: "a later row typed Ground floor while the first is emptied", files: ["a.uvtt", "b.uvtt", "c.uvtt"], typed: ["", "Ground floor", "Ground floor"] },
+      { what: "a first row typed Ground floor and an emptied later row", files: ["a.uvtt", "b.uvtt"], typed: ["Ground floor", ""] },
+    ];
+    for (const { what, files, typed } of cases) {
+      const rows = rowsOf(files.map(file)).map((r, i) => (typed[i] === undefined ? r : { ...r, floor: typed[i]! }));
+      const shown = floorNamesOf(rows);
+      const { state } = sent(rows.map((r, i) => fileFloor(`f${i}`, shown[i]!, inputs[i % inputs.length]!)));
+      assert.deepEqual(
+        floorsOf(state, "f0").map((f) => f.floor?.name),
+        shown,
+        what,
+      );
+      assert.equal(new Set(shown).size, shown.length, `${what}: every shown name is its own`);
+    }
+  });
+
+  test("a line under the field says what the floor will be called only where that differs from the field", () => {
+    const [row] = rowsOf([file("Crypt.uvtt")]);
+    assert.equal(willBeText({ ...row!, floor: "Crypt" }, "Crypt"), null);
+    assert.equal(willBeText({ ...row!, floor: "  Crypt " }, "Crypt"), null, "spaces round it are cut either way");
+    assert.equal(willBeText({ ...row!, floor: "Crypt" }, "Crypt 2"), "Will be Crypt 2.");
+    assert.equal(willBeText({ ...row!, floor: "" }, "Crypt"), "Will be Crypt.");
   });
 
   test("an emptied floor name leaves the reducer's, and a name taken twice is numbered", () => {

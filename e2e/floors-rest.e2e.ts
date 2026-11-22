@@ -407,9 +407,17 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     await dm.keyboard.press("Enter");
     await dialog.getByRole("button", { name: "Move Crypt Level 10 down", exact: true }).click();
     assert.deepEqual(await rowNames(dialog), ["Crypt_Level_1.dd2vtt", "Crypt_Level_2.dd2vtt", "Crypt_Level_10.dd2vtt"]);
-    await floorName("Crypt_Level_1.dd2vtt").fill("Upper crypt");
-    await floorName("Crypt_Level_2.dd2vtt").fill("Lower crypt");
-    await floorName("Crypt_Level_10.dd2vtt").fill("Vault");
+    // Typed names that collide, and an emptied one: a line under each field says what the floor will be called, and the floors are made with those names.
+    const willBe = (file: string) => dialog.getByRole("group", { name: file, exact: true }).getByText(/^Will be /);
+    assert.equal(await willBe("Crypt_Level_1.dd2vtt").count(), 0, "a name left as it was says nothing");
+    await floorName("Crypt_Level_1.dd2vtt").fill("Crypt");
+    await floorName("Crypt_Level_2.dd2vtt").fill("");
+    await floorName("Crypt_Level_10.dd2vtt").fill("Crypt");
+    assert.equal(await willBe("Crypt_Level_1.dd2vtt").count(), 0);
+    await willBe("Crypt_Level_2.dd2vtt").getByText("Will be Crypt Level 2.", { exact: true }).waitFor();
+    await dialog.getByRole("group", { name: "Crypt_Level_10.dd2vtt", exact: true }).getByText("Will be Crypt 2.", { exact: true }).waitFor();
+    assert.equal(await floorName("Crypt_Level_10.dd2vtt").getAttribute("aria-describedby") !== null, true, "the line is read with the field");
+    await dialog.getByRole("button", { name: "Move Crypt 2 up", exact: true }).waitFor();
     await sceneName.fill("Crypt");
     await shots.take(dm, "fl4r-3-several-files-dialog");
 
@@ -422,9 +430,9 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     assert.deepEqual(
       floors.map((f) => [f.floor?.name, f.floor?.level]),
       [
-        ["Upper crypt", 0],
-        ["Lower crypt", 1],
-        ["Vault", 2],
+        ["Crypt", 0],
+        ["Crypt Level 2", 1],
+        ["Crypt 2", 2],
       ],
     );
     for (const f of floors) {
@@ -468,6 +476,11 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
           const dialog = page.getByRole("dialog", { name: "New scene from 3 files", exact: true });
           await dialog.getByRole("textbox", { name: "Scene name", exact: true }).waitFor();
           lines.push(...alignmentLines(await measureAlignment(dialog), `New scene from 3 files, ${at}`));
+          // With typed names that collide the lines under the fields show too.
+          await dialog.getByRole("textbox", { name: "Floor name", exact: true }).nth(0).fill("Crypt");
+          await dialog.getByRole("textbox", { name: "Floor name", exact: true }).nth(1).fill("Crypt");
+          await dialog.getByText("Will be Crypt 2.", { exact: true }).waitFor();
+          lines.push(...alignmentLines(await measureAlignment(dialog), `New scene from 3 files, typed names that collide, ${at}`));
           if (size === PHONE && scale === 1) await shots.take(page, "fl4r-4-several-files-phone");
           if (size.width === 320 && scale === 1.3) await shots.take(page, "fl4r-4-several-files-320-130");
           await dialog.getByRole("button", { name: "Close", exact: true }).click();

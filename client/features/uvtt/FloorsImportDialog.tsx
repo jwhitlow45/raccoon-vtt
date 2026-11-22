@@ -15,7 +15,7 @@ import { startingLight } from "../vision/uvttLight.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
 import type { ImportOptions } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, type FloorRow } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, willBeText, type FloorRow } from "./floorsImport.ts";
 import { GRID_PROBLEM, type Device } from "./limits.ts";
 import { addAnswer, CHECK_MS, importOutcome, mustCount, NO_ANSWERS, sceneShown, storedContents, type Answers, type Contents } from "./rules.ts";
 import { shapeNote, sizeText, summaryLight } from "./summary.ts";
@@ -195,7 +195,8 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
         if (!map) throw new Error(fileError(row.file.name, GRID_PROBLEM));
         const start = startingLight(summaryLight(read), roomDefault);
         const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, light: start.light }), newScenePick(start.seen, undefined, setting, "uvtt"), start.light);
-        files.push({ scene, plan, floor: row.floor });
+        // The floor takes the name the row shows, so an emptied field or a repeated name never reads one way here and another in the scene.
+        files.push({ scene, plan, floor: shown[i]! });
       }
       const late = filesRefusal(store.getState().view, order.length);
       if (late) throw new Error(late);
@@ -285,6 +286,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
               </div>
               <Field
                 label="Floor name"
+                hint={willBeText(row, shown[i]!)}
                 value={row.floor}
                 maxLength={LIMITS.floorNameChars}
                 disabled={busy}

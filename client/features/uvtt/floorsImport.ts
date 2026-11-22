@@ -74,6 +74,14 @@ export function floorNamesOf(rows: readonly FloorRow[]): string[] {
   });
 }
 
+/**
+ * The line under a row's Floor name field where the floor will not get the name as it stands in the field:
+ * an emptied name takes the file's, and a name another floor has takes a number.
+ */
+export function willBeText(row: FloorRow, name: string): string | null {
+  return floorNameOf(row.floor) === name ? null : `Will be ${name}.`;
+}
+
 export function tooManyFiles(files: number): string | null {
   const most = LIMITS.floorsPerScene;
   return files > most ? `A scene holds at most ${most} floors. Pick ${most} files or fewer.` : null;
