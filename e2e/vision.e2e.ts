@@ -830,6 +830,34 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     }
   });
 
+  test("lp48b-1. the stopped walk's note closes on Escape, on a new tool and on another side panel", async () => {
+    await playerAt({ width: 1280, height: 800 }, "1");
+    try {
+      const ledge = "Ledge in the way. No stairs you have seen lead there.";
+      const stopAgain = async () => {
+        await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
+        await thornAt({ x: 7, y: 14, elevation: 10 });
+        await player.waitForTimeout(500);
+        await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
+        await thornAt({ x: 8, y: 12, elevation: 10 });
+        await stopNote(ledge).getByRole("button", { name: "Teleport here" }).waitFor();
+      };
+      await stopAgain();
+      await player.keyboard.press("Escape");
+      await stopNote(ledge).waitFor({ state: "detached" });
+      await stopAgain();
+      await player.keyboard.press("r");
+      await stopNote(ledge).waitFor({ state: "detached" });
+      await player.keyboard.press("v");
+      await openSideTab(player, "Characters");
+      await stopAgain();
+      await openSideTab(player, "Log");
+      await stopNote(ledge).waitFor({ state: "detached" });
+    } finally {
+      await playerAt({ width: 390, height: 844 }, "1");
+    }
+  });
+
   test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {
     // Out of the party's way first: the goblin goes where nobody sees it, so no frame of it reaches the player again.
     await ops.send({ t: "token.update", tokenId: run.goblinId, patch: { visibility: "dm" } });

@@ -56,9 +56,10 @@ export const COMPACT_NOTE_ROOM = Math.ceil(2 * theme.touch + GAP + PAD_TOP + PAD
  * The note after a stopped drop (docs/design/design-v1-maps-vision.md 4.1), beside
  * the ghost that marks where the player dropped the token: what stopped the
  * walk, and "Teleport here" for Misty Step and anything else that passes
- * walls or ledges. It goes when the player closes it, the teleport is done,
- * the token is dragged again, or the token stands anywhere else than where
- * its walk stopped, since the note is about that walk. While a token's
+ * walls or ledges. It goes when the player closes it, presses Escape, changes
+ * the tool or the side panel, the teleport is done, the token is dragged
+ * again, or the token stands anywhere else than where its walk stopped,
+ * since the note is about that walk. While a token's
  * action bar is open it steps aside, so one card floats over the map at a
  * time, and it comes back when the bar closes. The stopped drop itself
  * closes the bar (send.ts), so the note wins after a drag.
@@ -83,6 +84,30 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   useEffect(() => {
     if (stale && !busy) slot.setState({ note: null });
   }, [stale, busy, slot]);
+
+  // The tool and the panels the note was dropped under: a change of any is the player turning to something else.
+  const surface = useRoomView((s) => `${s.local.tool}|${s.local.tab}|${s.local.panel ?? ""}`);
+  const surfaceWas = useRef(surface);
+  useEffect(() => {
+    if (surfaceWas.current === surface) return;
+    surfaceWas.current = surface;
+    const now = slot.getState();
+    if (now.note !== null && !now.busy) slot.setState({ note: null });
+  }, [surface, slot]);
+  const open = note !== null;
+  useEffect(() => {
+    if (!open) return;
+    // After Room's own Escape (RoomChrome.tsx useEscape), which may use the key to deselect: the note goes too, unless a dialog or a field has the key.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || slot.getState().busy) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      if (document.querySelector('[aria-modal="true"]') !== null) return;
+      slot.setState({ note: null });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, slot]);
 
   const shown = note !== null && token !== undefined && note.sceneId === props.scene.id && (busy || (!stale && !barOpen));
   useLayoutEffect(() => {
