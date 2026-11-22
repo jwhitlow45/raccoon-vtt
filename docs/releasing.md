@@ -56,8 +56,10 @@ byte for byte. It then pushes amd64 and arm64 from the same build, checks
 that the amd64 image pushed is the one it tested, and signs the
 multi-architecture digest with Cosign, retrying up to three times, before
 tagging `X.Y.Z` or moving `X.Y` and `latest`. After publication succeeds,
-a read-only job generates the release notes, and a separate job creates the
-GitHub Release.
+a read-only job runs git-cliff to write `release-notes.md`, and a separate
+job reads that file and creates the GitHub Release. Every body ends with a
+link to the [update notes](self-hosting.md#update-notes). Past 100,000
+characters the body is a short one that links CHANGELOG.md instead.
 An existing GitHub Release is left unchanged on a rerun. Last, the
 [Release assets](#release-assets) workflow signs the source archive and
 the SBOM and attaches them to the release with their provenance.
