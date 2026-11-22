@@ -92,7 +92,7 @@ Above the tabs sits the party bar, which shows your players' characters with the
 
 When you type on a phone, the field and the buttons that go with it rise to sit just above the on-screen keyboard, so the HP entry keeps its **Apply** in view and a sheet's field never hides behind the keys. Everything goes back once the keyboard closes.
 
-![The DM's panel list on a phone, grouped under In play, Run the table and Prepare, each panel led by its icon, with Sound and Time after DM and Scenes.](dm-guide/screen-phone.webp)
+![The DM's panel list on a phone, grouped under In play and Run the table, each panel led by its icon, with Sound and Time starting below DM and Scenes.](dm-guide/screen-phone.webp)
 
 ![This device on a phone, Sheet handle: the choice Ringed tail in a menu, and under it a strip that previews the handle at the top edge of a sheet.](dm-guide/sheet-handle.webp)
 
@@ -246,9 +246,9 @@ Tap a group's name to fold it or open it again. A folded group tells you what it
 
 On a phone, only Light and weather starts open, so the settings you reach for during play sit right under the scene's name. **New scene** folds on a phone too, unless your room has no scene yet, so the list and the scene's own settings stay close together. On a computer every group starts open. Each group then stays the way you left it on that device, on every scene and the next time you open the room. Folding a group never interrupts anything in it: an image still uploading carries on, and squares you typed but haven't applied are still there when you open it again.
 
-![The forest road's settings with every group folded: under This scene, the scene's name, then Light and weather, Scene sound, Fog and vision, Map and grid, Walls and movement and Size and view, each with its icon and its summary, such as "30 × 20 squares", and Export under them.](dm-guide/scene-settings-folded.webp)
+![The forest road's settings: under This scene, the scene's name, then Floors open with its map choices, then Light and weather, Fog and vision, Map and grid, Walls and movement and Size and view folded, each with its icon and its summary, such as "30 × 20 squares".](dm-guide/scene-settings-folded.webp)
 
-![The crypt's Map and grid open: its map image with Replace map image and Paste an image, Remove map image on a line of its own, the Day phase showing now, and the grid's settings under them.](dm-guide/scene-settings-map.webp)
+![The forest road's Map and grid open: its map image (2100 × 1400 px) with Replace map image and Paste an image, Remove map image on a line of its own, the Day phase showing now, and the grid's settings under them.](dm-guide/scene-settings-map.webp)
 
 If you replace the map image of the scene the players are on, they see the new image as soon as it uploads, so the app asks you to confirm first.
 
@@ -262,13 +262,13 @@ Feet per square and the rule for diagonals aren't scene settings: they apply to 
 
 A tower, a keep or a cellar under an inn is one place on several levels, and a scene can hold it as several floors. These floors are the levels of a building, not the floor the Map builder paints, such as Stone or Wood, which is the ground of one map. Each floor has its own map, build, fog, light, weather, tokens and traps, and all of them share one place in the Scenes list, one grid and one budget of 500 tokens and 200 areas. A scene holds up to 8 floors. Reach for floors when the party splits between levels, or when a fight crosses a staircase and everyone should stay in one tracker. A party that always moves together is simpler as separate scenes.
 
-![The Floors menu open on the DM's screen, on a scene named Tower: Attic and Upper floor not reached yet, Ground floor with the players there, Upper floor checked as the floor on screen, and Floors… under the list. The party panel says On Ground floor for both characters.](dm-guide/floors-menu.webp)
+![The Floors menu open on the DM's screen: Attic and Upper floor not reached yet, Ground floor with the players there, Upper floor checked as the floor on screen, and Floors… under the list. The party panel says On Ground floor for both characters.](dm-guide/floors-menu.webp)
 
 ### Building floors
 
 **Floors** is the first group in the scene's settings, under **This scene**. It lists the floors top first, and each row says where the players stand: **Players here** on the floor they start on and on any floor an unhidden party member stands on, **Reached** on a floor they have been on or you have shown them, and **Not reached yet** on the rest. The floor on your screen wears an **On screen** tag. **Add a floor above** and **Add a floor below** put a new floor beside the floor on your screen. The new floor copies that floor's size, background, grid, light and what players see, and starts with no map, weather or scene sound, so you can build it from nothing. The first floor you add also names the scene's own floor **Ground floor**.
 
-![The Floors group open on the Tower: Attic, Upper floor with its On screen tag, and Ground floor with the players, then Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
+![The Floors group open in the Scenes panel: Attic, Upper floor with its On screen tag, and Ground floor with the players, then Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
 
 Tap a floor to open its page. It sets the floor's **Floor name**, its **Height above the floor below** (5 to 50 ft in steps of 5, and 10 by default, which the cost of a climb on stairs and ladders reads, and not on the lowest floor), **Show to players** or **Hide from players**, **Move up** and **Move down** in the stack, **Go to this floor** to put it on your own screen, and **Remove floor**, which asks for a second tap and takes everything on that floor with it. Every other group in the settings, Light and weather, Fog and vision, Map and grid and the rest, sets the floor on your screen, and a line under **This scene** says which: "The groups below set Upper floor."
 
@@ -400,7 +400,7 @@ An area cast over a hole reaches through it by the same rule, so it works where 
 
 In the [isometric view](#the-isometric-view) each hole draws as a drop. Its walls sink like a pit's and the floor below shows at the bottom, or black where the players have not reached it. A creature standing over the hole is drawn at the floor's own height until it falls.
 
-![The Upper floor in Isometric on the DM's screen: a 4 by 4 hole drawn as a drop with its walls sunk like a pit's, a 10 ft down chip over it and Down to Ground floor under it, a second Down to Ground floor pill by the steps and the Hidden Pit in red, beside the Initiative panel.](dm-guide/floors-opening-isometric.webp)
+![The Upper floor in Isometric on the DM's screen: a 4 by 4 hole drawn as a drop with its walls sunk like a pit's, a 10 ft down chip over it and Down to Ground floor under it, a second Down to Ground floor pill by the steps and the Hidden Pit in red, beside the Fight panel with no fight running.](dm-guide/floors-opening-isometric.webp)
 
 ### Falls
 
@@ -521,7 +521,7 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 
 **Squares or hexes.** You never have to tell the app which kind of grid a map has, because every search looks for squares, hex rows and hex columns at once. Hexes drawn with heavy lines are found too, even on very large maps. When the app is sure of a grid of the other shape, the scene changes shape to match in the same step. Upload a hex map in a room that starts new scenes on squares, for example, and its scene starts on hexes, lined up, with a line such as "Found hex rows of 70.4 px. The grid is hex rows now." **Undo setup** in **Setup history** takes the find back, shape and all, and right after an upload **Use default** puts back both the first guess and the shape the scene started with. Once something stands on the new grid that the old one can't keep, such as heights painted on its hexes, Use default leaves the scene as it is and says why.
 
-![Meadow ruins, a new Map image scene made on Squares from a forest map drawn with hex lines: the app's hexes over the art, "Found hex rows of 70 px. The grid is hex rows now." with Use default and Find the grid, and Grid shape on Hex rows in the scene's settings.](dm-guide/hex-find.webp)
+![A forest map drawn with hex lines after the grid search: the app's hexes over the art, "Found hex rows of 70 px. The grid is hex rows now." with Use default and Find the grid, and Grid shape on Hex rows in the scene's settings.](dm-guide/hex-find.webp)
 
 Sometimes the scene can't change shape at all, because painted ground, walls or traps already stand on its squares, or because it came with its own grid from a Universal VTT file. Line up grid then tells you what it found and why the scene kept its shape. When the app is less sure, the box only goes on the scene's own grid, and if the other shape looks more likely, the line says so ("These lines may be hex columns of 70.4 px. Change Grid shape to use them."). Change **Grid shape**, and the box moves onto those lines. A map that shows both shapes, such as a square grid drawn over hexagonal floor tiles, never changes shape by itself: the box goes on the scene's own grid, and the line names both sizes.
 
@@ -724,7 +724,7 @@ Two groups of the scene's settings fine-tune it. **Light** sits first in **Light
 - **Sight sources**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Switches**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. While it is folded, it tells you how both stand, such as "Fog on · Party vision on". You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
-![Fog and vision for the crypt: the group's name with its icon, Players see on Explore with the warning that the map has no walls yet, Sight on Whole party, who lends the party sight, the Switches fold and Copy to other scenes….](dm-guide/vision-settings.webp)
+![Fog and vision for the crypt: the group's name with its icon, Players see on Explore, Sight on Whole party, and the Sight sources list with Thorn, Bree and Mara, each lending the party its sight.](dm-guide/vision-settings.webp)
 
 **Senses.** Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
@@ -759,7 +759,7 @@ Players see the map change and never the setting behind it. With the clock hidde
 
 Each scene's line says what players see there now, and what the copy would do there: "The players are here. They see the change at once." on the players' scene, "Players' remembered maps here reset." where a scene leaves Explore, and "Each player's own map here joins the party's." where it leaves Per player. Tick the scenes you want, or press **Select all**, then **Copy to 3 scenes**. The sheet says "Copied to 3 scenes." when it's done and clears the ticks, or says which scenes refused and why. One **Undo setup** in **Setup history** puts every scene's settings back, though not the maps players remembered.
 
-![Copy Crypt's settings to…: Forest road, Watchtower and Chapel ruins ticked, each line saying what players see there now, Forest road's line adding that the players are there and see the change at once, and Copy to 3 scenes at the foot.](dm-guide/copy-settings.webp)
+![Copy Forest road's settings to…: Battle mat, Crypt and Watchtower ticked, each line saying what players see there now, Crypt's line adding that the players are there and see the change at once, and Copy to 3 scenes at the foot.](dm-guide/copy-settings.webp)
 
 ### Sight for each player
 
@@ -1008,7 +1008,7 @@ A phase can also set the scene's light. Under **Light and weather**, **Light per
 
 Press **Create scene** to make it, and keep the page open until the walls have been added. One **Undo setup** in **Setup history** takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares, since the file states its own square grid (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
 
-**A scene from several files.** A tower drawn as one file a level can come in as one scene. In the file picker, choose several files at once and "New scene from 3 files" opens. It lists them lowest floor first, in file-name order with numbers read as numbers, so `Level 2` comes before `Level 10`. Each row has a **Floor name**, which starts as the file's name cut to 40 characters, and **Move up** and **Move down** buttons, "Move Level 2 up", where the order is wrong. The first row is the lowest floor, so **Move up** moves a file down the tower, as the line at the foot says: "Each file becomes a floor, the first the lowest." **Scene name** starts as the first file's name cut to 40 characters, like the Floor name, and **Make the scene** makes it. Each floor starts as its file would alone on your room's defaults, with its lights, walls and doors. A scene holds 8 floors and a room 50 scenes, and a pick that would pass either is refused before anything uploads. A damaged file or a failed upload sends nothing and leaves the rows for you to try again, and when it finishes "Crypt is made with 3 floors, with every wall, door and light. Undo in Setup history." One **Undo setup** takes the whole scene back. The floors arrive unreached by the players, as any floor from a file does.
+**A scene from several files.** A tower drawn as one file a level can come in as one scene. In the file picker, choose several files at once and "New scene from 3 files" opens. It lists them lowest floor first, in file-name order with numbers read as numbers, so `Level 2` comes before `Level 10`. Each row has a **Floor name**, which starts as the file's name cut to 40 characters, and **Move up** and **Move down** buttons, "Move Level 2 up", where the order is wrong. The first row is the lowest floor, so **Move up** moves a file down the tower, as the line at the foot says: "Each file becomes a floor, the first the lowest." **Scene name** starts as the first file's name cut to 40 characters, like the Floor name, but takes up to 80, and **Make the scene** makes it. Files whose names share their first 40 characters get "2", "3" and on in the rows, which are the names the floors will have. Each floor starts as its file would alone on your room's defaults, with its lights, walls and doors. A scene holds 8 floors and a room 50 scenes, and a pick that would pass either is refused before anything uploads. A damaged file or a failed upload sends nothing and leaves the rows for you to try again, and when it finishes "Crypt is made with 3 floors, with every wall, door and light. Undo in Setup history." One **Undo setup** takes the whole scene back. The floors arrive unreached by the players, as any floor from a file does.
 
 ![New scene from 3 files on the DM's screen: Level 1, Level 2 and Level 3 listed with their Floor name fields and Move up and Move down buttons, Scene name Crypt under them, and Make the scene in the footer.](dm-guide/floors-several-files.webp)
 
@@ -1404,7 +1404,7 @@ For a quick check, save or skill you don't need the Dice panel at all. A stat bl
 
 The dice fly out of the box you tapped into a band at the top of the panel, under a line that shows the result as the Dice panel's newest roll does: the total, the roll's name, its dice and any verdict, such as "Natural 20, Pass". The line goes in without moving the box under your finger. It stays while the panel shows that creature, even if you fold the stat block, and each new roll takes its place. It has no **Again**, since the roll is also the newest roll in the Dice panel, which is where you roll it again. As in the Dice panel, a tap in the panel or any key shows the result at once. If you close the panel or select another token before the dice land, the result comes as a toast instead.
 
-![A goblin warrior's Token panel just after a Stealth roll from its Dexterity box: the result line at the top of the panel reads 22, Stealth check in the double frame of Expertise, and the die, 16, above the goblin's stat block and its ability boxes.](dm-guide/stat-block-roll-header.webp)
+![A goblin warrior's Token panel just after a Stealth roll from its Dexterity box: the result line at the top reads 14, Stealth check in the double frame of Expertise, with the die, 8, beside it, above the goblin's stat block and its ability boxes.](dm-guide/stat-block-roll-header.webp)
 
 For Advantage, Disadvantage or a secret roll, hold the roll for half a second, right-click it, or press `Shift+F10` on it, and pick from the choices that take its place in the list. A monster's rolls are hidden from players already, so for a monster you'll see only Advantage and Disadvantage there. `Escape`, or Back on Android, takes you back to the list. These rolls pay no attention to **Adv**, **Dis** or **Secret** under the Dice panel's **Next roll**, which stay pressed for your next roll there.
 
@@ -2564,7 +2564,7 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 **Running it**
 
 - With **Walls and ledges block players' moves** on, a character dropped on the tower walks there by the stairs, once the party has seen them, and until then stops at the ledge (see [When walls stop a move](#when-walls-stop-a-move)). A flier passes over.
-- Tap the ground with **Select** to read a height. The Ruler and token distances count height as if it were one more diagonal. Under the default rule (every square 5 ft), the larger of the two distances is what counts. So the Ruler from the archer, 30 ft up, to a goblin on the ground 10 squares (50 ft) away reads 50 ft.
+- Tap the ground with **Select** to read a height. The Ruler and token distances count height as if it were one more diagonal. Under the default rule (every square 5 ft), the larger of the two distances is what counts. So the Ruler from the archer, 30 ft up, to Thorn on the ground 10 squares (50 ft) away reads 50 ft.
 - Ivo casts Fireball on the ground under a harpy flying at 40 ft. The shaded squares include the harpy's square, but "In area" leaves it out, since the Sphere reaches only 20 ft up. To catch the harpy, center the Sphere on its token, or raise **Elevation** under **⋯** before placing it (see [Height](#height)).
 - When a harpy is knocked out of the air, lower its elevation to the ground, and apply any falling damage through its HP entry. The **Flying** status is only a reminder for you, and it is separate from the token's elevation.
 
@@ -2604,7 +2604,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 Radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
 5. When Bree takes damage, her player gets the Concentration save. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when Concentration does.
 
-![Spirit Guardians around Bree among the goblins: the attached aura, the goblins inside it in the Areas panel, and the reminder's notice as a goblin warrior walks in.](dm-guide/guardians.webp)
+![Spirit Guardians around Bree among the goblins: the attached aura, its card in the Areas panel listing the four goblins in the area, and a goblin warrior's move into it marked Moved 20 ft, 10 ft left with Dash.](dm-guide/guardians.webp)
 
 **The familiar**
 
