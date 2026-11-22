@@ -345,7 +345,7 @@ From 600 px a kept row's checkbox sits beside its D&D Beyond line where both fit
 | Stale: the server's `expect` check failed | "Bree changed on another device before this applied, so nothing changed. Check the review again." as a danger `Notice` | the review rebuilds from the live character, keeps the ticks whose lines remain, and Apply stays enabled |
 | Another refusal | "Not re-synced: " and the server's words | the review and its ticks stay |
 | The bucket (`BLOCK_SAVES_TOO_FAST`) | its words, and "You can apply again in a few seconds." as the status | Apply disabled for the refill, as the editor's Save |
-| The room too full | `BLOCKS_ROOM_TOO_FULL`'s words | as a refusal |
+| The room too full | `BLOCKS_ROOM_TOO_FULL`'s words for a player and `BLOCKS_ROOM_TOO_FULL_DM`'s for a DM (`blocksRoomTooFull(role)`), who is not told to ask the DM | as a refusal |
 | `unknown` | "The connection dropped before the server answered. Check Bree's stat block before re-syncing again." | the review stays |
 | An answer after closing | a toast: "Bree was not re-synced. <Reason>." or "The connection dropped before the server answered, so Bree may not have been re-synced. Check the stat block." | |
 | Deleted, or no longer the viewer's | a warning `Notice`: "This character was deleted or is no longer yours, so it cannot be re-synced." | Apply disabled |
