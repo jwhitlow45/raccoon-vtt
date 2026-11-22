@@ -297,7 +297,11 @@ try {
   await quiet(dm);
   await sleep(1500);
   await panelToTop(dm, initiative);
+  // The pit moves to the far corner for this picture, so its name does not meet the hole's name pill. It goes back after.
+  await ops.send({ t: "trap.update", trapId: trap, patch: { zone: { cells: [{ ...TRAPDOOR, x: 11, y: 2 }] } } });
+  await sleep(1500);
   await picture(dm, "floors-opening-isometric");
+  await ops.send({ t: "trap.update", trapId: trap, patch: { zone: { cells: [TRAPDOOR] } } });
   await key(dm, "i");
   await dm.getByRole("button", { name: /^View: Top-down/ }).waitFor();
 
