@@ -1490,6 +1490,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
   - End the shape to go back: the character's AC and Speeds return, and what is left of Polymorph's Temporary HP goes, unless Temporary HP from another source replaced them.
 - A Druid's known forms: up to 8 Beast forms the character knows for Wild Shape.
   - "Choose known forms" in Take a shape (then "Change") opens a step with the same search, Beasts only and Druid level, where one tap adds or takes out a form, and the known ones stay listed first whatever the filters.
+  - A form the server refuses says why above the list, and the list scrolls to the words if they were out of view, so a refused tap never looks like nothing happened.
   - They come first in Take a shape, where one tap takes the form as Wild Shape with its Temporary HP, or changes to it in Wild Shape.
   - The Stat block group draws no list of them: the Take a shape button on its row reads the count ("4 shapes", "1 shape") and stays in Wild Shape, so a druid in Wild Shape changes form, or opens Change ("Choose known forms" with none), without ending the shape.
   - In Wild Shape the form the druid is in shows pressed and unavailable, and while shaped the picker offers only Wild Shape. Polymorph or another shape hides the button until End the shape.
