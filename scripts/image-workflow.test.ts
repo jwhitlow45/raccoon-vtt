@@ -241,7 +241,8 @@ describe("GitHub Releases follow successful image publication", () => {
     assert.ok(long.length > 100_000);
     const at = publishRelease("missing", long).body ?? "";
     assert.ok(at.length < 1000, `${at.length} characters`);
-    assert.match(at, /blob\/v0\.2\.0\/CHANGELOG\.md#v020-2026-11-22\)/);
+    assert.match(at, /the v0\.2\.0 section|v0\.2\.0 section of the \[changelog\]\(https:\/\/github\.com\/example\/raccoon-vtt\/blob\/v0\.2\.0\/CHANGELOG\.md\)/);
+    assert.ok(!at.includes("CHANGELOG.md#"), "no heading fragment, whose date can differ from the changelog's");
     assert.ok(at.includes(POINTER));
     const huge = publishRelease("missing", `## v0.2.0 (2026-11-22)\n\n${"- a line of notes, longer than most\n".repeat(6000)}`).body ?? "";
     assert.ok(huge.length < 1000, "a body over 131,072 bytes never rides an argument or a variable");

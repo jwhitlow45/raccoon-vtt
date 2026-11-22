@@ -496,7 +496,7 @@ jobs:
           name: release-notes
           path: release-notes.md
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   release:
     needs: [publish, release-notes]
@@ -515,14 +515,14 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           # A Release body holds 125,000 characters. A release whose notes pass 100,000 gets a short body that links
-          # its changelog section, so the create call never fails on size. Every body ends with a pointer to the
-          # update notes. The notes stay in a file from git-cliff to gh, never in a variable or an argument.
+          # CHANGELOG.md with no heading fragment, since the generated heading's date follows the tagged commit and
+          # can differ from the changelog's. Every body ends with a pointer to the update notes. The notes stay in a
+          # file from git-cliff to gh, never in a variable or an argument.
           notes_file=$(mktemp)
           repo_url="https://github.com/$GITHUB_REPOSITORY"
           if [ "$(wc -m < release-notes.md)" -gt 100000 ]; then
-            heading=$(grep -m1 '^## ' release-notes.md | sed 's/^## //' | tr 'A-Z' 'a-z' | tr -d '.()' | tr ' ' '-' || true)
-            printf 'The notes for this release are too long for a Release page. Read the [%s section of the changelog](%s/blob/%s/CHANGELOG.md#%s).\n' \
-              "$TAG" "$repo_url" "$TAG" "$heading" > "$notes_file"
+            printf 'The notes for this release are too long for a Release page. Read the %s section of the [changelog](%s/blob/%s/CHANGELOG.md).\n' \
+              "$TAG" "$repo_url" "$TAG" > "$notes_file"
           else
             cp release-notes.md "$notes_file"
           fi
