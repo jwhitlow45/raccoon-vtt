@@ -198,7 +198,7 @@ function SpellField(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDr
     <OptInput
       ref={inRow ? results.anchorProps.ref : undefined}
       label="Spell"
-      placeholder="Spell, e.g. fireball"
+      placeholder="e.g. fireball"
       value={st.query}
       width={170}
       onChange={(query) => {

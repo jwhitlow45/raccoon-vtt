@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import type { DrawingKind } from "#shared/model.ts";
 import type { DrawingInput } from "#shared/protocol.ts";
+import { isCoarsePointer } from "../../lib/device.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
 import { Icon, type IconName } from "../../components/Icon.tsx";
@@ -247,7 +248,7 @@ const OPACITIES = [
 ] as const;
 
 const HINTS: Record<DrawMode, string> = {
-  free: "Draw with one finger.",
+  free: "Drag to draw.",
   line: "Drag from one end to the other.",
   arrow: "Drag from the tail to the point.",
   rect: "Drag from corner to corner.",
@@ -256,6 +257,12 @@ const HINTS: Record<DrawMode, string> = {
   text: "Tap where the text goes.",
   erase: "Tap or drag over a drawing to erase it.",
 };
+
+/** The line under the Draw tool. Only touch says "one finger": a mouse or a pen drags. */
+export function drawHint(mode: DrawMode, role: string, touch: boolean): string {
+  if (mode === "erase" && role === "player") return "Tap or drag over one of your own drawings to erase it.";
+  return mode === "free" && touch ? "Draw with one finger." : HINTS[mode];
+}
 
 const ERASE_OTHERS = "You can only erase your own drawings.";
 
@@ -407,7 +414,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
     <OptionsStrip
       tool="Draw"
       task={task}
-      line={{ tone: "hint", content: st.mode === "erase" && props.role === "player" ? "Tap or drag over one of your own drawings to erase it." : HINTS[st.mode] }}
+      line={{ tone: "hint", content: drawHint(st.mode, props.role, isCoarsePointer()) }}
       slots={[
         ...taskSlots,
         {
