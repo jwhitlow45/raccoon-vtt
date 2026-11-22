@@ -1693,6 +1693,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   /** HX-9b's helpers: a hex and its six neighbors, the free walls along their outline, and the Fog tool's bar. */
   const fogBar = (page: Page) => page.getByRole("toolbar", { name: "Fog options" });
   const ROOM_LINE = "Click a room closed in by wall lines.";
+  const ROOM_LINE_TOUCH = "Tap a room closed in by wall lines.";
   const sevenOf = (g: HexGrid, middle: Hex) => [middle, ...hexNeighbors(g, middle)].map(hexKey).sort();
   function ringWalls(g: HexGrid, keys: string[], door: string | null): { id: string; a: [number, number]; b: [number, number]; f: { kind: "wall" } | { kind: "door"; state: "closed"; secret: false; discovered: false } }[] {
     const outline = hexCellsOutline(g, keys);
@@ -1834,7 +1835,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await pickTool(page, "Fog");
           await pickOption(page, "Fog", "Shape", "Builder room");
           const bar = fogBar(page);
-          await bar.locator("[data-options-line]").filter({ hasText: ROOM_LINE }).waitFor();
+          await bar.locator("[data-options-line]").filter({ hasText: size.touch ? ROOM_LINE_TOUCH : ROOM_LINE }).waitFor();
           off.push(...alignmentLines(await measureAlignment(bar), `the Fog tool's Builder room on hexes at ${at}`));
           await shots.take(page, `hx9b-fog-bar-${size.name}-${scale * 100}`);
           await pickTool(page, "Select");
