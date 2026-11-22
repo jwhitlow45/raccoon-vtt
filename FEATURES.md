@@ -1957,7 +1957,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | W | Enter or leave full screen, where the browser can | everyone |
 | U | Mute or unmute this device's sound | everyone |
 | ? | Show the shortcuts | everyone |
-| Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
+| Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A stopped walk's note closes with the first Escape no other layer used, or with the one that lets go of the selection. A field outside the pop-up keeps its Escape | everyone |
 | Ctrl+V (Cmd+V on a Mac) | Use a copied image as a new scene, the selected token's picture, a stamp or a handout | DM, with nothing open that takes it |
 | ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a fight card's focused Roll |
 | Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in a fight card's roll options |

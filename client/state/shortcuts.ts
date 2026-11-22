@@ -1018,7 +1018,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "escape",
     input: "Escape",
-    does: "Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape",
+    does: "Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A stopped walk's note closes with the first Escape no other layer used, or with the one that lets go of the selection. A field outside the pop-up keeps its Escape",
     roles: EVERYONE,
     device: "keys",
   },
