@@ -1876,8 +1876,9 @@ export class RoomActor {
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
-    // A step that takes back or brings back a move, a hide, a show or a lock, or an HP change from the log, is bookkeeping as the change was.
-    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog || restoresToggles(op, before), recorded);
+    // A step that takes back or brings back a move, an HP change from the log, or a DM's hide, show or lock, is bookkeeping as the
+    // change was. Only a DM's restore is read for toggles: it reads stored fields, so a player's work never grows with hidden ones.
+    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog || (viewer.role === "dm" && restoresToggles(op, before)), recorded);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.

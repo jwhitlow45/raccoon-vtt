@@ -242,6 +242,7 @@ function togglesOnly(patch: object): boolean {
  */
 export function restoresToggles(op: Op, state: RoomState): boolean {
   if (op.t !== "sys.restore" || op.entries.length === 0) return false;
+  toggleReads.count++;
   return op.entries.every(({ key, value }) => {
     const stored = readEntity(state, key);
     if (key === "encounter") return sameButHiddenRows(value, stored);
@@ -250,6 +251,13 @@ export function restoresToggles(op: Op, state: RoomState): boolean {
     return sameBut(keepNumbering(state, value as Token, stored as Token), stored, TOGGLED);
   });
 }
+
+/**
+ * How many restores restoresToggles read. It reads stored fields a player
+ * may not see, so the actor asks it of a DM's restores alone, and a test
+ * holds a player's at none (LP47-OPUS-5).
+ */
+export const toggleReads = { count: 0 };
 
 /** What a toggle's restore may change on a creature or an area: the toggles and the rev every write steps. */
 const TOGGLED: ReadonlySet<string> = new Set(["rev", ...TOGGLE_FIELDS]);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { BOOKKEEPING_RESERVE, FAR, farByteLine, KEPT_FOR_PLAYERS_FULL, keptForPlayers, ROOM_FULL, SCENE_FULL, SEAT, sizeRemedy } from "#shared/limits.ts";
+import { toggleReads } from "#shared/farLine.ts";
 import { GROUND, UPPER, thornToken, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
@@ -493,6 +494,24 @@ describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and
 
   test("a lock's Undo past the players' line is taken after another creature's meeting numbered it since", async (t) => {
     await numberedBetween(t, { t: "token.update", tokenId: "wolf1", patch: { locked: true } }, (state) => state.tokens.wolf1!.locked, false);
+  });
+
+  test("only a DM's Undo is read for toggles: a player's never reads the stored fields it would compare (LP47-OPUS-5)", async (t) => {
+    const f = scopeFixture();
+    const h = await scopeActor(t, f.state);
+    const dm = await h.connect(f.dm);
+    const player = await h.connect(f.player, "player");
+    const undo = async (who: ScopeClient) => {
+      const scope = who.history().setup?.undo.head ? "setup" : "play";
+      return answer(await who.send({ t: "undo", scope, head: who.head(scope).id }));
+    };
+    assert.equal(answer(await player.send(stroke(f, f.player.id))), "taken", "a player's stroke");
+    const read = toggleReads.count;
+    assert.equal(await undo(player), "taken", "its Undo");
+    assert.equal(toggleReads.count, read, "a player's Undo reads nothing for toggles");
+    assert.equal(answer(await dm.send({ t: "token.update", tokenId: f.goblin, patch: { visibility: "dm" } })), "taken", "the DM's hide");
+    assert.equal(await undo(dm), "taken", "its Undo");
+    assert.equal(toggleReads.count, read + 1, "a DM's Undo is read");
   });
 
   test("past the players' line, a show in a fight that shows the creature's row too, as the action bar sends it, is taken, and so are its Undo and Redo (D-261122-043)", async (t) => {
