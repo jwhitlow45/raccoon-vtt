@@ -1,4 +1,4 @@
-import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
+import type { ConditionKey, Effect, RoomState, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import { MAX_DAMAGE_PARTS, type ActorTarget, type DurationInput, type OpOf, type OutcomeDamage } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
@@ -257,6 +257,23 @@ function onPageScene(page: Page, token: { sceneId: string }, dice: DiceView): bo
   return token.sceneId === page.sceneId || (source.floors !== undefined && source.floors.includes(token.sceneId));
 }
 
+/**
+ * The token a row reaches on the page's scene: its own, or for a fall card
+ * another token of the same holder the card names, as when the row's token
+ * moved to another scene and the creature's other one stayed (FLR4CARDS-ROWTOKEN).
+ * Null where the page reaches none, or its token now shows another creature.
+ */
+function reachedBy(page: Page, row: RowBase, dice: DiceView): Token | null {
+  const own = dice.view.tokens[row.tokenId];
+  if (own && holderOf(own) === row.holder && onPageScene(page, own, dice)) return own;
+  if (page.source.kind !== "fall") return null;
+  for (const id of page.source.tokenIds) {
+    const other = dice.view.tokens[id];
+    if (other && holderOf(other) === row.holder && onPageScene(page, other, dice)) return other;
+  }
+  return null;
+}
+
 /** Why an area's page whose creatures all moved off the floors it reaches cannot apply. */
 export const OFF_FLOOR_WORDS = "Its creatures have moved off this page's floor. Discard this page and start it again from its source.";
 
@@ -279,9 +296,9 @@ export function offFloorWords(page: Page, dice: DiceView): string | null {
   const live = page.rows.filter((r) => !stateOf(page, r).gone && stateOf(page, r).mark !== "skip");
   let elsewhere = false;
   for (const row of live) {
-    const token = dice.view.tokens[row.tokenId];
-    if (!token || holderOf(token) !== row.holder) continue;
-    if (onPageScene(page, token, dice)) return null;
+    const own = dice.view.tokens[row.tokenId];
+    if (!own || holderOf(own) !== row.holder) continue;
+    if (reachedBy(page, row, dice)) return null;
     elsewhere = true;
   }
   if (!elsewhere) return null;
@@ -362,14 +379,14 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   // The creatures a fall card's outcome takes off it: each row it reached, skipped ones too, since the DM chose that.
   const settled: string[] = [];
   const settledHolders = new Set<string>();
-  for (const row of page.rows) {
-    if (seen.has(row.holder)) continue;
-    seen.add(row.holder);
+  for (const listed of page.rows) {
+    if (seen.has(listed.holder)) continue;
+    seen.add(listed.holder);
     // A retained choice never transfers to another creature that now uses the
     // token. Deleted or moved creatures are excluded from the new plan.
-    const token = dice.view.tokens[row.tokenId];
-    const holder = token && holderOf(token);
-    if (!token || !onPageScene(page, token, dice) || holder !== row.holder) continue;
+    const token = reachedBy(page, listed, dice);
+    if (!token) continue;
+    const row = token.id === listed.tokenId ? listed : { ...listed, tokenId: token.id, target: { tokenId: token.id } };
     const state = stateOf(page, row);
     if (state.gone) continue;
     settled.push(row.tokenId);

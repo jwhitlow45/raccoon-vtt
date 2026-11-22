@@ -256,6 +256,21 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     assert.deepEqual(plan.targets.map((t) => t.target), [{ tokenId: "horse" }]);
   });
 
+  test("a creature whose row token moved to another scene while its other token stays is reached through that token, and the card goes (FLR4CARDS-ROWTOKEN)", () => {
+    const state = room4(["horse", "thorn", "thorn2"]);
+    const { page } = cardPage(state, state.falls!["120:0"]!);
+    assert.equal(page.rows.find((r) => r.name === "Thorn")?.tokenId, "thorn", "the row stands on the first token");
+    const moved: RoomState = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: "s2" } } };
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: moved, srd: { monsters: [], rolls: {} } };
+    assert.equal(applyWaits(page, dice, SIX), null, "Apply is not held up");
+    const plan = buildPlan(page, dice, SIX, ids())!;
+    assert.deepEqual([...plan.fall!.tokenIds].sort(), ["horse", "thorn2"], "the token on the page's scene is the one it settles");
+    assert.deepEqual(plan.targets.map((t) => t.target).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [{ tokenId: "horse" }, { tokenId: "thorn2" }]);
+    const after = run(moved, plan);
+    assert.equal(hp(after, "thorn"), 14, "Thorn takes it once");
+    assert.equal(after.falls?.["120:0"], undefined, "and the card leaves with the token on the other scene too");
+  });
+
   test("a page whose creatures all moved to another scene says so, not that they left its floor (FLR4-OPUS-10)", () => {
     const state = room4(["horse", "thorn"]);
     const { page } = cardPage(state, state.falls!["120:0"]!);
