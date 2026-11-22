@@ -11,7 +11,7 @@ import type { IsoGround } from "../../canvas/relief/context.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { hexOutline } from "../../lib/scene.ts";
 import { isometric, toView } from "../../lib/view.ts";
-import { pillPlace, pillReach } from "../measure/pillPlace.ts";
+import { pillGeometry, pillPlace, pillReach } from "../measure/pillPlace.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { pathNow } from "../measure/movement.ts";
 import { FLOOR_MARKS } from "../scenes/floorWords.ts";
@@ -209,7 +209,7 @@ export type EndPills = { id: string; o: Outline; hole: boolean; first: PillSpec 
 /** One end's pills where they hang: `pill` is its name, `chip` its height. */
 export type PlacedPills = { pill: PillSpec | null; chip: PillSpec | null };
 
-/** The nodes a floor's search may visit before it keeps the best placement found, which the first path (each pill's first choice) already is. */
+/** The nodes a floor's search may visit before it keeps the best placement found, which the first path (each pill's cheapest choice alone) already is. */
 const SEARCH_NODES = 20_000;
 
 function hullOf(points: readonly { x: number; y: number }[]): { x: number; y: number }[] {
@@ -256,8 +256,9 @@ function covers(a: Box, b: Box, charge: number): number {
   return boxesMeet(a, b) ? charge + (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * (Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)) : 0;
 }
 
-/** A pill over another pill costs more than one over another end's squares, since two names on one row cannot be read. */
+/** A pill over another pill costs most, since two names on one row cannot be read, and one over its own hole more than one over another end's squares, since it hides the hole it names. */
 const PILL_ON_PILL = 1_000_000;
+const PILL_ON_OWN = 300_000;
 const PILL_ON_SQUARES = 100_000;
 
 /**
@@ -266,11 +267,14 @@ const PILL_ON_SQUARES = 100_000;
  * let one's name cover the other hole or its pills as the view turns. The
  * holes' pills are placed together: each name hangs under, and each chip
  * over, one corner of its hole where it stands (`stands`) and clears the
- * turn's marker, or keeps the end's own edge, and the choice with the
- * fewest covers wins, a pill over a pill counting most, then the least
- * area. The search keeps the first of equal choices, so a lone hole's pills hang
- * where its corners put them: a name under the lowest corner on the screen and a chip over the highest. Ends that are not holes, and every end in
- * Top-down, keep their own edge, and the holes keep off their pills.
+ * turn's marker, centered or reaching outward from the hole, or keeps the
+ * end's own edge, and the choice with the fewest covers wins: a pill over
+ * a pill counts most, then one over its own hole, then one over another
+ * end's squares, then the least area (D-261122-112). The search keeps the
+ * first of equal choices, so a lone hole's pills hang where its corners
+ * put them: a name under the lowest corner on the screen and a chip over
+ * the highest. Ends that are not holes, and every end in Top-down, keep
+ * their own edge, and the holes keep off their pills.
  */
 export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean): Map<string, PlacedPills> {
   const out = new Map<string, PlacedPills>();
@@ -293,36 +297,51 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
     }
     out.set(e.id, { pill: edge, chip: e.dropPill });
     const corners = cornersOf(e.o);
+    const seen = corners.map((c) => viewPointOf(iso, c).x);
+    const mid = (Math.min(...seen) + Math.max(...seen)) / 2;
     const lists: [PillSpec | null, boolean][] = [[edge, false], [e.dropPill, true]];
     for (const [spec, chip] of lists) {
       if (!spec) continue;
       const hangs = chip ? "over" : "under";
       const sign = hangs === "under" ? -1 : 1;
       const ordered = corners.map((c) => ({ c, y: viewPointOf(iso, c).y })).sort((a, b) => sign * (a.y - b.y));
-      const specs: PillSpec[] = [];
-      for (const { c } of ordered) {
-        const at: PillSpec = { ...spec, x: c.x, y: c.y, above: chip, below: !chip };
-        if (stands(at) && (chip || !meetsTurnMarker(at, markers, scale, iso, true))) specs.push(at);
-      }
+      const at = (c: { x: number; y: number }, side?: "left" | "right"): PillSpec => ({ ...spec, x: c.x, y: c.y, above: chip, below: !chip, ...(side ? { side } : {}) });
+      // Each corner centers a pill, and a corner left or right of the hole's middle also hangs one outward on its side, which clears the hole where a centered pill wider than it cannot (ISO-1-MORE-SPOTS).
+      const outward = ordered.flatMap(({ c }) => {
+        const x = seen[corners.indexOf(c)]!;
+        return x < mid - 1e-9 ? [at(c, "left")] : x > mid + 1e-9 ? [at(c, "right")] : [];
+      });
+      const specs = [...ordered.map(({ c }) => at(c)), ...outward].filter((p) => stands(p) && (chip || !meetsTurnMarker(p, markers, scale, iso, true)));
       // The end's own edge is the last choice, and the only one where no corner serves.
       if (specs.length === 0 || stands(spec)) specs.push(spec);
-      const cands = specs.map((s2) => ({ spec: s2, box: drawnBox(s2, scale, iso, stands(s2), true), solo: 0 }));
-      // A pill never hangs over its own hole, where a corner that clears it serves.
-      const clear = cands.filter((c) => !boxCoversOutline(c.box, corners, iso));
-      slots.push({ end: i, chip, cands: clear.length > 0 ? clear : cands });
+      const cands = specs.map((s2) => {
+        const up = stands(s2);
+        const box = drawnBox(s2, scale, iso, up, true);
+        // The pointer always meets the rim it points at, so only the body can hide the hole.
+        const tip = up ? pillGeometry({ ...s2, scale }).pointer / scale : 0;
+        const body = chip ? { ...box, y1: box.y1 - tip } : { ...box, y0: box.y0 + tip };
+        // A pill over its own hole hides the hole it names, so it costs more than one over another end's squares, but less than one over another pill (D-261122-112).
+        return { spec: s2, box, solo: boxCoversOutline(body, corners, iso) ? covers(body, squares[i]!, PILL_ON_OWN) : 0 };
+      });
+      slots.push({ end: i, chip, cands });
     }
   });
   // What a pill covers apart from the other holes' pills: another end's squares and the pills that stay put.
   for (const slot of slots) {
     for (const c of slot.cands) {
-      c.solo = squares.reduce((n, b, j) => (b && j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) + fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
+      c.solo += squares.reduce((n, b, j) => (b && j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) + fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
     }
+    // Cheapest first, so the first path is already good when the node limit cuts the search short. The sort is stable, so equal choices keep their corner order.
+    slot.cands.sort((a, b) => a.solo - b.solo);
   }
+  // The least the slots from each one on can still add, which prunes a path that cannot beat the best.
+  const rest = slots.map(() => 0);
+  for (let k = slots.length - 1, sum = 0; k >= 0; k--) rest[k] = sum += slots[k]!.cands[0]?.solo ?? 0;
   const best = { cost: Infinity, pick: [] as Cand[] };
   let nodes = 0;
   const pick: Cand[] = [];
   const search = (at: number, cost: number): void => {
-    if (cost >= best.cost) return;
+    if (cost + (rest[at] ?? 0) >= best.cost) return;
     if (at === slots.length) {
       best.cost = cost;
       best.pick = pick.slice();

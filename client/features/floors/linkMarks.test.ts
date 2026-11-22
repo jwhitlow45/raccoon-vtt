@@ -4,9 +4,10 @@ import { ATTIC, GROUND, UPPER, onThornsTurn, run, tower, withStairs } from "#sha
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import type { PillSpec } from "../../canvas/boardView.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
-import { pillReach } from "../measure/pillPlace.ts";
+import { pillGeometry, pillReach } from "../measure/pillPlace.ts";
 import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
 
 /*
@@ -146,8 +147,8 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
   const flat = (turn: Turn) => ({ turn, ground: () => 0 });
   const meet = (a: Box, b: Box) => Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
   // A 2 by 2 hole and a 1 by 1 hole, each named and with its height chip.
-  const hole = (id: string, rect: { x: number; y: number; w: number; h: number }): EndPills => {
-    const o = outlineOf(grid, rect);
+  const hole = (id: string, rect: { x: number; y: number; w: number; h: number }, on: Grid = grid): EndPills => {
+    const o = outlineOf(on, rect);
     return {
       id,
       o,
@@ -157,22 +158,31 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     };
   };
   const pillBoxes = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true));
+  /** A pill's body without its pointer, which always meets the rim it points at: what hides its own hole. */
+  const bodies = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) =>
+    [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => {
+      const b = drawnBox(p, scale, iso, true, true);
+      const tip = pillGeometry({ ...p, scale }).pointer / scale;
+      return p.above ? { ...b, y1: b.y1 - tip } : { ...b, y0: b.y0 + tip };
+    });
 
   /** The covers among two ends' pills and squares, each pill against the other end's pills and squares as they draw, and against its own hole. */
-  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: ReturnType<typeof flat>, scale: number): { others: number; own: number } => {
+  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: ReturnType<typeof flat>, scale: number): { others: number; own: number; pills: number; cost: number } => {
     const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, scale));
-    let others = 0;
+    let pills = 0;
+    let squares = 0;
     let own = 0;
     ends.forEach((e, i) => {
-      for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(e.o), iso)) own++;
+      for (const x of bodies(iso, placed, e.id, scale)) if (boxCoversOutline(x, cornersOf(e.o), iso)) own++;
       ends.forEach((__, j) => {
         if (j <= i) return;
-        for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) others++;
-        for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(ends[j]!.o), iso)) others++;
-        for (const y of boxes[j]!) if (boxCoversOutline(y, cornersOf(e.o), iso)) others++;
+        for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) pills++;
+        for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(ends[j]!.o), iso)) squares++;
+        for (const y of boxes[j]!) if (boxCoversOutline(y, cornersOf(e.o), iso)) squares++;
       });
     });
-    return { others, own };
+    // The search's order of costs (D-261122-112): a pill over a pill, then over its own hole, then over another end's squares.
+    return { others: pills + squares, own, pills, cost: pills * 100 + own * 10 + squares };
   };
   const alone = (ends: readonly EndPills[], iso: ReturnType<typeof flat>, scale: number) => new Map(ends.flatMap((e) => [...placeEnds([e], [], scale, iso, () => true)]));
 
@@ -181,20 +191,45 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 12, y: 8, w: 1, h: 1 })];
     for (const turn of [0, 1, 2, 3] as const) {
       const iso = flat(turn);
-      assert.deepEqual(coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale), { others: 0, own: 0 }, `turn ${turn}: a pill covers another end's squares or pills, or its own hole`);
+      assert.equal(coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale).cost, 0, `turn ${turn}: a pill covers another end's squares or pills, or its own hole`);
     }
   });
 
-  test("where a phone's scale leaves no clear set, no pill hangs over its own hole and the holes' pills cover no more than each hole's own corners would", () => {
-    const scale = 21.375;
-    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 10, y: 7, w: 1, h: 1 })];
-    for (const turn of [0, 1, 2, 3] as const) {
-      const iso = flat(turn);
-      const together = coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale);
-      const apart = coversOf(ends, alone(ends, iso, scale), iso, scale);
-      assert.equal(together.own, 0, `turn ${turn}: a pill hangs over its own hole`);
-      assert.ok(together.others <= apart.others, `turn ${turn}: ${together.others} covers together, ${apart.others} apart`);
+  test("holes whose corners touch, and lp47's layout with a DM's two-line name, cover fewer pills than the default corners, at every turn, on a desk and a phone, on squares and both hex grids (LP48-ISO-1)", () => {
+    const named = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Undercroft", value: "Not reached yet" } });
+    const layouts = [grid, sceneGrid({ gridShape: "hexRows" }), sceneGrid({ gridShape: "hexColumns" })].flatMap((g) => [
+      [hole("a", { x: 6, y: 4, w: 2, h: 2 }, g), hole("b", { x: 8, y: 6, w: 1, h: 1 }, g)],
+      [named(hole("a", { x: 8, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 10, y: 7, w: 1, h: 1 }, g))],
+      [named(hole("a", { x: 6, y: 4, w: 2, h: 2 }, g)), named(hole("b", { x: 8, y: 6, w: 1, h: 1 }, g))],
+    ]);
+    for (const ends of layouts) {
+      for (const scale of [40, 21.375]) {
+        for (const turn of [0, 1, 2, 3] as const) {
+          const iso = flat(turn);
+          const together = coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale);
+          const apart = coversOf(ends, alone(ends, iso, scale), iso, scale);
+          const at = `${ends[0]!.o.loop ? "hexes" : "squares"} ${ends[0]!.o.x.toFixed(2)},${ends[0]!.o.y.toFixed(2)} at ${scale}, turn ${turn}`;
+          assert.ok(together.cost <= apart.cost, `${at}: ${JSON.stringify(together)} together, ${JSON.stringify(apart)} at the default corners`);
+          assert.ok(apart.pills === 0 || together.pills < apart.pills, `${at}: ${together.pills} pill-on-pill covers together, ${apart.pills} at the default corners`);
+          // Here every pill finds a spot off its own hole, the outward ones beside a side corner among them, whose pointer alone meets the rim.
+          assert.equal(together.own, 0, `${at}: a pill's words over its own hole`);
+        }
+      }
     }
+  });
+
+  test("a pill over its own hole beats one over another pill, and loses to one over another end's squares (D-261122-112)", () => {
+    // Turn 0: a's lowest corner is 8,6, and its name hung there meets b's squares, and b's chip where b keeps one.
+    const iso = flat(0);
+    const a = hole("a", { x: 6, y: 4, w: 2, h: 2 });
+    const b = hole("b", { x: 9, y: 7, w: 1, h: 1 });
+    const spot = (p: PillSpec, x: number, y: number) => p.x === x && p.y === y && p.side === undefined;
+    // a's name may hang only under its lowest corner (over b) or under its highest (over its own hole), and b's pills only at their own corners.
+    const stands = (p: PillSpec) => (p.name !== undefined ? spot(p, 8, 6) || spot(p, 6, 4) || spot(p, 10, 8) : spot(p, 6, 4) || spot(p, 9, 7));
+    const nameOf = (ends: EndPills[]) => placeEnds(ends, [], SCALE, iso, stands).get("a")!.pill!;
+    const bare = { ...b, dropPill: null };
+    assert.ok(spot(nameOf([a, bare]), 8, 6), "over another end's squares, not its own hole");
+    assert.ok(spot(nameOf([a, b]), 6, 4), "over its own hole, not another pill");
   });
 
   test("a lone hole's name hangs under its lowest corner on the screen and its chip sits over its highest, at every turn, and the next corner serves where the first is no place a pill stands", () => {
@@ -232,9 +267,9 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
         let n = 0;
         const boxes = many.map((e) => pillBoxes(iso, placed, e.id, scale));
         many.forEach((e, i) => {
-          for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(e.o), iso)) n += 100;
+          for (const x of bodies(iso, placed, e.id, scale)) if (boxCoversOutline(x, cornersOf(e.o), iso)) n += 10;
           for (let j = i + 1; j < many.length; j++) {
-            for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) n++;
+            for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) n += 100;
             for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(many[j]!.o), iso)) n++;
             for (const y of boxes[j]!) if (boxCoversOutline(y, cornersOf(e.o), iso)) n++;
           }

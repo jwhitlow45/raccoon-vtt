@@ -199,6 +199,32 @@ describe("a pointed pill at the screen's edge (docs/design/design-v1-polish.md R
     assert.equal(place.lean, 0);
   });
 
+  test("a side puts the body beside its point, the pointer at the body's near end, and the view still slides it in (LP48-ISO-1)", () => {
+    const point = { x: (view.x0 + view.x1) / 2, y: (view.y0 + view.y1) / 2 };
+    const g = pillGeometry({ ...name, ...point, below: true });
+    const corner = theme.radius.sm / scale;
+    // Where the view leaves room on that side, and with no view.
+    for (const [v, x] of [[null, point.x], [view, view.x1 - 10 / scale]] as const) {
+      const left = pillPlace({ ...name, x, y: point.y, below: true, side: "left" }, v);
+      near(left.box.x1, x + corner, "left: the body stops a corner past the point");
+      near(tipOf(left), x, "left: the tip on the point");
+    }
+    for (const [v, x] of [[null, point.x], [view, view.x0 + 10 / scale]] as const) {
+      const right = pillPlace({ ...name, x, y: point.y, below: true, side: "right" }, v);
+      near(right.box.x0, x - corner, "right: the body starts a corner before the point");
+      near(right.lean, -(g.width / 2 - theme.radius.sm), "right: the pointer at the straight edge's start");
+    }
+    const atEdge = { x: view.x0 + 10 / scale, y: point.y };
+    const place = pillPlace({ ...name, ...atEdge, above: true, side: "left" }, view);
+    inside(place.box, view, "a left body at the left edge slides back in");
+    near(tipOf(place), atEdge.x, "its tip still on the point");
+    const reach = pillReach({ ...name, ...point, below: true });
+    for (const side of ["left", "right"] as const) {
+      const box = pillPlace({ ...name, ...point, below: true, side }, null).box;
+      assert.ok(box.x0 >= reach.x0 - 1e-9 && box.x1 <= reach.x1 + 1e-9, `${side} lies inside the reach that labels keep off`);
+    }
+  });
+
   test("its reach spans every place a view can slide it to, and a plain pill's is its box", () => {
     const point = { x: 8, y: 20 };
     const reach = pillReach({ ...name, ...point, below: true });

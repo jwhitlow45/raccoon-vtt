@@ -47,6 +47,8 @@ export type PillProps = {
   offsetPx?: number;
   above?: boolean;
   below?: boolean;
+  /** A pointed pill's body sits to this side of its point, the pointer at the body's near end, so it can hang beside a corner instead of across it. */
+  side?: "left" | "right";
 };
 
 /**
@@ -74,16 +76,17 @@ function slideIn(x: number, y: number, w: number, h: number, scale: number, view
 
 /**
  * The left edge, in cells, of a pointed pill `w` wide over or under `point`:
- * centered on it, slid back inside `view` as a plain pill is, but never
- * so far that the point leaves the straight part of the body's edge
- * between its rounded corners (`corner` wide), where the pointer can reach.
+ * centered on it, or beside it as far as the pointer reaches toward
+ * `side`, slid back inside `view` as a plain pill is, but never so far
+ * that the point leaves the straight part of the body's edge between its
+ * rounded corners (`corner` wide), where the pointer can reach.
  * Only across: sliding up or down would part the pointer from its point.
  */
-function slideAlong(point: number, w: number, corner: number, scale: number, view: Box | null): number {
-  const centered = point - w / 2;
-  if (!view) return centered;
+function slideAlong(point: number, w: number, corner: number, scale: number, view: Box | null, side?: "left" | "right"): number {
+  const start = side === "left" ? point - w + corner : side === "right" ? point - corner : point - w / 2;
+  if (!view) return start;
   const edge = EDGE_PX / scale;
-  const inView = Math.max(view.x0 + edge, Math.min(centered, view.x1 - edge - w));
+  const inView = Math.max(view.x0 + edge, Math.min(start, view.x1 - edge - w));
   return Math.max(point - w + corner, Math.min(inView, point - corner));
 }
 
@@ -110,7 +113,7 @@ export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { 
   const off = (props.offsetPx ?? 0) * s;
   if (props.above || props.below) {
     const y = props.above ? props.y - off : props.y + off;
-    const x0 = slideAlong(props.x, w, Math.min(theme.radius.sm * s, w / 2), props.scale, view);
+    const x0 = slideAlong(props.x, w, Math.min(theme.radius.sm * s, w / 2), props.scale, view, props.side);
     const box = props.above ? { x0, y0: y - h - tip, x1: x0 + w, y1: y } : { x0, y0: y, x1: x0 + w, y1: y + h + tip };
     const middle = x0 + w / 2;
     return { box, x: middle, y, lean: (props.x - middle) * props.scale };
