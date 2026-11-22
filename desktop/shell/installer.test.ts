@@ -127,6 +127,21 @@ test("the installer goes on only when nothing runs, and stops with words when a 
   for (const at of boxes) assert.doesNotMatch(/"([^"]+)"/.exec(lines[at]!)?.[1] ?? "", /[\u2014;]/, "house style in the words");
 });
 
+test("a running check that could not tell runs once more, and only then do the words come", () => {
+  const body = /!macro raccoonRunning RESULT\n([\s\S]*?)\n!macroend/.exec(NSH)?.[1];
+  assert.ok(body);
+  const lines = body.split("\n").map((l) => l.trim());
+  assert.equal(lines.filter((l) => l.startsWith("nsExec::Exec ")).length, 1, "one check, run in the loop");
+  const at = lines.findIndex((l) => l.startsWith("nsExec::Exec "));
+  assert.deepEqual(lines.slice(0, 2), ["StrCpy $R6 0", "${Do}"]);
+  assert.deepEqual(lines.slice(at + 1, at + 7), ["Pop ${RESULT}", "IntOp $R6 $R6 + 1", "${If} ${RESULT} == 0", "${OrIf} ${RESULT} == 1", "${OrIf} $R6 >= 2", "${Break}"], "a known answer, or the second try, ends it");
+  assert.equal(lines.at(-1), "${Loop}");
+  // $R6 is the installer's own register, so the check that uses it keeps it.
+  const check = /!macro customCheckAppRunning\n([\s\S]*?)\n!macroend/.exec(NSH)?.[1]?.split("\n").map((l) => l.trim()) ?? [];
+  assert.deepEqual(check.slice(0, 3), ["Push $R6", "Push $R7", "Push $R8"]);
+  assert.deepEqual(check.slice(-3), ["Pop $R8", "Pop $R7", "Pop $R6"]);
+});
+
 test("the install makes RaccoonVTT's folder in ProgramData with programdata.ps1, run by Windows PowerShell's full path, and the uninstall leaves it", () => {
   const body = /!macro customInstall\n([\s\S]*?)\n!macroend/.exec(NSH)?.[1];
   assert.ok(body);

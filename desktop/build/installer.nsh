@@ -21,9 +21,22 @@
 ; Sets RESULT to 0 while any of RaccoonVTT's programs runs from the install
 ; folder and 1 when none does. Anything else (2 when the processes could
 ; not be listed, "error" or "timeout" from nsExec) means it could not tell.
+; A check that could not tell runs once more before RESULT says so: the
+; first CIM query after a boot can pass 30 s while Windows starts its
+; management service, and the next one finds it running. Uses $R6.
 !macro raccoonRunning RESULT
-  nsExec::Exec /TIMEOUT=30000 `${RACCOON_PS} "try { ${RACCOON_FIND_SET}; $$p = @(${RACCOON_FIND_LIST}) } catch { exit 2 }; if ($$p.Count -gt 0) { exit 0 }; exit 1"`
-  Pop ${RESULT}
+  StrCpy $R6 0
+  ${Do}
+    nsExec::Exec /TIMEOUT=30000 `${RACCOON_PS} "try { ${RACCOON_FIND_SET}; $$p = @(${RACCOON_FIND_LIST}) } catch { exit 2 }; if ($$p.Count -gt 0) { exit 0 }; exit 1"`
+    Pop ${RESULT}
+    IntOp $R6 $R6 + 1
+    ${If} ${RESULT} == 0
+    ${OrIf} ${RESULT} == 1
+    ${OrIf} $R6 >= 2
+      ${Break}
+    ${EndIf}
+    DetailPrint "Could not tell whether RaccoonVTT is running (${RESULT}). Checking again."
+  ${Loop}
 !macroend
 
 ; Waits up to SECONDS for RaccoonVTT's programs to end. RESULT as above.
@@ -50,6 +63,7 @@
 ; nothing runs: a program still running, or a check that cannot tell,
 ; stops with words and Retry. A silent install takes Cancel and quits.
 !macro customCheckAppRunning
+  Push $R6
   Push $R7
   Push $R8
   System::Call 'Kernel32::SetEnvironmentVariable(t "RACCOONVTT_INSTDIR", t "$INSTDIR\")i'
@@ -80,6 +94,7 @@
   ${Loop}
   Pop $R8
   Pop $R7
+  Pop $R6
 !macroend
 
 ; One rule, for the bundled server only, on private networks only (design 6):
