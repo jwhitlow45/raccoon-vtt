@@ -1,5 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
+import { freeName } from "#shared/reducer/floors.ts";
 import { floorNameOf } from "../scenes/floorSource.ts";
 import { fileSceneName, outcomeText, type ImportOutcome } from "./rules.ts";
 
@@ -17,13 +18,25 @@ export type FloorRow = { key: string; file: File; floor: string };
 /** "Level 2" before "Level 10", and "level 3" between them: numbers as numbers, letters by their base. Ties keep their order. */
 const BY_NAME = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
-/** The rows for picked files, lowest first, each named for its file, cut to a floor name's 40 characters. */
+/**
+ * The rows for picked files, lowest first, each named for its file, cut to a floor name's 40 characters.
+ * Names that collide after the cut are numbered as the reducer numbers them when the floors are made
+ * (freeName), so the dialog shows the names the floors get and each move button has its own name.
+ */
 export function rowsOf(files: readonly File[]): FloorRow[] {
+  const taken = new Set<string>();
   return files
     .map((file, i) => ({ file, i }))
     .sort((a, b) => BY_NAME.compare(a.file.name, b.file.name) || a.i - b.i)
-    .map(({ file, i }) => ({ key: `${i}`, file, floor: floorNameOf(fileSceneName(file.name)) }));
+    .map(({ file, i }) => {
+      const floor = freeName(floorNameOf(fileSceneName(file.name)), taken);
+      taken.add(floor);
+      return { key: `${i}`, file, floor };
+    });
 }
+
+/** What the scene name field takes, as New scene and Scene settings do: more than the start value, which is cut like a floor's name. */
+export const SCENE_NAME_CHARS = 80;
 
 /** The scene's name to start from: the first file's, cut like a floor's name so the two read alike. */
 export function sceneNameOf(rows: readonly FloorRow[]): string {

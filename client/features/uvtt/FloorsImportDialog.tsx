@@ -15,7 +15,7 @@ import { startingLight } from "../vision/uvttLight.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
 import type { ImportOptions } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, type FloorRow } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, type FloorRow } from "./floorsImport.ts";
 import { GRID_PROBLEM, type Device } from "./limits.ts";
 import { addAnswer, CHECK_MS, importOutcome, mustCount, NO_ANSWERS, sceneShown, storedContents, type Answers, type Contents } from "./rules.ts";
 import { shapeNote, sizeText, summaryLight } from "./summary.ts";
@@ -295,7 +295,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
             </li>
           ))}
         </ol>
-        <Field label="Scene name" value={sceneName} maxLength={LIMITS.floorNameChars} disabled={busy} onChange={(e) => setSceneName(e.target.value)} />
+        <Field label="Scene name" value={sceneName} maxLength={SCENE_NAME_CHARS} disabled={busy} onChange={(e) => setSceneName(e.target.value)} />
         {shape ? <Help>{shape}</Help> : null}
         {refusal ? (
           <div role="alert">

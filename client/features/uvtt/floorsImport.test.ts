@@ -7,7 +7,7 @@ import { floorsOf } from "#shared/rules/floors.ts";
 import { apply, room } from "#shared/testutil.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { convertUvtt, type ImportPlan } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
 import { readUvtt } from "./schema.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 import { withPlayersSee } from "../scenes/create.ts";
@@ -57,12 +57,28 @@ describe("a new scene from several files: the rows", () => {
     const rows = rowsOf([file("The_Sunken_Temple_of_the_Serpent_Lord_Level_2.dd2vtt"), file("The_Sunken_Temple_of_the_Serpent_Lord_Level_1.dd2vtt")]);
     assert.deepEqual(
       rows.map((r) => r.floor),
-      ["The Sunken Temple of the Serpent Lord Le", "The Sunken Temple of the Serpent Lord Le"],
+      ["The Sunken Temple of the Serpent Lord Le", "The Sunken Temple of the Serpent Lord 2"],
     );
     assert.ok(rows.every((r) => Array.from(r.floor).length <= LIMITS.floorNameChars));
     assert.equal(sceneNameOf(rows), "The Sunken Temple of the Serpent Lord Le");
     assert.ok(Array.from(sceneNameOf(rows)).length <= LIMITS.floorNameChars);
     assert.equal(rowName({ ...rows[0]!, floor: "  " }), "The Sunken Temple of the Serpent Lord Level 1", "an emptied name reads as its file's");
+  });
+
+  test("names that collide after the cut read as the floors will be named, so each row and move button has its own", () => {
+    const base = "The_Sunken_Cathedral_of_Saint_Varnholm_Level_";
+    const rows = rowsOf([`${base}10_Belfry.dd2vtt`, `${base}1_Undercroft.dd2vtt`, `${base}2_Nave.dd2vtt`].map(file));
+    assert.deepEqual(
+      rows.map((r) => r.floor),
+      ["The Sunken Cathedral of Saint Varnholm L", "The Sunken Cathedral of Saint Varnholm 2", "The Sunken Cathedral of Saint Varnholm 3"],
+    );
+    assert.equal(new Set(rows.map(rowName)).size, 3);
+    assert.ok(rows.every((r) => Array.from(r.floor).length <= LIMITS.floorNameChars));
+  });
+
+  test("the scene name field takes 80 characters, more than the 40 it starts cut to", () => {
+    assert.equal(SCENE_NAME_CHARS, 80);
+    assert.ok(SCENE_NAME_CHARS > LIMITS.floorNameChars);
   });
 
   test("move up toward the first, lowest floor and down, keeping each row's key, and not past either end", () => {
