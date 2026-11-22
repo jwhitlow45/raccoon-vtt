@@ -1,4 +1,5 @@
-import { createContext, useContext, useId, type CSSProperties, type ReactNode, type Ref } from "react";
+import { Children, createContext, useContext, useId, type CSSProperties, type ReactNode, type Ref } from "react";
+import { pointerWords } from "../lib/pointerWords.ts";
 import { theme } from "../lib/theme.ts";
 import { useHeld } from "./Held.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
@@ -527,20 +528,33 @@ function Reserved() {
 
 const HELP: CSSProperties = { margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted };
 
+/**
+ * `tapWords` says the line's own text is fixed words that say "Tap": a mouse
+ * reads "Click" in them, and a touch screen keeps "Tap". Text from the room
+ * (a creature, scene or page name, or what someone typed) must not be in it,
+ * as a thing named "Tap" would be reworded: a line with names words itself
+ * with pointerWords(template, names) and leaves `tapWords` off.
+ */
+function pointed(children: ReactNode, tapWords: true | undefined): ReactNode {
+  if (tapWords !== true) return children;
+  if (typeof children === "string") return pointerWords(children);
+  return Children.map(children, (child) => (typeof child === "string" ? pointerWords(child) : child));
+}
+
 /** A line that explains, under a control or a section's label. Give it an `id` and point the control's `aria-describedby` at it. */
-export function Help(props: { children: ReactNode; id?: string; style?: CSSProperties }) {
+export function Help(props: { children: ReactNode; id?: string; style?: CSSProperties; tapWords?: true }) {
   return (
     <p id={props.id} style={{ ...HELP, ...props.style }}>
-      {props.children}
+      {pointed(props.children, props.tapWords)}
     </p>
   );
 }
 
 /** Help in the warning tone: what a setting or an action will cost ("Players lose what they explored"). */
-export function Note(props: { children: ReactNode; id?: string; style?: CSSProperties }) {
+export function Note(props: { children: ReactNode; id?: string; style?: CSSProperties; tapWords?: true }) {
   return (
     <p id={props.id} style={{ ...HELP, color: theme.color.warning, ...props.style }}>
-      {props.children}
+      {pointed(props.children, props.tapWords)}
     </p>
   );
 }

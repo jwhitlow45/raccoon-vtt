@@ -463,7 +463,11 @@ const NOTE_COLOR = { muted: undefined, info: theme.color.text, error: theme.colo
  * tone: these lines say what happened as often as what it costs, and a
  * caller that means a caution uses Panel.tsx's Note.
  */
-export function Note(props: { children: ReactNode; tone?: "muted" | "error" | "info" }) {
+export function Note(props: { children: ReactNode; tone?: "muted" | "error" | "info"; tapWords?: true }) {
   const color = NOTE_COLOR[props.tone ?? "muted"];
-  return <Help style={color ? { color } : undefined}>{props.children}</Help>;
+  return (
+    <Help style={color ? { color } : undefined} tapWords={props.tapWords}>
+      {props.children}
+    </Help>
+  );
 }

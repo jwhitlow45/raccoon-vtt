@@ -653,7 +653,7 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
       </button>
     );
   };
-  const note = <Note>Death Saves{props.canEdit ? ": tap to fill" : ""}</Note>;
+  const note = <Note tapWords>Death Saves{props.canEdit ? ": tap to fill" : ""}</Note>;
   return (
     <div style={{ display: "grid", gap: theme.space(0.5) }}>
       {props.canEdit && props.target ? <DeathRoll target={props.target}>{note}</DeathRoll> : note}

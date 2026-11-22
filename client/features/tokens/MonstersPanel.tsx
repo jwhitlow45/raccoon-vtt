@@ -222,7 +222,7 @@ function MonsterDetail(props: {
         <Button variant="primary" size="sm" search="monsters.card.place" onClick={place} disabled={useTyped && typedHp === null}>
           {count === 1 ? "Place on the map" : `Place ${count} on the map`}
         </Button>
-        <Help>Then tap the map where {count === 1 ? "it goes" : "they go"}.</Help>
+        <Help tapWords>Then tap the map where {count === 1 ? "it goes" : "they go"}.</Help>
       </div>
       <MonsterImageSection target={target} name={m.name} image={image} fallback={fallback} onChange={setImage} />
       {listed.source === "room" ? (

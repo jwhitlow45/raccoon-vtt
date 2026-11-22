@@ -111,7 +111,7 @@ export function useAltImages(props: {
             {removing ? "Done" : "Remove one"}
           </SmallButton>
         </div>
-        <Help>{removing ? "Tap an image to remove it." : "Tap one to wear it."}</Help>
+        <Help tapWords>{removing ? "Tap an image to remove it." : "Tap one to wear it."}</Help>
       </div>
     );
 

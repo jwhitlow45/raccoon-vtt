@@ -30,6 +30,8 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { ConfirmButton: SceneConfirm } = await import("../features/scenes/controls.tsx");
 const { ConfirmButton: TokenConfirm } = await import("../features/tokens/ui.tsx");
 const { ConfirmButton: OptionsConfirm } = await import("../features/measure/controls.tsx");
+const { Help, Note } = await import("../components/Panel.tsx");
+const { Note: TokenNote } = await import("../features/tokens/ui.tsx");
 const { pointerWords } = await import("./pointerWords.ts");
 
 function html(element: ReturnType<typeof createElement>): string {
@@ -47,6 +49,11 @@ function onDevice<T>(touch: boolean, run: () => T): T {
 
 const NOOP = () => {};
 
+/** What JSX gives a line: the string alone, or the parts of it. */
+function kids(parts: string[]): string | string[] {
+  return parts.length === 1 ? parts[0]! : parts;
+}
+
 describe("the three ConfirmButtons word their second press for the pointer", () => {
   const buttons = {
     "the scenes one": (confirm: string, worded?: true) => createElement(SceneConfirm, { label: "Remove", confirm, ...(worded ? { worded } : null), onConfirm: NOOP }),
@@ -62,6 +69,27 @@ describe("the three ConfirmButtons word their second press for the pointer", () 
       const said = (touch: boolean) => onDevice(touch, () => pointerWords("Tap again: the map switches to {name}", { name: "Tap" }));
       assert.match(onDevice(false, () => html(button(said(false), true))), />Click again: the map switches to Tap</);
       assert.match(onDevice(true, () => html(button(said(true), true))), />Tap again: the map switches to Tap</);
+    });
+  }
+});
+
+describe("Help and both Notes word fixed text for the pointer", () => {
+  const lines = {
+    Help: (props: { tapWords?: true }, ...children: string[]) => createElement(Help, { ...props, children: kids(children) }),
+    "the warning Note": (props: { tapWords?: true }, ...children: string[]) => createElement(Note, { ...props, children: kids(children) }),
+    "the token panel's Note": (props: { tapWords?: true }, ...children: string[]) => createElement(TokenNote, { ...props, children: kids(children) }),
+  };
+  for (const [name, line] of Object.entries(lines)) {
+    test(`${name} reads Click on a mouse and Tap on a touch screen, in text and in parts`, () => {
+      assert.match(onDevice(false, () => html(line({ tapWords: true }, "Tap rows to pick creatures."))), />Click rows to pick creatures\.</);
+      assert.match(onDevice(true, () => html(line({ tapWords: true }, "Tap rows to pick creatures."))), />Tap rows to pick creatures\.</);
+      assert.match(onDevice(false, () => html(line({ tapWords: true }, "Then tap the map where ", "it goes", "."))), />Then click the map where it goes\.</);
+    });
+    test(`${name} leaves a line alone that holds a name, as a thing named Tap reads as named`, () => {
+      const named = (touch: boolean) => pointerWords("{name} is picked. Tap more rows.", { name: "Tap" }, touch);
+      assert.match(onDevice(false, () => html(line({}, named(false)))), />Tap is picked\. Click more rows\.</);
+      assert.match(onDevice(true, () => html(line({}, named(true)))), />Tap is picked\. Tap more rows\.</);
+      assert.match(onDevice(false, () => html(line({}, "Tap Room is the scene"))), />Tap Room is the scene</, "no tapWords, no rewording");
     });
   }
 });

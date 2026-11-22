@@ -237,7 +237,7 @@ function Builder(props: { id: string | null; srd: SrdList; close: PanelClose; on
       <ErrorText>{error}</ErrorText>
 
       <Section label={`Monsters (${creatureCount(draft.monsters)})`}>
-        {draft.monsters.length === 0 ? <Help>Add monsters below. Each tap adds one more.</Help> : null}
+        {draft.monsters.length === 0 ? <Help tapWords>Add monsters below. Each tap adds one more.</Help> : null}
         {draft.monsters.map((m, i) => (
           <MonsterLine
             key={`${i}:${lineKey(m)}`}

@@ -124,7 +124,7 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
   };
   return (
     <div data-device-sound="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      {line ? <Help>{line}</Help> : null}
+      {line ? <Help tapWords>{line}</Help> : null}
       {/* One grid for the four, so the names share a column and the sliders start and end together. */}
       <div style={GRID}>
         <IconButton

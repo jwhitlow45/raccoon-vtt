@@ -122,7 +122,7 @@ export function DeviceLine() {
 
 /** DeviceLine, pure. Unmute is a link button in the line, as Library is in the idle line (music/NowFull.tsx IdleLine), which unmutes inside its click. */
 export function DeviceLineView(props: { here: SoundHere; onUnmute(): void }) {
-  if (props.here === "tap") return <Help>{TAP_TO_START}</Help>;
+  if (props.here === "tap") return <Help tapWords>{TAP_TO_START}</Help>;
   if (props.here === "other") return <Help>{ANOTHER_WINDOW}</Help>;
   if (props.here === "cannot") return <Help>{CANNOT_PLAY}</Help>;
   if (props.here !== "off") return null;

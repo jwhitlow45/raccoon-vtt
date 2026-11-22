@@ -68,7 +68,7 @@ export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here
           </Button>
         </div>
       ) : null}
-      {props.here === "tap" ? <Help>{TAP_TO_START}</Help> : null}
+      {props.here === "tap" ? <Help tapWords>{TAP_TO_START}</Help> : null}
       {props.here === "other" ? <Help>{ANOTHER_WINDOW}</Help> : null}
       {props.here === "cannot" ? <Help>{CANNOT_PLAY}</Help> : null}
     </div>
