@@ -392,7 +392,8 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     assert.deepEqual(await Promise.all(["Crypt_Level_1.dd2vtt", "Crypt_Level_2.dd2vtt", "Crypt_Level_10.dd2vtt"].map((f) => floorName(f).inputValue())), ["Crypt Level 1", "Crypt Level 2", "Crypt Level 10"]);
     const sceneName = dialog.getByRole("textbox", { name: "Scene name", exact: true });
     assert.equal(await sceneName.inputValue(), "Crypt Level 1", "the first file's name");
-    assert.equal(await sceneName.getAttribute("maxlength"), "40", "cut to a floor name's length");
+    assert.ok(Array.from(await sceneName.inputValue()).length <= 40, "the start value is cut to a floor name's 40 characters");
+    assert.equal(await sceneName.getAttribute("maxlength"), "80", "the field takes a scene name's 80, as New scene does");
     assert.equal(await dialog.getByRole("button", { name: "Move Crypt Level 1 up", exact: true }).isDisabled(), true);
 
     // Move up takes the Level 10 row toward the lowest floor, and focus stays on its button.
