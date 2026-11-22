@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { keptWork, MOST_CHANGED } from "#shared/accepted.ts";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
+import { acceptedOf, keptWork, MOST_CHANGED } from "#shared/accepted.ts";
 import { seatWork } from "#shared/limits.ts";
 import type { Op } from "#shared/protocol.ts";
 import { scene, token } from "#shared/testutil.ts";
@@ -201,4 +203,46 @@ function legacyId(i: number): string {
 function withLegacyScenes<F extends ReturnType<typeof scopeFixture>>(f: F, count: number, from = 0): F {
   for (let i = from; i < from + count; i++) f.state.scenes[legacyId(i)] = scene(legacyId(i), { order: 5 + i });
   return f;
+}
+
+describe("what a room keeps lets go of the parts it drops", () => {
+  test("an unchanged token and template record, through 50 changes of the room's widths facts, as many as the room's op rate lets the DM send at once, holds only the parts the room keeps", async (t) => {
+    const f = withLegacyScenes(scopeFixture(), 1);
+    const h = await scopeActor(t, f.state);
+    const dm = await h.connect(f.dm);
+    const { tokens, templates } = dm.actor.committed.state;
+    const parts: WeakRef<object>[] = [];
+    let last: object[] = [];
+    const note = () => {
+      const named = acceptedOf(dm.actor.committed.state)!.named;
+      const now = ["widths:tokens", "widths:templates"].map((name) => named.get(name)!.part);
+      for (const [i, part] of now.entries()) if (part !== last[i]) parts.push(new WeakRef(part));
+      last = now;
+    };
+    note();
+    for (let i = 0; i < 25; i++) {
+      await dm.apply({ t: "scene.delete", sceneId: legacyId(0) });
+      note();
+      await dm.restore("setup");
+      note();
+    }
+    assert.equal(dm.actor.committed.state.tokens, tokens, "the token record is the one the room loaded");
+    assert.equal(dm.actor.committed.state.templates, templates, "the template record is the one the room loaded");
+    assert.equal(parts.length, 102, "each change of facts made the room new parts");
+    assert.equal(await kept(parts), 2, "only the room's two widths parts are kept");
+  });
+});
+
+/** How many of `parts` are still held once garbage is collected, which may take a few rounds. */
+async function kept(parts: readonly WeakRef<object>[]): Promise<number> {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  let live = parts.length;
+  for (let round = 0; round < 10 && live > 2; round++) {
+    // A WeakRef read in this turn holds its object until the turn ends.
+    await new Promise((resolve) => setImmediate(resolve));
+    gc();
+    live = parts.filter((ref) => ref.deref() !== undefined).length;
+  }
+  return live;
 }

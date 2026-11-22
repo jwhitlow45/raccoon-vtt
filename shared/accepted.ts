@@ -55,12 +55,17 @@ export const keptWork = { keys: 0, entries: 0 };
 
 const byMeta = new WeakMap<object, Accepted>();
 
-/** Each part's value over each record read, kept per record object, which is replaced and never changed (writable.ts). */
-const values = new WeakMap<object, Map<Part<unknown>, unknown>>();
+/**
+ * Each part's value over each record read, kept per record object, which
+ * is replaced and never changed (writable.ts). Both keys are weak: a part a
+ * room dropped, or made for one read, goes with its values, though the
+ * record it read stays as the room's.
+ */
+const values = new WeakMap<object, WeakMap<Part<unknown>, unknown>>();
 
 function remember(record: object, part: Part<unknown>, value: unknown): void {
   let kept = values.get(record);
-  if (!kept) values.set(record, (kept = new Map()));
+  if (!kept) values.set(record, (kept = new WeakMap()));
   kept.set(part, value);
 }
 
