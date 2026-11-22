@@ -51,7 +51,9 @@ const LOCK_PATH = "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2
  * a tap on the board selects creatures. Isometric draws the end flat on
  * the ground, and its name stands up where every cell under it is
  * revealed, as a trap's name does, else lies flat under the fog
- * (docs/design/design-v1-isometric-view.md 5.2). Each mark carries its
+ * (docs/design/design-v1-isometric-view.md 5.2). A hole's pills are the
+ * exception: one that cannot stand is hidden, since lying flat it runs
+ * under the dark cut off and covers a small hole. Each mark carries its
  * end's id and its pill's words as attributes, which the e2e files read
  * off the canvas.
  */
