@@ -18,7 +18,7 @@ import type { LayerProps } from "../layers.ts";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
-import { clearOfMarkers, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { clearOfMarkers, cornerPill, linkLabel, meetsTurnMarker, notReachedLinks, quietLinks } from "./linkMarks.ts";
 import { holeDrops } from "./openingView.ts";
 
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
@@ -159,6 +159,21 @@ function nameAnchor(o: Outline, edge: "top" | "bottom" = "top"): { x: number; y:
   return best;
 }
 
+/** An end's corners: a box's four, and on hexes the outline's points. */
+function cornersOf(o: Outline): { x: number; y: number }[] {
+  if (o.loop) {
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i + 1 < o.loop.length; i += 2) out.push({ x: o.loop[i]!, y: o.loop[i + 1]! });
+    return out;
+  }
+  return [
+    { x: o.x, y: o.y },
+    { x: o.x + o.w, y: o.y },
+    { x: o.x, y: o.y + o.h },
+    { x: o.x + o.w, y: o.y + o.h },
+  ];
+}
+
 /** A closed loop of points, x then y, as the path to clip or stroke. */
 function trace(ctx: Konva.Context, loop: readonly number[]): void {
   ctx.beginPath();
@@ -184,9 +199,14 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
     : null;
   const iso = useIsoGround();
   // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
-  const pill = first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...first, scale }) : true) : null;
+  const placed = first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? pillStands(iso.fog, { ...first, scale }) : true) : null;
   const top = nameAnchor(o, "top");
-  const chip: PillSpec | null = hole && props.drop !== null && shown ? { value: dropChip(props.drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
+  const dropPill: PillSpec | null = hole && props.drop !== null && shown ? { value: dropChip(props.drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
+  // On the isometric board a hole's pills hang from its lowest and highest corners on the screen, where they stand: a map edge can be the screen's top, and a pill under it covers a small hole.
+  const corners = useMemo(() => cornersOf(o), [o]);
+  const standing = (p: PillSpec) => iso !== null && pillStands(iso.fog, { ...p, scale });
+  const pill = placed && hole && iso ? cornerPill(placed, corners, iso, "under", (p) => standing(p) && !meetsTurnMarker(p, markers, scale, iso, true)) ?? placed : placed;
+  const chip = dropPill && iso ? cornerPill(dropPill, corners, iso, "over", standing) ?? dropPill : dropPill;
   // The end lies on the ground: Top-down's board, or the isometric ground stage.
   const flat = iso === null || iso.place === "ground";
   const pills = [pill, chip].filter((p): p is PillSpec => p !== null);
@@ -196,7 +216,8 @@ const LinkMark = memo(function LinkMark(props: { link: FloorLink; scenes: Readon
   const color = boardTheme.color.accentSoft;
   const locked = link.locked === true;
   const words = pill ? (pill.value ? `${pill.name} · ${pill.value}` : pill.name!) : "";
-  const stands = (p: PillSpec) => drawsHere(iso, iso ? pillStands(iso.fog, { ...p, scale }) : true);
+  // A hole's pill that cannot stand is not drawn at all: lying flat it runs under the dark of unexplored ground, cut off mid-word, and on a phone covers the hole.
+  const stands = (p: PillSpec) => drawsHere(iso, iso ? pillStands(iso.fog, { ...p, scale }) : true) && (!hole || standing(p) || iso === null);
   return (
     <Group {...{ [FLOOR_LINK_ATTR]: link.id, "data-floor-link-name": words, ...(chip ? { "data-floor-link-chip": chip.value } : {}) }}>
       {flat ? <LinkShape o={o} kind={link.kind} dir={dir} locked={locked} color={color} scale={scale} /> : null}

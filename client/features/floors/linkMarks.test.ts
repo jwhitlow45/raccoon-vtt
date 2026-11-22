@@ -6,7 +6,7 @@ import { viewPointOf } from "../../canvas/isoPlace.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
-import { clearOfMarkers, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
+import { clearOfMarkers, cornerPill, linkLabel, notReachedLinks, quietLinks } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -136,5 +136,36 @@ describe("an end's name and the turn's marker meet where they draw (B53-SOL-02)"
     const m = { ...marker, above: true, below: false, ...toWorld(view, { x: toView(view, name).x, y: (top + standing.y0) / 2 } as ViewPoint) };
     assert.equal(clearOfMarkers(name, bottom, [m], SCALE, flat(0), true), name, "standing, apart");
     assert.deepEqual(clearOfMarkers(name, bottom, [m], SCALE, flat(0), false), under, "flat, they meet");
+  });
+});
+
+describe("a hole's pills stand clear of the hole in Isometric", () => {
+  const corners = [
+    { x: 4, y: 4 },
+    { x: 6, y: 4 },
+    { x: 4, y: 6 },
+    { x: 6, y: 6 },
+  ];
+  const flat = (turn: Turn) => ({ turn, ground: () => 0 });
+  const name = { name: "Opening down", x: 5, y: 6, below: true, size: "map" as const, small: true };
+  const screenY = (turn: Turn, c: { x: number; y: number }) => viewPointOf(flat(turn), c).y;
+
+  test("a name hangs under the hole's lowest corner on the screen and a chip sits over its highest, at every turn", () => {
+    for (const turn of [0, 1, 2, 3] as const) {
+      const under = cornerPill(name, corners, flat(turn), "under", () => true)!;
+      const over = cornerPill({ ...name, name: undefined, value: "10 ft down", below: undefined }, corners, flat(turn), "over", () => true)!;
+      assert.equal(under.below, true);
+      assert.equal(over.above, true);
+      assert.equal(screenY(turn, under), Math.max(...corners.map((c) => screenY(turn, c))), `turn ${turn}: the name's corner is the lowest`);
+      assert.equal(screenY(turn, over), Math.min(...corners.map((c) => screenY(turn, c))), `turn ${turn}: the chip's corner is the highest`);
+    }
+  });
+
+  test("the next corner is tried where the first is not a place the pill stands, and none gives null", () => {
+    const lowest = cornerPill(name, corners, flat(0), "under", () => true)!;
+    const second = cornerPill(name, corners, flat(0), "under", (p) => p.x !== lowest.x || p.y !== lowest.y)!;
+    assert.ok(second.x !== lowest.x || second.y !== lowest.y);
+    assert.ok(screenY(0, second) <= screenY(0, lowest));
+    assert.equal(cornerPill(name, corners, flat(0), "under", () => false), null);
   });
 });

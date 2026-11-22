@@ -106,6 +106,35 @@ function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean):
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
 }
 
+/** Whether a pill's box, as it draws, meets any of the turn's markers (always upright). */
+export function meetsTurnMarker(pill: PillSpec, markers: readonly PillSpec[], scale: number, iso: DrawSpace, upright: boolean): boolean {
+  const mine = drawnBox(pill, scale, iso, upright);
+  return markers.some((m) => {
+    const b = drawnBox(m, scale, iso, true);
+    return Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0);
+  });
+}
+
+/**
+ * Where an upright pill can stand clear of the hole it names in Isometric
+ * (a phone's small holes lay a pill hung from a map edge over the hole
+ * itself, as the view turns): the hole's corners from the lowest on the
+ * screen up for a name that hangs under its corner, or from the highest
+ * down for a chip that sits over one. The first the pill stands at
+ * (`fits`) wins, else null, and the caller keeps the pill's map edge.
+ */
+export function cornerPill(pill: PillSpec, corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>, hangs: "under" | "over", fits: (p: PillSpec) => boolean): PillSpec | null {
+  const sign = hangs === "under" ? -1 : 1;
+  const ordered = corners
+    .map((c) => ({ c, y: viewPointOf(iso, c).y }))
+    .sort((a, b) => sign * (a.y - b.y));
+  for (const { c } of ordered) {
+    const at: PillSpec = { ...pill, x: c.x, y: c.y, above: hangs === "over", below: hangs === "under" };
+    if (fits(at)) return at;
+  }
+  return null;
+}
+
 /**
  * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
  * over the end's top edge, and where its box meets a marker's it hangs
@@ -120,11 +149,7 @@ function drawnBox(p: PillSpec, scale: number, iso: DrawSpace, upright: boolean):
  * pills apart on the map can cover each other on screen, and the reverse.
  */
 export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number, iso: DrawSpace = null, upright = true): PillSpec {
-  const drawnMarkers = markers.map((m) => drawnBox(m, scale, iso, true));
-  const meetsMarker = (p: PillSpec) => {
-    const mine = drawnBox(p, scale, iso, upright);
-    return drawnMarkers.some((b) => Math.min(mine.x1, b.x1) > Math.max(mine.x0, b.x0) && Math.min(mine.y1, b.y1) > Math.max(mine.y0, b.y0));
-  };
+  const meetsMarker = (p: PillSpec) => meetsTurnMarker(p, markers, scale, iso, upright);
   if (!meetsMarker(pill)) return pill;
   // Under the end can meet the marker too (Isometric on a phone), and then moving only trades one cover for another.
   const under: PillSpec = { ...pill, x: bottom.x, y: bottom.y, above: false, below: true };
