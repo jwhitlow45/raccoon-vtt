@@ -284,7 +284,7 @@ function covers(a: Box, b: Box, charge: number): number {
   return boxesMeet(a, b) ? charge + (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * (Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)) : 0;
 }
 
-/** A pill over another pill costs most, since two names on one row cannot be read, and one over its own hole more than one over another end's squares, since it hides the hole it names. */
+/** A pill over another pill weighs most, since two names on one row cannot be read, and one over its own hole more than one over another end's squares, since it hides the hole it names. The charges add up, so three covers of squares weigh as much as one of its own hole. */
 const PILL_ON_PILL = 1_000_000;
 const PILL_ON_OWN = 300_000;
 const PILL_ON_SQUARES = 100_000;
@@ -298,10 +298,12 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * holes' pills are placed together: each name hangs under, and each chip
  * over, one corner of its hole where it stands (`stands`, always in
  * Top-down) and clears the turn's marker, centered or reaching outward
- * from the hole, or keeps the end's own edge, and the choice with the
- * fewest covers wins: a pill over a pill counts most, then one over its
- * own hole, then one over another end's squares or a token, then the
- * least area (D-261122-112). The search keeps the first of equal choices,
+ * from the hole, or keeps the end's own edge, and the choice that costs
+ * least wins. Each cover adds its charge and its area: a pill over a pill
+ * weighs more than one over its own hole, which weighs more than one over
+ * another end's squares or a token (D-261122-112). The charges add up, so
+ * enough lesser covers can weigh as much as a greater one, and area only
+ * breaks a tie of charges. The search keeps the first of equal choices,
  * so a lone hole's pills hang where they would alone: in Isometric a name
  * under the lowest corner on the screen and a chip over the highest, and
  * in Top-down from the middles of its bottom and top edges. Ends that are
