@@ -1269,7 +1269,7 @@ holds:
   start stops and asks you to put `postgres-link.json` back from a copy of
   the data folder. A moved or copied data folder gets a junction of its own.
 
-### Backups
+### Desktop backups
 
 The window's **Backups** card lists them. A backup runs on **Back up now**,
 before an update (below), and in the background: once the server is up, and
