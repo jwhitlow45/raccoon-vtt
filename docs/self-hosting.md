@@ -577,8 +577,10 @@ player's undo history, which is never stored, so nothing that was undoable
 before an update can be undone after it.
 
 After any update, reload every page left open across it, table displays
-included. No version check makes an open page reload, so until it does, it
-works by the old rules.
+included. A page opened on this release or later reloads itself when the
+update raises the op version, once its edits are saved. A page opened before
+this release, and any update that changes only the page's code, make no
+version check, so until it is reloaded, a page works by the old rules.
 
 Images are pinned by digest: the Node base in `Dockerfile`, and postgres and
 squid in `docker-compose.server.yml`. They do not update on their own. To

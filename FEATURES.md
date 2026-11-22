@@ -255,7 +255,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
 - The app's icon is a raccoon face on a white rounded square, the shape of an iPhone app icon, in the browser tab, on the Home Screen, on Home and About, and over the docs.
 - Phones load a smaller copy of each map, and the map redraws only when something changes.
-- A page open on older code than the server reloads itself once. The server sends its version as the room opens, and a page on a lower one shows "RaccoonVTT was updated. Reloading…", waits until its changes are saved, and reloads. If the reload brings the same old code back, as a cached page does, it does not reload again for that version.
+- A page reloads itself once when the server's room format is newer than the page's. The server sends its version as the room opens, and a page on a lower one shows "RaccoonVTT was updated. Reloading…", waits until its changes are saved and no new creature is still waiting on the server's answer, and reloads. A page that cannot keep a record for the tab does not reload. If the reload brings the same old code back, as a cached page does, it does not reload again for that version. An update that changes only the page's code reloads nothing.
 - A panel that cannot load, offline or after the site was updated, says so inside itself, and the rest of the room keeps running. Its Reload waits until your changes are saved and the connection is back, and opens the panel again. The SRD monster list and stat blocks offer the same Reload when they did not load.
 
 ## Scenes and maps
