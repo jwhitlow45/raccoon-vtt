@@ -477,20 +477,26 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    outputs:
-      content: ${{ steps.notes.outputs.content }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
+      # git-cliff writes the notes straight to a file and the release job reads that file, so no env variable or step
+      # output carries them (one env string holds at most 131,072 bytes). The image's own entrypoint is skipped
+      # because it drops privileges, which a checkout owned by the runner user does not need.
       - name: Generate this release's notes
-        id: notes
-        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" --entrypoint /usr/local/bin/git-cliff \
+            -v "$PWD:/app" -w /app \
+            ghcr.io/orhun/git-cliff/git-cliff@sha256:1e696a381a1b0366bb6ccbb6bd4e50e73473fda88eab3a757b95e0d0d66c9531 \
+            --config cliff.toml --current --strip header -o release-notes.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          config: cliff.toml
-          args: --current --strip header
-          github_token: ${{ github.token }}
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 1
 
   release:
     needs: [publish, release-notes]
@@ -500,23 +506,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          NOTES: ${{ needs.release-notes.outputs.content }}
         run: |
           # A Release body holds 125,000 characters. A release whose notes pass 100,000 gets a short body that links
           # its changelog section, so the create call never fails on size. Every body ends with a pointer to the
-          # update notes. The body goes in a file, so no argument carries it.
+          # update notes. The notes stay in a file from git-cliff to gh, never in a variable or an argument.
           notes_file=$(mktemp)
           repo_url="https://github.com/$GITHUB_REPOSITORY"
-          if [ "$(printf '%s' "$NOTES" | wc -m)" -gt 100000 ]; then
-            heading=$(printf '%s\n' "$NOTES" | grep -m1 '^## ' | sed 's/^## //' | tr 'A-Z' 'a-z' | tr -d '.()' | tr ' ' '-' || true)
+          if [ "$(wc -m < release-notes.md)" -gt 100000 ]; then
+            heading=$(grep -m1 '^## ' release-notes.md | sed 's/^## //' | tr 'A-Z' 'a-z' | tr -d '.()' | tr ' ' '-' || true)
             printf 'The notes for this release are too long for a Release page. Read the [%s section of the changelog](%s/blob/%s/CHANGELOG.md#%s).\n' \
               "$TAG" "$repo_url" "$TAG" "$heading" > "$notes_file"
           else
-            printf '%s\n' "$NOTES" > "$notes_file"
+            cp release-notes.md "$notes_file"
           fi
           printf '\nBefore updating a server, read the [update notes](%s/blob/%s/docs/self-hosting.md#update-notes).\n' \
             "$repo_url" "$TAG" >> "$notes_file"

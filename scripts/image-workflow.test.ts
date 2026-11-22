@@ -180,9 +180,11 @@ fi
 [ "$2" = create ]
 `);
     chmodSync(path.join(dir, "gh"), 0o755);
+    writeFileSync(path.join(dir, "release-notes.md"), notes);
     const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript("Publish the GitHub Release")], {
       encoding: "utf8",
-      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, STATE: state, CALLS: path.join(dir, "calls"), TAG: "v0.2.0", GITHUB_REPOSITORY: "example/raccoon-vtt", NOTES: notes, BODY: path.join(dir, "body") },
+      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, STATE: state, CALLS: path.join(dir, "calls"), TAG: "v0.2.0", GITHUB_REPOSITORY: "example/raccoon-vtt", BODY: path.join(dir, "body") },
+      cwd: dir,
     });
     const body = existsSync(path.join(dir, "body")) ? readFileSync(path.join(dir, "body"), "utf8") : undefined;
     return { status: result.status, calls: readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n"), body };
@@ -202,14 +204,16 @@ describe("GitHub Releases follow successful image publication", () => {
     const notes = jobBlock("release-notes");
     assert.match(notes, /permissions:\n      contents: read\n/);
     assert.doesNotMatch(notes, /contents: write/);
-    assert.match(notes, /github_token: \$\{\{ github.token \}\}/);
-    assert.match(notes, /content: \$\{\{ steps.notes.outputs.content \}\}/);
+    assert.doesNotMatch(notes, /outputs:|steps\.notes\.outputs/, "no job or step output carries the notes");
     const release = jobBlock("release");
     assert.match(release, /needs: \[publish, release-notes\]/);
-    assert.match(release, /NOTES: \$\{\{ needs.release-notes.outputs.content \}\}/);
+    assert.doesNotMatch(release, /NOTES/, "no variable carries the notes");
+    assert.match(release, /actions\/download-artifact@[0-9a-f]{40}[^\n]*\n\s+with:\n\s+name: release-notes\n/);
+    assert.match(notes, /-o release-notes\.md/);
+    assert.match(notes, /name: release-notes\n\s+path: release-notes\.md/);
     assert.match(release, /--notes-file "\$notes_file"/);
     assert.doesNotMatch(release, /--notes "/);
-    assert.doesNotMatch(release, /uses:/);
+    assert.deepEqual([...release.matchAll(/uses: ([^@\s]+)@/g)].map((m) => m[1]), ["actions/download-artifact"]);
   });
 
   test("an existing Release is left unchanged", () => {
@@ -239,6 +243,8 @@ describe("GitHub Releases follow successful image publication", () => {
     assert.ok(at.length < 1000, `${at.length} characters`);
     assert.match(at, /blob\/v0\.2\.0\/CHANGELOG\.md#v020-2026-11-22\)/);
     assert.ok(at.includes(POINTER));
+    const huge = publishRelease("missing", `## v0.2.0 (2026-11-22)\n\n${"- a line of notes, longer than most\n".repeat(6000)}`).body ?? "";
+    assert.ok(huge.length < 1000, "a body over 131,072 bytes never rides an argument or a variable");
     const edge = publishRelease("missing", `## v0.2.0 (2026-11-22)\n${"x".repeat(100_000 - 24)}`).body ?? "";
     assert.ok(edge.length > 99_000, "100,000 characters stay whole");
   });
