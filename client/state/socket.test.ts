@@ -91,17 +91,23 @@ class FakeEnv implements ConnectionEnv {
 }
 
 /** A page's own build and what its tab kept across reloads, which `kept` stands in for. */
-function fakeBuild(own: number, kept: { tried: number | null | "unknown" } = { tried: null }) {
+function fakeBuild(own: number, kept: { tried: number | null | "unknown" } = { tried: null }, keeps = true) {
   const reloads: number[] = [];
+  const reads = { tried: 0 };
   const build: BuildReload = {
     ownOp: own,
-    tried: () => kept.tried,
+    tried: () => {
+      reads.tried++;
+      return kept.tried;
+    },
     remember: (serverOp) => {
-      if (kept.tried !== "unknown") kept.tried = serverOp;
+      if (!keeps || kept.tried === "unknown") return false;
+      kept.tried = serverOp;
+      return true;
     },
     reload: () => reloads.push(1),
   };
-  return { build, reloads, kept };
+  return { build, reloads, kept, reads };
 }
 
 function setup(opts: { viewer?: Viewer; state?: RoomState; random?: number; recheck?: () => Promise<You | null>; ephPerSecond?: () => number; buildReload?: BuildReload } = {}) {
@@ -1422,7 +1428,7 @@ describe("a page on older code than the server (build frame)", () => {
     }
   });
 
-  test("a page that never sent its version is not told, and a hello always carries it", () => {
+  test("a page without buildReload never reloads, and every hello carries its version", () => {
     const s = setup();
     s.socket.start();
     s.last().open();
@@ -1499,6 +1505,52 @@ describe("a page on older code than the server (build frame)", () => {
     s.clock.advance(1);
     assert.equal(b.reloads.length, 0, "an edit queued during the note holds the reload");
     s.last().emit({ t: "ev", seq: 1, changes: [], acks: [n] });
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 1, "the answer lets it go");
+  });
+
+  test("a tab whose storage reads but keeps nothing never reloads, and says no once, not at every store change", () => {
+    const b = fakeBuild(10, { tried: null }, false);
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    openWith(s, 11);
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 0, "the write failed, so there would be nothing to stop the next reload");
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    openWith(s, 11);
+    s.clock.advance(BUILD_RELOAD_NOTE_MS);
+    assert.equal(b.reloads.length, 0);
+    const readsAfter = b.reads.tried;
+    for (let i = 0; i < 5; i++) s.room.ui.notify(`unrelated ${i}`);
+    assert.equal(b.reads.tried, readsAfter, "a version already answered is not asked of the storage at every store change");
+  });
+
+  test("a create still waiting on the room's answer about its ids holds the reload until the answer comes", () => {
+    const b = fakeBuild(10);
+    const s = setup({ buildReload: b.build });
+    s.socket.start();
+    s.connect();
+    const id = uuidv7(s.room.serverNow());
+    const { rev: _rev, fogExemptAuto: _auto, ...input } = token(id, { sceneId: "s1", name: "Goblin" });
+    s.room.dispatch({ t: "token.create", token: input } as ClientOp);
+    assert.equal(s.last().take("op").length, 1);
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "build", opVersion: 11 });
+    // The server settled the create and its answer was lost: nothing is pending, and the room is asked about its id.
+    s.last().emit(s.snapshot("s1", 1));
+    assert.equal(s.room.store.getState().pending.length, 0);
+    assert.equal(s.room.store.getState().idsSettling, 1);
+    const [ask] = s.last().take("ids") as Extract<ClientMessage, { t: "ids" }>[];
+    assert.deepEqual(ask?.ids, [id]);
+    s.clock.advance(BUILD_RELOAD_NOTE_MS * 3);
+    assert.equal(b.reloads.length, 0, "no reload while the answer is out");
+    assert.equal(s.room.store.getState().toasts.some((t) => t.text.startsWith("RaccoonVTT was updated")), false);
+    s.last().emit({ t: "ids", k: ask!.k, held: [id], notHeld: [], pending: [] });
+    assert.equal(s.room.store.getState().idsSettling, 0);
     s.clock.advance(BUILD_RELOAD_NOTE_MS);
     assert.equal(b.reloads.length, 1, "the answer lets it go");
   });

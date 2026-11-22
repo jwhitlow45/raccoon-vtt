@@ -274,6 +274,11 @@ export type RoomStoreState = RoomView & {
   seq: number;
   /** Ops sent or queued, oldest first. A refusal or an ack removes one in the same update that applies its batch. */
   pending: readonly PendingOp[];
+  /**
+   * How many creates wait on the room's answer about their ids after a reconnect. They are out of `pending`, but a
+   * reload would lose them, so a page that reloads for new code waits on this as it waits on `pending`.
+   */
+  idsSettling: number;
   sceneLoad: SceneLoad;
   /** Every held floor's ephemeral events (ephemeral.ts FloorEphemeral). `ephemeral` is the floor shown's. */
   ephemeralFloors: FloorEphemeral;
@@ -688,6 +693,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     confirmedReady: false,
     seq: 0,
     pending: [],
+    idsSettling: 0,
     refused: [],
     trapped: [],
     sceneLoad: SCENE_LOAD_IDLE,
@@ -742,6 +748,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * server settled their numbers, and told nothing until that answer.
    */
   let settling: { p: PendingOp; since: number }[] = [];
+  /** Publishes how many creates settle (RoomStoreState.idsSettling), after each change to the list. */
+  const publishSettling = (): void => {
+    if (get().idsSettling !== settling.length) store.setState({ idsSettling: settling.length });
+  };
   /** The `ids` asks still unanswered, by `k`. */
   const idsAsked = new Set<number>();
   let ownK = OWN_K;
@@ -1147,6 +1157,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     const gave = settling.filter((x) => now - x.since >= IDS_SETTLE_MS);
     if (gave.length > 0) {
       settling = settling.filter((x) => !gave.includes(x));
+      publishSettling();
       tell(gave.map((x) => x.p), () => "unknown", undefined, "snapshot");
     }
     if (settling.length === 0 || !ready || !outbox) return;
@@ -1506,6 +1517,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const uncertain = settled.filter((p) => mintedOf(p.op).length > 0);
       const lost = settled.filter((p) => !uncertain.includes(p));
       settling = [...settling, ...uncertain.map((p) => ({ p, since: clock.now() }))];
+      publishSettling();
       idsAsked.clear();
       // The clock frame just ahead of every snapshot is a fresh reading of the server's time. An unsent op whose ids
       // it would refuse, or nearly, takes fresh ones in place, so offline work goes as it was made, and so does one
@@ -1770,6 +1782,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         else return true;
         return false;
       });
+      publishSettling();
       if (again.length > 0) {
         // Never recorded, so never taken: it goes again under fresh ids, at the end of the queue, with the work it holds.
         const queued = again.map((p) => ({ ...p, n: nextN++ }));

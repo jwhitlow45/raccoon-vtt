@@ -9,9 +9,10 @@ import { OP_VERSION } from "#shared/migrate.ts";
 export type BuildReload = {
   /** The op version of this page's own code. */
   ownOp: number;
-  /** The newest server version this tab already reloaded for, or null. Null as well when the tab keeps nothing, which never reloads. */
+  /** The newest server version this tab already reloaded for, null when it never did, or "unknown" when the tab cannot say, which never reloads. */
   tried(): number | null | "unknown";
-  remember(serverOp: number): void;
+  /** Keeps the version for the tab. False when it could not be kept, which must stop the reload: nothing would stop the next one. */
+  remember(serverOp: number): boolean;
   reload(): void;
 };
 
@@ -40,8 +41,10 @@ export function browserBuildReload(): BuildReload {
     remember(serverOp) {
       try {
         sessionStorage.setItem(KEY, String(serverOp));
+        // Storage that takes a write and keeps nothing would loop as well.
+        return sessionStorage.getItem(KEY) === String(serverOp);
       } catch {
-        // tried() reads the same storage and answers unknown, so nothing reloads.
+        return false;
       }
     },
     reload() {

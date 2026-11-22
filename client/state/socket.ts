@@ -331,6 +331,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const buildReloadTimer = new Timer(clock);
   /** The server's op version, once a `build` frame said it. */
   let newerBuild: number | null = null;
+  /** The server version this page already answered no to, so it asks the tab's storage once for it. */
+  let noReloadFor: number | null = null;
   let unsubscribeStore: (() => void) | null = null;
   /** Wakes the outbox once the op it could not send fits the socket's budget. */
   const paceTimer = new Timer(clock);
@@ -641,21 +643,35 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   }
 
   /**
-   * Reloads for newer server code once the socket is open and the queued edits are answered, since a reload drops
-   * what is queued (client/lib/chunkLoad.ts reloadGate). Asked again as each of those changes.
+   * Reloads for newer server code once the socket is open and nothing of this page's work would be lost: the queued
+   * edits are answered and no create still waits on the room's answer about its ids (a reload drops both,
+   * client/lib/chunkLoad.ts reloadGate). Asked again as each of those changes.
    */
   function considerBuildReload(): void {
     const reload = options.buildReload;
-    if (!reload || previewOf !== undefined || newerBuild === null || buildReloadTimer.pending) return;
-    if (phase !== "open" || room.store.getState().pending.length > 0) return;
-    if (!shouldReloadForBuild(newerBuild, reload.ownOp, reload.tried())) return;
+    if (!reload || previewOf !== undefined || newerBuild === null || newerBuild === noReloadFor || buildReloadTimer.pending) return;
+    if (phase !== "open" || unsaved()) return;
     const serverOp = newerBuild;
-    room.ui.notify("RaccoonVTT was updated. Reloading…");
+    if (!shouldReloadForBuild(serverOp, reload.ownOp, reload.tried())) {
+      // Settled for this version, so the store's later changes read no storage for it.
+      noReloadFor = serverOp;
+      return;
+    }
+    // Pending before the note, which publishes a store change that asks this function again.
     buildReloadTimer.set(BUILD_RELOAD_NOTE_MS, () => {
-      if (phase !== "open" || room.store.getState().pending.length > 0) return;
-      reload.remember(serverOp);
+      if (phase !== "open" || unsaved()) return;
+      if (!reload.remember(serverOp)) {
+        noReloadFor = serverOp;
+        return;
+      }
       reload.reload();
     });
+    room.ui.notify("RaccoonVTT was updated. Reloading…");
+  }
+
+  function unsaved(): boolean {
+    const s = room.store.getState();
+    return s.pending.length > 0 || s.idsSettling > 0;
   }
 
   function onSnapshot(msg: Extract<ServerMessage, { t: "snapshot" }>): void {
