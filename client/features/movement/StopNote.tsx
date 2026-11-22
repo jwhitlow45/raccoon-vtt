@@ -19,7 +19,9 @@ import { sceneGrid } from "#shared/rules/grid.ts";
 import { cardPlace } from "./anchor.ts";
 import { dropView, stopText } from "./drop.ts";
 import { stopNoteSlot } from "./store.ts";
+import { escapeClosesNote } from "./noteEscape.ts";
 import { runTeleport } from "./teleport.ts";
+import { roomLetGo } from "../../lib/escape.ts";
 
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 const NO_FOG: Readonly<Record<string, FogTile>> = {};
@@ -97,13 +99,18 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   const open = note !== null;
   useEffect(() => {
     if (!open) return;
-    // After Room's own Escape (RoomChrome.tsx useEscape), which may use the key to deselect: the note goes too, unless a dialog or a field has the key.
+    // After Room's own Escape (RoomChrome.tsx useEscape): the note goes with Room's letting go of the selection and with an Escape nobody used, never with one a pop-up or a pane took.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || slot.getState().busy) return;
+      if (e.key !== "Escape") return;
       const target = e.target instanceof HTMLElement ? e.target : null;
-      if (target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
-      if (document.querySelector('[aria-modal="true"]') !== null) return;
-      slot.setState({ note: null });
+      const closes = escapeClosesNote({
+        busy: slot.getState().busy,
+        defaultPrevented: e.defaultPrevented,
+        roomLetGo: roomLetGo.has(e),
+        editing: target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)),
+        dialogOpen: document.querySelector('[aria-modal="true"]') !== null,
+      });
+      if (closes) slot.setState({ note: null });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

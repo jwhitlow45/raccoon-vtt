@@ -20,7 +20,7 @@ import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import type { Turn } from "../lib/view.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { accentVars, boardAccentVars, type Accent } from "../lib/accent.ts";
-import { escapeTarget } from "../lib/escape.ts";
+import { escapeTarget, roomLetGo } from "../lib/escape.ts";
 import { toggleFullscreen, useFullscreen } from "../lib/fullscreen.ts";
 import { takeReopen } from "../lib/reopen.ts";
 import { preloadLazies } from "../lib/retryableLazy.ts";
@@ -158,6 +158,7 @@ export function useEscape(sheetOpen: boolean, closeSheets: () => void, tokenPane
         else ui.select(null);
       } else if (what === "group") ui.doneSelecting();
       else if (what === "token") ui.select(null);
+      if (what === "actionBar" || what === "group" || what === "token") roomLetGo.add(e);
       // Marked as used, so the label pane (features/builder/LabelPane.tsx), which listens after this, stays open.
       if (what) e.preventDefault();
     };

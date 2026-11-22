@@ -23,3 +23,10 @@ export function escapeTarget(input: {
   if (input.token) return "token";
   return null;
 }
+
+/**
+ * The Escape presses that room's own handler (pages/RoomChrome.tsx useEscape) used to let go of the
+ * action bar or the selection. Room marks every Escape it takes as used, and a layer that listens
+ * after it, as the stopped walk's note does, tells this one from a pop-up's or a pane's by this set.
+ */
+export const roomLetGo = new WeakSet<Event>();

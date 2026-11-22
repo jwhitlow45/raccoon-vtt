@@ -843,6 +843,22 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         await stopNote(ledge).getByRole("button", { name: "Teleport here" }).waitFor();
       };
       await stopAgain();
+      // An Escape another layer used (a pop-up, a pane, a list step back marks it so) leaves the note open, and the next one closes it.
+      await player.evaluate(() => {
+        const g = globalThis as unknown as { __eatEscape?: (e: { key: string; preventDefault(): void }) => void; addEventListener(t: string, f: unknown, c: boolean): void };
+        g.__eatEscape = (e) => {
+          if (e.key === "Escape") e.preventDefault();
+        };
+        g.addEventListener("keydown", g.__eatEscape, true);
+      });
+      await player.keyboard.press("Escape");
+      await player.waitForTimeout(300);
+      assert.equal(await stopNote(ledge).count(), 1, "an Escape another layer used left the note open");
+      await player.evaluate(() => {
+        const g = globalThis as unknown as { __eatEscape?: unknown; removeEventListener(t: string, f: unknown, c: boolean): void };
+        g.removeEventListener("keydown", g.__eatEscape, true);
+      });
+      // Room's own letting go of the selection closes it with the same press.
       await player.keyboard.press("Escape");
       await stopNote(ledge).waitFor({ state: "detached" });
       await stopAgain();
