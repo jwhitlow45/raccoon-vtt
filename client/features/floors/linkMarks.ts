@@ -120,26 +120,6 @@ export function meetsTurnMarker(pill: PillSpec, markers: readonly PillSpec[], sc
 }
 
 /**
- * Where an upright pill can stand clear of the hole it names in Isometric
- * (a phone's small holes lay a pill hung from a map edge over the hole
- * itself, as the view turns): the hole's corners from the lowest on the
- * screen up for a name that hangs under its corner, or from the highest
- * down for a chip that sits over one. The first the pill stands at
- * (`fits`) wins, else null, and the caller keeps the pill's map edge.
- */
-export function cornerPill(pill: PillSpec, corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>, hangs: "under" | "over", fits: (p: PillSpec) => boolean): PillSpec | null {
-  const sign = hangs === "under" ? -1 : 1;
-  const ordered = corners
-    .map((c) => ({ c, y: viewPointOf(iso, c).y }))
-    .sort((a, b) => sign * (a.y - b.y));
-  for (const { c } of ordered) {
-    const at: PillSpec = { ...pill, x: c.x, y: c.y, above: hangs === "over", below: hangs === "under" };
-    if (fits(at)) return at;
-  }
-  return null;
-}
-
-/**
  * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
  * over the end's top edge, and where its box meets a marker's it hangs
  * under the bottom edge (`bottom`) instead, unless the marker meets that
@@ -212,7 +192,6 @@ export function cornersOf(o: Outline): { x: number; y: number }[] {
     { x: o.x + o.w, y: o.y + o.h },
   ];
 }
-
 
 /** The squares an end covers as they draw in Isometric: the box round its corners at the ground's height, as a flat pill's is (drawnBox). */
 export function outlineBox(corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>): Box {
@@ -290,7 +269,7 @@ const PILL_ON_SQUARES = 100_000;
  * turn's marker, or keeps the end's own edge, and the choice with the
  * fewest covers wins, a pill over a pill counting most, then the least
  * area. The search keeps the first of equal choices, so a lone hole's pills hang
- * where cornerPill puts them. Ends that are not holes, and every end in
+ * where its corners put them: a name under the lowest corner on the screen and a chip over the highest. Ends that are not holes, and every end in
  * Top-down, keep their own edge, and the holes keep off their pills.
  */
 export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean): Map<string, PlacedPills> {

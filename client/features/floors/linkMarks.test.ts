@@ -3,11 +3,11 @@ import { describe, test } from "node:test";
 import { ATTIC, GROUND, UPPER, onThornsTurn, run, tower, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
-import type { Grid } from "#shared/rules/grid.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
-import { boxCoversOutline, clearOfMarkers, cornerPill, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
+import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -140,37 +140,6 @@ describe("an end's name and the turn's marker meet where they draw (B53-SOL-02)"
   });
 });
 
-describe("a hole's pills stand clear of the hole in Isometric", () => {
-  const corners = [
-    { x: 4, y: 4 },
-    { x: 6, y: 4 },
-    { x: 4, y: 6 },
-    { x: 6, y: 6 },
-  ];
-  const flat = (turn: Turn) => ({ turn, ground: () => 0 });
-  const name = { name: "Opening down", x: 5, y: 6, below: true, size: "map" as const, small: true };
-  const screenY = (turn: Turn, c: { x: number; y: number }) => viewPointOf(flat(turn), c).y;
-
-  test("a name hangs under the hole's lowest corner on the screen and a chip sits over its highest, at every turn", () => {
-    for (const turn of [0, 1, 2, 3] as const) {
-      const under = cornerPill(name, corners, flat(turn), "under", () => true)!;
-      const over = cornerPill({ ...name, name: undefined, value: "10 ft down", below: undefined }, corners, flat(turn), "over", () => true)!;
-      assert.equal(under.below, true);
-      assert.equal(over.above, true);
-      assert.equal(screenY(turn, under), Math.max(...corners.map((c) => screenY(turn, c))), `turn ${turn}: the name's corner is the lowest`);
-      assert.equal(screenY(turn, over), Math.min(...corners.map((c) => screenY(turn, c))), `turn ${turn}: the chip's corner is the highest`);
-    }
-  });
-
-  test("the next corner is tried where the first is not a place the pill stands, and none gives null", () => {
-    const lowest = cornerPill(name, corners, flat(0), "under", () => true)!;
-    const second = cornerPill(name, corners, flat(0), "under", (p) => p.x !== lowest.x || p.y !== lowest.y)!;
-    assert.ok(second.x !== lowest.x || second.y !== lowest.y);
-    assert.ok(screenY(0, second) <= screenY(0, lowest));
-    assert.equal(cornerPill(name, corners, flat(0), "under", () => false), null);
-  });
-});
-
 describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)", () => {
   const SCALE = 40;
   const grid: Grid = { shape: "squares" } as Grid;
@@ -225,6 +194,54 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
       const apart = coversOf(ends, alone(ends, iso, scale), iso, scale);
       assert.equal(together.own, 0, `turn ${turn}: a pill hangs over its own hole`);
       assert.ok(together.others <= apart.others, `turn ${turn}: ${together.others} covers together, ${apart.others} apart`);
+    }
+  });
+
+  test("a lone hole's name hangs under its lowest corner on the screen and its chip sits over its highest, at every turn, and the next corner serves where the first is no place a pill stands", () => {
+    const one = hole("a", { x: 4, y: 4, w: 2, h: 2 });
+    const screenY = (iso: ReturnType<typeof flat>, c: { x: number; y: number }) => viewPointOf(iso, c).y;
+    for (const turn of [0, 1, 2, 3] as const) {
+      const iso = flat(turn);
+      const ys = cornersOf(one.o).map((c) => screenY(iso, c));
+      const placed = placeEnds([one], [], 40, iso, () => true).get("a")!;
+      assert.equal(placed.pill!.below, true);
+      assert.equal(placed.chip!.above, true);
+      assert.equal(screenY(iso, placed.pill!), Math.max(...ys), `turn ${turn}: the name's corner is the lowest`);
+      assert.equal(screenY(iso, placed.chip!), Math.min(...ys), `turn ${turn}: the chip's corner is the highest`);
+      const lowest = placed.pill!;
+      const next = placeEnds([one], [], 40, iso, (p) => p.x !== lowest.x || p.y !== lowest.y).get("a")!;
+      assert.ok(next.pill!.x !== lowest.x || next.pill!.y !== lowest.y, `turn ${turn}: the name moved off the first corner`);
+    }
+  });
+
+  test("sixteen holes on a hex grid with the turn's marker up finish, and cover no more than each hole's own corners would", () => {
+    const hex = sceneGrid({ gridShape: "hexRows" });
+    const many = Array.from({ length: 16 }, (_, k) => {
+      const o = outlineOf(hex, { x: 3 + (k % 4) * 3, y: 3 + Math.floor(k / 4) * 3, w: 1, h: 1 });
+      return { ...hole(`h${String(k).padStart(2, "0")}`, { x: 0, y: 0, w: 1, h: 1 }), o, first: { name: "Down to Ground floor", x: o.x + o.w / 2, y: o.y + o.h, below: true, size: "map" as const, small: true, maxLines: 1 as const, stack: true }, dropPill: { value: "10 ft down", x: o.x + o.w / 2, y: o.y, above: true, size: "map" as const, small: true } };
+    });
+    const marker = { x: 8, y: 7, value: "Moved 15 ft\n15 ft left", size: "screen" as const, small: true, below: true };
+    const scale = 30;
+    for (const turn of [0, 1, 2, 3] as const) {
+      const iso = flat(turn);
+      const started = Date.now();
+      const together = placeEnds(many, [marker], scale, iso, () => true);
+      assert.ok(Date.now() - started < 2000, `turn ${turn}: the placement took ${Date.now() - started} ms`);
+      const apart = new Map(many.flatMap((e) => [...placeEnds([e], [marker], scale, iso, () => true)]));
+      const covers = (placed: ReturnType<typeof placeEnds>) => {
+        let n = 0;
+        const boxes = many.map((e) => pillBoxes(iso, placed, e.id, scale));
+        many.forEach((e, i) => {
+          for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(e.o), iso)) n += 100;
+          for (let j = i + 1; j < many.length; j++) {
+            for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) n++;
+            for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(many[j]!.o), iso)) n++;
+            for (const y of boxes[j]!) if (boxCoversOutline(y, cornersOf(e.o), iso)) n++;
+          }
+        });
+        return n;
+      };
+      assert.ok(covers(together) <= covers(apart), `turn ${turn}: ${covers(together)} covers together, ${covers(apart)} apart`);
     }
   });
 
