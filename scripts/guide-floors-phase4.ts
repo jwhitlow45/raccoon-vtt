@@ -76,6 +76,25 @@ async function quiet(page: Page): Promise<void> {
   await waitFor("no toast", async () => ((await page.locator("[data-toast]").count()) === 0 ? true : null), 20_000);
 }
 
+/** Scrolls the side panel back to its top, so no line of it hides under the tab row. */
+async function panelToTop(page: Page, tabpanel: Locator): Promise<void> {
+  await tabpanel.evaluate((el) => {
+    type Box = { scrollTop: number; scrollHeight: number; clientHeight: number; parentElement: Box | null; querySelectorAll(s: string): Box[] };
+    const top = (box: Box) => {
+      if (box.scrollHeight > box.clientHeight + 5) box.scrollTop = 0;
+    };
+    // The panel's scroller is the panel itself, a box above it or one inside it.
+    let up: Box | null = el as unknown as Box;
+    while (up) {
+      top(up);
+      up = up.parentElement;
+    }
+    (el as unknown as Box).querySelectorAll("*").forEach(top);
+    (globalThis as unknown as { scrollTo(x: number, y: number): void }).scrollTo(0, 0);
+  });
+  await page.waitForTimeout(300);
+}
+
 /** Scrolls only the side panel so `target` stands at its top, and puts the page itself back at the top. */
 async function scrollPanelTo(page: Page, target: Locator): Promise<void> {
   await target.evaluate((el) => {
@@ -199,6 +218,9 @@ try {
   for (const id of Object.keys(dmSocket.state?.falls ?? {})) await ops.send({ t: "fall.settle", fallId: id });
 
   // Shot 4b: Thorn in the air over the hole's lower end on Ground floor, with Fly up. Ana's screen follows him down.
+  // Thorn's name plate hangs under him over the hole, so the goblin steps aside, or the plate hides its health word. The goblin goes back after the picture.
+  const goblin = Object.values(dmSocket.state?.tokens ?? {}).find((t) => t?.name === "Goblin")!;
+  await ops.send({ t: "token.move", tokenId: goblin.id, x: 9, y: 5 });
   await ops.send({ t: "token.move", tokenId: tThorn, x: OVER.x, y: OVER.y, elevation: 5 });
   await waitFor("Thorn in the air below", () => (dmSocket.state?.tokens[tThorn]?.elevation === 5 ? true : null));
   await onFloor(ana, "Ground floor");
@@ -210,6 +232,7 @@ try {
   await ana.locator('[data-climb="up"]:visible').first().waitFor();
   await picture(ana, "floors-fly-up");
   await key(ana, "Escape");
+  await ops.send({ t: "token.move", tokenId: goblin.id, x: goblin.x, y: goblin.y });
   await ops.send({ t: "token.move", tokenId: tThorn, x: OVER.x, y: OVER.y, elevation: 0 });
   await ops.send({ t: "token.move", tokenId: tThorn, x: 3, y: 2 });
   // The fall's toast waits for a tap, so a reload clears it from the pictures that follow.
@@ -268,11 +291,12 @@ try {
   await onFloor(dm, "Upper floor");
 
   // Shot 6b: the opening in Isometric, a drop in the boards with the hall below it, beside the Initiative panel. The view is set back after.
-  await panel(dm, "Initiative");
+  const initiative = await panel(dm, "Initiative");
   await key(dm, "i");
   await dm.getByRole("button", { name: /^View: Isometric/ }).waitFor();
   await quiet(dm);
   await sleep(1500);
+  await panelToTop(dm, initiative);
   await picture(dm, "floors-opening-isometric");
   await key(dm, "i");
   await dm.getByRole("button", { name: /^View: Top-down/ }).waitFor();
