@@ -303,7 +303,7 @@ export function MonsterEditor(props: {
         {errors.length > 0 ? (
           <div ref={problems}>
             <Notice tone="danger" role="alert">
-              <strong>{refused ? "Not saved:" : "Fix these first:"}</strong>
+              <strong>{refused ? "Not saved." : "Fix these first:"}</strong>
               {errors.map((e) => (
                 <p key={e} style={{ margin: `${theme.space(1)}px 0 0` }}>
                   {e}

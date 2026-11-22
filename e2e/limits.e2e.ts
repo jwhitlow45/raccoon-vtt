@@ -581,7 +581,7 @@ describe("raccoon-vtt player limits on a device", { timeout: 600_000 }, () => {
               });
             }
             await editor.getByRole("button", { name: "Save", exact: true }).click();
-            const alert = editor.getByRole("alert").filter({ hasText: BLOCKS_ROOM_TOO_FULL });
+            const alert = editor.getByRole("alert").filter({ hasText: `Not saved. ${BLOCKS_ROOM_TOO_FULL}` });
             await alert.waitFor();
             const label = `${at}, saved from the ${from}`;
             const box = await waitFor(`${label}: the words in view`, async () => {

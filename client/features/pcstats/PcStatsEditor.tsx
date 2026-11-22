@@ -456,7 +456,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         {refusal ? (
           <div ref={refused}>
             <Notice tone="danger" role="alert">
-              <strong>Not saved:</strong> {refusal}
+              <strong>Not saved.</strong> {refusal}
             </Notice>
           </div>
         ) : null}
