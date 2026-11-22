@@ -86,11 +86,14 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
 /**
  * The squares each token on a floor stands on, as one string so the
  * board places its holes' pills again only when a token moves, which
- * a hole's pills keep off (placeEnds).
+ * a hole's pills keep off (placeEnds). Empty on a floor with no hole,
+ * whose ends keep their own edges, so a move there costs one look at its
+ * ends and no walk over the tokens.
  */
-export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes"> | null | undefined, sceneId: string): string {
+export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLinks"> | null | undefined, sceneId: string): string {
   const scene = view ? ownEntry(view.scenes, sceneId) : undefined;
   if (!view || !scene) return "";
+  if (!Object.values(view.floorLinks ?? {}).some((l) => l.sceneId === sceneId && l.kind === "opening" && linkDir(view, l) === "down")) return "";
   const g = sceneGrid(scene);
   return Object.values(view.tokens)
     .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)

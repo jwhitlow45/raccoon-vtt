@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ATTIC, GROUND, UPPER, onThornsTurn, run, thornToken, tower, withStairs } from "#shared/floorLinksTestutil.ts";
+import { ATTIC, GROUND, UPPER, onThornsTurn, run, thornToken, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
@@ -331,11 +331,22 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
   });
 
   test("the tokens a hole's pills keep off are each token's squares on the floor shown, and only there", () => {
-    const s = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }) } });
-    assert.deepEqual(spotsOf(tokenSpots(s, GROUND)), [{ x: 3, y: 3, w: 1, h: 1 }]);
+    const placed = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }), at: thornToken({ id: "at", sceneId: ATTIC, x: 1, y: 1 }) } });
+    // A hole in Upper floor and one in Attic, each floor with its creature.
+    const s = withOpening(withOpening(placed), { id: "o3", pairId: "o4", upper: ATTIC, lower: UPPER, rect: { x: 2, y: 2, w: 1, h: 1 } });
     assert.deepEqual(spotsOf(tokenSpots(s, UPPER)), [{ x: 6, y: 2, w: 1, h: 1 }]);
+    assert.deepEqual(spotsOf(tokenSpots(s, ATTIC)), [{ x: 1, y: 1, w: 1, h: 1 }]);
     assert.deepEqual(spotsOf(tokenSpots(s, "nowhere")), []);
-    assert.deepEqual(spotsOf(tokenSpots(null, GROUND)), []);
+    assert.deepEqual(spotsOf(tokenSpots(null, UPPER)), []);
+  });
+
+  test("a floor with no hole gives no tokens, so a move there walks none: its lower ends and its stairs keep their own edges (LP48FIXA-R1)", () => {
+    const placed = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }) } });
+    assert.equal(tokenSpots(placed, GROUND), "", "no ends at all");
+    assert.equal(tokenSpots(withStairs(placed), GROUND), "", "stairs up");
+    assert.equal(tokenSpots(withStairs(placed), UPPER), "", "stairs down");
+    assert.equal(tokenSpots(withOpening(placed), GROUND), "", "an opening's lower end");
+    assert.equal(tokenSpots(withOpening(placed), UPPER), "6,2,1,1", "the hole's floor");
   });
 
   test("an end whose pills fit no corner keeps its own edge, and Top-down keeps each end's own edge where nothing is covered", () => {
