@@ -15,7 +15,7 @@ import { startingLight } from "../vision/uvttLight.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
 import type { ImportOptions } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, type FloorRow } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText, type FloorRow } from "./floorsImport.ts";
 import { GRID_PROBLEM, type Device } from "./limits.ts";
 import { addAnswer, CHECK_MS, importOutcome, mustCount, NO_ANSWERS, sceneShown, storedContents, type Answers, type Contents } from "./rules.ts";
 import { shapeNote, sizeText, summaryLight } from "./summary.ts";
@@ -94,6 +94,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
     moveButtons.current.get(`${refocus.key}:${up ? "up" : "down"}`)?.focus();
   }, [refocus, rows]);
 
+  const shown = floorNamesOf(rows);
   const busy = step.k !== "rows" && step.k !== "ended";
   const refusal = tooManyFiles(rows.length) ?? scenesFull(sceneCount, rows.length);
 
@@ -182,13 +183,13 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
         const ext = image.blob.type === "image/png" ? "png" : image.blob.type === "image/jpeg" ? "jpg" : "webp";
         let asset: Awaited<ReturnType<typeof uploadMap>>;
         try {
-          asset = await uploadMap(roomId, new File([image.blob], `${rowName(row)}.${ext}`, { type: image.blob.type }), {
+          asset = await uploadMap(roomId, new File([image.blob], `${shown[i]}.${ext}`, { type: image.blob.type }), {
             signal: abort.signal,
             onWaiting: (waiting) => setStep((s) => (s.k === "upload" ? { ...s, waiting } : s)),
           });
         } catch (err) {
           if (abort.signal.aborted || isAbort(err)) throw err;
-          throw new Error(`${uploadFailed(rowName(row))} ${uploadErrorText(err)}`);
+          throw new Error(`${uploadFailed(shown[i]!)} ${uploadErrorText(err)}`);
         }
         const map = placeMap(plan, { assetId: asset.id, width: asset.width, height: asset.height, fileImageWidth: read.info.image.width });
         if (!map) throw new Error(fileError(row.file.name, GRID_PROBLEM));
@@ -199,7 +200,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
       const late = filesRefusal(store.getState().view, order.length);
       if (late) throw new Error(late);
       const { ops, floorAt } = severalFilesOps(files, actions.newId);
-      const floorName = (op: number) => rowName(order[floorAt[Math.max(0, op)] ?? 0]!);
+      const floorName = (op: number) => shown[floorAt[Math.max(0, op)] ?? 0]!;
       // One undo group, so one Undo setup takes the whole scene back, every floor with it.
       const group = actions.newId();
       let answers = NO_ANSWERS;
@@ -270,7 +271,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
                   disabled={busy || i === 0}
                   onClick={() => move(row.key, true)}
                 >
-                  {`Move ${rowName(row)} up`}
+                  {`Move ${shown[i]} up`}
                 </Button>
                 <Button
                   ref={(el) => void (el ? moveButtons.current.set(`${row.key}:down`, el) : moveButtons.current.delete(`${row.key}:down`))}
@@ -279,7 +280,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
                   disabled={busy || i === rows.length - 1}
                   onClick={() => move(row.key, false)}
                 >
-                  {`Move ${rowName(row)} down`}
+                  {`Move ${shown[i]} down`}
                 </Button>
               </div>
               <Field
@@ -304,7 +305,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
         ) : null}
         {error ? <ErrorText>{error}</ErrorText> : null}
         {step.k === "ended" ? <ErrorText>{step.error}</ErrorText> : null}
-        <Steps step={step} name={at === null ? "" : rowName(rows[at - 1] ?? rows[0]!)} of={rows.length} />
+        <Steps step={step} name={at === null ? "" : (shown[at - 1] ?? shown[0] ?? "")} of={rows.length} />
       </div>
     </Dialog>
   );

@@ -60,6 +60,20 @@ export function rowName(row: FloorRow): string {
   return row.floor.trim() || fileSceneName(row.file.name);
 }
 
+/**
+ * The name each row's floor will get, in row order: the typed (or file) name cut to a floor's
+ * length, numbered as the reducer numbers floors of one name when they are made (freeName).
+ * Worked out over the current rows each time, since typed names can collide.
+ */
+export function floorNamesOf(rows: readonly FloorRow[]): string[] {
+  const taken = new Set<string>();
+  return rows.map((row) => {
+    const name = freeName(floorNameOf(rowName(row)), taken);
+    taken.add(name);
+    return name;
+  });
+}
+
 export function tooManyFiles(files: number): string | null {
   const most = LIMITS.floorsPerScene;
   return files > most ? `A scene holds at most ${most} floors. Pick ${most} files or fewer.` : null;

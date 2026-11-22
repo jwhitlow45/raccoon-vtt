@@ -7,7 +7,7 @@ import { floorsOf } from "#shared/rules/floors.ts";
 import { apply, room } from "#shared/testutil.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { convertUvtt, type ImportPlan } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
+import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
 import { readUvtt } from "./schema.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 import { withPlayersSee } from "../scenes/create.ts";
@@ -74,6 +74,19 @@ describe("a new scene from several files: the rows", () => {
     );
     assert.equal(new Set(rows.map(rowName)).size, 3);
     assert.ok(rows.every((r) => Array.from(r.floor).length <= LIMITS.floorNameChars));
+  });
+
+  test("typed names that collide read as the floors will be named, over the rows as they stand", () => {
+    const rows = rowsOf(["a.uvtt", "b.uvtt", "c.uvtt"].map(file)).map((r, i) => ({ ...r, floor: i === 1 ? "Nave" : "Crypt" }));
+    assert.deepEqual(floorNamesOf(rows), ["Crypt", "Nave", "Crypt 2"]);
+    const moved = moveRow(rows, rows[2]!.key, true)!;
+    assert.deepEqual(floorNamesOf(moved), ["Crypt", "Crypt 2", "Nave"]);
+    assert.deepEqual(floorNamesOf(rows.map((r) => ({ ...r, floor: "Nave" }))), ["Nave", "Nave 2", "Nave 3"]);
+    assert.deepEqual(floorNamesOf(rows.map((r, i) => (i === 0 ? { ...r, floor: "  " } : r))), ["a", "Nave", "Crypt"], "an emptied name reads as its file's");
+    const long = "x".repeat(LIMITS.floorNameChars);
+    const cut = floorNamesOf(rows.map((r) => ({ ...r, floor: long })));
+    assert.equal(new Set(cut).size, 3);
+    assert.ok(cut.every((n) => Array.from(n).length <= LIMITS.floorNameChars));
   });
 
   test("the scene name field takes 80 characters, more than the 40 it starts cut to", () => {
