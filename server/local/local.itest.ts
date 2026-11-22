@@ -503,6 +503,34 @@ describe("the supervisor's channel (IPC)", () => {
     });
   }
 
+  // A supervisor busy elsewhere reads the server's output late. Its stop's last line used to be lost from server.log
+  // whenever the pipe was full at the exit.
+  test("a supervisor slow to read still gets the stop's last line, since the exit waits for it", async () => {
+    const c = await startChild();
+    try {
+      c.child.stdout?.pause();
+      // Each request's long path is logged, so the output outgrows the pipe and this side's buffer while nothing reads.
+      const path = `/not-a-page/${"p".repeat(4_000)}`;
+      for (let i = 0; i < 60; i++) await (await fetch(`http://127.0.0.1:${c.port}${path}`, { headers: { "user-agent": userAgent } })).arrayBuffer();
+      c.child.send({ type: "shutdown" });
+      // The server has closed once a connection is refused, and the rest of the stop takes a few ms more.
+      let refused = false;
+      for (const deadline = Date.now() + 25_000; !refused && Date.now() < deadline; ) {
+        refused = await fetch(`http://127.0.0.1:${c.port}/healthz`).then(() => false, () => true);
+        if (!refused) await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.ok(refused, "the server closed");
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(c.child.exitCode, null, "the exit waits for its output to be read");
+      assert.doesNotMatch(c.output(), /"msg":"shut down"/, "nothing read yet");
+      c.child.stdout?.resume();
+      assert.equal(await within(c.exited, 25_000, "the exit"), 0);
+      await until(() => /"msg":"shut down"/.test(c.output()), 5_000, "the stop's last line");
+    } finally {
+      if (c.child.exitCode === null) c.child.kill("SIGKILL");
+    }
+  });
+
   test("the channel closing, as when the supervisor dies, runs the same graceful shutdown", async () => {
     const c = await startChild();
     try {

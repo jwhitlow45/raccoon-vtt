@@ -2,6 +2,7 @@ import type { ServerToSupervisor } from "../desktop/contract.ts";
 import { buildApp } from "./app.ts";
 import { checkDatabaseDisk, loadConfig } from "./config.ts";
 import { applySchema, closePool, getPool } from "./db.ts";
+import { exitAfterLogs } from "./local/logOutput.ts";
 import { shutDown } from "./shutdown.ts";
 
 /**
@@ -41,7 +42,8 @@ function onSignal(signal: string): void {
   closing = true;
   app.log.info({ signal }, "shutting down");
   // A stop asked for while the server is still binding waits for the bind, so the close finds it whole.
-  void listening.catch(() => undefined).then(() => shutDown(app, closePool));
+  // Local mode's exit waits for the stop's last log lines to reach the supervisor (server/local/logOutput.ts).
+  void listening.catch(() => undefined).then(() => shutDown(app, closePool, config.local ? { exit: (code) => exitAfterLogs(code) } : {}));
 }
 process.on("SIGTERM", () => onSignal("SIGTERM"));
 process.on("SIGINT", () => onSignal("SIGINT"));
