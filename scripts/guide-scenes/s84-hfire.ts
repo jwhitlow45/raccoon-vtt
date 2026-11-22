@@ -4,7 +4,7 @@ export default async (c: any) => {
   await dm.getByRole("button", { name: "Clear", exact: true }).click().catch(() => {});
   await c.harness.pickTool(dm, "Area");
   await dm.waitForTimeout(400);
-  const spell = dm.getByRole("combobox", { name: "Spell" });
+  const spell = dm.getByLabel("Spell", { exact: true });
   if (await spell.count()) {
     await spell.fill("fireball");
     await dm.waitForTimeout(400);
@@ -12,7 +12,7 @@ export default async (c: any) => {
   } else {
     await dm.getByRole("button", { name: /^Shape/ }).first().click();
     await dm.waitForTimeout(300);
-    await dm.getByRole("combobox", { name: "Spell" }).fill("fireball");
+    await dm.getByLabel("Spell", { exact: true }).fill("fireball");
     await dm.waitForTimeout(400);
     await dm.keyboard.press("Enter");
   }
