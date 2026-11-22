@@ -400,7 +400,7 @@ An area cast over a hole reaches through it by the same rule, so it works where 
 
 In the [isometric view](#the-isometric-view) each hole draws as a drop. Its walls sink like a pit's and the floor below shows at the bottom, or black where the players have not reached it. A creature standing over the hole is drawn at the floor's own height until it falls.
 
-![The Upper floor in Isometric on the DM's screen: a 4 by 4 hole in the boards drawn as a drop, its walls sunk like a pit's, a chip reading 10 ft down over it and its name Down to Ground floor under it, a second Down to Ground floor pill by the steps on the left wall and the Hidden Pit marked in red at the right, beside the Initiative panel.](dm-guide/floors-opening-isometric.webp)
+![The Upper floor in Isometric on the DM's screen: a 4 by 4 hole drawn as a drop with its walls sunk like a pit's, a 10 ft down chip over it and Down to Ground floor under it, a second Down to Ground floor pill by the steps and the Hidden Pit in red, beside the Initiative panel.](dm-guide/floors-opening-isometric.webp)
 
 ### Falls
 
