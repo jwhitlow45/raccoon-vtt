@@ -76,8 +76,8 @@ describe("placing, changing and removing stairs (3)", () => {
     const pit = { ...s, traps: { p: { id: "p", rev: 1, sceneId: GROUND, name: "Pit", zone: { cells: [{ x: 4, y: 3, w: 1, h: 1 }] }, state: "armed" as const, found: false, rig: { on: ["enter" as const], who: "any" as const, floor: true, resets: "never" as const, stops: true, foundOnSpring: true, pit: { floor: -10 }, hits: "trigger" as const, actions: [], find: [], notice: false } } } };
     assert.equal(refusal(pit, putOp()), "A pit trap lies under those squares on Ground floor.");
     const one = withStairs(s);
-    assert.equal(refusal(one, putOp({ id: "l3", pairId: "l4", rect: { x: 4, y: 3, w: 1, h: 1 } })), "Those squares already have stairs to Upper floor.");
-    assert.equal(refusal(one, putOp({ id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, kind: "ladder", rect: { x: 4, y: 3, w: 1, h: 1 } })), "Those squares already have stairs to Ground floor.");
+    assert.equal(refusal(one, putOp({ id: "l3", pairId: "l4", rect: { x: 4, y: 3, w: 1, h: 1 } })), "Those squares already have stairs to Upper floor on Ground floor.");
+    assert.equal(refusal(one, putOp({ id: "l3", pairId: "l4", sceneId: UPPER, to: ATTIC, kind: "ladder", rect: { x: 4, y: 3, w: 1, h: 1 } })), "Those squares already have stairs to Ground floor on Upper floor.");
     assert.equal(refusal(one, putOp()), "those stairs are already on the map");
   });
 
