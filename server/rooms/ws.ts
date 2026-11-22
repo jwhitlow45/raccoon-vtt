@@ -68,7 +68,7 @@ export const MAX_FRAME_BYTES = 64 * 1024;
  * (shared/limits.ts HARD), and 1 MiB more, rounded up to a whole MiB, so
  * one snapshot alone never closes a slow socket. A room at the far line
  * sends its DM the scene, the companion stat blocks beside it and the DM's
- * own log, about 12.3 MiB in the full test room, below that bound
+ * own log, about 12.6 MiB in the full test room, below that bound
  * (server/rooms/limits.bounds.test.ts).
  */
 export const DEFAULT_BUFFERED_LIMIT = HARD.sendBufferBytes;
