@@ -5,10 +5,10 @@ import { FAR } from "#shared/limits.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor, character, DM, entry, env, P1, room, token, trap } from "#shared/testutil.ts";
+import { actor, character, DM, drawing, entry, env, P1, reveal, room, scene, template, token, trap } from "#shared/testutil.ts";
 import { MAX_LOG } from "#shared/logRings.ts";
 import { knownBy, parked } from "./copyTwinsTesting.ts";
-import { exactBuilds, exactReads, growthBound, measuredStateBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { exactBuilds, exactReads, growthBound, measuredStateBytes, sceneGroups, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 
 /*
  * D-261121-065 and 076 (design 2): a player's far check builds their copy
@@ -141,4 +141,69 @@ describe("a player's far check reads both stepped parts exactly on every op (D-2
     const chats = Array.from({ length: 8 }, (_, i): Op => ({ t: "log.chat", text: `c${i}` }));
     assert.deepEqual(costs(twins[1], false, chats), costs(twins[0], false, chats));
   });
+});
+
+/*
+ * A player's far check reads every scene from one pass over the room a
+ * side (floorParts), so it walks each of the room's collections as often
+ * in a room of one scene as in a room of 50. The seam counts a walk of a
+ * collection each time its keys or an array's length are read.
+ */
+describe("a player's far check walks the room's collections as often at 1 scene as at 50", () => {
+  /** `groups` scenes alike, each with floors or not: per-player sight, fog cleared, hidden and seen creatures, an area, a drawing and a pit on every floor. */
+  function scenes(groups: number, floors: boolean): RoomState {
+    const state = room({ scenes: {} });
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ notes: "", dmNotes: "" }) });
+    state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
+    for (let g = 0; g < groups; g++) {
+      const main = g === 0 ? "s1" : `s-${g}`;
+      for (const [level, id] of (floors ? [main, `${main}-up`] : [main]).entries()) {
+        state.scenes[id] = scene(id, { order: g, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true }, ...(floors ? { floor: { of: main, level, name: `Level ${level}` } } : {}) });
+        for (let i = 0; i < 4; i++) state.tokens[`${id}-hidden-${i}`] = token(`${id}-hidden-${i}`, { sceneId: id, visibility: "dm", x: 10 + i, y: 10 });
+        state.tokens[`${id}-seen`] = token(`${id}-seen`, { sceneId: id, x: 5, y: 5 });
+        state.templates[`${id}-area`] = template(`${id}-area`, { sceneId: id });
+        state.drawings[`${id}-line`] = drawing(`${id}-line`, { sceneId: id });
+        state.traps[`${id}-pit`] = trap(`${id}-pit`, { sceneId: id, rig: { ...trap("x").rig!, pit: { floor: -10 } } });
+        reveal(state, id, { x: 0, y: 0, w: 20, h: 20 });
+      }
+    }
+    return state;
+  }
+
+  /** A state whose collections count each walk of them in `counts`, by name. */
+  function walkCounting(state: RoomState, counts: Map<string, number>): RoomState {
+    const out: Record<string, unknown> = { ...state };
+    for (const [name, value] of Object.entries(state)) {
+      if (name === "meta" || typeof value !== "object" || value === null) continue;
+      const walked = () => counts.set(name, (counts.get(name) ?? 0) + 1);
+      out[name] = new Proxy(value, {
+        ownKeys: (target) => (walked(), Reflect.ownKeys(target)),
+        get: (target, key, receiver) => (Array.isArray(target) && key === "length" && walked(), Reflect.get(target, key, receiver)),
+      });
+    }
+    return out as RoomState;
+  }
+
+  /** The walks of each collection P1's chat line's far check makes. */
+  function walks(start: RoomState): Record<string, number> {
+    const op: Op = { t: "log.chat", text: "onward" };
+    const r = applyOp(start, op, P1, env(++seq));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    const guard = new SizeGuard({ stateLimit: 64 * 1024 * 1024, sceneLimit: 64 * 1024 * 1024 });
+    guard.stateMeasured(measuredStateBytes(start), start);
+    const counts = new Map<string, number>();
+    const [scenes, growth] = [touchedScenes(start, r.state, r.touched), growthBound(start, r.state, r.touched)];
+    const reads = exactReads.count;
+    assert.ok(guard.check(walkCounting(r.state, counts), scenes, growth, walkCounting(start, counts), "player", "widest", opKind(op).far === "exempt", "p1").ok);
+    assert.equal(exactReads.count - reads, 2 * (1 + sceneGroups(start).length), "the room's and every scene's, both sides");
+    return Object.fromEntries([...counts].sort(([a], [b]) => (a < b ? -1 : 1)));
+  }
+
+  for (const floors of [false, true]) {
+    test(`on scenes ${floors ? "of two floors" : "of one floor"}, each collection is walked as often at 50 scenes as at 1`, () => {
+      const one = walks(scenes(1, floors));
+      assert.ok(one.tokens! > 0 && one.traps! > 0 && one.fogTiles! > 0, JSON.stringify(one));
+      assert.deepEqual(walks(scenes(50, floors)), one);
+    });
+  }
 });

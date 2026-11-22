@@ -975,9 +975,13 @@ function perPlayerSceneReserve(state: RoomState, scene: Scene): number {
  * PV3-ASTRA-1), but the DM's own fog keeps its tiles when the scene
  * shrinks, and the shared fog holds one over each. Only the DM's fog
  * decides how many, which no player's sight does. Kept per fog collection
- * and scene, each replaced and never changed.
+ * and scene, each replaced and never changed, and read from the fog's
+ * tiles grouped by floor once per collection, so every scene's costs one
+ * walk of the fog.
  */
 const fogPast = new WeakMap<object, WeakMap<Scene, number>>();
+type FogEntry = readonly [string, RoomState["fogTiles"][string]];
+const fogByFloor = new WeakMap<object, ReadonlyMap<string, readonly FogEntry[]>>();
 
 function fogPastBounds(fogTiles: RoomState["fogTiles"], scene: Scene): number {
   let byScene = fogPast.get(fogTiles);
@@ -986,8 +990,8 @@ function fogPastBounds(fogTiles: RoomState["fogTiles"], scene: Scene): number {
     bytes = 0;
     const across = tilesAcross(scene.bounds.w);
     const down = tilesAcross(scene.bounds.h);
-    for (const [key, t] of Object.entries(fogTiles)) {
-      if (t.sceneId !== scene.id || (t.tx < across && t.ty < down)) continue;
+    for (const [key, t] of fogTilesOn(fogTiles, scene.id)) {
+      if (t.tx < across && t.ty < down) continue;
       bytes += fieldBytes(key) + serializedBytes({ sceneId: scene.id, tx: t.tx, ty: t.ty, rev: WIDEST_REV, bits: FULL_TILE }) + 1;
     }
     if (!isWritable(fogTiles)) {
@@ -996,6 +1000,22 @@ function fogPastBounds(fogTiles: RoomState["fogTiles"], scene: Scene): number {
     }
   }
   return bytes;
+}
+
+/** The fog's tiles on one floor with their keys, from the fog grouped by floor once per collection. */
+function fogTilesOn(fogTiles: RoomState["fogTiles"], sceneId: string): readonly FogEntry[] {
+  let grouped = isWritable(fogTiles) ? undefined : fogByFloor.get(fogTiles);
+  if (!grouped) {
+    const out = new Map<string, FogEntry[]>();
+    for (const [key, tile] of Object.entries(fogTiles)) {
+      const list = out.get(tile.sceneId);
+      if (list) list.push([key, tile]);
+      else out.set(tile.sceneId, [[key, tile]]);
+    }
+    if (!isWritable(fogTiles)) fogByFloor.set(fogTiles, out);
+    grouped = out;
+  }
+  return grouped.get(sceneId) ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -1240,16 +1260,27 @@ function pitChunks(trap: Trap): Set<string> {
  * scene has a pit trap. A chunk two pits touch counts for each.
  */
 export function pitReserve(state: RoomState, sceneId: string): number {
-  let chunks = 0;
-  let pits = 0;
-  for (const trap of Object.values(state.traps ?? {})) {
-    if (trap.sceneId !== sceneId || !trap.rig?.pit) continue;
-    pits++;
-    chunks += pitChunks(trap).size;
-  }
-  if (pits === 0) return 0;
+  const chunks = pitChunksByFloor(state.traps ?? {}).get(sceneId);
+  if (chunks === undefined) return 0;
   const k = utf8Bytes(JSON.stringify(sceneId));
   return chunks * (2 * k + 780) + PIT_TOKENS_RESERVE;
+}
+
+const pitsKept = new WeakMap<object, ReadonlyMap<string, number>>();
+
+/**
+ * The chunks the pit traps on each floor touch, each floor with a pit
+ * listed even where they touch none, in one pass over the traps and kept
+ * per traps collection, which is replaced and never changed. So every
+ * scene's pits cost one walk of the traps.
+ */
+function pitChunksByFloor(traps: RoomState["traps"]): ReadonlyMap<string, number> {
+  const hit = pitsKept.get(traps);
+  if (hit) return hit;
+  const out = new Map<string, number>();
+  for (const trap of Object.values(traps)) if (trap.rig?.pit) out.set(trap.sceneId, (out.get(trap.sceneId) ?? 0) + pitChunks(trap).size);
+  if (!isWritable(traps)) pitsKept.set(traps, out);
+  return out;
 }
 
 /** Every reserve and trap measure the room's own bytes count: the traps, the pits, and the room's occurrences and logs. */
@@ -3123,9 +3154,10 @@ export function readingAt(readings: readonly ScopeReading[], scope: FarScope): S
  * exactly, before and after their op over one membership (exactOver), at
  * the widest per-player reserves unless `widest` is false: what the far
  * check reads (SizeGuard #farPlayer). Each stepped part is read exactly on
- * both sides, the room's from the sizes kept per entity (exactMeasure). A
- * scene the room did not hold before, or any scope with no state before,
- * has no reading before.
+ * both sides, the room's from the sizes kept per entity (exactMeasure) and
+ * every scene's from one pass over the state a side (floorParts), each
+ * scene's floors as sceneGroups gives them. A scene the room did not hold
+ * before, or any scope with no state before, has no reading before.
  */
 export function farReadings(before: RoomState | undefined, after: RoomState, memberId: string, widest = true): ScopeReading[] {
   const parts = exactOver(before, after, memberId);
@@ -3134,18 +3166,69 @@ export function farReadings(before: RoomState | undefined, after: RoomState, mem
     const held = heldIn(state, own);
     return { stepped: exactMeasure(state) - held.sub + farReserves(state, widest), exact: held.shown };
   };
-  const scene = (state: RoomState, own: OwnCopyBytes, main: string): FarParts => {
-    exactReads.count++;
-    const floors = new Set(floorsOf(state, main).map((floor) => floor.id));
-    const held = heldIn(state, own, floors);
-    return { stepped: projectedSceneBytes(state, main, MEMORY_CAP, "dm") + farWidths(state, floors) - held.sub, exact: held.shown };
-  };
+  const sceneAfter = sceneReader(after, now);
+  const sceneBefore = before === undefined ? undefined : sceneReader(before, was);
+  const groupsBefore = new Map((before === undefined ? [] : sceneGroups(before)).map((floors) => [floors[0]!.floor?.of ?? floors[0]!.id, floors]));
   const out: ScopeReading[] = [{ scope: { kind: "room" }, ...(before ? { before: room(before, was) } : {}), after: room(after, now) }];
   for (const floors of sceneGroups(after)) {
     const main = floors[0]!.floor?.of ?? floors[0]!.id;
-    out.push({ scope: { kind: "scene", main }, ...(before?.scenes[main] ? { before: scene(before, was, main) } : {}), after: scene(after, now, main) });
+    const floorsBefore = groupsBefore.get(main);
+    out.push({ scope: { kind: "scene", main }, ...(sceneBefore && floorsBefore ? { before: sceneBefore(main, floorsBefore) } : {}), after: sceneAfter(main, floors) });
   }
   return out;
+}
+
+/**
+ * One side's scene readings (farReadings): a scene's is what every scene
+ * counts once and its floors' parts (floorParts), with its main floor's
+ * drop headroom, less the player's exact part at the room level and on
+ * those floors. Each read counts in exactReads.
+ */
+function sceneReader(state: RoomState, own: OwnCopyBytes): (main: string, floors: readonly Scene[]) => FarParts {
+  const parts = floorParts(state);
+  return (main, floors) => {
+    exactReads.count++;
+    const drop = parts.drops.get(main);
+    let stepped = parts.shared + (drop ? drop.creatures + drop.areas : 0) - own.roomLevel.sub;
+    let exact = own.roomLevel.shown;
+    for (const floor of floors) {
+      const held = own.floors.get(floor.id);
+      stepped += (parts.floors.get(floor.id) ?? 0) - (held?.sub ?? 0);
+      exact += held?.shown ?? 0;
+    }
+    return { stepped, exact };
+  };
+}
+
+/** What a scene's far reading counts but a player's exact part: once for every scene, on each floor, and by main floor. */
+type FloorParts = { readonly shared: number; readonly floors: ReadonlyMap<string, number>; readonly drops: ReadonlyMap<string, DropHeadroom> };
+
+/**
+ * Every scene's far reading but a player's exact part, read in one pass
+ * over the state: once for any scene the shell, the room-level part with
+ * its widths (farWidthsRoomLevel) and the commas of the room-level
+ * collections (roomLevelCommas), on each floor its own part
+ * (allScenesOwnBytes), its sight, explored and map reserves, its widths
+ * less the turn's walks and its pit's creatures (farWidths) and its
+ * commas (floorCommas), and each drop scene's headroom by its main floor
+ * (dropHeadrooms). A scene's floors summed read what projectedSceneBytes
+ * and farWidths read on them, and reading every scene costs about one walk
+ * of the room, as the room's reading does, however many scenes it holds.
+ */
+function floorParts(state: RoomState): FloorParts {
+  const owns = allScenesOwnBytes(state);
+  const widths = farWidthsByFloor(state);
+  const walks = turnWalks(state).byFloor;
+  const pits = pitChunksByFloor(state.traps ?? {});
+  const commas = floorCommas(state);
+  const explored = new Set(reservedExploreFloors(state));
+  const floors = new Map<string, number>();
+  for (const scene of Object.values(state.scenes)) {
+    const reserves = sightReserve(scene) + perPlayerSceneReserve(state, scene) + (explored.has(scene.id) ? exploredReserve(state, scene.id) : 0) + discoveryReserve(state, scene, MEMORY_CAP);
+    const far = (widths.get(scene.id) ?? 0) - (walks.get(scene.id) ?? 0) - (pits.has(scene.id) ? PIT_TOKENS_RESERVE : 0);
+    floors.set(scene.id, (owns.get(scene.id) ?? 0) + reserves + far + (commas.get(scene.id) ?? 0));
+  }
+  return { shared: SHELL_BYTES + roomLevelBytes(state) + farWidthsRoomLevel(state) + roomLevelCommas(state, false), floors, drops: dropHeadrooms(state) };
 }
 
 /** farReadings with a state before, as the twin tests read it. */
@@ -3172,23 +3255,41 @@ function exactMeasure(state: RoomState): number {
  * for every entry (commasOf), so it keeps none.
  */
 function collectionCommas(state: RoomState, floors?: ReadonlySet<string>): number {
-  const any = (things: Iterable<{ sceneId: string }>) => {
-    if (!floors) return [...things].length > 0 ? 1 : 0;
-    const on = new Set<string>();
-    for (const thing of things) if (floors.has(thing.sceneId) && state.scenes[thing.sceneId]?.floor === undefined) on.add(thing.sceneId);
-    return on.size;
-  };
-  const floorParts = any(Object.values(state.tokens)) + any(Object.values(state.templates)) + any(Object.values(state.drawings));
-  const nonEmpty = (n: number) => (n > 0 ? 1 : 0);
-  const roomParts =
+  if (!floors) return nonEmpty(Object.keys(state.tokens).length) + nonEmpty(Object.keys(state.templates).length) + nonEmpty(Object.keys(state.drawings).length) + roomLevelCommas(state, true);
+  const byFloor = floorCommas(state);
+  let commas = roomLevelCommas(state, false);
+  for (const id of floors) commas += byFloor.get(id) ?? 0;
+  return commas;
+}
+
+const nonEmpty = (n: number) => (n > 0 ? 1 : 0);
+
+/** collectionCommas of the room-level collections, with the companion blocks in the room's reading alone, which alone counts them. */
+function roomLevelCommas(state: RoomState, room: boolean): number {
+  return (
     nonEmpty(Object.keys(state.members).length) +
     nonEmpty(Object.keys(state.characters).length) +
     nonEmpty(Object.keys(state.rolls).length) +
     nonEmpty(Object.keys(state.casts).length) +
     nonEmpty(measuredLog(state.log).length) +
     nonEmpty(state.encounter?.entries.length ?? 0) +
-    (floors ? 0 : nonEmpty(Object.keys(state.companionBlocks).length));
-  return floorParts + roomParts;
+    (room ? nonEmpty(Object.keys(state.companionBlocks).length) : 0)
+  );
+}
+
+/**
+ * collectionCommas on each floor, in one pass over each collection: one
+ * for each of the creatures, the areas and the drawings that holds
+ * anything there, on a scene without floors. A floor of a scene keeps none.
+ */
+function floorCommas(state: RoomState): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const things of [state.tokens, state.templates, state.drawings]) {
+    const on = new Set<string>();
+    for (const thing of Object.values(things)) on.add(thing.sceneId);
+    for (const id of on) if (state.scenes[id] && state.scenes[id].floor === undefined) out.set(id, (out.get(id) ?? 0) + 1);
+  }
+  return out;
 }
 
 /** The exact part of a player's far reading (ownCopyBytes): on the floors of `sceneIds` with the room-level part each scene's reading counts, or the room's whole. */

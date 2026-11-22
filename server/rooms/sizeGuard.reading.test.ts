@@ -559,3 +559,27 @@ describe("D-261121-073 and 075: what hidden bytes may still decide, and no store
     }
   });
 });
+
+/*
+ * A scene's reading counts its floors as sceneGroups gives them, by the
+ * main floor each names, so a floor whose main floor is gone still counts
+ * in a player's reading of its scene, on both sides of their op.
+ */
+describe("a scene's reading reads every floor of its group", () => {
+  test("a floor whose main floor is gone reads as a scene of that floor alone, before P1's op and after it", () => {
+    const state = room();
+    state.scenes.up = scene("up", { floor: { of: "gone", level: 1, name: "Upper" } });
+    state.tokens.hero = token("hero", { kind: "pc", ownerIds: ["p1"], sceneId: "up", x: 2, y: 2 });
+    state.tokens.gob = token("gob", { sceneId: "up", visibility: "dm", x: 9, y: 9 });
+    const r = applyOp(state, { t: "log.chat", text: "up here" }, P1, env(++seq));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    const floorAlone = (s: RoomState) => {
+      const held = ownHeldBytes(s, "p1", ["up"]);
+      return { stepped: projectedSceneBytes(s, "up") + farWidths(s, new Set(["up"])) - held.sub, exact: held.shown };
+    };
+    const reading = readingAt(playerReadings(state, r.state, "p1"), { kind: "scene", main: "gone" });
+    assert.ok(floorAlone(state).exact > 0, "P1's creature on the floor is in their exact part");
+    assert.deepEqual(reading?.before, floorAlone(state));
+    assert.deepEqual(reading?.after, floorAlone(r.state));
+  });
+});
