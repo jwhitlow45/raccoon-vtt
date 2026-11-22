@@ -461,8 +461,8 @@ export default function BuilderOptions() {
           asking
             ? ASKING_LINE
             : s.mode === "wing"
-              ? (wingOffLine !== null ? { tone: "warning", content: wingOffLine } : s.note ? { tone: "warning", content: s.note } : wingLine)
-              : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid, s.linkKind)) }
+              ? (wingOffLine !== null ? { tone: "warning", content: wingOffLine } : s.note ? { tone: "warning", content: s.note, worded: true } : wingLine)
+              : { tone: s.note || s.inSight ? "warning" : "hint", ...(s.note ? { worded: true as const } : {}), content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid, s.linkKind)) }
         }
         slots={slots}
       />

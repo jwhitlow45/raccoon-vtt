@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { sightOf, tileKey } from "#shared/keys.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type CellRect, type EdgeFeature, type FreeWall, type RoomState, type Scene, type WallFeature } from "#shared/model.ts";
 import { autoWallBetween, autoWallsOf, FLOOR_TERRAINS, paintedAt } from "#shared/rules/autoWalls.ts";
@@ -693,7 +694,15 @@ function wingMove(p: ToolPointer, ctx: ToolContext): void {
   if (store.getState().wingDraft === null && distance(start.screen, p.screen) <= TAP_SLOP_PX) return;
   const rect = areaBetween(sceneGrid(ctx.scene), start.world, p.world, ctx.scene.bounds);
   const problem = judgeArea(view, ctx.scene, rect);
-  store.setState({ wingDraft: { rect, problem }, note: problem });
+  store.setState({ wingDraft: { rect, problem }, note: said(problem) });
+}
+
+/**
+ * The options line shows a note as it is, since a link note can hold a floor named "Tap". So a note
+ * that says "Tap" is worded for the pointer here, where it is set.
+ */
+function said(note: string | null): string | null {
+  return note === null ? null : pointerWords(note);
 }
 
 function wingUp(p: ToolPointer, ctx: ToolContext): void {
@@ -709,11 +718,11 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
     const rect = areaBetween(sceneGrid(ctx.scene), start.world, p.world, ctx.scene.bounds);
     const problem = judgeArea(view, ctx.scene, rect);
     if (problem !== null) {
-      store.setState({ note: problem });
+      store.setState({ note: said(problem) });
       return;
     }
     const next = nextPicks(view, ctx.scene, s.wing, { area: rect });
-    store.setState({ wing: next.picks, note: next.note });
+    store.setState({ wing: next.picks, note: said(next.note) });
     return;
   }
   // With Edit rooms on, a tap on a ghost room opens its panel in the pane rather than picking a join (dungeon phase 3, 3.3).
@@ -733,11 +742,11 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
     return;
   }
   if (!tapped.ok) {
-    store.setState({ note: tapped.problem });
+    store.setState({ note: said(tapped.problem) });
     return;
   }
   const next = nextPicks(view, ctx.scene, s.wing, { tap: tapped.value });
-  store.setState({ wing: next.picks, note: next.note });
+  store.setState({ wing: next.picks, note: said(next.note) });
 }
 
 // ------------------------------------------------------------ the base

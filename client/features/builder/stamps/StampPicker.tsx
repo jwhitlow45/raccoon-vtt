@@ -1,3 +1,4 @@
+import { pointerWords } from "../../../lib/pointerWords.ts";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Dialog } from "../../../components/Dialog.tsx";
 import { Empty } from "../../../components/Empty.tsx";
@@ -155,7 +156,7 @@ export function StampPicker(props: {
           ) : (
             <StarterBrowser
               uses={STARTER_STAMP_USES}
-              hint="Openly licensed props from the starter packs. Use sets what the next tap places."
+              hint={pointerWords("Openly licensed props from the starter packs. Use sets what the next tap places.")}
               floor={STAMP_TILE_FLOOR}
               onUse={(found) => {
                 const choice = starterChoice(found.work);

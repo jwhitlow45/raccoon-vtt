@@ -428,7 +428,7 @@ export default function WingPane(props: {
   }, [question]);
   const send = useMemo(() => (props.send === undefined ? wingSender(actions, { store: roomStore, shown: () => mounted.current }) : props.send), [props.send, actions, roomStore]);
   const sendLine = sending === "asking" ? BUILD_ASKING : sending ? (sending.n >= sending.of ? WING_WAITING : `Adding the wing… ${sending.n} of ${sending.of}`) : null;
-  const planLine = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words ?? (plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE));
+  const planLine = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words !== undefined ? pointerWords(plan.words) : plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE);
   const status = sendLine ?? said ?? planLine;
   const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null;
   const add = async () => {
@@ -556,7 +556,11 @@ export default function WingPane(props: {
               ) : null}
             </>
           )}
-          {joinProblem ? <Help style={{ color: theme.color.warning }}>{joinProblem}</Help> : null}
+          {joinProblem ? (
+            <Help tapWords style={{ color: theme.color.warning }}>
+              {joinProblem}
+            </Help>
+          ) : null}
           {scene.fogEnabled !== true ? <Help>{WING_NO_FOG}</Help> : null}
           {warnings ? <Help style={{ color: theme.color.warning }}>{warnings}</Help> : null}
         </div>

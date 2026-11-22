@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { MAX_POLY_VERTICES } from "#shared/protocol.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
@@ -98,7 +99,7 @@ function tapLine(p: ToolPointer, ctx: ToolContext, g: HexGrid): void {
   if (s.edge === "clear" || (s.edge === "door" && line.length === 0)) {
     if (tapFreeWall(p, ctx)) return;
     if (s.edge === "clear") {
-      store.setState({ note: "Tap a wall, door or window to remove it." });
+      store.setState({ note: pointerWords("Tap a wall, door or window to remove it.") });
       return;
     }
   }
@@ -117,7 +118,7 @@ function tapLine(p: ToolPointer, ctx: ToolContext, g: HexGrid): void {
   }
   if (last && last.x === point.x && last.y === point.y) return;
   if (line.length >= MAX_POLY_VERTICES) {
-    store.setState({ note: `A wall line has at most ${MAX_POLY_VERTICES} points. Tap Done to finish.` });
+    store.setState({ note: pointerWords(`A wall line has at most ${MAX_POLY_VERTICES} points. Tap Done to finish.`) });
     return;
   }
   store.setState({ line: [...line, point], lineScene: ctx.scene.id, lineAt: null, note: null });

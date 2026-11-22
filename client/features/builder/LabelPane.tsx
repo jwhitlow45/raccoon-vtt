@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Label } from "#shared/model.ts";
@@ -181,8 +182,8 @@ function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean; con
       </div>
       {commit.kind === "empty" ? <Note>A label needs text. Delete removes it.</Note> : null}
       <PaneFooter>
-        <Button size="sm" variant="danger" armed={armedAt !== null} icon="delete" iconOnly={armedAt === null ? "always" : undefined} title="Delete this label" aria-label={armedAt !== null ? "Tap again to delete" : "Delete this label"} onClick={tapDeleteButton}>
-          {armedAt !== null ? "Tap again to delete" : "Delete"}
+        <Button size="sm" variant="danger" armed={armedAt !== null} icon="delete" iconOnly={armedAt === null ? "always" : undefined} title="Delete this label" aria-label={armedAt !== null ? pointerWords("Tap again to delete") : "Delete this label"} onClick={tapDeleteButton}>
+          {armedAt !== null ? pointerWords("Tap again to delete") : "Delete"}
         </Button>
         <Button size="sm" variant="primary" disabled={commit.kind === "empty" || commit.kind === "tooLong"} onClick={done}>
           Done

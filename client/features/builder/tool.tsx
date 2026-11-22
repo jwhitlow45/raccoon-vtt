@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { Suspense } from "react";
 import type { EdgeFeature } from "#shared/model.ts";
 import { MAX_POLY_VERTICES } from "#shared/protocol.ts";
@@ -98,7 +99,7 @@ function tapEdge(p: ToolPointer, ctx: ToolContext): void {
   const sceneId = ctx.scene.id;
   const key = nearestEdge(p.world, ctx.scene.bounds);
   if (!key) {
-    builderState.setState({ note: "Tap an edge inside the scene." });
+    builderState.setState({ note: pointerWords("Tap an edge inside the scene.") });
     return;
   }
   const current = edgeAt(ctx.getState().floorView, sceneId, key);
