@@ -212,6 +212,17 @@ describe("narrow sight dependents (docs/design/design-v1-maps-vision.md 4.3.5)",
     assert.ok(dependents(state, [keys.sight("s1", 0, 0)]).includes(keys.token("gob")));
     assert.ok(dependents(state, [keys.sight("s1", 1, 0)]).includes(keys.token("gob")));
   });
+
+  test("a creature whose scene turns to hexes counts by its hexes, though the squares were read of the same token before", () => {
+    const squares = dark();
+    // On squares it stands on tile 1 alone, and its hexes in columns reach back onto tile 0.
+    squares.tokens.gob = token("gob", { x: 16, y: 4 });
+    const hexes: RoomState = { ...squares, scenes: { ...squares.scenes, s1: { ...squares.scenes.s1!, gridShape: "hexColumns" } } };
+    assert.ok(!dependents(squares, [keys.sight("s1", 0, 0)]).includes(keys.token("gob")));
+    assert.equal(hexes.tokens.gob, squares.tokens.gob, "one token object on both grids");
+    assert.ok(dependents(hexes, [keys.sight("s1", 0, 0)]).includes(keys.token("gob")));
+    assert.ok(dependents(structuredClone(hexes), [keys.sight("s1", 0, 0)]).includes(keys.token("gob")));
+  });
 });
 
 describe("hashing and the held map", () => {

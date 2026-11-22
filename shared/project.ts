@@ -5103,6 +5103,50 @@ function spanDependents(state: RoomState, other: RoomState | undefined, add: (ke
 }
 
 /**
+ * A tokens collection's tokens in order, and apart the ones that a pass of
+ * dependents reads by a field most tokens lack: a walk, a character's
+ * ref, a carrier's link. Kept per collection object, which is replaced and
+ * never changed (writable.ts), so a fan-out's pass over the state before
+ * its batch reads what the last batch's pass over its state after kept,
+ * and a pass over a few tokens reads only those.
+ */
+type TokenLists = { all: Token[]; walking: Token[]; byRef: Token[]; carried: Token[] };
+
+const tokenLists = new WeakMap<object, TokenLists>();
+
+function tokenListsOf(tokens: RoomState["tokens"]): TokenLists {
+  let lists = tokenLists.get(tokens);
+  if (lists) return lists;
+  lists = { all: Object.values(tokens), walking: [], byRef: [], carried: [] };
+  for (const token of lists.all) {
+    if (token.path) lists.walking.push(token);
+    if ("ref" in token.actor) lists.byRef.push(token);
+    if (token.attached) lists.carried.push(token);
+  }
+  if (!isWritable(tokens)) tokenLists.set(tokens, lists);
+  return lists;
+}
+
+/**
+ * The cells a token counts by where tiles changed (tileDependents): those
+ * the fog rule reads, and on squares the unsnapped rectangle sight judges
+ * it by. They read only the token and its scene's grid, so they are kept
+ * per token object, which is replaced and never changed, and per grid.
+ */
+const tileReaches = new WeakMap<Token, { grid: Grid; r: CellRange }>();
+
+function tileReach(state: RoomState, token: Token): CellRange {
+  const grid = gridOfToken(state, token);
+  const kept = tileReaches.get(token);
+  if (kept?.grid === grid) return kept.r;
+  const cells = occupiedRange(grid, token);
+  const seen = grid.shape === "hex" ? null : sightRect(token);
+  const r = seen ? { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) } : cells;
+  if (!isWritable(token)) tileReaches.set(token, { grid, r });
+  return r;
+}
+
+/**
  * Entities whose projection can change when the touched ones do (design
  * 7.3, fan-out): templates on a touched token, kept rulers on one, tokens
  * of a touched character, the encounter when a row's creature changed,
@@ -5117,6 +5161,7 @@ function spanDependents(state: RoomState, other: RoomState | undefined, add: (ke
  * differ.
  */
 export function dependents(state: RoomState, touched: EntityKey[], other?: RoomState): EntityKey[] {
+  const tokens = tokenListsOf(state.tokens);
   const seen = new Set(touched);
   const out: EntityKey[] = [];
   const add = (key: EntityKey) => {
@@ -5157,14 +5202,14 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     const at = partsKey([sceneId, memberId]);
     if (cornered.has(at)) return;
     cornered.add(at);
-    for (const token of Object.values(state.tokens)) {
-      if (token.sceneId !== sceneId || !token.path) continue;
+    for (const token of tokens.walking) {
+      if (token.sceneId !== sceneId) continue;
       if (memberId === null ? playerOwned(state, token) : ownsToken(state, { memberId, role: "player" }, token)) add(keys.token(token.id));
     }
   };
   // A player gets a token's path only while it is the path of the turn under way and of a row they see (projectPathCtx).
   if (touched.includes(keys.encounter)) {
-    for (const token of Object.values(state.tokens)) if (token.path) add(keys.token(token.id));
+    for (const token of tokens.walking) add(keys.token(token.id));
   }
   /*
    * On a scene cut from held ground (heldGroundMap) a player's chunk at a
@@ -5245,7 +5290,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
       }
       // Every chunk of a viewer's copy reads the scene's fields, so on hexes each creature's outline may clip anew.
       if (scene && heldHex(scene.id) && (!was || sceneFields(scene) !== sceneFields(was))) {
-        for (const token of Object.values(state.tokens)) {
+        for (const token of tokens.all) {
           if (token.sceneId !== scene.id) continue;
           add(keys.token(token.id));
           tokenIds.add(token.id);
@@ -5306,11 +5351,11 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   if (pageIds.size > 0) {
     for (const pin of Object.values(state.pins)) if (pin.pageId !== undefined && pageIds.has(pin.pageId)) add(keys.pin(pin.id));
   }
-  if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds);
-  if (wallChunks.length > 0) wallDependents(state, wallChunks, add, tokenIds);
+  if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds, tokens.all);
+  if (wallChunks.length > 0) wallDependents(state, wallChunks, add, tokenIds, tokens.all);
   // A stair's direction reads the scene's whole stair map, so a build edit can turn a stair chunks away (ASTRA-4): every chunk with a stair goes again.
   for (const sceneId of stairScenes) for (const key of stairChunkKeys(state, sceneId)) add(key);
-  for (const token of Object.values(state.tokens)) {
+  for (const token of tokens.byRef) {
     if ("ref" in token.actor && characterIds.has(token.actor.ref)) {
       add(keys.token(token.id));
       tokenIds.add(token.id);
@@ -5325,7 +5370,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   // A carried token's link reaches a player while they see its holder (linkShown), so the holder's change re-projects it.
   // Hidden links count here too, but only to choose what to project again: each copy is still projected by its own rule,
   // and only what changed in it is sent (docs/design/design-v1-attach.md 8.0).
-  for (const token of Object.values(state.tokens)) if (token.attached && tokenIds.has(token.attached.to)) add(keys.token(token.id));
+  for (const token of tokens.carried) if (token.attached && tokenIds.has(token.attached.to)) add(keys.token(token.id));
   // So does a mount sharing the turn, in the turn's start.
   if (state.encounter?.turnStart?.mounts?.some((id) => tokenIds.has(id))) {
     add(keys.encounter);
@@ -5336,7 +5381,8 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   // sight or out of it, re-projects every path of the turn, the mount's with no change to the mount.
   const turn = state.encounter?.turnStart;
   if (turn && tokenIds.has(turn.tokenId)) {
-    for (const token of Object.values(state.tokens)) if (token.path?.turn === turn.seq) add(keys.token(token.id));
+    // A turn from before paths were recorded has no seq, which every token without a walk matches too.
+    for (const token of turn.seq === undefined ? tokens.all : tokens.walking) if (token.path?.turn === turn.seq) add(keys.token(token.id));
   }
   for (const template of Object.values(state.templates)) {
     if ((template.attachedTo !== undefined && tokenIds.has(template.attachedTo)) || (template.casterId !== undefined && tokenIds.has(template.casterId))) {
@@ -5459,22 +5505,36 @@ function soundDependents(state: RoomState, touched: readonly EntityKey[], add: (
  * box where it was dropped off its anchor (docs/design/design-v1-hex-grids.md
  * HX-D10).
  */
-function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet<string>>, add: (key: EntityKey) => void, tokenIds: Set<string>): void {
+function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet<string>>, add: (key: EntityKey) => void, tokenIds: Set<string>, tokens: readonly Token[]): void {
+  // Each scene's changed tiles span a box, outside which no tile is one of them, so a range's tiles are read only inside it.
+  const boxes = new Map<string, { tx0: number; ty0: number; tx1: number; ty1: number }>();
+  for (const [sceneId, held] of tiles) {
+    const box = { tx0: Infinity, ty0: Infinity, tx1: -Infinity, ty1: -Infinity };
+    for (const at of held) {
+      const comma = at.indexOf(",");
+      const tx = Number(at.slice(0, comma));
+      const ty = Number(at.slice(comma + 1));
+      // A range's tiles are whole numbers, so a tile that reads as no number is never one of them.
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      box.tx0 = Math.min(box.tx0, tx);
+      box.ty0 = Math.min(box.ty0, ty);
+      box.tx1 = Math.max(box.tx1, tx);
+      box.ty1 = Math.max(box.ty1, ty);
+    }
+    boxes.set(sceneId, box);
+  }
   const on = (sceneId: string, r: CellRange): boolean => {
     const held = tiles.get(sceneId);
     if (!held) return false;
-    for (let ty = Math.floor(r.y0 / TILE_CELLS); ty * TILE_CELLS < r.y1; ty++) {
-      for (let tx = Math.floor(r.x0 / TILE_CELLS); tx * TILE_CELLS < r.x1; tx++) if (held.has(`${tx},${ty}`)) return true;
+    const box = boxes.get(sceneId)!;
+    for (let ty = Math.max(Math.floor(r.y0 / TILE_CELLS), box.ty0); ty * TILE_CELLS < r.y1 && ty <= box.ty1; ty++) {
+      for (let tx = Math.max(Math.floor(r.x0 / TILE_CELLS), box.tx0); tx * TILE_CELLS < r.x1 && tx <= box.tx1; tx++) if (held.has(`${tx},${ty}`)) return true;
     }
     return false;
   };
-  for (const token of Object.values(state.tokens)) {
+  for (const token of tokens) {
     if (!tiles.has(token.sceneId)) continue;
-    const grid = gridOfToken(state, token);
-    const cells = occupiedRange(grid, token);
-    const seen = grid.shape === "hex" ? null : sightRect(token);
-    const r = seen ? { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) } : cells;
-    if (!on(token.sceneId, r)) continue;
+    if (!on(token.sceneId, tileReach(state, token))) continue;
     add(keys.token(token.id));
     tokenIds.add(token.id);
   }
@@ -5510,7 +5570,7 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
  * across. A written chunk is no global change: a Wall line stroke would
  * project the whole room again.
  */
-function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx: number; cy: number }[], add: (key: EntityKey) => void, tokenIds: Set<string>): void {
+function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx: number; cy: number }[], add: (key: EntityKey) => void, tokenIds: Set<string>, tokens: readonly Token[]): void {
   const boxes = new Map<string, CellRange[]>();
   for (const { sceneId, cx, cy } of chunks) {
     let list = boxes.get(sceneId);
@@ -5521,7 +5581,7 @@ function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx
     const held = ownEntry(state.buildChunks, chunkKey(sceneId, cx, cy));
     if (isHex(g) && (held?.heights !== undefined || held?.up !== undefined)) list.push(hexChunkBox(g, cx, cy, CHUNK_CELLS));
   }
-  for (const token of Object.values(state.tokens)) {
+  for (const token of tokens) {
     const list = boxes.get(token.sceneId);
     if (!list) continue;
     const r = footprintRect(gridOfToken(state, token), token);
