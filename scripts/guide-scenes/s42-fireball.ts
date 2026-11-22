@@ -4,7 +4,7 @@ export default async (c: any) => {
   await c.harness.pickTool(dm, "Area");
   await dm.waitForTimeout(500);
   const idle = await dm.locator("body").innerText();
-  const spell = dm.getByPlaceholder("Spell, e.g. fireball");
+  const spell = dm.getByRole("combobox", { name: "Spell" });
   if (await spell.count()) {
     await spell.fill("fireball");
     await dm.waitForTimeout(500);

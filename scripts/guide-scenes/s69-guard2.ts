@@ -5,11 +5,11 @@ export default async (c: any) => {
   await dm.keyboard.press("Escape");
   await c.harness.pickTool(dm, "Area");
   await dm.waitForTimeout(400);
-  let spell = dm.getByPlaceholder("Spell, e.g. fireball");
+  let spell = dm.getByRole("combobox", { name: "Spell" });
   if (!(await spell.count())) {
     await dm.getByRole("button", { name: /^Shape/ }).first().click();
     await dm.waitForTimeout(300);
-    spell = dm.getByPlaceholder("Spell, e.g. fireball");
+    spell = dm.getByRole("combobox", { name: "Spell" });
   }
   await spell.fill("spirit guardians");
   await dm.waitForTimeout(400);
