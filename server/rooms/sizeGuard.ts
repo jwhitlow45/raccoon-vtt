@@ -535,12 +535,6 @@ export function touchedScenes(before: RoomState, after: RoomState, touched: read
   return [...out];
 }
 
-/**
- * A scene's whole measure in the state an op started from, reserves
- * included, so an op on a scene already over its limit is refused only when
- * it adds to it. A scene the op made has none. Only asked of a scene over
- * its limit, which a room reaches rarely.
- */
 /** What a scene's far reading counts beyond its measures on its floors: sight, explored ground, players' maps and the widths. */
 function sceneReserves(state: RoomState, floors: readonly Scene[]): number {
   const sight = sum(floors, (scene) => sightReserve(scene) + perPlayerSceneReserve(state, scene));
@@ -549,6 +543,14 @@ function sceneReserves(state: RoomState, floors: readonly Scene[]): number {
   return sight + explored + maps + farWidths(state, new Set(floors.map((scene) => scene.id)));
 }
 
+/**
+ * A scene's whole measure in the state an op started from, reserves
+ * included, so an op on a scene already over its limit is refused only when
+ * it adds to it. A scene the op made has none. The near check asks it of a
+ * scene over its limit, and the DM's far check of a scene whose bound
+ * comes within a step of its line. A player's far check reads its own
+ * readings (farReadings) and never asks it.
+ */
 function neededBefore(before: RoomState, sceneId: string, share: number, role: Viewer["role"]): number {
   return before.scenes[sceneId] ? projectedSceneBytes(before, sceneId, share, role) : 0;
 }
