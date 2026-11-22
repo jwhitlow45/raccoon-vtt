@@ -9,7 +9,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, drawing, effect, entry, env, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { exactCopies, farWidths, linesHeld, measuredStateBytes, ownHeldBytes, turnWalks } from "./sizeGuard.ts";
 import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
-import { copyOf, hiddenCreatures, knownBy, OMITTED, players, seenCreature, twinBase } from "./copyTwinsTesting.ts";
+import { copyOf, hiddenCreatures, knownBy, OMITTED, placeName, players, seenCreature, twinBase } from "./copyTwinsTesting.ts";
 
 /*
  * D-261116-015 and D-261119-021: a player's exact part counts only what
@@ -40,7 +40,7 @@ function shownMoved(before: RoomState, after: RoomState, memberId: string): stri
   for (const key of new Set([...was.keys(), ...is.keys()])) {
     const [a, b] = [was.get(key), is.get(key)];
     if (a && b) {
-      const [from, to] = [a.shownOn ?? a.on, b.shownOn ?? b.on];
+      const [from, to] = [placeName(a.shownOn ?? a.on), placeName(b.shownOn ?? b.on)];
       if (a.shown !== b.shown || from !== to) out.push(`${key}: ${a.shown} B on ${from}, then ${b.shown} B on ${to}`);
     } else if (there(before, key) && there(after, key) && !reattached(before, after, key)) out.push(`${key} ${a ? "left" : "came into"} the exact part`);
   }
@@ -181,7 +181,7 @@ describe("D-261119-021: an op that leaves a player's copy as it was leaves what 
 
 /** Where each thing in a player's exact part counts what it shows, and how much: what equal copies must give alike. */
 function shownBy(state: RoomState, memberId: string): Record<string, string> {
-  return Object.fromEntries([...exactCopies(state, memberId)].map(([key, part]) => [key, `${part.shown} B on ${part.shownOn ?? part.on}`]));
+  return Object.fromEntries([...exactCopies(state, memberId)].map(([key, part]) => [key, `${part.shown} B on ${placeName(part.shownOn ?? part.on)}`]));
 }
 
 describe("D-261120-003: rooms whose copies are equal give a player equal exact parts", () => {

@@ -7,9 +7,10 @@ import { applyOp } from "#shared/reducer.ts";
 import { projectState, stableStringify } from "#shared/project.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { actor, castAsk, character, companionBlock, DM, drawing, effect, entry, env, member, randomDiceRoll, randomOp, randomState, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { farAnswer, parked } from "./copyTwinsTesting.ts";
 import { fullRoom } from "./limitsTesting.ts";
 import { PLAYER_OPS, playerTable } from "./playerOpsTesting.ts";
-import { exactCopies, farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, overFarLine, ownCopyBytes, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, projectedSceneBytes, roomLevelBytes, SizeGuard, widestPerPlayerReserve } from "./sizeGuard.ts";
+import { exactCopies, farRoomBytes, farWidths, growthBound, heldBytes, measuredStateBytes, overFarLine, ownCopyBytes, ownHeldBytes, PER_PLAYER_FULL, playerBlockBytes, playerReadings, projectedSceneBytes, readingAt, roomLevelBytes, SizeGuard, widestPerPlayerReserve, type FarScope } from "./sizeGuard.ts";
 
 /*
  * The byte lines under player limits: the near lines (the guard's state and
@@ -270,6 +271,63 @@ describe("a scene whose id is \"room\" is read as a scene, and the room as the r
     const roomPast = roomScene(0, FAR.roomBytes);
     assert.deepEqual(judgedOn(roomPast), { answer: { ok: false, code: "quota", message: ROOM_FULL }, scene: null });
   });
+});
+
+/*
+ * A player's exact part keeps each thing's place apart by kind, the room,
+ * the companion blocks or a floor by its id, so a scene whose id is "room"
+ * or "blocks" reads as any scene. Twins apart only in that scene's id, the
+ * word or a plain id as long, P1's 399 kept rulers there each anchored on
+ * their hero at all 50 stops, read alike in every scope and answer P1's
+ * line there alike at every line around it.
+ */
+describe("scene ids \"room\" and \"blocks\" are read as scenes in a player's exact part", () => {
+  /** P1's room on a scene with the id `sceneId`: their hero there and 399 rulers they kept on it, each anchored on the hero at all 50 stops. */
+  const rulers = (sceneId: string): RoomState => {
+    const state = room();
+    state.scenes = { ...state.scenes, [sceneId]: scene(sceneId, { order: 2 }) };
+    state.meta = { ...state.meta, playerSceneId: sceneId };
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ notes: "", dmNotes: "" }) });
+    state.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], sceneId, x: 2, y: 2 });
+    const points = Array.from({ length: 100 }, (_, i) => 2 + (i % 2));
+    for (let i = 0; i < 399; i++) state.drawings[`ruler${i}`] = drawing(`ruler${i}`, { sceneId, kind: "ruler", points, anchors: points.slice(50).map(() => "hero"), ownerId: "p1", visibility: "all" });
+    return state;
+  };
+  /** `state` with its scene `from` given the id `to`, as long, so the twins store the same bytes. */
+  const renamed = (state: RoomState, from: string, to: string): RoomState => {
+    const on = <T extends { sceneId: string }>(things: Record<string, T>) => Object.fromEntries(Object.entries(things).map(([id, thing]) => [id, thing.sceneId === from ? { ...thing, sceneId: to } : thing]));
+    const { [from]: moved, ...scenes } = state.scenes;
+    return { ...state, meta: { ...state.meta, playerSceneId: to }, scenes: { ...scenes, [to]: { ...moved!, id: to } }, tokens: on(state.tokens), drawings: on(state.drawings) };
+  };
+  /** Each reading of P1's line on `sceneId`, that scene's scope named alike in both twins. */
+  const readings = (state: RoomState, sceneId: string) => {
+    const r = applyOp(state, line("d1", sceneId), P1, env(9));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    const named = (scope: FarScope): FarScope => (scope.kind === "scene" && scope.main === sceneId ? { kind: "scene", main: "the rulers' scene" } : scope);
+    return playerReadings(state, r.state, "p1").map((reading) => ({ ...reading, scope: named(reading.scope) }));
+  };
+
+  for (const [word, plain] of [["room", "roam"], ["blocks", "blokes"]] as const) {
+    test(`P1's rulers on a scene named "${word}" read in every scope as on one named "${plain}", before P1's line there and after`, () => {
+      const twin = rulers(plain);
+      const plainReadings = readings(twin, plain);
+      assert.ok(readingAt(plainReadings, { kind: "scene", main: "the rulers' scene" })!.after.exact > 2 * MIB, "P1's rulers count in their scene's exact part");
+      assert.ok(readingAt(plainReadings, { kind: "scene", main: "s1" })!.after.exact < 4096, "and not in another scene's");
+      assert.deepEqual(readings(renamed(twin, plain, word), word), plainReadings);
+    });
+
+    test(`P1's line on a scene named "${word}" is answered as on one named "${plain}", just past another scene's line and just under or past its own`, () => {
+      // A create meets a scene's line short of its bookkeeping (shared/limits.ts farByteLine), so under it is under that.
+      for (const [at, offset, said] of [["s1", 40_000, "taken"], [plain, -BOOKKEEPING_RESERVE.scene - 40_000, "taken"], [plain, 40_000, `quota: ${SCENE_FULL}`]] as const) {
+        const twin = rulers(plain);
+        parked([twin], "scene", at, offset);
+        const [answer, named] = [farAnswer(twin, line("d1", plain), P1, 9), farAnswer(renamed(twin, plain, word), line("d1", word), P1, 9)];
+        assert.equal(answer.said, said, `${at} ${offset}`);
+        assert.equal(named.said, said, `${at} ${offset}`);
+        if (answer.scope) assert.deepEqual(named.scope, { kind: "scene", main: word });
+      }
+    });
+  }
 });
 
 describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing is", () => {

@@ -17,7 +17,7 @@ import { actor, character, DM, effect, entry, env, P1, randomDiceRoll, randomOp,
 import { PLAYER_OPS as FIXED, playerTable as table, rolled } from "./playerOpsTesting.ts";
 import { UndoTable } from "./undoTesting.ts";
 import { GROUND, UPPER, fallCard, trapdoor, tower as floorsTower, tower, withFalls, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
-import { farAnswer, parked } from "./copyTwinsTesting.ts";
+import { farAnswer, parked, placeName } from "./copyTwinsTesting.ts";
 import { exactCopies, farRoomBytes, farWidths, measuredStateBytes, ownHeldBytes, projectedSceneBytes, type ExactCopy } from "./sizeGuard.ts";
 
 /*
@@ -103,7 +103,8 @@ function otherTurnWalks(state: RoomState): Map<string, number> {
     const lists = token.path.stops.filter((stop) => stop.seenBy !== undefined);
     // As the measures count it: each list of who saw at the roster's widest (sizeGuard.ts tokenLists).
     const bytes = serializedBytes({ path: token.path }) - 1 - sum(lists, (stop) => serializedBytes(stop.seenBy) - 2) + lists.length * widestList(state);
-    out.set(token.sceneId, (out.get(token.sceneId) ?? 0) + bytes);
+    const on = placeName({ kind: "floor", id: token.sceneId });
+    out.set(on, (out.get(on) ?? 0) + bytes);
   }
   return out;
 }
@@ -132,7 +133,7 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
     if (was.has(key) !== is.has(key) && residualMove(before, after, key)) {
       // What it takes out of the stepped part: its bytes and, for a creature, its fields' widths (FAR_WIDTHS).
       const taken = (copies: ReadonlyMap<EntityKey, ExactCopy>) => copies.get(key as EntityKey)?.sub ?? 0;
-      const on = (is.get(key) ?? was.get(key))!.on;
+      const on = placeName((is.get(key) ?? was.get(key))!.on);
       residual.set(on, (residual.get(on) ?? 0) + taken(was) - taken(is));
       accepted.push(`${key} ${is.has(key) ? "came into" : "left"} P1's exact part`);
       continue;
@@ -141,11 +142,11 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
     if (gain === 0) continue;
     if (gain > 0 && namesDeleted(before, after, key)) {
       // Residual 3: the answer for a creature the op deleted leaves the copy of a roll request the DM made, once.
-      residual.set("room", (residual.get("room") ?? 0) + gain);
+      residual.set(placeName({ kind: "room" }), (residual.get(placeName({ kind: "room" })) ?? 0) + gain);
       accepted.push(`${key} keeps ${gain} bytes for a creature the op deleted`);
       continue;
     }
-    const on = is.get(key)?.on ?? was.get(key)!.on;
+    const on = placeName(is.get(key)?.on ?? was.get(key)!.on);
     const at = moved.get(on) ?? { hidden: 0, walks: 0 };
     at.hidden += gain;
     moved.set(on, at);
@@ -166,7 +167,7 @@ function strays(before: RoomState, after: RoomState, accepted: string[] = [], st
   for (const [scope, after] of a) {
     const where = scope === "room" ? "the room" : `scene ${scope}`;
     const floors = scope === "room" ? null : new Set(floorsOf(before, scope).map((f) => f.id));
-    const holds = (on: string) => scope === "room" || on === "room" || floors!.has(on);
+    const holds = (on: string) => scope === "room" || on === placeName({ kind: "room" }) || [...floors!].some((id) => on === placeName({ kind: "floor", id }));
     let hidden = 0;
     let allowed = 0;
     for (const [on, bytes] of moved) {
@@ -435,7 +436,7 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
         assert.ok(result.ok, result.ok ? "" : result.message);
         return result.state;
       }) as [RoomState, RoomState];
-      const shown = (state: RoomState) => Object.fromEntries([...exactCopies(state, "p1")].map(([key, part]) => [key, `${part.shown} B on ${part.shownOn ?? part.on}`]));
+      const shown = (state: RoomState) => Object.fromEntries([...exactCopies(state, "p1")].map(([key, part]) => [key, `${part.shown} B on ${placeName(part.shownOn ?? part.on)}`]));
       const copyOf = (state: RoomState) => stableStringify(projectState(state, P1, { sceneId: null }));
       const [hiddenDown, deletedDown] = [played(hidden, [climbDown]), played(deleted, [climbDown])];
       assert.equal(copyOf(hidden), copyOf(deleted), `${id}: P1's copies are alike`);

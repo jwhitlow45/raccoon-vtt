@@ -131,7 +131,7 @@ describe("the room the DM's adds leave the players at the far lines", () => {
   const widthOf = (key: string, part: ExactCopy): "creature" | "character" | "area" | "unseenArea" | undefined => {
     if (key.startsWith("token:")) return "creature";
     if (key.startsWith("character:")) return "character";
-    if (key.startsWith("template:")) return part.shownOn === "room" ? "unseenArea" : "area";
+    if (key.startsWith("template:")) return part.shownOn?.kind === "room" ? "unseenArea" : "area";
     return undefined;
   };
   /** Each kind's widest thing in a player's exact part into `most`, and how many creatures it holds. */

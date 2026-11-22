@@ -2904,11 +2904,11 @@ function copyBytesOf(exact: ReadonlyMap<EntityKey, ExactCopy>): OwnCopyBytes {
   const floors = new Map<string, ExactBytes>();
   const roomLevel = { sub: 0, shown: 0 };
   const blocks = { sub: 0, shown: 0 };
-  const part = (where: string) => {
-    if (where === "room") return roomLevel;
-    if (where === "blocks") return blocks;
-    let floor = floors.get(where);
-    if (!floor) floors.set(where, (floor = { sub: 0, shown: 0 }));
+  const part = (where: ExactPlace) => {
+    if (where.kind === "room") return roomLevel;
+    if (where.kind === "blocks") return blocks;
+    let floor = floors.get(where.id);
+    if (!floor) floors.set(where.id, (floor = { sub: 0, shown: 0 }));
     return floor;
   };
   for (const { on, sub, shown, shownOn } of exact.values()) {
@@ -2940,11 +2940,28 @@ function exactRoom(state: RoomState, memberId: string, view: SeatView): { room: 
 }
 
 /**
+ * Where a thing of a player's exact part counts: the room-level part every
+ * scene's reading counts, the companion blocks only the room's reading
+ * counts, or a floor by its id. The three are apart by kind, never by id,
+ * since a floor's id may be any word, "room" and "blocks" among them.
+ */
+export type ExactPlace = { readonly kind: "room" } | { readonly kind: "blocks" } | { readonly kind: "floor"; readonly id: string };
+
+const AT_ROOM = { kind: "room" } as const satisfies ExactPlace;
+const AT_BLOCKS = { kind: "blocks" } as const satisfies ExactPlace;
+const atFloor = (id: string): ExactPlace => ({ kind: "floor", id });
+
+/** Whether two places of an exact part are one. */
+export function samePlace(a: ExactPlace, b: ExactPlace): boolean {
+  return a.kind === "floor" ? b.kind === "floor" && a.id === b.id : a.kind === b.kind;
+}
+
+/**
  * A thing in a player's exact part (exactCopies): where its stored bytes
  * are, a floor, the room-level part every scene counts or only the room's
  * blocks, where it counts what it shows when not there too, and its part.
  */
-export type ExactCopy = { on: string; shownOn?: "room" } & ExactBytes;
+export type ExactCopy = { on: ExactPlace; shownOn?: { readonly kind: "room" } } & ExactBytes;
 
 /**
  * The log's shared lines a player's exact part holds, each as they read it
@@ -3001,11 +3018,11 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   // A thing at its bytes in the measures, a creature with its numbers and rev at their widest, and what the far line
   // counts of it beyond them (FAR_WIDTHS), which the stepped part's widths hold and the exact part counts its own way.
   const measured = (kind: CopiedKind, id: string, stored: unknown) => entityBytes(id, stored) + (kind === "token" ? tokenNumbering(stored as Token) : 0);
-  const entity = (kind: CopiedKind, id: string, stored: unknown, copy: unknown, on: string, beyond = 0): ExactCopy => {
+  const entity = (kind: CopiedKind, id: string, stored: unknown, copy: unknown, on: ExactPlace, beyond = 0): ExactCopy => {
     const part = exactBytes(kind, stored, measured(kind, id, stored), copy, entityBytes(id, copy), room);
     return { on, ...part, sub: part.sub + beyond };
   };
-  const creature = (token: Token, copy: unknown) => entity("token", token.id, walkless(token), walkless(copy), token.sceneId, widthsOf(FAR_WIDTHS.token, token as unknown as Record<string, unknown>, widths));
+  const creature = (token: Token, copy: unknown) => entity("token", token.id, walkless(token), walkless(copy), atFloor(token.sceneId), widthsOf(FAR_WIDTHS.token, token as unknown as Record<string, unknown>, widths));
   const own = ownHeld(state, memberId, view, new Set(Object.keys(state.scenes)));
   for (const [id, copy] of own.token) out.set(keys.token(id), creature(state.tokens[id]!, copy));
   // Every creature their copy holds while the room lets them move any, or change any one's HP, and the characters those
@@ -3023,25 +3040,25 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
   for (const [id, copy] of own.template) {
     const area = state.templates[id]!;
     const beyond = widthsOf(FAR_WIDTHS.template, area as unknown as Record<string, unknown>, widths);
-    if (!own.unseenAreas.has(id)) out.set(keys.template(id), entity("template", id, area, copy, area.sceneId, beyond));
+    if (!own.unseenAreas.has(id)) out.set(keys.template(id), entity("template", id, area, copy, atFloor(area.sceneId), beyond));
     else {
       const shown = fieldBytes(id) + AREA_MOST + 1;
-      out.set(keys.template(id), { on: area.sceneId, shownOn: "room", sub: Math.min(measured("template", id, area), shown) + beyond, shown, hidden: 0 });
+      out.set(keys.template(id), { on: atFloor(area.sceneId), shownOn: AT_ROOM, sub: Math.min(measured("template", id, area), shown) + beyond, shown, hidden: 0 });
     }
   }
-  for (const [id, copy] of own.drawing) out.set(keys.drawing(id), entity("drawing", id, state.drawings[id], copy, state.drawings[id]!.sceneId));
+  for (const [id, copy] of own.drawing) out.set(keys.drawing(id), entity("drawing", id, state.drawings[id], copy, atFloor(state.drawings[id]!.sceneId)));
   // A row is an entry of the fight's list, with its comma, and has no key of its own: it goes by `row:` and its id.
   const rows = new Map((state.encounter?.entries ?? []).map((e) => [e.id, e]));
   for (const [id, copy] of own.row) {
     const row = rows.get(id)!;
     const part = exactBytes("row", row, valueBytes(row) + 1, copy, valueBytes(copy) + 1, room);
-    out.set(`row:${id}`, { on: "room", ...part, sub: part.sub + Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder)) });
+    out.set(`row:${id}`, { on: AT_ROOM, ...part, sub: part.sub + Math.max(0, fieldBytes("tieOrder") + TIE_ORDER_MOST + 1 - memberBytes("tieOrder", row.tieOrder)) });
   }
-  for (const [id, copy] of own.cast) out.set(keys.cast(id), entity("cast", id, state.casts[id], copy, "room"));
-  for (const [id, copy] of own.companionBlock) out.set(keys.companionBlock(id), entity("companionBlock", id, state.companionBlocks[id], copy, "blocks"));
+  for (const [id, copy] of own.cast) out.set(keys.cast(id), entity("cast", id, state.casts[id], copy, AT_ROOM));
+  for (const [id, copy] of own.companionBlock) out.set(keys.companionBlock(id), entity("companionBlock", id, state.companionBlocks[id], copy, AT_BLOCKS));
   const copied = (kind: "member" | "character" | "roll", id: string, stored: unknown, beyond = 0) => {
     const copy = view.copy(kind, id);
-    if (copy !== null) out.set(keys[kind](id), entity(kind, id, stored, copy, "room", beyond));
+    if (copy !== null) out.set(keys[kind](id), entity(kind, id, stored, copy, AT_ROOM, beyond));
   };
   copied("member", memberId, state.members[memberId]);
   for (const id of characters) {
@@ -3049,13 +3066,13 @@ export function exactCopies(state: RoomState, memberId: string, view: SeatView =
     if (c) copied("character", id, c, widths.damage ? characterDamageWidths(c) : 0);
   }
   for (const [id, roll] of Object.entries(state.rolls)) copied("roll", id, roll);
-  for (const [line, copy] of linesHeld(state, memberId, view)) out.set(keys.log(line.id), { on: "room", ...exactBytes("log", line, valueBytes(line) + 1, copy, valueBytes(copy) + 1, room) });
+  for (const [line, copy] of linesHeld(state, memberId, view)) out.set(keys.log(line.id), { on: AT_ROOM, ...exactBytes("log", line, valueBytes(line) + 1, copy, valueBytes(copy) + 1, room) });
   // The doors their copy holds, which they open, close and find: only those fields of the build's chunks.
   for (const [key, chunk] of Object.entries(state.buildChunks)) {
     if (!view.holds(chunk.sceneId)) continue;
     const copy = view.copy("chunk", key);
     if (copy === null || !holdsDoor(copy as Record<string, unknown>)) continue;
-    out.set(keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), { on: chunk.sceneId, ...fieldsOnly("chunk", chunk, copy, room) });
+    out.set(keys.chunk(chunk.sceneId, chunk.cx, chunk.cy), { on: atFloor(chunk.sceneId), ...fieldsOnly("chunk", chunk, copy, room) });
   }
   return out;
 }
@@ -3122,7 +3139,7 @@ export function exactOver(before: RoomState | undefined, after: RoomState, membe
   for (const [key, part] of was) {
     const held = now.get(key);
     if (held) out.set(key, held);
-    else if (storedIn(after, key)) out.set(key, { ...part, on: part.on === "room" || part.on === "blocks" ? part.on : (storedOn(after, key) ?? part.on) });
+    else if (storedIn(after, key)) out.set(key, { ...part, on: part.on.kind === "floor" ? atFloor(storedOn(after, key) ?? part.on.id) : part.on });
   }
   for (const [key, part] of now) if (!was.has(key) && !storedIn(before, key)) out.set(key, part);
   return { before: was, after: out };

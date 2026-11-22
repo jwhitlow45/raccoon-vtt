@@ -6,7 +6,7 @@ import { projectState, seatView, stableStringify } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { drawing, effect, entry, env, randomState, rng, scene, template, token } from "#shared/testutil.ts";
-import { exactOver, growthBound, linesHeld, playerReadings, readingAt, sameScope, SizeGuard, touchedScenes, type ExactCopy, type FarParts, type FarScope } from "./sizeGuard.ts";
+import { exactOver, growthBound, linesHeld, playerReadings, readingAt, samePlace, sameScope, SizeGuard, touchedScenes, type ExactCopy, type ExactPlace, type FarParts, type FarScope } from "./sizeGuard.ts";
 
 /*
  * Twins of a random room apart only in what P1's copy leaves out
@@ -177,11 +177,14 @@ const copyAt = (state: RoomState, key: string, memberId: string): string => {
   return stableStringify(kind === "log" ? view.written(id) : view.copy(kind as CopiedKind, id));
 };
 
+/** A place of an exact part in words, apart by kind as the places are: the room, the blocks or a floor by its id. */
+export const placeName = (place: ExactPlace): string => (place.kind === "floor" ? `floor ${place.id}` : `the ${place.kind}`);
+
 /** The keys whose part differs between two exact parts, or that one holds and the other does not. */
 const partsApart = (x: ReadonlyMap<EntityKey, ExactCopy>, y: ReadonlyMap<EntityKey, ExactCopy>): EntityKey[] =>
   [...new Set([...x.keys(), ...y.keys()])].filter((key) => {
     const [p, q] = [x.get(key), y.get(key)];
-    return !p || !q || p.on !== q.on || p.shownOn !== q.shownOn || p.shown !== q.shown || p.sub !== q.sub;
+    return !p || !q || !samePlace(p.on, q.on) || p.shownOn?.kind !== q.shownOn?.kind || p.shown !== q.shown || p.sub !== q.sub;
   });
 
 /**
