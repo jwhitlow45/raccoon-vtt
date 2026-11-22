@@ -706,11 +706,6 @@ export function holdsPageScene(state: Pick<RoomState, "scenes">, viewing: string
 }
 
 /**
- * Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out.
- * The view holds only the scene on screen (with its floors), so with the DM on another scene a missing token says
- * nothing about whether it was deleted, and every row keeps what it had (`held` false).
- */
-/**
  * Whether a row's creature is still in `view`: by its own token, or on a fall
  * card by any other token of its holder the card names, since the row's
  * token may have moved to another scene while the creature's other one
@@ -725,6 +720,11 @@ export function rowPresent(page: Pick<Page, "source">, view: Pick<RoomState, "to
   });
 }
 
+/**
+ * Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out.
+ * The view holds only the scene on screen (with its floors), so with the DM on another scene a missing token says
+ * nothing about whether it was deleted, and every row keeps what it had (`held` false).
+ */
 export function markGone(page: Page, held: boolean, present: (row: RowBase) => boolean): Page {
   if (!held) return page;
   let next = page;
