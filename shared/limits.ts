@@ -1491,7 +1491,10 @@ export type KeptRoom = { readonly meta: { readonly settings: Pick<RoomState["met
  * own share pays. A reading rounds its stepped part up by less than a
  * step, so once the DM's adds stop each player keeps more than 0.75 MiB,
  * close to two sessions (D-261116-016), less what their own rolls, asks
- * and rulers count past their stored bytes. It is rounded up to a whole
+ * and rulers count past their stored bytes. That floor holds within the
+ * margin for ordinary play, one concentration a line and a few hundred
+ * doors: further conditions in an HP line's revert and doors rest on the
+ * margin, as EXACT_WIDTH says. The kept bytes are rounded up to a whole
  * number of steps. Turning either setting on, or a join, moves it, so the
  * DM's change of a setting reads the DM's line at the new reserve, and a
  * join may leave the DM past their line, which refuses only the DM's adds.
