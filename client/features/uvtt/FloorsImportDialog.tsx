@@ -6,6 +6,7 @@ import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
+import { SETUP_SAVED } from "../../state/store.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { newScenePick, newScenePreset, withPlayersSee } from "../scenes/create.ts";
@@ -142,6 +143,8 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
       return;
     }
     // Done, or hidden: the toast says how it ended, beside the new scene as the dialog closes on it.
+    // The ops' own "Saved. Undo in Setup history." toast would stand beside this one, which says it too.
+    if (outcome.k === "complete" && !outcome.checked) for (const t of store.getState().toasts) if (t.text === SETUP_SAVED) ui.dismissToast(t.id);
     ui.notify(text, tone);
     if (mounted.current) props.onClose();
   };
@@ -292,7 +295,7 @@ export function FloorsImportDialog(props: { files: readonly File[]; device: Devi
             </li>
           ))}
         </ol>
-        <Field label="Scene name" value={sceneName} maxLength={80} disabled={busy} onChange={(e) => setSceneName(e.target.value)} />
+        <Field label="Scene name" value={sceneName} maxLength={LIMITS.floorNameChars} disabled={busy} onChange={(e) => setSceneName(e.target.value)} />
         {shape ? <Help>{shape}</Help> : null}
         {refusal ? (
           <div role="alert">

@@ -107,7 +107,7 @@ export const IDS_SETTLE_MS = 2 * 60_000;
 const OWN_K = 2 ** 50;
 const MIB = 1024 * 1024;
 const MAX_TOASTS = 3;
-const SETUP_SAVED = "Saved. Undo in Setup history.";
+export const SETUP_SAVED = "Saved. Undo in Setup history.";
 const TOO_LARGE_TO_UNDO = "This change is too large to undo.";
 /**
  * What the forget question says when the answer to its Go ahead was lost

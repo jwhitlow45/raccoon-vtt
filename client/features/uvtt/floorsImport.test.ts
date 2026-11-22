@@ -53,14 +53,15 @@ describe("a new scene from several files: the rows", () => {
     assert.deepEqual(names(["Map.uvtt", "map.uvtt"]), ["Map.uvtt", "map.uvtt"]);
   });
 
-  test("each take its file's name as the floor's, cut to 40 characters, and the scene the first file's", () => {
+  test("each take its file's name as the floor's, cut to 40 characters, and the scene the first file's cut the same way", () => {
     const rows = rowsOf([file("The_Sunken_Temple_of_the_Serpent_Lord_Level_2.dd2vtt"), file("The_Sunken_Temple_of_the_Serpent_Lord_Level_1.dd2vtt")]);
     assert.deepEqual(
       rows.map((r) => r.floor),
       ["The Sunken Temple of the Serpent Lord Le", "The Sunken Temple of the Serpent Lord Le"],
     );
     assert.ok(rows.every((r) => Array.from(r.floor).length <= LIMITS.floorNameChars));
-    assert.equal(sceneNameOf(rows), "The Sunken Temple of the Serpent Lord Level 1");
+    assert.equal(sceneNameOf(rows), "The Sunken Temple of the Serpent Lord Le");
+    assert.ok(Array.from(sceneNameOf(rows)).length <= LIMITS.floorNameChars);
     assert.equal(rowName({ ...rows[0]!, floor: "  " }), "The Sunken Temple of the Serpent Lord Level 1", "an emptied name reads as its file's");
   });
 
@@ -107,8 +108,8 @@ describe("a new scene from several files: the words", () => {
     assert.equal(addingText(3, 12, "Level 2"), "Adding walls 3 of 12 on Level 2");
     assert.equal(fileError("Level 2.dd2vtt", "This file has no map image."), "Level 2.dd2vtt: This file has no map image.");
     assert.equal(uploadFailed("Level 2"), "Level 2 could not be uploaded, so no scene was made.");
-    assert.deepEqual(severalOutcomeText({ k: "complete", checked: false }, "Tower", 3, true), { text: "Tower is made with 3 floors, with every wall, door and light.", tone: "info" });
-    assert.equal(severalOutcomeText({ k: "complete", checked: false }, "Tower", 3, false).text, "Tower is made with 3 floors, with every wall, door and light. Open it from the Scenes panel.");
+    assert.deepEqual(severalOutcomeText({ k: "complete", checked: false }, "Tower", 3, true), { text: "Tower is made with 3 floors, with every wall, door and light. Undo in Setup history.", tone: "info" });
+    assert.equal(severalOutcomeText({ k: "complete", checked: false }, "Tower", 3, false).text, "Tower is made with 3 floors, with every wall, door and light. Open it from the Scenes panel. Undo in Setup history.");
     assert.match(severalOutcomeText({ k: "partial" }, "Tower", 3, true).text, /^The server refused part of the import/);
     assert.match(severalOutcomeText({ k: "none", lost: false }, "Tower", 3, true).text, /no scene was made/);
   });

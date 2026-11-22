@@ -25,10 +25,10 @@ export function rowsOf(files: readonly File[]): FloorRow[] {
     .map(({ file, i }) => ({ key: `${i}`, file, floor: floorNameOf(fileSceneName(file.name)) }));
 }
 
-/** The scene's name to start from: the first file's, as one file's import names its scene. */
+/** The scene's name to start from: the first file's, cut like a floor's name so the two read alike. */
 export function sceneNameOf(rows: readonly FloorRow[]): string {
   const first = rows[0];
-  return first ? fileSceneName(first.file.name) : "";
+  return first ? floorNameOf(fileSceneName(first.file.name)) : "";
 }
 
 /** The rows after Move up (toward the first, lowest floor) or Move down, or null at the end of the list. */
@@ -87,12 +87,15 @@ export function dialogTitle(files: number): string {
   return `New scene from ${files} files`;
 }
 
+/** The setup toast's words, which this scene's own toast replaces so the DM sees one notice (SETUP_SAVED in state/store.ts). */
+const UNDO_HINT = "Undo in Setup history.";
+
 /**
  * How the import ended, in one sentence: a complete one names the floors
  * made, and every other ending reads as one file's import does, since one
  * Undo setup takes every floor back the same way.
  */
 export function severalOutcomeText(outcome: ImportOutcome, scene: string, floors: number, opened: boolean): { text: string; tone: "info" | "error" } {
-  if (outcome.k === "complete" && !outcome.checked) return { text: `${scene} is made with ${floors} floors, with every wall, door and light.${opened ? "" : " Open it from the Scenes panel."}`, tone: "info" };
+  if (outcome.k === "complete" && !outcome.checked) return { text: `${scene} is made with ${floors} floors, with every wall, door and light.${opened ? "" : " Open it from the Scenes panel."} ${UNDO_HINT}`, tone: "info" };
   return outcomeText(outcome, scene, opened);
 }

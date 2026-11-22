@@ -392,6 +392,7 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     assert.deepEqual(await Promise.all(["Crypt_Level_1.dd2vtt", "Crypt_Level_2.dd2vtt", "Crypt_Level_10.dd2vtt"].map((f) => floorName(f).inputValue())), ["Crypt Level 1", "Crypt Level 2", "Crypt Level 10"]);
     const sceneName = dialog.getByRole("textbox", { name: "Scene name", exact: true });
     assert.equal(await sceneName.inputValue(), "Crypt Level 1", "the first file's name");
+    assert.equal(await sceneName.getAttribute("maxlength"), "40", "cut to a floor name's length");
     assert.equal(await dialog.getByRole("button", { name: "Move Crypt Level 1 up", exact: true }).isDisabled(), true);
 
     // Move up takes the Level 10 row toward the lowest floor, and focus stays on its button.
@@ -414,7 +415,8 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
     await dialog.getByText(/^(Reading|Uploading) /).first().waitFor();
     await dialog.waitFor({ state: "detached", timeout: 120_000 });
-    await dm.locator("[data-toast]").filter({ hasText: "Crypt is made with 3 floors, with every wall, door and light." }).first().waitFor();
+    await dm.locator("[data-toast]").filter({ hasText: "Crypt is made with 3 floors, with every wall, door and light. Undo in Setup history." }).first().waitFor();
+    assert.equal(await dm.locator("[data-toast]").count(), 1, "one toast says it, not it and the setup one beside it");
     const floors = await waitFor("Crypt's three floors", () => (floorsNamed("Crypt").length === 3 ? floorsNamed("Crypt") : null), 30_000);
     assert.deepEqual(
       floors.map((f) => [f.floor?.name, f.floor?.level]),
