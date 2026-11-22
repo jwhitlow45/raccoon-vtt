@@ -167,7 +167,7 @@ describe("raccoon-vtt: a DM device whose scene was deleted with the players on i
    * A phone's half open sheet covers the middle of the map, where the words stand centered in the whole stage, so with a
    * panel open (BUGSS-PHONE-SHEET) they must stand in what the bars and the sheet leave clear.
    */
-  test("fu7-1. on a phone with a panel open over the map, the words ask for a scene in the middle of what the bars and the sheet leave clear, with a notch and a home bar, at 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+  test("fu7-1. on a phone with a panel open over the map, the words ask for a scene in the middle of what the bars and the sheet leave clear, with a notch and a home bar, at 390 x 844 and 320 x 568, and on its side at 844 x 390 where the sheet stands at the right, at 100% (and the two upright sizes at 130%)", async () => {
     const hidden: string[] = [];
     // A phone's safe areas, a notch above and a home bar below, which the sheet's foot and the bars both stand clear of.
     const cdp = await dm.context().newCDPSession(dm);
@@ -187,7 +187,9 @@ describe("raccoon-vtt: a DM device whose scene was deleted with the players on i
         await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
         await dm.goto(`${server.origin}/r/${run.roomId}`);
         await dm.getByRole("button", { name: /^Panels/ }).waitFor();
-        for (const [n, size] of [{ width: 390, height: 844 }, { width: 320, height: 568 }].entries()) {
+        // On its side at 130% the sheet fills the screen (full mode), so no map shows and there are no clear words to measure.
+        const sizes = [{ width: 390, height: 844 }, { width: 320, height: 568 }, ...(scale === 1 ? [{ width: 844, height: 390 }] : [])];
+        for (const [n, size] of sizes.entries()) {
           const at = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
           await dm.setViewportSize(size);
           if (n > 0) scene = await hall();
@@ -202,7 +204,7 @@ describe("raccoon-vtt: a DM device whose scene was deleted with the players on i
           await ops.send({ t: "scene.delete", sceneId: scene, leavePlayers: true });
           const words = dm.getByText(PICK, { exact: true });
           await words.waitFor();
-          // The words' own text, read from the text node: the element is the whole stage. Scanned up and down from its middle for the first thing that is not the stage, which is the top bars and the sheet.
+          // The words' own text, read from the text node: the element is the whole stage. Scanned up and down, and left and right, from its middle for the first thing that is not the stage, which is the top bars and the sheet.
           const band = await words.evaluate((el) => {
             const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): { left: number; right: number; top: number; bottom: number } }; elementFromPoint(x: number, y: number): unknown } }).document;
             const range = doc.createRange();
@@ -214,16 +216,23 @@ describe("raccoon-vtt: a DM device whose scene was deleted with the players on i
             while (top > 0 && doc.elementFromPoint(x, top - 1) === el) top--;
             let bottom = mid;
             while (bottom < 4000 && doc.elementFromPoint(x, bottom + 1) === el) bottom++;
-            return { mid, top, bottom, words: [r.left + 2, x, r.right - 2].map((px) => doc.elementFromPoint(px, mid) === el) };
+            // The same scan along the words' row, which a sideways sheet narrows from the right (sheetClear.right).
+            let left = x;
+            while (left > 0 && doc.elementFromPoint(left - 1, mid) === el) left--;
+            let right = x;
+            while (right < 4000 && doc.elementFromPoint(right + 1, mid) === el) right++;
+            return { mid, top, bottom, center: x, left, right, words: [r.left + 2, x, r.right - 2].map((px) => doc.elementFromPoint(px, mid) === el) };
           });
           const off = band.mid - (band.top + band.bottom) / 2;
-          if (!band.words.every(Boolean) || Math.abs(off) > 3) hidden.push(`${at}: the words' middle at ${band.mid.toFixed(1)} in a clear band from ${band.top} to ${band.bottom}, ${off.toFixed(1)} px off its middle, hit ${band.words.join()}`);
+          const across = band.center - (band.left + band.right) / 2;
+          if (!band.words.every(Boolean) || Math.abs(off) > 3 || Math.abs(across) > 3) hidden.push(`${at}: the words' middle at ${band.mid.toFixed(1)} in a clear band from ${band.top} to ${band.bottom}, ${off.toFixed(1)} px off its middle, and at ${band.center.toFixed(1)} across from ${band.left} to ${band.right}, ${across.toFixed(1)} px off, hit ${band.words.join()}`);
           await shots.take(dm, `fu7-scene-gone-sheet-${size.width}-${Math.round(scale * 100)}`);
         }
       }
     } finally {
       // Best effort, so a failure above is the one the run reports.
       await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } }).catch(() => undefined);
+      await cdp.detach().catch(() => undefined);
       await ops.send({ t: "room.setPlayerScene", sceneId: run.keep }).catch(() => undefined);
       await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1")).catch(() => undefined);
       await dm.setViewportSize(DESKTOP);
