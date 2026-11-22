@@ -210,7 +210,10 @@ const AREA_POSE_FIELDS = new Set(["origin", "faceOffset", "anchor", "yaw", "pitc
  * exact part of a player who may move any or apply damage as any creature
  * coming into sight does, at a width the room keeps for every creature
  * (shared/limits.ts keptForPlayers). A name shown moves it from what the
- * copy hides to what it holds, which changes no width.
+ * copy hides to what it holds, which changes no width. A player's area
+ * riding a creature shown or hidden changes form, between its copy and
+ * the constant an unseen area counts at, which the room keeps for a
+ * seat's riding areas (EXACT_WIDTH.unseenArea).
  */
 const TOGGLE_FIELDS = new Set(["visibility", "locked", "nameHidden"]);
 

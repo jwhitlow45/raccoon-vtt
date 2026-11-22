@@ -11,21 +11,26 @@ import { character, DM, entry, env, room, scene, template, token } from "#shared
 import { exactCopies, farReadings, farWidths, growthBound, linesHeld, measuredStateBytes, readingAt, type ExactCopy } from "./sizeGuard.ts";
 
 /*
- * LP47A-SHOW-1 (D-261122-041, 050): a hide, a show, a lock and an unlock
- * are bookkeeping (shared/farLine.ts TOGGLE_FIELDS), so they go on past
- * the DM's lines and the players' to the far line itself. That holds only
+ * LP47A-SHOW-1 (D-261122-041, 042, 043, 050): a hide, a show, a lock, an
+ * unlock and a name shown or hidden are bookkeeping (shared/farLine.ts
+ * TOGGLE_FIELDS), as is a fight row's hide or show, so they go on past the
+ * DM's lines and the players' to the far line itself. That holds only
  * while each is a toggle of fixed width that leaves every player's widths
  * as they were, which these tests read in every combination of the two
  * settings that put creatures in a player's exact part: the stored room
  * grows by one byte for each thing shown or unlocked and by nothing else,
  * and in each player's exact part everything keeps its width (what the
- * part counts past what the stepped part takes out). The one change is
- * what the toggle brings into the player's copy or takes out of it: a
- * creature shown to a player who may move any or apply damage, or an area
- * of theirs, comes in as any thing coming into sight does, at no more than
+ * part counts past what the stepped part takes out). The changes are what
+ * the toggle brings into the player's copy or takes out of it. A creature
+ * shown to a player who may move any or apply damage, or an area of
+ * theirs, comes in as any thing coming into sight does, at no more than
  * its kind's width in EXACT_WIDTH, which the room keeps for every creature
- * and for one seat's areas (shared/limits.ts keptForPlayers). So each
- * player's reading moves by the toggle's bytes and by those widths alone.
+ * and for one seat's areas (shared/limits.ts keptForPlayers), and a row of
+ * theirs as one never hidden counts. An area of theirs riding a creature
+ * shown or hidden changes form instead (LP47-OPUS-1), between its copy
+ * and the one constant an unseen area counts at, which the room keeps for
+ * a seat's riding areas (EXACT_WIDTH.unseenArea). So each player's reading
+ * moves by the toggle's bytes and by those widths alone.
  */
 
 const SETTINGS = [
@@ -45,8 +50,9 @@ const SETTINGS = [
  * P1's Hero and a wolf of theirs the DM hid, the DM's goblins (one hidden,
  * one shown), two hidden bandits, a locked statue, a figure whose name the
  * DM hid, the DM's hidden area and an area of P1's the DM hid, with a
- * shared line about the goblin, and a fight in which the DM hid Hero's row
- * (shown in the twin `rowShown` makes).
+ * shared line about the goblin, P1's areas riding the lurker and the
+ * goblin, and a fight in which the DM hid Hero's row (shown in the twin
+ * `rowShown` makes).
  */
 function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean, rowShown = false): RoomState {
   const state = room({
@@ -64,6 +70,10 @@ function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean, rowShown 
     templates: {
       zone: template("zone", { ownerId: "dm1", visibility: "dm", origin: { x: 14, y: 4, z: 0 } }),
       aura: template("aura", { ownerId: "p1", visibility: "dm", origin: { x: 8, y: 8, z: 0 } }),
+      // P1's areas riding the hidden lurker, one bare and one labeled, and the shown goblin.
+      ward: template("ward", { ownerId: "p1", attachedTo: "lurker", origin: { x: 4, y: 4, z: 0 } }),
+      ward2: template("ward2", { ownerId: "p1", attachedTo: "lurker", shape: "cube", size: 10, label: "Hunter's Mark on the bandit leader", origin: { x: 4, y: 4, z: 0 } }),
+      mark: template("mark", { ownerId: "p1", attachedTo: "goblin", origin: { x: 6, y: 6, z: 0 } }),
     },
     log: [{ id: "1:0", at: "2026-10-12T20:00:00.000Z", kind: "chat", from: "dm1", text: "The goblin snarls." }],
   });
@@ -88,8 +98,19 @@ const TOGGLES: [string, Op][] = [
   ["Hero's row shown", { t: "encounter.update", entryId: "rhero", patch: { hidden: false } }],
 ];
 
+/** An area of theirs riding a creature their copy does not hold, which counts at a constant in every scene's reading (exactCopies). */
+const unseen = (part: ExactCopy) => part.shownOn?.kind === "room";
+
 const width = (part: ExactCopy) => part.shown - part.sub;
 const total = (parts: { stepped: number; exact: number }) => parts.stepped + parts.exact;
+/** A map key's bytes in the measure: the id as JSON and its colon. */
+const keyBytes = (id: string) => JSON.stringify(id).length + 1;
+/** What an unseen area counts past its key, read once from the bare ward on the hidden lurker. */
+const UNSEEN_AREA = (() => {
+  const part = exactCopies(table("none", false), "p1").get("template:ward")!;
+  assert.ok(unseen(part), "the ward rides a creature P1 does not see");
+  return part.shown - keyBytes("ward");
+})();
 
 /** The things a toggle wrote, by key, with the bytes each stores past what it stored before. */
 function toggled(before: RoomState, after: RoomState): Map<string, number> {
@@ -109,24 +130,30 @@ function toggled(before: RoomState, after: RoomState): Map<string, number> {
 
 /**
  * What a toggle changes in `player`'s exact part, asserting that what stays
- * keeps its place and widths: the widths of what came in or left. A name
- * shown or hidden moves the name between what the copy holds and what it
- * hides, so only a creature whose name `op` toggled may change its hidden
- * bytes, and still keeps its width.
+ * keeps its place and widths: the widths of what came in or left, and of
+ * what changed form. A name shown or hidden moves the name between what the
+ * copy holds and what it hides, so only a creature whose name `op` toggled
+ * may change its hidden bytes, and still keeps its width. An area of theirs
+ * riding a creature shown or hidden changes form, between the unseen form
+ * (a constant) and its copy (LP47-OPUS-1), so its width moves by the change.
  */
-function exactChange(before: RoomState, after: RoomState, player: string, op?: Op): { came: Map<string, number>; left: Map<string, number> } {
+function exactChange(before: RoomState, after: RoomState, player: string, op?: Op): { came: Map<string, number>; left: Map<string, number>; switched: Map<string, number> } {
   const renamed = op?.t === "token.update" && "nameHidden" in op.patch ? `token:${op.tokenId}` : null;
   const [was, is] = [exactCopies(before, player), exactCopies(after, player)];
   const came = new Map<string, number>();
   const left = new Map<string, number>();
+  const switched = new Map<string, number>();
   for (const [key, part] of is) {
     const old = was.get(key);
     if (!old) came.set(key, width(part));
-    else if (key === renamed) assert.deepEqual([part.on, width(part)], [old.on, width(old)], `${player}'s ${key} keeps its place and width`);
+    else if (unseen(part) !== unseen(old)) {
+      assert.deepEqual(part.on, old.on, `${player}'s ${key} keeps its place`);
+      switched.set(key, width(part) - width(old));
+    } else if (key === renamed) assert.deepEqual([part.on, width(part)], [old.on, width(old)], `${player}'s ${key} keeps its place and width`);
     else assert.deepEqual([part.on, width(part), part.hidden], [old.on, width(old), old.hidden], `${player}'s ${key} keeps its place and widths`);
   }
   for (const [key, part] of was) if (!is.has(key)) left.set(key, width(part));
-  return { came, left };
+  return { came, left, switched };
 }
 
 describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixed width that leave every player's widths as they were", () => {
@@ -150,7 +177,16 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
         assert.equal(farWidths(after), farWidths(before), `${what}: the far line's widths are as they were`);
         for (const player of ["p1", "p2"]) {
           const at = `${what}, ${player}`;
-          const { came, left } = exactChange(before, after, player, op);
+          const { came, left, switched } = exactChange(before, after, player, op);
+          // An area of theirs changes form only as the creature it rides is shown or hidden, and in its unseen form counts the
+          // one constant whatever the area holds: a bare area and a labeled cube count alike past their keys.
+          for (const key of switched.keys()) {
+            const area = after.templates[key.slice("template:".length)]!;
+            assert.ok(area.ownerId === player && area.attachedTo !== undefined && things.has(`token:${area.attachedTo}`), `${at}: ${key} changed form only as the creature it rides was shown or hidden`);
+            for (const part of [exactCopies(before, player).get(key)!, exactCopies(after, player).get(key)!].filter(unseen)) {
+              assert.equal(part.shown - keyBytes(area.id), UNSEEN_AREA, `${at}: ${key} unseen at the constant`);
+            }
+          }
           // Only a creature or an area shown or hidden comes into or leaves their copy, and only one the settings put in their part.
           const view = seatView(after, player);
           for (const [key, bytes] of came) {
@@ -173,7 +209,8 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
           assert.equal(lines.length, 1, `${at}: the shared line in their part`);
           assert.deepEqual(lines, [...linesHeld(before, player).values()], `${at}: the shared lines as they read them`);
           // So each reading, the room's and the scene's, moves by the toggles' bytes and the widths of what came in or left.
-          const moved = [...came.values()].reduce((sum, bytes) => sum + bytes, 0) - [...left.values()].reduce((sum, bytes) => sum + bytes, 0);
+          const sum = (bytes: Map<string, number>) => [...bytes.values()].reduce((total, b) => total + b, 0);
+          const moved = sum(came) - sum(left) + sum(switched);
           for (const scope of [{ kind: "room" } as const, { kind: "scene", main: "s1" } as const]) {
             const was = readingAt(farReadings(undefined, before, player), scope)!.after;
             const is = readingAt(farReadings(undefined, after, player), scope)!.after;
@@ -188,17 +225,21 @@ describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixe
     });
   }
 
-  test("each kind of thing the settings put in a player's part comes into it at a show in some combination, so the checks above are not empty", () => {
+  test("each kind of thing the settings put in a player's part comes into it at a show in some combination, and each riding area changes form, so the checks above are not empty", () => {
     const came = new Set<string>();
     for (const [moveAny, damage] of SETTINGS) {
       for (const [, op] of TOGGLES) {
         const before = table(moveAny, damage);
         const result = applyOp(before, op, DM, env(5));
         assert.ok(result.ok);
-        for (const player of ["p1", "p2"]) for (const key of exactChange(before, result.state, player, op).came.keys()) came.add(`${player} ${key}`);
+        for (const player of ["p1", "p2"]) {
+          const change = exactChange(before, result.state, player, op);
+          for (const key of change.came.keys()) came.add(`${player} ${key}`);
+          for (const key of change.switched.keys()) came.add(`${player} ${key} changed form`);
+        }
       }
     }
-    for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura", "p1 row:rhero"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
+    for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura", "p1 row:rhero", "p1 template:ward changed form", "p1 template:ward2 changed form", "p1 template:mark changed form"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
   });
 });
 
