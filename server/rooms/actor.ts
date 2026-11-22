@@ -3,7 +3,7 @@ import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
-import { FAR_TREATMENT, opKind as limitKind } from "#shared/farLine.ts";
+import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
@@ -1876,8 +1876,8 @@ export class RoomActor {
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
-    // A step that takes back or brings back a move, or an HP change from the log, is bookkeeping as the change was.
-    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog, recorded);
+    // A step that takes back or brings back a move, a hide, a show or a lock, or an HP change from the log, is bookkeeping as the change was.
+    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog || restoresToggles(op, before), recorded);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.

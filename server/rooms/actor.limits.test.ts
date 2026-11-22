@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { BOOKKEEPING_RESERVE, FAR, farByteLine, keptForPlayers, ROOM_FULL, SCENE_FULL, SEAT, sizeRemedy } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, farByteLine, KEPT_FOR_PLAYERS_FULL, keptForPlayers, ROOM_FULL, SCENE_FULL, SEAT, sizeRemedy } from "#shared/limits.ts";
 import { GROUND, UPPER, thornToken, tower, withOpening, withStairs } from "#shared/floorLinksTestutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import { ROLL_ASKED_ALREADY } from "#shared/permissions.ts";
@@ -376,4 +376,81 @@ describe("a walk a player's op takes off a creature outside the turn stays out o
     assert.deepEqual(got[0], got[1]);
     assert.deepEqual(got[0], ["taken", "taken", "taken"]);
   });
+});
+
+describe("LP47A-SHOW-1: a hide or a show is bookkeeping, past the DM's lines and the players' (D-261122-041)", () => {
+  const SETTINGS = [
+    { moveAny: "none", damage: false },
+    { moveAny: "all", damage: false },
+    { moveAny: "chosen", damage: false },
+    { moveAny: "nobody chosen", damage: false },
+    { moveAny: "none", damage: true },
+    { moveAny: "all", damage: true },
+    { moveAny: "chosen", damage: true },
+    { moveAny: "nobody chosen", damage: true },
+  ] as const;
+  type Setting = (typeof SETTINGS)[number];
+  const dmLineOf = (state: RoomState) => farByteLine("meets", "room", { dmKept: keptForPlayers(state) })!;
+  const createLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
+
+  /**
+   * The fixture under `setting`, with the DM's hidden bandits and area and a
+   * locked statue, its
+   * reading at its widest filled with the DM's notes to near `line` and
+   * then padded until `past` holds of it.
+   */
+  function room(setting: Setting, line: (state: RoomState) => number, past: (state: RoomState) => boolean) {
+    const f = filled(4 * MIB);
+    const moveAny = setting.moveAny === "chosen" ? [f.player.id] : setting.moveAny === "nobody chosen" ? [] : setting.moveAny;
+    f.state.meta = { ...f.state.meta, settings: { ...f.state.meta.settings, playersMoveAny: moveAny, playersApplyDamage: setting.damage } };
+    for (const id of ["lurker", "flank1", "flank2"]) f.state.tokens[id] = token(id, { sceneId: f.sceneId, name: "Bandit", x: 2, y: 9, visibility: "dm" });
+    f.state.templates.zone = template("zone", { sceneId: f.sceneId, ownerId: f.dm.id, visibility: "dm" });
+    f.state.tokens.statue = token("statue", { sceneId: f.sceneId, name: "Statue", x: 6, y: 9, locked: true });
+    const near = line(f.state) - farRoomBytes(f.state, true) - FAR.byteStep;
+    assert.ok(near > 0, "filled short of the line");
+    for (let pad = near; !past(f.state); pad += 16 * 1024) f.state.tokens.n0 = { ...f.state.tokens.n0!, notes: "p".repeat(pad) };
+    return f;
+  }
+
+  const shows = (f: ReturnType<typeof filled>) =>
+    [
+      ["a creature's show", { t: "token.update", tokenId: "lurker", patch: { visibility: "all" } }],
+      ["a group's show", { t: "token.updateMany", tokenIds: ["flank1", "flank2"], patch: { visibility: "all" } }],
+      ["an area's show", { t: "template.update", templateId: "zone", patch: { visibility: "all" } }],
+      // An unlock stores a byte more ("false"), as a show does.
+      ["an unlock", { t: "token.update", tokenId: "statue", patch: { locked: false } }],
+    ] as const;
+
+  const stroke = (f: ReturnType<typeof filled>, ownerId: string) => ({ t: "drawing.create", drawing: { id: uuidv7(), sceneId: f.sceneId, kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } });
+
+  for (const setting of SETTINGS) {
+    const named = `Who can move any token ${setting.moveAny}, Players apply damage ${setting.damage ? "on" : "off"}`;
+
+    test(`${named}: past the DM's line, where the DM's create is refused in the kept words, each is taken`, async (t) => {
+      const f = room(setting, dmLineOf, (state) => farRoomBytes(state, true) > dmLineOf(state));
+      assert.ok(farRoomBytes(f.state, true) < createLine - MIB, "well short of the players' line");
+      const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+      const dm = await h.connect(f.dm);
+      assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm")}`, "the DM's create");
+      for (const [what, op] of shows(f)) assert.equal(answer(await dm.send(op)), "taken", what);
+      const state = h.actor.committed.state;
+      assert.deepEqual([state.tokens.lurker!.visibility, state.tokens.flank2!.visibility, state.templates.zone!.visibility, state.tokens.statue!.locked], ["all", "all", "all", false]);
+    });
+
+    test(`${named}: past the players' line, inside the bookkeeping reserve, each is taken, and so are a hide's Undo and Redo`, async (t) => {
+      const f = room(setting, () => createLine, (state) => farRoomBytes(state, false) > createLine);
+      assert.ok(farRoomBytes(f.state, true) <= FAR.roomBytes - 64 * 1024, `${FAR.roomBytes - farRoomBytes(f.state, true)} short of the line`);
+      const h = await scopeActor(t, f.state, { sizeLimits: { stateLimit: 64 * MIB, sceneLimit: 64 * MIB } });
+      const dm = await h.connect(f.dm);
+      const player = await h.connect(f.player, "player");
+      assert.equal(answer(await player.send(stroke(f, f.player.id))), `quota: ${sizeRemedy(ROOM_FULL, "player")}`, "a player's create");
+      assert.equal(answer(await dm.send(stroke(f, f.dm.id))), `quota: ${sizeRemedy(ROOM_FULL, "dm")}`, "the DM's create");
+      for (const [what, op] of shows(f)) assert.equal(answer(await dm.send(op)), "taken", what);
+      assert.equal(answer(await dm.send({ t: "token.update", tokenId: "lurker", patch: { visibility: "dm" } })), "taken", "a hide");
+      assert.equal(answer(await dm.send({ t: "undo", scope: "play", head: dm.head().id })), "taken", "the hide's Undo, a show");
+      assert.equal(h.actor.committed.state.tokens.lurker!.visibility, "all");
+      assert.equal(answer(await dm.send({ t: "redo", scope: "play", head: dm.head("play", "redo").id })), "taken", "its Redo");
+      assert.equal(h.actor.committed.state.tokens.lurker!.visibility, "dm");
+    });
+  }
 });

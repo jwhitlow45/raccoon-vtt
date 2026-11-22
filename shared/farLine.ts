@@ -1,4 +1,6 @@
+import { readEntity } from "./keys.ts";
 import type { LimitKind } from "./limits.ts";
+import type { RoomState } from "./model.ts";
 import { isPoseOp, type Op, type OpType } from "./protocol.ts";
 
 /**
@@ -196,12 +198,52 @@ const FIXED_ACTOR_FIELDS = new Set(["hp", "ac", "speeds", "senses", "initBonus",
 /** An area's place and size, which a `template.update` may change as bookkeeping. */
 const AREA_POSE_FIELDS = new Set(["origin", "faceOffset", "anchor", "yaw", "pitch", "size", "width", "height"]);
 
+/**
+ * The switches that hide or show a creature or an area, or lock a creature
+ * (D-261122-041, 050), which a `token.update`, `token.updateMany` or
+ * `template.update` of them alone changes as bookkeeping. Each is stored
+ * whatever its state, one byte apart, and a player's exact part counts the
+ * thing at the same width either way, so a toggle adds no entity and leaves
+ * every player's widths as they were (server/rooms/sizeGuard.toggles.test.ts).
+ * A shown creature comes into the exact part of a player who may move any
+ * or apply damage as any creature coming into sight does, at a width the
+ * room keeps for every creature (shared/limits.ts keptForPlayers). A hidden
+ * name is not one: showing it puts a name of any length in their copies.
+ */
+const TOGGLE_FIELDS = new Set(["visibility", "locked"]);
+
 function fixedActorOnly(patch: object): boolean {
   const keys = Object.keys(patch);
   if (keys.length !== 1 || keys[0] !== "actor") return false;
   const actor = (patch as { actor?: unknown }).actor;
   return actor !== null && typeof actor === "object" && Object.keys(actor).every((field) => FIXED_ACTOR_FIELDS.has(field));
 }
+
+function togglesOnly(patch: object): boolean {
+  const keys = Object.keys(patch);
+  return keys.length > 0 && keys.every((field) => TOGGLE_FIELDS.has(field));
+}
+
+/**
+ * Whether a restore puts back only toggles (TOGGLE_FIELDS): each entry a
+ * creature or an area `state` holds, with its value equal to the stored
+ * one but in those fields and its rev. So the undo of a hide is
+ * bookkeeping as the show is. Anything else it puts back, or a thing
+ * changed since, meets the line as before.
+ */
+export function restoresToggles(op: Op, state: RoomState): boolean {
+  if (op.t !== "sys.restore" || op.entries.length === 0) return false;
+  return op.entries.every(({ key, value }) => (key.startsWith("token:") || key.startsWith("template:")) && sameButToggles(value, readEntity(state, key)));
+}
+
+function sameButToggles(restored: unknown, stored: unknown): boolean {
+  if (!isRecord(restored) || !isRecord(stored)) return false;
+  const fields = (thing: Record<string, unknown>) => Object.keys(thing).filter((field) => field !== "rev" && !TOGGLE_FIELDS.has(field));
+  const theirs = fields(stored);
+  return fields(restored).length === theirs.length && theirs.every((field) => JSON.stringify(restored[field]) === JSON.stringify(stored[field]));
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
  * How `op` meets the far line: `exempt`, `meets`, `own` (its own rule), or
@@ -229,14 +271,14 @@ function byFieldExempt(op: Op): boolean {
   switch (op.t) {
     case "token.update": {
       const { patch } = op;
-      return isPoseOp(op) || fixedActorOnly(patch);
+      return isPoseOp(op) || fixedActorOnly(patch) || togglesOnly(patch);
     }
     case "token.updateMany":
-      return fixedActorOnly(op.patch);
+      return fixedActorOnly(op.patch) || togglesOnly(op.patch);
     case "character.update":
       return fixedActorOnly(op.patch);
     case "template.update":
-      return Object.keys(op.patch).every((field) => AREA_POSE_FIELDS.has(field));
+      return Object.keys(op.patch).every((field) => AREA_POSE_FIELDS.has(field)) || togglesOnly(op.patch);
     default:
       return false;
   }

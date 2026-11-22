@@ -1,0 +1,192 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import { farRule } from "#shared/farLine.ts";
+import { EXACT_WIDTH } from "#shared/limits.ts";
+import type { RoomState } from "#shared/model.ts";
+import { movesAnyToken } from "#shared/permissions.ts";
+import type { Op } from "#shared/protocol.ts";
+import { seatView } from "#shared/project.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { character, DM, env, room, scene, template, token } from "#shared/testutil.ts";
+import { exactCopies, farReadings, farWidths, growthBound, linesHeld, measuredStateBytes, readingAt, type ExactCopy } from "./sizeGuard.ts";
+
+/*
+ * LP47A-SHOW-1 (D-261122-041, 050): a hide, a show, a lock and an unlock
+ * are bookkeeping (shared/farLine.ts TOGGLE_FIELDS), so they go on past
+ * the DM's lines and the players' to the far line itself. That holds only
+ * while each is a toggle of fixed width that leaves every player's widths
+ * as they were, which these tests read in every combination of the two
+ * settings that put creatures in a player's exact part: the stored room
+ * grows by one byte for each thing shown or unlocked and by nothing else,
+ * and in each player's exact part everything keeps its width (what the
+ * part counts past what the stepped part takes out). The one change is
+ * what the toggle brings into the player's copy or takes out of it: a
+ * creature shown to a player who may move any or apply damage, or an area
+ * of theirs, comes in as any thing coming into sight does, at no more than
+ * its kind's width in EXACT_WIDTH, which the room keeps for every creature
+ * and for one seat's areas (shared/limits.ts keptForPlayers). So each
+ * player's reading moves by the toggle's bytes and by those widths alone.
+ */
+
+const SETTINGS = [
+  ["none", false],
+  ["all", false],
+  [["p1"], false],
+  [["p2"], false],
+  [[], false],
+  ["none", true],
+  ["all", true],
+  [["p1"], true],
+  [["p2"], true],
+  [[], true],
+] as const;
+
+/**
+ * P1's Hero and a wolf of theirs the DM hid, the DM's goblins (one hidden,
+ * one shown), two hidden bandits, a locked statue, the DM's hidden area
+ * and an area of P1's the DM hid, with a shared line about the goblin.
+ */
+function table(moveAny: (typeof SETTINGS)[number][0], damage: boolean): RoomState {
+  const state = room({
+    characters: { c1: character("c1", { ownerIds: ["p1"] }) },
+    tokens: {
+      hero: token("hero", { kind: "pc", name: "Hero", ownerIds: ["p1"], actor: { ref: "c1" }, x: 1, y: 1 }),
+      wolf: token("wolf", { name: "Wolf", ownerIds: ["p1"], visibility: "dm", x: 2, y: 8 }),
+      lurker: token("lurker", { visibility: "dm", x: 4, y: 4, notes: "Waits under the bridge." }),
+      goblin: token("goblin", { x: 6, y: 6 }),
+      flank1: token("flank1", { name: "Bandit", visibility: "dm", x: 9, y: 2 }),
+      flank2: token("flank2", { name: "Bandit", visibility: "dm", x: 9, y: 3 }),
+      statue: token("statue", { name: "Statue", kind: "object", locked: true, x: 12, y: 12 }),
+    },
+    templates: {
+      zone: template("zone", { ownerId: "dm1", visibility: "dm", origin: { x: 14, y: 4, z: 0 } }),
+      aura: template("aura", { ownerId: "p1", visibility: "dm", origin: { x: 8, y: 8, z: 0 } }),
+    },
+    log: [{ id: "1:0", at: "2026-10-12T20:00:00.000Z", kind: "chat", from: "dm1", text: "The goblin snarls." }],
+  });
+  state.scenes.s1 = scene("s1", { fogEnabled: false });
+  state.meta = { ...state.meta, settings: { ...state.meta.settings, playersMoveAny: moveAny as RoomState["meta"]["settings"]["playersMoveAny"], playersApplyDamage: damage } };
+  return state;
+}
+
+const TOGGLES: [string, Op][] = [
+  ["the DM's creature shown", { t: "token.update", tokenId: "lurker", patch: { visibility: "all" } }],
+  ["the DM's creature hidden", { t: "token.update", tokenId: "goblin", patch: { visibility: "dm" } }],
+  ["P1's wolf shown", { t: "token.update", tokenId: "wolf", patch: { visibility: "all" } }],
+  ["a group shown", { t: "token.updateMany", tokenIds: ["flank1", "flank2"], patch: { visibility: "all" } }],
+  ["the DM's area shown", { t: "template.update", templateId: "zone", patch: { visibility: "all" } }],
+  ["P1's area shown", { t: "template.update", templateId: "aura", patch: { visibility: "all" } }],
+  ["the statue unlocked", { t: "token.update", tokenId: "statue", patch: { locked: false } }],
+  ["the goblin locked", { t: "token.update", tokenId: "goblin", patch: { locked: true } }],
+];
+
+const width = (part: ExactCopy) => part.shown - part.sub;
+const total = (parts: { stepped: number; exact: number }) => parts.stepped + parts.exact;
+
+/** The things a toggle wrote, by key, with the bytes each stores past what it stored before. */
+function toggled(before: RoomState, after: RoomState): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [id, was] of Object.entries(before.tokens)) {
+    const now = after.tokens[id]!;
+    if (now.visibility !== was.visibility || now.locked !== was.locked) out.set(`token:${id}`, JSON.stringify(now).length - JSON.stringify(was).length);
+  }
+  for (const [id, was] of Object.entries(before.templates)) {
+    const now = after.templates[id]!;
+    if (now.visibility !== was.visibility) out.set(`template:${id}`, JSON.stringify(now).length - JSON.stringify(was).length);
+  }
+  return out;
+}
+
+/** What a toggle changes in `player`'s exact part, asserting that what stays keeps its place and widths: the widths of what came in or left. */
+function exactChange(before: RoomState, after: RoomState, player: string): { came: Map<string, number>; left: Map<string, number> } {
+  const [was, is] = [exactCopies(before, player), exactCopies(after, player)];
+  const came = new Map<string, number>();
+  const left = new Map<string, number>();
+  for (const [key, part] of is) {
+    const old = was.get(key);
+    if (!old) came.set(key, width(part));
+    else assert.deepEqual([part.on, width(part), part.hidden], [old.on, width(old), old.hidden], `${player}'s ${key} keeps its place and widths`);
+  }
+  for (const [key, part] of was) if (!is.has(key)) left.set(key, width(part));
+  return { came, left };
+}
+
+describe("LP47A-SHOW-1: a hide, a show, a lock and an unlock are toggles of fixed width that leave every player's widths as they were", () => {
+  for (const [moveAny, damage] of SETTINGS) {
+    const named = `Who can move any token ${JSON.stringify(moveAny)}, Players apply damage ${damage ? "on" : "off"}`;
+    test(named, () => {
+      for (const [what, op] of TOGGLES) {
+        assert.equal(farRule(op), "exempt", `${what} is bookkeeping`);
+        const before = table(moveAny, damage);
+        const result = applyOp(before, op, DM, env(5));
+        assert.ok(result.ok, `${what}: ${result.ok ? "" : result.message}`);
+        const after = result.state;
+        // The stored room: one byte more for each thing shown or unlocked, one less for each hidden or locked, nothing else written.
+        const things = toggled(before, after);
+        assert.ok(things.size > 0, `${what} toggled something`);
+        for (const bytes of things.values()) assert.equal(Math.abs(bytes), 1, `${what}: one byte a thing`);
+        const stored = [...things.values()].reduce((sum, bytes) => sum + bytes, 0);
+        assert.deepEqual([...new Set(result.touched)].sort(), [...things.keys()].sort(), `${what} wrote only what it toggled`);
+        assert.equal(measuredStateBytes(after) - measuredStateBytes(before), stored, `${what}: the measure moves by the toggles alone`);
+        assert.equal(growthBound(before, after, result.touched), Math.max(0, stored), `${what}: its growth bound is the toggles'`);
+        assert.equal(farWidths(after), farWidths(before), `${what}: the far line's widths are as they were`);
+        for (const player of ["p1", "p2"]) {
+          const at = `${what}, ${player}`;
+          const { came, left } = exactChange(before, after, player);
+          // Only a creature or an area shown or hidden comes into or leaves their copy, and only one the settings put in their part.
+          const view = seatView(after, player);
+          for (const [key, bytes] of came) {
+            const [kind, id] = key.split(":") as ["token" | "template", string];
+            assert.ok(things.has(key) && (kind === "token" ? after.tokens[id]!.visibility : after.templates[id]!.visibility) === "all", `${at}: ${key} came in only as it was shown`);
+            assert.ok(view.copy(kind, id) !== null, `${at}: their copy holds ${key}`);
+            if (kind === "token") assert.ok(after.tokens[id]!.ownerIds.includes(player) || movesAnyToken(after.meta.settings, player) || damage, `${at}: ${key} is in their part by the settings`);
+            else assert.equal(after.templates[id]!.ownerId, player, `${at}: ${key} is their own area`);
+            assert.ok(bytes >= 0 && bytes <= (kind === "token" ? EXACT_WIDTH.creature : EXACT_WIDTH.area), `${at}: ${key} comes in at ${bytes} bytes past what it takes out, within its kind's kept width`);
+          }
+          for (const key of left.keys()) assert.ok(things.has(key) && after.tokens[key.split(":")[1]!]?.visibility === "dm", `${at}: ${key} left only as it was hidden`);
+          const lines = [...linesHeld(after, player).values()];
+          assert.equal(lines.length, 1, `${at}: the shared line in their part`);
+          assert.deepEqual(lines, [...linesHeld(before, player).values()], `${at}: the shared lines as they read them`);
+          // So each reading, the room's and the scene's, moves by the toggles' bytes and the widths of what came in or left.
+          const moved = [...came.values()].reduce((sum, bytes) => sum + bytes, 0) - [...left.values()].reduce((sum, bytes) => sum + bytes, 0);
+          for (const scope of [{ kind: "room" } as const, { kind: "scene", main: "s1" } as const]) {
+            const was = readingAt(farReadings(undefined, before, player), scope)!.after;
+            const is = readingAt(farReadings(undefined, after, player), scope)!.after;
+            assert.equal(total(is) - total(was), stored + moved, `${at}: the ${scope.kind}'s reading`);
+          }
+        }
+        // The toggle back leaves every player's exact part as it was.
+        const back = applyOp(after, reverse(op, before), DM, env(6));
+        assert.ok(back.ok);
+        for (const player of ["p1", "p2"]) assert.deepEqual(exactCopies(back.state, player), exactCopies(before, player), `${what}, ${player}: the toggle back`);
+      }
+    });
+  }
+
+  test("each kind of thing the settings put in a player's part comes into it at a show in some combination, so the checks above are not empty", () => {
+    const came = new Set<string>();
+    for (const [moveAny, damage] of SETTINGS) {
+      for (const [, op] of TOGGLES) {
+        const before = table(moveAny, damage);
+        const result = applyOp(before, op, DM, env(5));
+        assert.ok(result.ok);
+        for (const player of ["p1", "p2"]) for (const key of exactChange(before, result.state, player).came.keys()) came.add(`${player} ${key}`);
+      }
+    }
+    for (const key of ["p1 token:lurker", "p2 token:lurker", "p2 token:wolf", "p1 token:flank2", "p1 template:aura"]) assert.ok(came.has(key), `${key} came in somewhere: ${[...came].join(", ")}`);
+  });
+});
+
+/** The op that toggles back what `op` toggled on `before`. */
+function reverse(op: Op, before: RoomState): Op {
+  switch (op.t) {
+    case "token.update":
+      return { ...op, patch: "visibility" in op.patch ? { visibility: before.tokens[op.tokenId]!.visibility } : { locked: before.tokens[op.tokenId]!.locked } };
+    case "token.updateMany":
+      return { ...op, patch: { visibility: before.tokens[op.tokenIds[0]!]!.visibility } };
+    case "template.update":
+      return { ...op, patch: { visibility: before.templates[op.templateId]!.visibility } };
+    default:
+      throw new Error(op.t);
+  }
+}
