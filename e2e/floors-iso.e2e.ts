@@ -324,7 +324,7 @@ describe("the floors below in Isometric", { concurrency: false, timeout: 600_000
     // Half a cell in from the far corner the bottom shows 2 cells down, and 1.2 cells down the far side above it: so the bottom lies 2 cells down, not Cellar's 4.
     const at = inFromFar(GROUND_HOLE, 0, 0.5);
     await bottomShows(ana, at, 2, "black", "a black bottom 2 cells down");
-    // A quarter cell across the screen from the seam where the two far sides meet, as fl4i-1 reads, onto the lit one.
+    // A quarter cell across the screen from the seam where the two far sides meet, onto the lit side.
     const [side] = await boardPixels(ana, [{ x: at.x - 0.25, y: at.y + 0.25, z: -1.2 }]);
     assert.ok(side!.relief[3] === 255 && !near(side!.relief, [0, 0, 0, 255], 12), `the far side above the bottom, read ${show(side!.relief)}`);
     await shots.take(ana, "fl4i-2-ana-hole-unreached");

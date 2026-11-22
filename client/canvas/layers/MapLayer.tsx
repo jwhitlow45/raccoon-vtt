@@ -200,14 +200,17 @@ function MapImage(props: {
   useEffect(() => () => onDrawn?.(null), [onDrawn]);
   if (!drawn) return null;
   // The video fills the still's rectangle, the one the grid was lined up on, turned and mirrored as its file asked (docs/design/design-v1-video-turns.md 7).
-  if (moving.element && rect && props.map.video) return <KImage ref={moving.ref} image={moving.element} {...videoPlacement(rect, props.map.video)} />;
+  if (moving.element && rect && props.map.video) return <KImage name={MAP_IMAGE} ref={moving.ref} image={moving.element} {...videoPlacement(rect, props.map.video)} />;
   // Every variant is stretched to the calibrated rectangle, so a phone's
   // 4096 px copy and a desktop's 8192 px original agree with the printed
   // grid. The image is never cache()d: a cached 8192 px map exceeds iOS
   // canvas limits. It is the same Konva node as the video's, so the still
   // takes back a plain placement's turn and scale too.
-  return <KImage ref={moving.ref} image={drawn.image} {...videoPlacement(drawn.rect, PLAIN)} />;
+  return <KImage name={MAP_IMAGE} ref={moving.ref} image={drawn.image} {...videoPlacement(drawn.rect, PLAIN)} />;
 }
+
+/** The map picture's Konva name, which a browser check finds it by (e2e/alignmentRoom.ts mapDrawn) in place of any image of the same shape. */
+export const MAP_IMAGE = "mapImage";
 
 /** No turn and no mirror: a still's placement is its rectangle. */
 const PLAIN = {};

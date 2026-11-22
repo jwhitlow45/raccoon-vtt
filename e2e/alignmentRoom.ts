@@ -7991,9 +7991,11 @@ async function viewScene(panel: Locator, sceneId: string): Promise<void> {
 }
 
 /**
- * Whether the board on screen draws a map image of this shape. A phone
- * draws a smaller copy of the image, so the shape is what is compared, and
- * a scene switched away from keeps no image of the scene before.
+ * Whether the board on screen draws the scene's map picture, found by its
+ * name (client/canvas/layers/MapLayer.tsx MAP_IMAGE) so no other image of
+ * the same shape stands in for it. A phone draws a smaller copy of the
+ * image, so the shape is what is compared, and a scene switched away from
+ * keeps no image of the scene before.
  */
 function mapDrawn(page: Page, ratio: number): Promise<true | null> {
   return page.evaluate((r) => {
@@ -8004,7 +8006,7 @@ function mapDrawn(page: Page, ratio: number): Promise<true | null> {
     const drawn = stages
       .filter((s) => s.width() > 0 && s.visible())
       .some((s) =>
-        s.find("Image").some((n) => {
+        s.find(".mapImage").some((n) => {
           const img = n.image?.();
           const w = img?.naturalWidth || img?.width || 0;
           const h = img?.naturalHeight || img?.height || 0;
