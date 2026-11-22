@@ -9,9 +9,18 @@ import { spawn } from "node:child_process";
  */
 const MODULE = new URL("./logOutput.ts", import.meta.url).href;
 
+/**
+ * Node makes stdout's pipe writes synchronous on Windows (lib/net.js), so a
+ * child there blocks in a write while nothing reads and reaches its exit
+ * only once the parent reads again. The cases of a full pipe at the exit
+ * are then cases of a blocked write, which these cannot hold, so they run
+ * elsewhere only.
+ */
+const asyncPipes = process.platform === "win32" ? "stdout's pipe writes are synchronous on Windows" : false;
+
 type Run = { code: number | null; out: string; ms: number };
 
-function run(flushMs: number, reader: "slow" | "never" | "gone"): Promise<Run> {
+function run(flushMs: number, reader: "reading" | "slow" | "never" | "gone"): Promise<Run> {
   const script = `
     import { exitAfterLogs, localLogOutput } from ${JSON.stringify(MODULE)};
     const out = localLogOutput();
@@ -27,7 +36,7 @@ function run(flushMs: number, reader: "slow" | "never" | "gone"): Promise<Run> {
   if (reader === "gone") stdout.destroy();
   else {
     stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
-    stdout.pause();
+    if (reader !== "reading") stdout.pause();
     if (reader === "slow") setTimeout(() => stdout.resume(), 500);
   }
   return new Promise((resolve, reject) => {
@@ -45,7 +54,15 @@ function run(flushMs: number, reader: "slow" | "never" | "gone"): Promise<Run> {
   });
 }
 
-test("a supervisor slow to read gets every line, the last one too, before the exit", async () => {
+test("a supervisor that reads gets every line, the last one too, before the exit", async () => {
+  const r = await run(12_000, "reading");
+  assert.equal(r.code, 3);
+  assert.equal(r.out.length, 1024 * 1024 + "the last line\n".length);
+  assert.ok(r.out.endsWith("the last line\n"));
+  assert.ok(r.ms < 10_000, `${r.ms} ms`);
+});
+
+test("a supervisor slow to read gets every line, the last one too, before the exit", { skip: asyncPipes }, async () => {
   const r = await run(12_000, "slow");
   assert.equal(r.code, 3);
   assert.equal(r.out.length, 1024 * 1024 + "the last line\n".length);
@@ -53,7 +70,7 @@ test("a supervisor slow to read gets every line, the last one too, before the ex
   assert.ok(r.ms < 10_000, `the write's callback ended it, not the bound (${r.ms} ms)`);
 });
 
-test("a supervisor that never reads holds the exit only for the bound", async () => {
+test("a supervisor that never reads holds the exit only for the bound", { skip: asyncPipes }, async () => {
   const r = await run(300, "never");
   assert.equal(r.code, 3);
   assert.ok(r.ms < 10_000, `${r.ms} ms`);

@@ -432,6 +432,7 @@ describe("the supervisor's channel (IPC)", () => {
       assert.equal((await socket.closed).code, 1012);
       assert.equal(await within(c.exited, 25_000, "the exit"), 0);
       assert.match(c.output(), /"signal":"shutdown"/);
+      await until(() => /"msg":"shut down"/.test(c.output()), 5_000, "the stop's last line");
     } finally {
       if (c.child.exitCode === null) c.child.kill("SIGKILL");
     }
@@ -504,8 +505,10 @@ describe("the supervisor's channel (IPC)", () => {
   }
 
   // A supervisor busy elsewhere reads the server's output late. Its stop's last line used to be lost from server.log
-  // whenever the pipe was full at the exit.
-  test("a supervisor slow to read still gets the stop's last line, since the exit waits for it", async () => {
+  // whenever the pipe was full at the exit. Node makes stdout's pipe writes synchronous on Windows (lib/net.js), so
+  // there the server blocks in its request logging while nothing reads and never reaches the stop: off Windows only.
+  // The shutdown test above reads all along and holds the last line on every system.
+  test("a supervisor slow to read still gets the stop's last line, since the exit waits for it", { skip: process.platform === "win32" ? "stdout's pipe writes are synchronous on Windows" : false }, async () => {
     const c = await startChild();
     try {
       c.child.stdout?.pause();
