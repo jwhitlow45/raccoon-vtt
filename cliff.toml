@@ -26,6 +26,14 @@ conventional_commits = true
 filter_unconventional = true
 split_commits = false
 protect_breaking_commits = false
+# Five subjects name internal work lanes, which a release's readers have no use for. The subject stays in history
+# and is reworded here, so the changelog and the release notes are generated and never hand edited.
+commit_preprocessors = [
+  { pattern = 'generator, landing and dialog lanes', replace = 'generator, landing and dialog' },
+  { pattern = 'declared for the qol lanes', replace = 'declared' },
+  { pattern = "the landing lane's edits argument", replace = "the landing's edits argument" },
+  { pattern = 'hold the alert lane so', replace = 'keep clear of the alert so' },
+]
 commit_parsers = [
   { message = '^feat(\([^)]*\))?!?:', group = "Features" },
   { message = '^fix(\([^)]*\))?!?:', group = "Fixes" },
