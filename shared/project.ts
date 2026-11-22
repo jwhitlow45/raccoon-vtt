@@ -5106,26 +5106,48 @@ function spanDependents(state: RoomState, other: RoomState | undefined, add: (ke
  * A tokens collection's tokens in order, and apart the ones that a pass of
  * dependents reads by a field most tokens lack: a walk, a character's
  * ref, a carrier's link. Kept per collection object, which is replaced and
- * never changed (writable.ts), so a fan-out's pass over the state before
- * its batch reads what the last batch's pass over its state after kept,
- * and a pass over a few tokens reads only those.
+ * never changed (writable.ts), with every token's tile reach for the grids
+ * its scenes had when last asked (`grids`). The fan-out works them out for
+ * each batch's state after (keepTokenLists), global or not, so the batch
+ * that replaced a token or changed a grid is the one that works its reach
+ * out again, and a pass over a few tokens reads only those.
  */
-type TokenLists = { all: Token[]; walking: Token[]; byRef: Token[]; carried: Token[] };
+type TokenLists = { all: Token[]; walking: Token[]; byRef: Token[]; carried: Token[]; reaches: CellRange[]; grids: string | null };
 
 const tokenLists = new WeakMap<object, TokenLists>();
 
-function tokenListsOf(tokens: RoomState["tokens"]): TokenLists {
+/** The grid of each scene, as one text: what a token's reach reads besides the token. */
+function gridsOf(state: RoomState): string {
+  return JSON.stringify(Object.values(state.scenes).map((scene) => [scene.id, scene.gridShape ?? null]));
+}
+
+function tokenListsOf(state: RoomState): TokenLists {
+  const tokens = state.tokens;
   let lists = tokenLists.get(tokens);
-  if (lists) return lists;
-  lists = { all: Object.values(tokens), walking: [], byRef: [], carried: [] };
-  for (const token of lists.all) {
-    if (token.path) lists.walking.push(token);
-    if ("ref" in token.actor) lists.byRef.push(token);
-    if (token.attached) lists.carried.push(token);
+  if (!lists) {
+    lists = { all: Object.values(tokens), walking: [], byRef: [], carried: [], reaches: [], grids: null };
+    for (const token of lists.all) {
+      if (token.path) lists.walking.push(token);
+      if ("ref" in token.actor) lists.byRef.push(token);
+      if (token.attached) lists.carried.push(token);
+    }
+    if (!isWritable(tokens)) tokenLists.set(tokens, lists);
   }
-  if (!isWritable(tokens)) tokenLists.set(tokens, lists);
+  const grids = gridsOf(state);
+  if (lists.grids !== grids) {
+    lists.reaches = lists.all.map((token) => tileReach(state, token));
+    lists.grids = grids;
+  }
   return lists;
 }
+
+/** A batch's state after has its token lists and every reach worked out in its own fan-out (TokenLists). */
+export function keepTokenLists(state: RoomState): void {
+  tokenListsOf(state);
+}
+
+/** Reaches worked out, counted for tests that hold a player's fan-out alike whatever hidden work came before it. */
+export const reachWork = { computed: 0 };
 
 /**
  * The cells a token counts by where tiles changed (tileDependents): those
@@ -5139,6 +5161,7 @@ function tileReach(state: RoomState, token: Token): CellRange {
   const grid = gridOfToken(state, token);
   const kept = tileReaches.get(token);
   if (kept?.grid === grid) return kept.r;
+  reachWork.computed++;
   const cells = occupiedRange(grid, token);
   const seen = grid.shape === "hex" ? null : sightRect(token);
   const r = seen ? { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) } : cells;
@@ -5161,7 +5184,7 @@ function tileReach(state: RoomState, token: Token): CellRange {
  * differ.
  */
 export function dependents(state: RoomState, touched: EntityKey[], other?: RoomState): EntityKey[] {
-  const tokens = tokenListsOf(state.tokens);
+  const tokens = tokenListsOf(state);
   const seen = new Set(touched);
   const out: EntityKey[] = [];
   const add = (key: EntityKey) => {
@@ -5351,7 +5374,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
   if (pageIds.size > 0) {
     for (const pin of Object.values(state.pins)) if (pin.pageId !== undefined && pageIds.has(pin.pageId)) add(keys.pin(pin.id));
   }
-  if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds, tokens.all);
+  if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds, tokens);
   if (wallChunks.length > 0) wallDependents(state, wallChunks, add, tokenIds, tokens.all);
   // A stair's direction reads the scene's whole stair map, so a build edit can turn a stair chunks away (ASTRA-4): every chunk with a stair goes again.
   for (const sceneId of stairScenes) for (const key of stairChunkKeys(state, sceneId)) add(key);
@@ -5505,7 +5528,7 @@ function soundDependents(state: RoomState, touched: readonly EntityKey[], add: (
  * box where it was dropped off its anchor (docs/design/design-v1-hex-grids.md
  * HX-D10).
  */
-function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet<string>>, add: (key: EntityKey) => void, tokenIds: Set<string>, tokens: readonly Token[]): void {
+function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet<string>>, add: (key: EntityKey) => void, tokenIds: Set<string>, tokens: TokenLists): void {
   // Each scene's changed tiles span a box, outside which no tile is one of them, so a range's tiles are read only inside it.
   const boxes = new Map<string, { tx0: number; ty0: number; tx1: number; ty1: number }>();
   for (const [sceneId, held] of tiles) {
@@ -5532,9 +5555,9 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
     }
     return false;
   };
-  for (const token of tokens) {
+  for (const [i, token] of tokens.all.entries()) {
     if (!tiles.has(token.sceneId)) continue;
-    if (!on(token.sceneId, tileReach(state, token))) continue;
+    if (!on(token.sceneId, tokens.reaches[i]!)) continue;
     add(keys.token(token.id));
     tokenIds.add(token.id);
   }

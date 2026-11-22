@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, SceneId, Stamp, Trap, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, heldGroundMap, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, rankedStamp, sightHolders, stampCells, stampOrder, stampRanks, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, heldGroundMap, keepTokenLists, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, rankedStamp, sightHolders, stampCells, stampOrder, stampRanks, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import { MAX_KEPT_REFUSALS, type Change, type RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
@@ -70,6 +70,8 @@ export function previewOmits(line: Pick<LogEntry, "kind" | "from" | "to">, by: s
  * diff: a viewer arriving on one gets a snapshot.
  */
 export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> = [], viewers: Iterable<Viewer> = []): Set<EntityKey> {
+  // Global or not, the batch works out its own state's token lists and reaches, so no later batch pays for the tokens it replaced.
+  keepTokenLists(batch.after);
   if (batch.global) return new Set([...allKeys(batch.before), ...allKeys(batch.after)]);
   const touched = [...batch.touched, ...changedSightKeys(batch.before, batch.after, watched)];
   // A viewer's live log starts where a ring of their own fills (shared/logRings.ts), which the roster bounds, so the lines it passed over come and go.
