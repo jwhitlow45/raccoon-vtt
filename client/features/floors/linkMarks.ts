@@ -233,6 +233,45 @@ export type PlacedPills = { pill: PillSpec | null; chip: PillSpec | null };
 /** The nodes a floor's search may visit before it keeps the best placement found, which the first path (each pill's first choice) already is. */
 const SEARCH_NODES = 20_000;
 
+function hullOf(points: readonly { x: number; y: number }[]): { x: number; y: number }[] {
+  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (list: typeof pts) => {
+    const out: typeof pts = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(pts), ...half(pts.reverse())];
+}
+
+/**
+ * Whether a box covers any of an end's squares as they draw: the convex
+ * hull of its corners in view units, tested with separating axes. Touching
+ * along an edge is no cover. The bounding box would count the empty corners
+ * of a diamond.
+ */
+export function boxCoversOutline(box: Box, corners: readonly { x: number; y: number }[], iso: Exclude<DrawSpace, null>): boolean {
+  const hull = hullOf(corners.map((c) => viewPointOf(iso, c)));
+  if (hull.length < 3) return false;
+  const E = 1e-9;
+  const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }, ...hull.map((p, i) => {
+    const q = hull[(i + 1) % hull.length]!;
+    return { x: p.y - q.y, y: q.x - p.x };
+  })];
+  const rect = [{ x: box.x0, y: box.y0 }, { x: box.x1, y: box.y0 }, { x: box.x0, y: box.y1 }, { x: box.x1, y: box.y1 }];
+  for (const a of axes) {
+    const on = (pts: readonly { x: number; y: number }[]) => pts.map((p) => p.x * a.x + p.y * a.y);
+    const r = on(rect);
+    const h = on(hull);
+    if (Math.min(Math.max(...r), Math.max(...h)) - Math.max(Math.min(...r), Math.min(...h)) <= E * Math.hypot(a.x, a.y)) return false;
+  }
+  return true;
+}
+
 /** What one box covers of another: nothing, or a flat charge for each cover with the area added, so fewer covers always beat a smaller area. */
 function covers(a: Box, b: Box, charge: number): number {
   return boxesMeet(a, b) ? charge + (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * (Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)) : 0;
@@ -288,7 +327,10 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
       }
       // The end's own edge is the last choice, and the only one where no corner serves.
       if (specs.length === 0 || stands(spec)) specs.push(spec);
-      slots.push({ end: i, chip, cands: specs.map((s2) => ({ spec: s2, box: drawnBox(s2, scale, iso, stands(s2), true), solo: 0 })) });
+      const cands = specs.map((s2) => ({ spec: s2, box: drawnBox(s2, scale, iso, stands(s2), true), solo: 0 }));
+      // A pill never hangs over its own hole, where a corner that clears it serves.
+      const clear = cands.filter((c) => !boxCoversOutline(c.box, corners, iso));
+      slots.push({ end: i, chip, cands: clear.length > 0 ? clear : cands });
     }
   });
   // What a pill covers apart from the other holes' pills: another end's squares and the pills that stay put.

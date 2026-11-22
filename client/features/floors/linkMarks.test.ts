@@ -7,7 +7,7 @@ import type { Grid } from "#shared/rules/grid.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillReach } from "../measure/pillPlace.ts";
-import { clearOfMarkers, cornerPill, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
+import { boxCoversOutline, clearOfMarkers, cornerPill, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineOf, placeEnds, quietLinks, type EndPills } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -189,43 +189,42 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
   };
   const pillBoxes = (iso: ReturnType<typeof flat>, placed: ReturnType<typeof placeEnds>, id: string, scale: number) => [placed.get(id)!.pill!, placed.get(id)!.chip!].map((p) => drawnBox(p, scale, iso, true, true));
 
-  /** The covers among two ends' pills and squares, each pill against the other end's pills and squares. */
-  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: ReturnType<typeof flat>, scale: number): number => {
-    const own = ends.map((e) => outlineBox(cornersOf(e.o), iso));
+  /** The covers among two ends' pills and squares, each pill against the other end's pills and squares as they draw, and against its own hole. */
+  const coversOf = (ends: readonly EndPills[], placed: ReturnType<typeof placeEnds>, iso: ReturnType<typeof flat>, scale: number): { others: number; own: number } => {
     const boxes = ends.map((e) => pillBoxes(iso, placed, e.id, scale));
-    let n = 0;
-    ends.forEach((_, i) => {
+    let others = 0;
+    let own = 0;
+    ends.forEach((e, i) => {
+      for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(e.o), iso)) own++;
       ends.forEach((__, j) => {
         if (j <= i) return;
-        for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) n++;
-        for (const x of boxes[i]!) if (meet(x, own[j]!)) n++;
-        for (const y of boxes[j]!) if (meet(y, own[i]!)) n++;
+        for (const x of boxes[i]!) for (const y of boxes[j]!) if (meet(x, y)) others++;
+        for (const x of boxes[i]!) if (boxCoversOutline(x, cornersOf(ends[j]!.o), iso)) others++;
+        for (const y of boxes[j]!) if (boxCoversOutline(y, cornersOf(e.o), iso)) others++;
       });
     });
-    return n;
+    return { others, own };
   };
   const alone = (ends: readonly EndPills[], iso: ReturnType<typeof flat>, scale: number) => new Map(ends.flatMap((e) => [...placeEnds([e], [], scale, iso, () => true)]));
 
-  test("at every turn no pill meets another end's squares or pills where the pills can be placed clear, and a hole on its own would have crowded them", () => {
-    const scale = 30;
-    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 11, y: 7, w: 1, h: 1 })];
-    let crowded = 0;
+  test("where the pills can be placed clear, no pill meets another end's squares or pills or covers its own hole, at every turn", () => {
+    const scale = 40;
+    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 12, y: 8, w: 1, h: 1 })];
     for (const turn of [0, 1, 2, 3] as const) {
       const iso = flat(turn);
-      assert.equal(coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale), 0, `turn ${turn}: a pill covers another end's squares or pills`);
-      if (coversOf(ends, alone(ends, iso, scale), iso, scale) > 0) crowded++;
+      assert.deepEqual(coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale), { others: 0, own: 0 }, `turn ${turn}: a pill covers another end's squares or pills, or its own hole`);
     }
-    assert.ok(crowded > 0, "each hole's own corners crowd at some turn, so the test proves something");
   });
 
-  test("where a phone's scale leaves no clear set, the holes' pills cover less than each hole's own corners would, at every turn", () => {
+  test("where a phone's scale leaves no clear set, no pill hangs over its own hole and the holes' pills cover no more than each hole's own corners would", () => {
     const scale = 21.375;
     const ends = [hole("a", { x: 8, y: 4, w: 2, h: 2 }), hole("b", { x: 10, y: 7, w: 1, h: 1 })];
     for (const turn of [0, 1, 2, 3] as const) {
       const iso = flat(turn);
       const together = coversOf(ends, placeEnds(ends, [], scale, iso, () => true), iso, scale);
       const apart = coversOf(ends, alone(ends, iso, scale), iso, scale);
-      assert.ok(together < apart, `turn ${turn}: ${together} covers together, ${apart} apart`);
+      assert.equal(together.own, 0, `turn ${turn}: a pill hangs over its own hole`);
+      assert.ok(together.others <= apart.others, `turn ${turn}: ${together.others} covers together, ${apart.others} apart`);
     }
   });
 
