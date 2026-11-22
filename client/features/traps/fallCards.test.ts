@@ -5,6 +5,7 @@ import type { Fall, RoomState } from "#shared/model.ts";
 import { character, room, scene, token } from "#shared/testutil.ts";
 import { deskFalls, fallRead, foldedWithFalls, type FallNames } from "./desk.ts";
 
+const { fallAlerts } = await import("./alerts.ts");
 const { fallStart, FallCard } = await import("./FallCard.tsx");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -115,6 +116,23 @@ describe("fall cards on the DM desk", () => {
     const mountGone = fallRead(view(), card({ tokenId: "horse", riders: ["thorn"] }), "upper", NO_LABELS);
     assert.deepEqual([mountGone.kind, mountGone.line, mountGone.tokenIds], ["here", "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.", ["thorn"]], "a rider still takes the fall of a mount gone since");
     assert.deepEqual(fallStart(card({ tokenId: "horse", riders: ["thorn"] }), two.tokenIds).source, { kind: "fall", fallId: "120:0", tokenIds: ["horse", "thorn"] });
+  });
+
+  test("a character shown by two tokens is named once, in the card, its region, its buttons and the toast, while Apply keeps both tokens (LP47B-FALL-1)", () => {
+    const twice = view({
+      tokens: {
+        ...view().tokens,
+        horse: token("horse", { sceneId: "ground", name: "Horse" }),
+        carried: token("carried", { sceneId: "ground", kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" } }),
+      },
+    });
+    const c = card({ tokenId: "horse", riders: ["thorn", "carried"] });
+    const read = fallRead(twice, c, "upper", NO_LABELS);
+    assert.deepEqual([read.line, read.region, read.whose], ["Horse and Thorn fell 10 ft to Ground floor: each 1d6 Bludgeoning, Prone.", "Fall: Horse and Thorn", "Horse and Thorn's fall"]);
+    assert.deepEqual(read.tokenIds, ["horse", "thorn", "carried"]);
+    const alone = fallRead(twice, card({ tokenId: "thorn", riders: ["carried"] }), "upper", NO_LABELS);
+    assert.equal(alone.line, "Thorn fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.");
+    assert.deepEqual(fallAlerts([c], twice, "upper", NO_LABELS).map((a) => a.text), ["Horse and Thorn fell 10 ft to Ground floor."]);
   });
 
   test("Apply's page: the creature that fell, by the card's id, in the Dice panel", () => {

@@ -5,6 +5,7 @@ import { byFallAge } from "#shared/rules/fallCards.ts";
 import { fallDice, floorBelow } from "#shared/rules/floorLinks.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { displayName } from "../../lib/scene.ts";
+import { holderOf } from "../dice/targets.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { floorWord } from "./rules.ts";
@@ -179,6 +180,22 @@ export function fallers(view: Pick<RoomState, "tokens">, card: Fall): string[] {
   return [card.tokenId, ...(card.riders ?? [])].filter((id) => ownEntry(view.tokens, id) !== undefined);
 }
 
+/**
+ * The first token of each holder, which is all a card's words name: a
+ * character shown by two tokens, one riding and one carried, is one
+ * creature that fell once (LP47B-FALL-1). Apply still takes every token.
+ */
+export function fallNamed(view: Pick<RoomState, "tokens">, ids: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return ids.filter((id) => {
+    const token = ownEntry(view.tokens, id);
+    const holder = token ? holderOf(token) : `token:${id}`;
+    if (seen.has(holder)) return false;
+    seen.add(holder);
+    return true;
+  });
+}
+
 /** "Thorn", "Horse and Thorn", "Horse, Thorn, Bree and 2 more". */
 export function fallNames(view: Pick<RoomState, "tokens">, ids: readonly string[], labels: Labels): string {
   return nameList(view, ids.slice(0, FALL_NAMES_SHOWN), labels, Math.max(0, ids.length - FALL_NAMES_SHOWN));
@@ -230,9 +247,10 @@ export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall,
   const tokenIds = fallers(view, card);
   if (tokenIds.length > 0) {
     if (known) for (const id of tokenIds) keepName(known, id, nameOf(view, id, labels));
-    const name = fallNames(view, tokenIds, labels);
+    const named = fallNamed(view, tokenIds);
+    const name = fallNames(view, named, labels);
     const dice = fallDice(card.ft);
-    const hurt = dice > 0 ? `${tokenIds.length > 1 ? "each " : ""}${dice}d6 Bludgeoning, Prone` : "no damage";
+    const hurt = dice > 0 ? `${named.length > 1 ? "each " : ""}${dice}d6 Bludgeoning, Prone` : "no damage";
     return { kind: "here", name, tokenIds, dice, line: `${name} fell ${card.ft} ft to ${floor}: ${hurt}.`, region: `Fall: ${name}`, whose: `${name}'s fall` };
   }
   const here = shown !== null && sameScene(view, card.sceneId, shown);

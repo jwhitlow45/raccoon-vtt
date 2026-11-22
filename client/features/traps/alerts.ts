@@ -8,7 +8,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
-import { fallers, fallNames } from "./desk.ts";
+import { fallers, fallNamed, fallNames } from "./desk.ts";
 import { placeName } from "../floors/words.ts";
 
 /*
@@ -131,7 +131,7 @@ function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "to
     const floor = scene?.floor?.name ?? scene?.name ?? "another floor";
     const ids = fallers(state, card);
     const show = scene && card.sceneId !== viewing ? { show: { sceneId: card.sceneId } } : {};
-    if (ids.length > 0) return { text: `${fallNames(state, ids, labels)} fell ${card.ft} ft to ${floor}.`, ...show };
+    if (ids.length > 0) return { text: `${fallNames(state, fallNamed(state, ids), labels)} fell ${card.ft} ft to ${floor}.`, ...show };
     // The copy holds every floor of the scene shown, so a creature missing from it is no longer on the map there.
     if (viewing !== null && sameScene(state, card.sceneId, viewing)) return { text: `A creature no longer on the map fell ${card.ft} ft to ${floor}.` };
     return { text: `A creature fell ${card.ft} ft to ${floor} ${scene?.name.trim() ? `on ${scene.name.trim()}` : "on another scene"}.`, ...show };
