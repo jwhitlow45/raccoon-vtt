@@ -268,7 +268,7 @@ A tower, a keep or a cellar under an inn is one place on several levels, and a s
 
 **Floors** is the first group in the scene's settings, under **This scene**. It lists the floors top first, and each row says where the players stand: **Players here** on the floor they start on and on any floor an unhidden party member stands on, **Reached** on a floor they have been on or you have shown them, and **Not reached yet** on the rest. The floor on your screen wears an **On screen** tag. **Add a floor above** and **Add a floor below** put a new floor beside the floor on your screen. The new floor copies that floor's size, background, grid, light and what players see, and starts with no map, weather or scene sound, so you can build it from nothing. The first floor you add also names the scene's own floor **Ground floor**.
 
-![The Floors group open in the Scenes panel: Attic, Upper floor with its On screen tag, and Ground floor with the players, then Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
+![The Floors group open in the Scenes panel: Attic, Upper floor with its On screen tag, and Ground floor with the players, then the Map row with Blank, VTT file and Dungeon, Add a floor above and Add a floor below, and Light and weather under them.](dm-guide/floors-settings.webp)
 
 Tap a floor to open its page. It sets the floor's **Floor name**, its **Height above the floor below** (5 to 50 ft in steps of 5, and 10 by default, which the cost of a climb on stairs and ladders reads, and not on the lowest floor), **Show to players** or **Hide from players**, **Move up** and **Move down** in the stack, **Go to this floor** to put it on your own screen, and **Remove floor**, which asks for a second tap and takes everything on that floor with it. Every other group in the settings, Light and weather, Fog and vision, Map and grid and the rest, sets the floor on your screen, and a line under **This scene** says which: "The groups below set Upper floor."
 
@@ -724,7 +724,7 @@ Two groups of the scene's settings fine-tune it. **Light** sits first in **Light
 - **Sight sources**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Switches**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. While it is folded, it tells you how both stand, such as "Fog on · Party vision on". You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
-![Fog and vision for the crypt: the group's name with its icon, Players see on Explore, Sight on Whole party, and the Sight sources list with Thorn, Bree and Mara, each lending the party its sight.](dm-guide/vision-settings.webp)
+![Fog and vision for the crypt: the group's name with its icon, Players see on Explore, Sight on Whole party, and the Sight sources list starting with Thorn, Bree and Mara, each lending the party its sight.](dm-guide/vision-settings.webp)
 
 **Senses.** Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 

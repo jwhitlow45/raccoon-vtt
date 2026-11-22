@@ -679,7 +679,7 @@ A player at 844 x 390 at 130% (649 x 300), the pair, Area placing a Fireball, th
 |     o Crypt (Pat)                                    Find  Fit     |
 |         +-----------------------------+                            |
 |         | SHAPE                       |                            |
-|         | [Spell, e.g. fireball     ] |           map              |
+|         | [e.g. fireball           ] |           map              |
 |         | [Cone] [Sphere] [Cylinder]  |                            |
 |         | [Cube] [Line] [Emanation]   |                            |
 |         | Size   [-]  20 ft  [+]      |                            |
