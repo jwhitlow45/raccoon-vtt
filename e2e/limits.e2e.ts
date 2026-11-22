@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { idTime, uuidv7 } from "../shared/ids.ts";
-import { KEPT_FOR_PLAYERS_FULL, LEAVE_PLAYERS_ASK, overNotice, ROOM_FULL, SCENE_FULL, SEAT_FULL, sizeRemedy } from "../shared/limits.ts";
+import { BLOCKS_ROOM_TOO_FULL, KEPT_FOR_PLAYERS_FULL, LEAVE_PLAYERS_ASK, overNotice, ROOM_FULL, SCENE_FULL, SEAT_FULL, sizeRemedy } from "../shared/limits.ts";
 import type { RoomState } from "../shared/model.ts";
 import { actor } from "../shared/testutil.ts";
 import { ConsoleWatch, dragCells, OpSocket, openSideTab, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -528,6 +528,87 @@ describe("raccoon-vtt player limits on a device", { timeout: 600_000 }, () => {
     await waitFor("the map back", () => (dmSocket.state!.scenes[run.sceneId] ? true : null));
     await waitFor("the players on it again", () => (dmSocket.state!.meta.playerSceneId === run.sceneId ? true : null));
     await ana.locator(".konvajs-content").first().waitFor();
+  });
+
+  test("lp47fixa-1. a refused stat block Save shows its words at the top of the editor and in view, saved from the top or the foot of the form, on a computer and a phone at 100% and 130%", async () => {
+    const off: string[] = [];
+    // The server never sees the save: the page is sent the refusal in its place, as the room at its line answers a player.
+    const refuseSaves = () => {
+      ana_.toServer = (frame) => {
+        if (frame.t !== "op" || (frame.op as Json | undefined)?.t !== "character.update") return frame;
+        const seq = Math.max(0, ...ana_.got.flatMap((f) => (typeof f.seq === "number" ? [f.seq] : [])));
+        ana_.open!.page.send(JSON.stringify({ t: "ev", seq, changes: [], rejects: [{ n: frame.n, code: "quota", message: BLOCKS_ROOM_TOO_FULL }] }));
+        return null;
+      };
+    };
+    // The editor's scrolling body is the one box in its dialog that scrolls (each evaluate finds it again, in the page).
+    type Styles = { getComputedStyle(el: unknown): { overflowY: string } };
+    /** Where the alert lies against the editor's scrolling body, and how far that body scrolls. */
+    const placed = (alert: Locator) =>
+      alert.evaluate((el) => {
+        const g = globalThis as unknown as Styles;
+        const body = [...el.closest("dialog")!.querySelectorAll("div")].find((d) => g.getComputedStyle(d).overflowY === "auto" && d.scrollHeight > d.clientHeight)!;
+        const [a, b] = [el.getBoundingClientRect(), body.getBoundingClientRect()];
+        return { top: a.top, bottom: a.bottom, bodyTop: b.top, bodyBottom: b.bottom, tall: body.scrollHeight - body.clientHeight };
+      });
+    try {
+      for (const scale of ["1", "1.3"]) {
+        for (const size of [DESKTOP, PHONE, SMALL]) {
+          const phone = size.width < 900;
+          const at = `${size.width} x ${size.height} at ${scale === "1" ? 100 : 130}%`;
+          await ana.setViewportSize(size);
+          await ana.evaluate((v) => localStorage.setItem("rvtt.uiScale", v), scale);
+          await openAna();
+          if (phone) {
+            await ana.getByRole("button", { name: "Panels" }).click();
+            await ana.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+          } else await openSideTab(ana, "Characters");
+          // Ana plays Bree alone, so the panel lands on Bree's page.
+          const fold = ana.getByRole("button", { name: "Stat block", exact: true });
+          await fold.waitFor();
+          if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+          await ana.getByRole("button", { name: "Add a stat block" }).click();
+          const editor = ana.getByRole("dialog", { name: "Bree's stat block" });
+          await editor.waitFor();
+          await editor.getByLabel("Level", { exact: true }).fill("3");
+          refuseSaves();
+          for (const from of ["top", "foot"] as const) {
+            // From the foot, as after adding a weapon under Rolls: the words above the fields come into view all the same.
+            if (from === "foot") {
+              await editor.evaluate((dialog) => {
+                const g = globalThis as unknown as Styles;
+                [...dialog.querySelectorAll("div")].find((d) => g.getComputedStyle(d).overflowY === "auto" && d.scrollHeight > d.clientHeight)!.scrollTo(0, 1e6);
+              });
+            }
+            await editor.getByRole("button", { name: "Save", exact: true }).click();
+            const alert = editor.getByRole("alert").filter({ hasText: BLOCKS_ROOM_TOO_FULL });
+            await alert.waitFor();
+            const label = `${at}, saved from the ${from}`;
+            const box = await waitFor(`${label}: the words in view`, async () => {
+              const box = await placed(alert);
+              return box.top >= box.bodyTop - 1 && box.bottom <= box.bodyBottom + 1 ? box : null;
+            }, 5_000);
+            assert.ok(box.tall > 0, `${label}: the form scrolls, so the check means something`);
+            if (from === "top") {
+              // Above the fields: nothing of the form sits between the editor's top and the words.
+              assert.ok(box.top - box.bodyTop < 200, `${label}: at the top of the editor ${JSON.stringify(box)}`);
+              off.push(...alignmentLines(await measureAlignment(alert), `the refused save's words at ${at}`));
+              await shots.take(ana, `lp47fixa-1-refused-save-${size.width}-${scale === "1" ? 100 : 130}`);
+            }
+          }
+          ana_.toServer = null;
+          await ana.keyboard.press("Escape");
+          await editor.getByRole("button", { name: "Discard", exact: true }).click();
+          await editor.waitFor({ state: "detached" });
+        }
+      }
+    } finally {
+      ana_.toServer = null;
+      await ana.setViewportSize(DESKTOP);
+      await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await openAna();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
   test("lim-9. the pages logged no console errors", () => {

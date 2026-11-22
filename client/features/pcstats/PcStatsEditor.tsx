@@ -130,6 +130,12 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     const timer = setTimeout(() => setRetryAt(null), Math.max(0, retryAt - Date.now()));
     return () => clearTimeout(timer);
   }, [retryAt]);
+  // A refused Save says so above the fields, scrolled into view after the render that shows it, as the companion editor
+  // does: at the foot of a long form the words sat out of sight and Save seemed to do nothing (LP47A-STATS-1).
+  const refused = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (refusal) refused.current?.scrollIntoView({ block: "nearest" });
+  }, [refusal]);
 
   const send = (event: FlowEvent) => {
     const { state, effects } = stepFlow(flowRef.current, event);
@@ -447,6 +453,13 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             This stat block was deleted or is no longer yours, so it cannot be saved.
           </Notice>
         ) : null}
+        {refusal ? (
+          <div ref={refused}>
+            <Notice tone="danger" role="alert">
+              <strong>Not saved:</strong> {refusal}
+            </Notice>
+          </div>
+        ) : null}
         <FillFrom onPaste={() => send({ t: "open", step: "paste" })} onDdb={() => send({ t: "open", step: "ddb" })} />
         {alsoAny(flow.also) ? <Help>{`Save also sets ${alsoWords(flow.also)}.`}</Help> : null}
         <LevelRow draft={draft} onLevel={(level) => setDraft((x) => ({ ...x, level }))} />
@@ -457,11 +470,6 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         <Defenses stats={draft.stats} setStats={setStats} />
         <Rolls stats={draft.stats} level={draft.level} setStats={setStats} newId={actions.newId} />
         {size.near && !size.over ? <Notice tone="warning">{sizeText(size.bytes)}</Notice> : null}
-        {refusal ? (
-          <Notice tone="danger" role="alert">
-            <strong>Not saved:</strong> {refusal}
-          </Notice>
-        ) : null}
         {problems.length > 0 ? (
           <div role="status">
             <Notice tone="danger">
