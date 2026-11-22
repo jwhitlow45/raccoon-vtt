@@ -30,6 +30,7 @@ import {
 } from "./ruler.ts";
 import { MEASURES, pickMeasure, publish, refuseKeep, restoreRuler, rulerActivated, rulerDeactivated, rulerSlot, shares, takeStairs, toggleShare } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { heldKey, walkShown, walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -130,7 +131,7 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
   );
   if ("leave" in plan) {
     publish(ctx, plan.leave);
-    ctx.ui.notify("Measure something first, then double-tap to keep the ruler on the map.");
+    ctx.ui.notify(pointerWords("Measure something first, then double-tap to keep the ruler on the map."));
     return;
   }
   if (ctx.actions.dispatch({ t: "drawing.create", drawing: plan.create }) === null) return;

@@ -7,7 +7,9 @@ import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { ID_RETRY_FAILED, overNotice } from "#shared/limits.ts";
+import { NO_TYPED_TOTALS } from "#shared/permissions.ts";
 import { endSentence } from "#shared/logText.ts";
+import { JOIN_CHANGED } from "#shared/rules/wingClear.ts";
 import type { InitEntry, LogEntry, RoomState, SceneId, Viewer } from "#shared/model.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
@@ -26,6 +28,7 @@ import {
 import { holdsTurn, opReads, reads, satisfies } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
+import { pointerWords } from "../lib/pointerWords.ts";
 import { freshIds, idTimeRefused, mintedOf, renamed, sentIdDead, unsentIdStale } from "./ids.ts";
 import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, nextFloorExpiry, NO_FLOOR_EPHEMERAL, onEveryFloor, onFloor, sweepEph, type FloorEphemeral } from "./ephemeral.ts";
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
@@ -482,12 +485,23 @@ function isRace(code: RefusalCode): boolean {
 }
 
 /**
+ * The refusals the server words for touch ("Tap Roll instead"). A mouse
+ * reads Click in them. Only the exact sentences are reworded: a refusal can
+ * carry a name, and one named "Tap" keeps it.
+ */
+const TAP_REFUSALS: ReadonlySet<string> = new Set([NO_TYPED_TOTALS, JOIN_CHANGED]);
+
+export function refusalWords(message: string): string {
+  return TAP_REFUSALS.has(message) ? pointerWords(message) : message;
+}
+
+/**
  * The toast for a refused op. A quota refusal says itself what is full,
  * the room or one scene (shared/limits.ts), so it is shown as it is: a
  * scene at one of its caps is not a full room.
  */
 export function refusalText(code: RefusalCode, message: string): string {
-  const detail = message.trim().replace(/\.$/, "");
+  const detail = refusalWords(message).trim().replace(/\.$/, "");
   const sentence = detail ? detail[0]!.toUpperCase() + detail.slice(1) + "." : "";
   switch (code) {
     case "quota":

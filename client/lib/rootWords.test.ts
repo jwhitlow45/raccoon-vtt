@@ -32,7 +32,11 @@ const { ConfirmButton: TokenConfirm } = await import("../features/tokens/ui.tsx"
 const { ConfirmButton: OptionsConfirm } = await import("../features/measure/controls.tsx");
 const { Help, Note } = await import("../components/Panel.tsx");
 const { Note: TokenNote } = await import("../features/tokens/ui.tsx");
+const { outcomeWords } = await import("../features/builder/WingPane.tsx");
 const { pointerWords } = await import("./pointerWords.ts");
+const { refusalText } = await import("../state/store.ts");
+const { NO_TYPED_TOTALS } = await import("#shared/permissions.ts");
+const { JOIN_CHANGED } = await import("#shared/rules/wingClear.ts");
 
 function html(element: ReturnType<typeof createElement>): string {
   return renderToStaticMarkup(element);
@@ -92,4 +96,22 @@ describe("Help and both Notes word fixed text for the pointer", () => {
       assert.match(onDevice(false, () => html(line({}, "Tap Room is the scene"))), />Tap Room is the scene</, "no tapWords, no rewording");
     });
   }
+});
+
+describe("a refusal toast words the server's touch sentences for the pointer", () => {
+  test("a mouse reads Click in the two sentences the server words with Tap, and a touch screen keeps Tap", () => {
+    assert.equal(onDevice(false, () => refusalText("forbidden", NO_TYPED_TOTALS)), "The DM has turned off typed totals in this room. Click Roll instead.");
+    assert.equal(onDevice(true, () => refusalText("forbidden", NO_TYPED_TOTALS)), "The DM has turned off typed totals in this room. Tap Roll instead.");
+    assert.equal(onDevice(false, () => refusalText("invalid", JOIN_CHANGED)), "Not saved. The wall the wing joins has changed. Click it again.");
+  });
+
+  test("the wing pane's own toast and note for a changed join word it the same way", () => {
+    assert.equal(onDevice(false, () => outcomeWords({ k: "join" } as never)), "The wall the wing joins has changed. Click it again.");
+    assert.equal(onDevice(true, () => outcomeWords({ k: "join" } as never)), "The wall the wing joins has changed. Tap it again.");
+  });
+
+  test("a refusal that holds a name is never reworded, so a creature named Tap keeps its name", () => {
+    assert.equal(onDevice(false, () => refusalText("forbidden", "Tap is not yours")), "Tap is not yours.");
+    assert.equal(onDevice(false, () => refusalText("invalid", "Tap Room is full. Tap Roll instead")), "Not saved. Tap Room is full. Tap Roll instead.");
+  });
 });

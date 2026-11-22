@@ -128,7 +128,7 @@ function pickAction(ctx: ToolContext, picking: TrapPicking, p: ToolPointer): voi
   else if (door) action = { door: door.ref, state: door.door.state === "open" ? "closed" : "open" };
   else if (stamp && stamp.visibility === "dm") action = { show: { stampId: stamp.id } };
   if (!action) {
-    ctx.ui.notify(token || stamp ? "Only a hidden creature or a hidden stamp can be shown." : "Tap a door, a light, a hidden creature or a hidden stamp.", "info");
+    ctx.ui.notify(token || stamp ? "Only a hidden creature or a hidden stamp can be shown." : pointerWords("Tap a door, a light, a hidden creature or a hidden stamp."), "info");
     return;
   }
   const actions = trap.rig.actions;

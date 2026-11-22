@@ -39,6 +39,7 @@ import { ghostOf, ghostRooms, type WingGhost } from "./wingGhost.ts";
 import { wingBox, wingFit, wingPanePlacement, wingPlace } from "./wingPanePlacement.ts";
 import { areaLine, JOIN_WORDS, judgeJoin, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
 import { JOIN_CHANGED, WING_MOVED } from "#shared/rules/wingClear.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 
 /*
  * The wing pane (docs/design: dungeon generator phase 3, 3.3, D-261110-161,
@@ -203,7 +204,7 @@ export function outcomeWords(outcome: WingOutcome): string | null {
     case "unconfirmed":
       return "The connection dropped while adding the wing, and it could not be confirmed complete. Undo setup in Setup history usually takes back what landed.";
     case "join":
-      return JOIN_CHANGED;
+      return pointerWords(JOIN_CHANGED);
     case "moved":
       return WING_MOVED;
     case "large":
@@ -455,7 +456,7 @@ export default function WingPane(props: {
     }
     if (outcome.k === "join") {
       // A changed join is tapped again: the pane closes with it, and the toast says why.
-      ui.notify(JOIN_CHANGED, "error");
+      ui.notify(pointerWords(JOIN_CHANGED), "error");
       builder.setState({ wing: { ...picks, tap: null, join: null }, wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null });
       return;
     }
