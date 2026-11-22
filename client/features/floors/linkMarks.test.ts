@@ -9,7 +9,7 @@ import type { Box } from "../../lib/boardText.ts";
 import { theme } from "../../lib/theme.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { pillGeometry, pillPlace, pillReach } from "../measure/pillPlace.ts";
-import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, spotsOf, tokenSpots, type DrawSpace, type EndPills } from "./linkMarks.ts";
+import { boxCoversOutline, clearOfMarkers, cornersOf, drawnBox, linkLabel, notReachedLinks, outlineBox, outlineOf, placeEnds, quietLinks, spotsOf, tokenBox, tokenSpots, type DrawSpace, type EndPills } from "./linkMarks.ts";
 
 /*
  * The board's marks of stairs and ladders (docs/design/design-v1-floors.md
@@ -425,6 +425,24 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
       }
     }
     assert.equal(ran, 180);
+  });
+
+  test("in Isometric a hole's chip keeps off a creature's standee rising into it, where its squares lie clear of the chip, at every turn (LP48FIXA-R1)", () => {
+    const small = hole("a", { x: 8, y: 6, w: 1, h: 1 });
+    const area = (a: Box, b: Box) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+    for (const turn of [0, 1, 2, 3] as const) {
+      const iso = flat(turn);
+      const lone = placeEnds([small], [], 40, iso, () => true).get("a")!.chip!;
+      const chipBox = drawnBox(lone, 40, iso, true, true);
+      // A creature round the hole whose squares the chip clears but whose standee it covers.
+      const spots = [-2, -1, 0, 1, 2].flatMap((dx) => [-2, -1, 0, 1, 2].map((dy) => ({ x: 8 + dx, y: 6 + dy, w: 1, h: 1 }))).filter((r) => !(r.x === 8 && r.y === 6));
+      const behind = spots.find((r) => area(chipBox, outlineBox(cornersOf({ ...r, loop: null }), iso)) === 0 && area(chipBox, tokenBox(r, iso)) > 0);
+      assert.ok(behind, `turn ${turn}: such a creature`);
+      const moved = placeEnds([small], [], 40, iso, () => true, [behind]).get("a")!.chip!;
+      assert.ok(area(drawnBox(moved, 40, iso, true, true), tokenBox(behind, iso)) < area(chipBox, tokenBox(behind, iso)), `turn ${turn}: the chip moves off the standee`);
+    }
+    // Top-down draws no standee: a creature covers its squares.
+    assert.deepEqual(tokenBox({ x: 3, y: 4, w: 2, h: 2 }, null), { x0: 3, y0: 4, x1: 5, y1: 6 });
   });
 
   test("the tokens a hole's pills keep off are each token's squares on the floor shown, and only there", () => {

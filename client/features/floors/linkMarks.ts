@@ -284,6 +284,19 @@ export function boxCoversOutline(box: Box, corners: readonly { x: number; y: num
   return true;
 }
 
+/**
+ * What a creature covers on the screen: its squares, and in Isometric the
+ * standee rising from their middle as tall as they are deep (canvas/relief/standee.ts
+ * standeeShape's frame), so a chip over a corner behind it keeps off its
+ * upper body and its badges too (LP48FIXA-R1).
+ */
+export function tokenBox(r: FloorLink["rect"], iso: DrawSpace): Box {
+  const ground = outlineBox(cornersOf({ ...r, loop: null }), iso);
+  if (!iso) return ground;
+  const foot = viewPointOf(iso, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  return { x0: Math.min(ground.x0, foot.x - r.w / 2), y0: Math.min(ground.y0, foot.y - r.h), x1: Math.max(ground.x1, foot.x + r.w / 2), y1: ground.y1 };
+}
+
 /** What one box covers of another: nothing, or a flat charge for each cover with the area added, so fewer covers always beat a smaller area. */
 function covers(a: Box, b: Box, charge: number): number {
   return boxesMeet(a, b) ? charge + (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * (Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)) : 0;
@@ -324,7 +337,7 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
   const { view = null, prune = true } = options;
   const out = new Map<string, PlacedPills>();
   const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
-  const standing = tokens.map((r) => outlineBox(cornersOf({ ...r, loop: null }), iso));
+  const standing = tokens.map((r) => tokenBox(r, iso));
   type Cand = { spec: PillSpec; box: Box; solo: number };
   type Slot = { end: number; chip: boolean; cands: Cand[] };
   const slots: Slot[] = [];
