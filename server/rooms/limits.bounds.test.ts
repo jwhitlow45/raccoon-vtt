@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { EXACT_WIDTH, FAR, farByteLine, farLimits, HARD, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, LIMITS, SEAT, serializedBytes } from "#shared/limits.ts";
+import { EXACT_WIDTH, FAR, farByteLine, farLimits, HARD, HISTORY_BYTES, KEPT_FOR_PLAYERS_FULL, keptForPlayers, LIMITS, rosterListBytes, SEAT, serializedBytes, utf8Bytes } from "#shared/limits.ts";
+import { keys } from "#shared/keys.ts";
+import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import type { RoomSettings, RoomState, Viewer } from "#shared/model.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { turnUnderWay } from "#shared/rules/path.ts";
 import { exactCopies, farRoomBytes, growthBound, measuredStateBytes, ownHeldBytes, SizeGuard, turnWalks, walkPool, type ExactCopy } from "./sizeGuard.ts";
-import { actor, apply, castAsk, character, env, room, scene, template, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, character, effect, env, member, room, scene, template, token } from "#shared/testutil.ts";
 import { DEFAULT_BUFFERED_LIMIT } from "./ws.ts";
-import { fullRoom, markedRoom, measureBounds, roomMeasure } from "./limitsTesting.ts";
+import { fullRoom, markedRoom, measureBounds, memberIdAt, roomMeasure, type FullRoomOptions } from "./limitsTesting.ts";
 
 const MIB = 1024 * 1024;
 
@@ -108,13 +110,16 @@ describe("the marked room of 20 per-player scenes", () => {
 });
 
 /*
- * D-261121-019 and D-261116-016: once the DM's adds stop, each player keeps
- * more than 0.75 MiB, whatever Players move any token and Players apply
- * damage are set to and whether a fight runs. KEPT_FOR_PLAYERS holds the
- * widths those settings and sight put in a player's exact part at
- * EXACT_WIDTH a thing, each held here at or above what a thing of its kind
- * takes. The room fills to the DM's line with the settings on, as the DM's
- * change of one meets that line.
+ * D-261121-021 and D-261116-016: once the DM's adds stop, each player keeps
+ * more than 0.75 MiB less what their own rolls, asks and rulers count past
+ * their stored bytes, whatever Players move any token and Players apply
+ * damage are set to, whether a fight runs, and whoever wrote the shared
+ * lines: each player in turn, one player alone, or the DM, HP changes on a
+ * creature every player sees. keptForPlayers holds the widths the DM's
+ * choices put in a player's exact part at EXACT_WIDTH a thing, each held
+ * here at or above what a thing of its kind takes. The room fills to the
+ * DM's line with the settings on, as the DM's change of one meets that
+ * line.
  */
 describe("the room the DM's adds leave the players at the far lines", () => {
   const settings: ReadonlyArray<readonly [string, Partial<RoomSettings>]> = [
@@ -123,7 +128,7 @@ describe("the room the DM's adds leave the players at the far lines", () => {
     ["Players apply damage", { playersMoveAny: "none", playersApplyDamage: true }],
     ["both", { playersMoveAny: "all", playersApplyDamage: true }],
   ];
-  const widthOf = (key: string, part: ExactCopy): keyof typeof EXACT_WIDTH | undefined => {
+  const widthOf = (key: string, part: ExactCopy): "creature" | "character" | "area" | "unseenArea" | undefined => {
     if (key.startsWith("token:")) return "creature";
     if (key.startsWith("character:")) return "character";
     if (key.startsWith("template:")) return part.shownOn === "room" ? "unseenArea" : "area";
@@ -140,22 +145,42 @@ describe("the room the DM's adds leave the players at the far lines", () => {
     return creatures;
   };
   const withinWidths = (most: ReadonlyMap<string, number>, what: string) => {
-    for (const [kind, width] of most) assert.ok(width <= EXACT_WIDTH[kind as keyof typeof EXACT_WIDTH], `${what}: a ${kind} takes ${width} bytes`);
+    for (const [kind, width] of most) assert.ok(width <= EXACT_WIDTH[kind as "creature"], `${what}: a ${kind} takes ${width} bytes`);
   };
+  /** What a player's own rolls, asks and rulers count in their exact part past what they store, which only their play grows. */
+  const ownMade = (state: RoomState, player: string): number => {
+    const lines = new Map(state.log.map((line) => [keys.log(line.id), line]));
+    let bytes = 0;
+    for (const [key, part] of exactCopies(state, player)) {
+      const line = lines.get(key);
+      const own = key.startsWith("cast:") || key.startsWith("drawing:") || (line?.data?.type === "dice" && line.data.by === player);
+      if (own) bytes += Math.max(0, part.shown - part.sub);
+    }
+    return bytes;
+  };
+  const dmLineOf = (state: RoomState) => farByteLine("meets", "room", { dmKept: keptForPlayers(state) })!;
+  const runs: ReadonlyArray<{ fight: boolean; lines: NonNullable<FullRoomOptions["lines"]>; whose: string }> = [
+    { fight: true, lines: "spread", whose: "each player's rolls in turn" },
+    { fight: false, lines: "spread", whose: "each player's rolls in turn" },
+    { fight: false, lines: "one", whose: "the first player's rolls alone" },
+    { fight: false, lines: "hp", whose: "the DM's HP changes on a creature every player sees" },
+  ];
 
-  for (const fight of [true, false]) {
+  for (const { fight, lines, whose } of runs) {
     for (const [what, set] of settings) {
-      test(`with ${what} on and ${fight ? "a fight" : "no fight"}, each player keeps more than 0.75 MiB once the DM's adds stop`, () => {
+      test(`with ${what} on, ${fight ? "a fight" : "no fight"} and the shared lines ${whose}, each player keeps more than 0.75 MiB less their own rolls', asks' and rulers' widths once the DM's adds stop`, () => {
         const players = farByteLine("meets", "room", "players")!;
-        const dmLine = farByteLine("meets", "room", "dm")!;
-        const full = fullRoom({ roomBytes: dmLine, fight, settings: set });
+        const full = fullRoom({ roomBytes: dmLineOf, fight, settings: set, lines });
         // The DM's reading rounds its stepped part up, so their adds stop within a step of their line.
+        const dmLine = dmLineOf(full.state);
         const dm = farRoomBytes(full.state, true);
         assert.ok(dm <= dmLine && dm > dmLine - FAR.byteStep, `the DM's reading ${dm} against their line ${dmLine}`);
         const measured = measuredStateBytes(full.state);
-        for (const player of full.players) {
+        // Every player where the lines are spread, else the first, who wrote them all or none, and two others.
+        for (const player of lines === "spread" ? full.players : full.players.slice(0, 3)) {
           const keeps = players - farRoomBytes(full.state, true, measured, ownHeldBytes(full.state, player));
-          assert.ok(keeps > 0.75 * MIB, `${player} keeps ${keeps} bytes`);
+          const own = ownMade(full.state, player);
+          assert.ok(keeps > 0.75 * MIB - own, `${player} keeps ${keeps} bytes, their own rolls, asks and rulers ${own}`);
         }
         // Either setting puts every creature their copy holds in their exact part, far more than a seat's.
         const most = new Map<string, number>();
@@ -168,18 +193,90 @@ describe("the room the DM's adds leave the players at the far lines", () => {
     }
   }
 
-  test("in a room full to the DM's line, the DM's change that turns Players apply damage on is refused in the words of the room kept for the players, and one that turns Players move any token on is taken", () => {
-    const full = fullRoom({ roomBytes: farByteLine("meets", "room", "dm")!, fight: false });
+  test("in a room full to the DM's line, the DM's change that turns Players move any token or Players apply damage on is refused in the words of the room kept for the players, though the change adds no bytes", () => {
+    const full = fullRoom({ roomBytes: dmLineOf, fight: false });
     const dm: Viewer = { memberId: full.dms[0]!, role: "dm" };
     const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
     guard.stateMeasured(measuredStateBytes(full.state), full.state);
     const turnedOn = (settings: Partial<RoomSettings>) => {
       const r = applyOp(full.state, { t: "room.update", settings }, dm, env(9));
       assert.ok(r.ok);
-      return guard.check(r.state, [full.sceneId], growthBound(full.state, r.state, r.touched), full.state, "dm", "dmAdd", false);
+      assert.ok(dmLineOf(r.state) < dmLineOf(full.state), "the DM's line moves down");
+      return { reading: farRoomBytes(r.state, true), answer: guard.check(r.state, [full.sceneId], growthBound(full.state, r.state, r.touched), full.state, "dm", "dmAdd", false) };
     };
-    assert.deepEqual(turnedOn({ playersApplyDamage: true }), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL });
-    assert.deepEqual(turnedOn({ playersMoveAny: "all" }), { ok: true });
+    assert.deepEqual(turnedOn({ playersApplyDamage: true }).answer, { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL });
+    // Move any counts nothing in the DM's reading, so only the line's move refuses it.
+    const moveAny = turnedOn({ playersMoveAny: "all" });
+    assert.ok(moveAny.reading <= farRoomBytes(full.state, true), "the DM's reading does not grow");
+    assert.deepEqual(moveAny.answer, { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL });
+  });
+
+  test("a join that raises the kept bytes leaves the DM past the DM's line: the DM's adds are refused in the kept words and a player's add is taken", () => {
+    const facts = (count: number) => ({ meta: { settings: { playersMoveAny: "none" as const, playersApplyDamage: false } }, members: Object.fromEntries(Array.from({ length: count }, (_, i) => [memberIdAt(i), {}])) });
+    // The fewest members at which one more raises the kept bytes by a step.
+    const members = Array.from({ length: LIMITS.membersPerRoom - 2 }, (_, i) => i + 2).find((n) => keptForPlayers(facts(n + 1)) > keptForPlayers(facts(n)))!;
+    assert.ok(members !== undefined);
+    const state = room();
+    state.members = Object.fromEntries(Array.from({ length: members }, (_, i) => [memberIdAt(i), member(memberIdAt(i), i === 0 ? "dm" : "player")]));
+    const [dmId, playerId] = [memberIdAt(0), memberIdAt(1)];
+    // The DM's notes on scenes of their own, as many as the DM's line takes.
+    const dmLine = dmLineOf(state);
+    const add = (i: number) => {
+      const sceneId = `f${Math.floor(i / 100)}`;
+      state.scenes[sceneId] ??= scene(sceneId, { order: 10 + Math.floor(i / 100) });
+      state.tokens[`fill${i}`] = token(`fill${i}`, { sceneId, notes: "n".repeat(MAX_NOTES) });
+    };
+    // Most of them at once, by one's bytes, then one at a time to the line.
+    const empty = farRoomBytes(state, true);
+    add(0);
+    const each = farRoomBytes(state, true) - empty || serializedBytes(state.tokens.fill0);
+    let i = 1;
+    for (const most = Math.floor((dmLine - empty) / each) - 2 * Math.ceil(FAR.byteStep / each); i < most; i++) add(i);
+    for (const batch of [16, 1]) {
+      for (; farRoomBytes(state, true) <= dmLine; i += batch) for (let k = i; k < i + batch; k++) add(k);
+      for (let k = i - batch; k < i; k++) delete state.tokens[`fill${k}`];
+      i -= batch;
+    }
+    const server: Viewer = { memberId: "server", role: "dm" };
+    const joined = applyOp(state, { t: "sys.memberJoin", member: { id: memberIdAt(members), name: "Late", color: "#123456", kind: "player", createdAt: "2026-11-21T20:00:00.000Z" } }, server, env(9));
+    assert.ok(joined.ok);
+    const after = joined.state;
+    assert.ok(farRoomBytes(state, true) <= dmLine && farRoomBytes(after, true) > dmLineOf(after), "the join leaves the DM past the DM's line");
+    const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
+    guard.stateMeasured(measuredStateBytes(after), after);
+    const judged = (op: Op, who: Viewer) => {
+      const r = applyOp(after, op, who, env(10));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      return guard.check(r.state, ["s1"], growthBound(after, r.state, r.touched), after, who.role, who.role === "dm" ? "dmAdd" : "widest", false, who.role === "player" ? who.memberId : undefined);
+    };
+    const line = (id: string, ownerId: string): Op => ({ t: "drawing.create", drawing: { id, sceneId: "s1", kind: "line", points: [0, 0, 2, 2], style: { stroke: "#ff0000", width: 2, opacity: 1 }, ownerId, visibility: "all" } }) as Op;
+    assert.deepEqual(judged(line("dm-line", dmId), { memberId: dmId, role: "dm" }), { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL });
+    assert.deepEqual(judged(line("p-line", playerId), { memberId: playerId, role: "player" }), { ok: true });
+  });
+
+  test("a shared line not a player's own and a roll request take no more than their widths at the roster, however long its ids", () => {
+    for (const idLength of [2, 36, 64]) {
+      for (const count of [2, 6, 50]) {
+        const state = room();
+        const ids = Array.from({ length: count }, (_, i) => (i === 0 ? "p1" : i === count - 1 ? "dm1" : `m${i}`.padEnd(idLength, "x")));
+        state.members = Object.fromEntries(ids.map((id) => [id, member(id, id === "dm1" ? "dm" : "player")]));
+        for (let t = 0; t < LIMITS.rollTargets; t++) {
+          state.tokens[`t${t}`] = token(`t${t}`, { x: t % 10, y: Math.floor(t / 10), hpVisibility: "hidden", actor: { inline: actor({ dmNotes: "" }) } });
+          state.tokens[`o${t}`] = token(`o${t}`, { x: t % 10, y: 6 + Math.floor(t / 10), ownerIds: ["p1"], actor: { inline: actor({ dmNotes: "" }) } });
+        }
+        // An HP line of the DM's whose readers are not stored, and a request of 50 of P1's creatures none has answered.
+        const vitals = { hp: { cur: 5, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
+        const revert = { before: vitals, after: vitals, added: [effect("e-hit", { key: "poisoned" })], removed: [] };
+        state.log = [{ id: "1:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert, tokenId: "t0", seen: true } } as never];
+        state.rolls = { r0: { id: "r0", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 15, dcShown: false, resultShown: false, at: "2026-10-12T20:00:00.000Z", targets: Array.from({ length: LIMITS.rollTargets }, (_, i) => ({ tokenId: `o${i}` })) } };
+        const parts = exactCopies(state, "p1");
+        const width = (key: string) => parts.get(key)!.shown - parts.get(key)!.sub;
+        const idMost = Math.max(...ids.map((id) => utf8Bytes(JSON.stringify(id))));
+        const what = `${count} members of ${idLength} characters`;
+        assert.ok(width("log:1:0") <= EXACT_WIDTH.line + EXACT_WIDTH.lineReaderLists * rosterListBytes(ids), `${what}: the line takes ${width("log:1:0")} bytes`);
+        assert.ok(width("roll:r0") <= EXACT_WIDTH.rollRequest + LIMITS.rollTargets * (EXACT_WIDTH.rollTarget + idMost), `${what}: the request takes ${width("roll:r0")} bytes`);
+      }
+    }
   });
 
   test("a creature, a character and an area take no more than their kind's width in a player's exact part, under any setting, however their HP shows", () => {

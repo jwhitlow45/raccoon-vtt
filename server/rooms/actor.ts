@@ -2391,7 +2391,7 @@ export class RoomActor {
       return { ok: true };
     }
     // The DM's other adds read the room as a player's do, at the widest, on the DM's line, so the room kept for the players
-    // (shared/limits.ts KEPT_FOR_PLAYERS) is there whatever the roster: read at today's, the DM's adds could fill what a
+    // (shared/limits.ts keptForPlayers) is there whatever the roster: read at today's, the DM's adds could fill what a
     // player's then lack. The DM's bookkeeping, a move of the players and who sees for themselves (`own`) spend room for the
     // players' own play, so they read today's roster and the players' line, as before. A DM's undo or redo puts back only
     // what the room held before, so it reads the players' line at the widest, the players' scene's and a Per player

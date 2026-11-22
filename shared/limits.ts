@@ -1438,38 +1438,73 @@ export const BOOKKEEPING_RESERVE = { room: 512 * 1024, scene: 256 * 1024 } as co
  * stepped part takes out for it (server/rooms/sizeGuard.ts exactCopies),
  * under any of the room's settings: a creature, a character, an area their
  * copy holds, and an area it holds neither of, nor the creature or floor it
- * is on, which counts at its widest. limits.bounds.test.ts holds each at or
- * above what a thing of its kind takes.
+ * is on, which counts at its widest. A shared line not their own counts
+ * `line` and its readers lists at every member of the roster, as many as
+ * the widest kind holds (an HP line's two, its revert at REVERT_MOST). A
+ * roll request counts `rollRequest` and, for each target, `rollTarget` and
+ * who answered at the roster's widest id. limits.bounds.test.ts holds each
+ * at or above what a thing of its kind takes.
  */
-export const EXACT_WIDTH = { creature: 256, character: 5 * 1024, area: 256, unseenArea: 3328 } as const;
+export const EXACT_WIDTH = { creature: 256, character: 5 * 1024, area: 256, unseenArea: 3328, line: 640, lineReaderLists: 2, rollRequest: 32, rollTarget: 480 } as const;
+
+/**
+ * The shared lines a live log keeps (shared/logRings.ts MAX_LOG, which
+ * imports this file, so the number is kept here too and a test holds them
+ * equal).
+ */
+export const KEPT_SHARED_LINES = 200;
+
+/** A list of every member of the roster as JSON, its brackets, commas and ids: what a line's readers count at in an exact part. */
+export function rosterListBytes(memberIds: readonly string[]): number {
+  return 2 + Math.max(0, memberIds.length - 1) + memberIds.reduce((bytes, id) => bytes + utf8Bytes(JSON.stringify(id)), 0);
+}
+
+/** The public facts the room's kept bytes read (keptForPlayers). */
+export type KeptRoom = { readonly meta: { readonly settings: Pick<RoomState["meta"]["settings"], "playersMoveAny" | "playersApplyDamage"> }; readonly members: Readonly<Record<string, unknown>> };
 
 /**
  * Bytes under the room's far line that the DM's adds leave to the
- * players' (D-261116-008): a DM's op that meets the line stops this much
- * before a player's does, read at the same widest reserves. Measured on
- * live play 43's repro (server/rooms/limits.itest.ts), a session of 5
- * areas and 50 strokes of 200 point values for each of six players takes
- * 418 KiB. It is 1 MiB plus the most the room's settings and sight put in
- * a player's exact part past the stored bytes (D-261121-019): every
- * creature the far line counts in a scene, which Players move any token
- * and Players apply damage bring in, every character, which apply damage
- * brings in, and one seat's areas, its riding ones out of sight. A reading
- * rounds its stepped part up by less than a step, so once the DM's adds
- * stop each player keeps more than 0.75 MiB, close to two sessions
- * (D-261116-016), less only what their own asks and drawings, the roll
- * requests and the shared lines count past their stored bytes. It is
- * rounded up to a whole number of steps, so its words name a round size.
- * Joins and the DM's play after that spend their own bytes of it. A scene
- * keeps more already: the DM's own part of it stops at the 3 MiB scene
- * line, half its far line.
+ * players' (D-261116-008, D-261121-021): a DM's op that meets the line
+ * stops this much before a player's does, read at the same widest
+ * reserves. Measured on live play 43's repro (server/rooms/limits.itest.ts),
+ * a session of 5 areas and 50 strokes of 200 point values for each of six
+ * players takes 418 KiB. It is 1 MiB plus the most that the DM's choices
+ * put in every player's exact part past the stored bytes, from the room's
+ * public settings and roster: the creatures their copy holds, every one of
+ * a scene where Players move any token or Players apply damage is on and
+ * else a seat's and as many as the DM may lend, every character, one
+ * seat's areas, its riding ones out of sight, the shared lines that are not
+ * the player's own, each at the widest kind's readers lists at every
+ * member, and the open roll requests' answers. A player's own rolls, asks
+ * and rulers are not kept: only their own play grows them, and only their
+ * own share pays. A reading rounds its stepped part up by less than a
+ * step, so once the DM's adds stop each player keeps more than 0.75 MiB,
+ * close to two sessions (D-261116-016), less what their own rolls, asks
+ * and rulers count past their stored bytes. It is rounded up to a whole
+ * number of steps. Turning either setting on, or a join, moves it, so the
+ * DM's change of a setting reads the DM's line at the new reserve, and a
+ * join may leave the DM past their line, which refuses only the DM's adds.
+ * A scene keeps more already: the DM's own part of it stops at the 3 MiB
+ * scene line, half its far line.
  */
-export const KEPT_FOR_PLAYERS = roundUp(
-  MiB + FAR.tokens * EXACT_WIDTH.creature + LIMITS.charactersPerRoom * EXACT_WIDTH.character + SEAT.ridingAreas * EXACT_WIDTH.unseenArea + FLOORS * SEAT.freeAreas * EXACT_WIDTH.area,
-  FAR.byteStep,
-);
+export function keptForPlayers(room: KeptRoom): number {
+  const { playersMoveAny, playersApplyDamage } = room.meta.settings;
+  const ids = Object.keys(room.members);
+  const anyCreature = playersApplyDamage || (playersMoveAny !== undefined && playersMoveAny !== "none");
+  const creatures = anyCreature ? FAR.tokens : SEAT.tokens + LIMITS.tokensPerScene;
+  const idMost = ids.reduce((most, id) => Math.max(most, utf8Bytes(JSON.stringify(id))), 0);
+  const lines = KEPT_SHARED_LINES * (EXACT_WIDTH.line + EXACT_WIDTH.lineReaderLists * rosterListBytes(ids));
+  const rolls = LIMITS.openRollsPerRoom * (EXACT_WIDTH.rollRequest + LIMITS.rollTargets * (EXACT_WIDTH.rollTarget + idMost));
+  const seat = SEAT.ridingAreas * EXACT_WIDTH.unseenArea + FLOORS * SEAT.freeAreas * EXACT_WIDTH.area;
+  return roundUp(MiB + creatures * EXACT_WIDTH.creature + LIMITS.charactersPerRoom * EXACT_WIDTH.character + seat + lines + rolls, FAR.byteStep);
+}
 
-/** The DM's refusal of an add that only the room kept for the players stops. */
-export const KEPT_FOR_PLAYERS_FULL = `the room is full: it keeps its last ${n(KEPT_FOR_PLAYERS / MiB)} MiB for what the players add`;
+/**
+ * The DM's refusal of an add that only the room kept for the players
+ * stops. It names no size: the kept bytes follow the room's settings and
+ * roster (keptForPlayers).
+ */
+export const KEPT_FOR_PLAYERS_FULL = "the room is full: it keeps the rest for what the players add";
 
 /**
  * What a byte line refuses with, before the remedy (`sizeRemedy`). No size
@@ -1504,28 +1539,34 @@ const SIZE_REMEDY: Record<"dm" | "player", Record<string, string | undefined>> =
 };
 
 /**
+ * Whose far line an op reads: the players', or the DM's, which stops the
+ * kept bytes (keptForPlayers) sooner on the room's.
+ */
+export type FarLineOf = "players" | { readonly dmKept: number };
+
+/**
  * The far byte line an op of `kind` reads in `scope`, or null for a
  * deletion, which meets none. `whose` is the DM's line for the DM's adds,
- * which stops KEPT_FOR_PLAYERS sooner on the room's, or the players' line
- * for every other op, the DM's bookkeeping and a move of the players
- * included (server/rooms/actor.ts bytesMeet).
+ * or the players' line for every other op, the DM's bookkeeping and a
+ * move of the players included (server/rooms/actor.ts bytesMeet).
  */
-export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene", whose: "dm" | "players"): number | null {
+export function farByteLine(kind: LimitKind["far"], scope: "room" | "scene", whose: FarLineOf): number | null {
   if (kind === "deletion") return null;
   const line = scope === "room" ? FAR.roomBytes : FAR.sceneBytes;
   if (kind === "exempt") return line;
-  return line - BOOKKEEPING_RESERVE[scope] - (whose === "dm" && scope === "room" ? KEPT_FOR_PLAYERS : 0);
+  return line - BOOKKEEPING_RESERVE[scope] - (whose !== "players" && scope === "room" ? whose.dmKept : 0);
 }
 
 /**
  * Whether the far line refuses an op of `kind` in `scope` on `whose` line
  * (farByteLine): its reading (farReading), the stepped part with its
  * reserves rounded up to FAR.byteStep and the exact part to the byte, is
- * past the line, and the op grew. The DM's op grew when the measure's total
- * did. A player's grew when their own reading did (readingGrew). The size
- * guard reads it for the room and for each scene (server/rooms/sizeGuard.ts).
+ * past the line, and the op grew. The DM's op grew when the measure's
+ * total did, or the kept bytes. A player's grew when their own reading did
+ * (readingGrew). The size guard reads it for the room and for each scene
+ * (server/rooms/sizeGuard.ts).
  */
-export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], whose: "dm" | "players", stepped: number, exact: number, grew: boolean): boolean {
+export function farBytesOver(scope: "room" | "scene", kind: LimitKind["far"], whose: FarLineOf, stepped: number, exact: number, grew: boolean): boolean {
   const line = farByteLine(kind, scope, whose);
   return line !== null && grew && farReading(stepped, exact) > line;
 }

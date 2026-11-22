@@ -4,7 +4,7 @@ import { AUTO_CHARS, CHUNK_CELLS, FALL_RIDERS_MOST, KNOWN_CHARS, UP_DIR_CHARS, t
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, HARD, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type LimitCheck, type SeatView } from "#shared/limits.ts";
+import { exploredReserve, FAR, farByteLine, farBytesOver, farReading, HARD, keptForPlayers, KEPT_FOR_PLAYERS_FULL, LIMITS, MARKED_POOL, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, ownHeld, readingGrew, reservedExploreFloors, ROOM_FULL, SCENE_FULL, SEAT, seatHeld, serializedBytes, utf8Bytes, WIDEST_REV, type CopiedKind, type FarLineOf, type LimitCheck, type SeatView } from "#shared/limits.ts";
 import { FALL_FEET_MOST, MAX_NAME, MAX_PATH_CORNERS, MAX_PATH_STOPS, SHED_STEPS_MOST, type OpOf } from "#shared/protocol.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { NUMBERS_MOST } from "#shared/numbering.ts";
@@ -119,7 +119,7 @@ type Measure = { bytes: number; growth: number };
  * How an op meets the far line (SizeGuard.check): not at all, with today's
  * reserves, or with per-player vision's at their widest. A DM's op that
  * raises those (`widestDm`) and the DM's other adds (`dmAdd`) read the
- * room's line KEPT_FOR_PLAYERS sooner (shared/limits.ts).
+ * room's line the kept bytes sooner (shared/limits.ts keptForPlayers).
  */
 export type FarJudge = "none" | "today" | "widest" | "widestDm" | "dmAdd";
 
@@ -238,10 +238,10 @@ export class SizeGuard {
    * and reads the far line itself, where an op that meets the line stops
    * BOOKKEEPING_RESERVE short of it (shared/limits.ts farByteLine), so what
    * bookkeeping adds stays within the room's stored bound. The DM's adds
-   * (`widestDm` and `dmAdd`) stop KEPT_FOR_PLAYERS sooner on the room's.
-   * `player` is a player sender's member id, whose far reading holds only
-   * their own copy's own things exactly, over one membership with their op
-   * (exactOver).
+   * (`widestDm` and `dmAdd`) stop the kept bytes (keptForPlayers) sooner
+   * on the room's. `player` is a player sender's member id, whose far
+   * reading holds only their own copy's own things exactly, over one
+   * membership with their op (exactOver).
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm", far: FarJudge = "none", exempt = false, player?: string): LimitCheck {
     this.#refusedScene = null;
@@ -402,14 +402,19 @@ export class SizeGuard {
    * it. A player's op reads their own reading instead (#farPlayer). Read
    * exactly only once the bound with a step to spare could pass the line.
    * Called after the near check counted the op's growth, so the bounds hold
-   * it. The DM's adds read the DM's line, KEPT_FOR_PLAYERS before the
-   * players' on the room, and one that only the kept room stops says so
-   * (KEPT_FOR_PLAYERS_FULL).
+   * it. The DM's adds read the DM's line, the kept bytes (keptForPlayers)
+   * before the players' on the room, and one that only the kept room stops
+   * says so (KEPT_FOR_PLAYERS_FULL). The kept bytes follow the room's
+   * settings and roster, so on the DM's line an op that raises them grew
+   * by as much: a setting turned on at the DM's line is refused, whatever
+   * its own bytes.
    */
   #far(next: RoomState, before: RoomState | undefined, far: Exclude<FarJudge, "none">, kind: "meets" | "exempt", player: string | undefined): LimitCheck {
     const widest = far !== "today";
     if (player !== undefined) return this.#farPlayer(next, before, widest, kind, player);
-    const line = far === "widestDm" || far === "dmAdd" ? "dm" : "players";
+    const dm = far === "widestDm" || far === "dmAdd";
+    const kept = dm ? keptForPlayers(next) : 0;
+    const line: FarLineOf = dm ? { dmKept: kept } : "players";
     const state = this.#state;
     const reserves = farReserves(next, widest);
     const roomLine = farByteLine(kind, "room", line)!;
@@ -417,10 +422,11 @@ export class SizeGuard {
       const bytes = measuredStateBytes(next);
       const held = heldBytes(next, undefined, true);
       const grew = before === undefined || bytes + reserves > measuredStateBytes(before) + farReserves(before, widest);
+      const keptGrew = dm && before !== undefined && kept > keptForPlayers(before);
       const dmPart = bytes - held + reserves;
-      if (farBytesOver("room", kind, line, dmPart, held, grew)) {
+      if (farBytesOver("room", kind, line, dmPart, held, grew || keptGrew)) {
         if (far === "widestDm") return { ok: false, code: "quota", message: PER_PLAYER_FULL };
-        return line === "dm" && !farBytesOver("room", kind, "players", dmPart, held, grew) ? { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL } : roomFull();
+        return dm && !farBytesOver("room", kind, "players", dmPart, held, grew) ? { ok: false, code: "quota", message: KEPT_FOR_PLAYERS_FULL } : roomFull();
       }
       this.#state = { bytes, growth: 0 };
     }

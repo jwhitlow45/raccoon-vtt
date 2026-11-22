@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, LIMITS, NO_ROOM_TO_EXPLORE, ROOM_FULL, roundUp, SEAT, serializedBytes, sizeRemedy } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, keptForPlayers, KEPT_FOR_PLAYERS_FULL, LIMITS, NO_ROOM_TO_EXPLORE, ROOM_FULL, roundUp, SEAT, serializedBytes, sizeRemedy } from "#shared/limits.ts";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
@@ -473,11 +473,12 @@ describe("a room past the far line on per-player sight alone", () => {
   });
 
   test("LP43-LIMITS-2: inside what the room keeps for the players, the DM's adds are refused in its words and a player's line taken, with the DM's bookkeeping, a move of the players and deletes", async (t) => {
-    // The fewest scenes whose widest reading leaves the players less than KEPT_FOR_PLAYERS and at least a step.
+    // The fewest scenes whose widest reading leaves the players less than the kept bytes and at least a step.
+    const reserve = keptForPlayers(perPlayerRoom(0));
     const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
     const scenes = [8, 9, 10, 11, 12].find((n) => {
       const reading = farRoomBytes(perPlayerRoom(n), true);
-      return reading > playersLine - KEPT_FOR_PLAYERS && reading <= playersLine - FAR.byteStep;
+      return reading > playersLine - reserve && reading <= playersLine - FAR.byteStep;
     });
     assert.ok(scenes !== undefined, "a room inside the kept room");
     const state = perPlayerRoom(scenes);
@@ -486,7 +487,7 @@ describe("a room past the far line on per-player sight alone", () => {
     state.tokens.gob = token("gob", { name: "Goblin", x: 9, y: 9 });
     const r = await opened(t, state, "kept");
     assert.deepEqual(codes(await sendAll(r, player(r), ["a line", "a move", "a chat line"])), [["a line", "taken"], ["a move", "taken"], ["a chat line", "taken"]], "the player's adds go on");
-    assert.ok(farRoomBytes(r.state, false) <= playersLine - KEPT_FOR_PLAYERS, "today's roster reads under the DM's line, where the DM's adds went on before");
+    assert.ok(farRoomBytes(r.state, false) <= playersLine - reserve, "today's roster reads under the DM's line, where the DM's adds went on before");
     assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s2" }), "taken", "moving the players onto a scene they explore, which spends room for their play");
     assert.equal(await answer(r, "dm", { t: "room.setPlayerScene", sceneId: "s1" }), "taken", "and back");
     assert.deepEqual(await answer(r, "dm", goblin(r)), { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, "the DM's create");
@@ -509,7 +510,7 @@ describe("a room past the far line on per-player sight alone", () => {
   test("LP44-UNDO-1: once the room is past the DM's line, the DM's Undo of a creature's, the players' scene's and a Per player scene's delete are taken", async (t) => {
     const playersLine = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
     // The players' room in use: the widest reading past the DM's line and a step under the players'.
-    const scenes = scenesPast(playersLine - KEPT_FOR_PLAYERS);
+    const scenes = scenesPast(playersLine - keptForPlayers(perPlayerRoom(0)));
     const state = perPlayerRoom(scenes);
     assert.ok(farRoomBytes(state, true) <= playersLine - FAR.byteStep, "a step under the players' line");
     state.tokens.gob = token("gob", { name: "Goblin", x: 9, y: 9 });

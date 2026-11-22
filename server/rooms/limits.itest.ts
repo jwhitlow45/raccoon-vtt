@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, SEAT_FULL, sizeRemedy } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, keptForPlayers, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, SEAT_FULL, sizeRemedy } from "#shared/limits.ts";
 import type { Op } from "#shared/protocol.ts";
 import { farRoomBytes, heldBytes, PER_PLAYER_FULL } from "./sizeGuard.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
@@ -11,9 +11,8 @@ import { startEngine, type Engine, type Socket } from "./testing.ts";
  * Live play 43's repro over real sockets (LP43-LIMITS-2, D-261116-008): a
  * DM with two players adds per-player scenes until the room refuses one,
  * then creatures of their own until the room refuses those, and four more
- * players join. The room keeps its last 2 MiB (KEPT_FOR_PLAYERS) for what
- * the players add, so each of the six then adds a session's areas and
- * strokes.
+ * players join. The room keeps the rest (keptForPlayers) for what the
+ * players add, so each of the six then adds a session's areas and strokes.
  */
 
 type Answer = "taken" | { code: string; message: string };
@@ -89,7 +88,7 @@ describe("the room keeps room for the players (LP43-LIMITS-2)", () => {
       }
       assert.deepEqual(refused, { code: "quota", message: sizeRemedy(KEPT_FOR_PLAYERS_FULL, "dm") }, `the DM's creatures refused after ${creatures}`);
       const kept = FAR.roomBytes - BOOKKEEPING_RESERVE.room - farRoomBytes(room(), true);
-      assert.ok(kept >= KEPT_FOR_PLAYERS, `the players' kept room is free at the widest: ${kept}`);
+      assert.ok(kept >= keptForPlayers(room()), `the players' kept room is free at the widest: ${kept}`);
 
       for (const name of ["Rook", "Sage", "Tam", "Uma"]) players.push(await join(name));
       const session: Answer[] = [];

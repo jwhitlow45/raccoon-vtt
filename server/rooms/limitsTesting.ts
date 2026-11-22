@@ -60,8 +60,8 @@ export type FullRoom = {
 export type FullRoomOptions = {
   /** Members on the roster, two of them DMs. 50 unless set. */
   members?: number;
-  /** The room line companion blocks fill the room to, with its reserves. */
-  roomBytes?: number;
+  /** The room line companion blocks fill the room to, with its reserves, or that line as the filled room's own facts set it. */
+  roomBytes?: number | ((state: RoomState) => number);
   /** The scene line drawings fill the players' scene to. */
   sceneBytes?: number;
   /** Whether a fight runs, its history at its bound and nine walks at their widest on its turn. Yes unless set. */
@@ -73,6 +73,12 @@ export type FullRoomOptions = {
    * it on.
    */
   settings?: Partial<RoomSettings>;
+  /**
+   * Who wrote the shared log's lines: each a player's roll in turn (the
+   * default), every one the first player's, or each the DM's HP change on
+   * a creature every player sees.
+   */
+  lines?: "spread" | "one" | "hp";
 };
 
 function roster(count: number): { members: Record<string, Member>; dms: string[]; players: string[] } {
@@ -112,12 +118,14 @@ export function fullRoom(opts: FullRoomOptions = {}): FullRoom {
   }
   addAsks(state, sceneId);
   addRolls(state);
-  addLog(state, dms, players);
+  addLog(state, dms, players, opts.lines ?? "spread");
   addReminded(state, players);
   addSaveOutcomes(state);
   if (opts.fight !== false) addHistory(state);
   fillScene(state, sceneId, players, opts.sceneBytes ?? FAR.sceneBytes);
-  fillBlocks(state, opts.roomBytes ?? FAR.roomBytes);
+  const roomBytes = typeof opts.roomBytes === "function" ? opts.roomBytes(state) : (opts.roomBytes ?? FAR.roomBytes);
+  trimScene(state, roomBytes);
+  fillBlocks(state, roomBytes);
   return { state, sceneId, dms, players };
 }
 
@@ -282,11 +290,17 @@ function filling(bytes: number, lines: number, make: (text: string) => LogEntry)
  * shared line, so a DM's live log, which starts where the later of their
  * own rings fills, holds nearly every line the room keeps.
  */
-function addLog(state: RoomState, dms: readonly string[], players: readonly string[]): void {
+function addLog(state: RoomState, dms: readonly string[], players: readonly string[], lines: NonNullable<FullRoomOptions["lines"]>): void {
   const log: LogEntry[] = [];
   let seq = 1;
   const tokenId = Object.keys(state.tokens)[0]!;
-  const shared = (): LogEntry => ({ id: `${seq++}:0`, at: AT, kind: "event", data: { type: "dice", by: players[seq % players.length]!, to: "all", rolls: widestRolls(tokenId, LIMITS.diceRollsPerOp, LIMITS.dicePerOp) } });
+  // A creature every player sees: past the characters' own, every other one is shown.
+  const seen = Object.keys(state.tokens)[LIMITS.charactersPerRoom + 1]!;
+  const vitals = { hp: { cur: 5, max: 20, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } };
+  const hp = (): LogEntry =>
+    ({ id: `${seq++}:0`, at: AT, kind: "event", data: { type: "hp", change: "damage", amount: 3, label: "Bloodied", left: vitals.hp, revert: { before: vitals, after: vitals, added: [], removed: [] }, tokenId: seen, seen: true } }) as never;
+  const shared = (): LogEntry =>
+    lines === "hp" ? hp() : { id: `${seq++}:0`, at: AT, kind: "event", data: { type: "dice", by: lines === "one" ? players[0]! : players[seq % players.length]!, to: "all", rolls: widestRolls(tokenId, LIMITS.diceRollsPerOp, LIMITS.dicePerOp) } };
   log.push(shared());
   const dmLine = (id: string, rolls: number): LogEntry => ({ id, at: AT, kind: "event", data: { type: "dice", by: dms[0]!, to: "dm", rolls: widestRolls(tokenId, rolls, LIMITS.dicePerOp) } });
   const dmLineAt = (at: number): LogEntry => {
@@ -384,6 +398,26 @@ function fillScene(state: RoomState, sceneId: string, players: readonly string[]
     if (bytes > left) break;
     state.drawings[id] = d;
     left -= bytes;
+  }
+}
+
+/**
+ * The scene's drawings off, the last first, until the room's far reading
+ * is at `limit`: a line under what the room holds without them, such as
+ * the DM's where the kept bytes are large, is reached with the scene less
+ * full.
+ */
+function trimScene(state: RoomState, limit: number): void {
+  const drawn = Object.keys(state.drawings).filter((id) => id.startsWith("draw-"));
+  let over = farRoomBytes(state, true) - limit;
+  while (over > 0 && drawn.length > 0) {
+    for (let freed = 0; freed < over && drawn.length > 0; ) {
+      const id = drawn.pop()!;
+      freed += serializedBytes({ [id]: state.drawings[id] }) - 1;
+      delete state.drawings[id];
+    }
+    state.drawings = { ...state.drawings };
+    over = farRoomBytes(state, true) - limit;
   }
 }
 

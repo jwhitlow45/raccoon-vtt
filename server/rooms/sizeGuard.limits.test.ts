@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BOOKKEEPING_RESERVE, FAR, KEPT_FOR_PLAYERS, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, roundUp, SCENE_FULL } from "#shared/limits.ts";
+import { BOOKKEEPING_RESERVE, FAR, keptForPlayers, KEPT_FOR_PLAYERS_FULL, ROOM_FULL, roundUp, SCENE_FULL } from "#shared/limits.ts";
 import type { Actor, LogEntry, Member, PcStats, RoomState, Viewer } from "#shared/model.ts";
 import { MAX_NOTES, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -305,9 +305,10 @@ describe("LP43-PRIV-1: a player's far reading never reads whose an unseen thing 
 
   test("LIMITS-2: a player's add reads the players' line, never the DM's sooner one", () => {
     // P1's reading between the DM's line and the players': P1's line taken, the DM's growing note refused in the kept words.
-    const state = filled(room(), fillFor(room(), FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS / 2));
+    const reserve = keptForPlayers(room());
+    const state = filled(room(), fillFor(room(), FAR.roomBytes - BOOKKEEPING_RESERVE.room - reserve / 2));
     const reading = farRoomBytes(state, true);
-    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room - KEPT_FOR_PLAYERS && reading < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, `${reading} inside the kept room`);
+    assert.ok(reading > FAR.roomBytes - BOOKKEEPING_RESERVE.room - reserve && reading < FAR.roomBytes - BOOKKEEPING_RESERVE.room - FAR.byteStep, `${reading} inside the kept room`);
     assert.deepEqual(playerJudged(state, line("d1"), "p1"), { ok: true }, "P1's line");
     const guard = new SizeGuard({ stateLimit: 64 * MIB, sceneLimit: 64 * MIB });
     guard.stateMeasured(measuredStateBytes(state), state);
@@ -439,9 +440,10 @@ describe("LP43-PRIV-3: behind a blackout a player's exact part holds nothing", (
 });
 
 describe("LP43R2-1: the room the DM's adds leave the players", () => {
-  test("at the DM's last add a player keeps more than KEPT_FOR_PLAYERS less one step, a join's bytes aside, and the worst case comes within a few KiB of it", () => {
+  test("at the DM's last add a player keeps more than the kept bytes less one step, a join's bytes aside, and the worst case comes within a few KiB of it", () => {
     const players = FAR.roomBytes - BOOKKEEPING_RESERVE.room;
-    const dmLine = players - KEPT_FOR_PLAYERS;
+    const reserve = keptForPlayers(room());
+    const dmLine = players - reserve;
     const base = room();
     base.characters.c1 = character("c1", { ownerIds: ["p1"] });
     base.tokens.hero = token("hero", { kind: "pc", actor: { ref: "c1" }, ownerIds: ["p1"], x: 2, y: 2 });
@@ -475,13 +477,13 @@ describe("LP43R2-1: the room the DM's adds leave the players", () => {
     // What P1's exact part counts past what it takes out of the stepped part: their own fields at their widths.
     const widths = (state: RoomState) => ownHeldBytes(state, "p1").shown - ownHeldBytes(state, "p1").sub;
     const kept = keeps(last);
-    const least = KEPT_FOR_PLAYERS - FAR.byteStep - widths(last);
+    const least = reserve - FAR.byteStep - widths(last);
     assert.ok(kept > least && kept < least + 4 * 1024, `the worst case: P1 keeps ${kept} bytes, their widths ${widths(last)}`);
     // A player joins: their bytes come out of what P1 keeps, and the rounding P1 reads never takes more than its step.
     const joined: RoomState = { ...last, members: { ...last.members, p3: member("p3") } };
     const join = measuredStateBytes(joined) - measuredStateBytes(last);
     const left = keeps(joined);
-    assert.ok(left > KEPT_FOR_PLAYERS - FAR.byteStep - widths(joined) - join, `after a join of ${join} bytes P1 keeps ${left} bytes`);
+    assert.ok(left > reserve - FAR.byteStep - widths(joined) - join, `after a join of ${join} bytes P1 keeps ${left} bytes`);
     // The guard reads the same: P1's own area of 1 KiB under what P1 keeps is taken, and of 1 KiB over it refused.
     const withArea = (label: string): RoomState => ({ ...joined, templates: { ...joined.templates, a3: template("a3", { label }) } });
     const overhead = measuredStateBytes(withArea("")) - measuredStateBytes(joined);
