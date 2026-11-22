@@ -15,7 +15,10 @@ import { isWritable } from "./writable.ts";
  * whole sums as before. A state the room never accepted from, as a test's
  * or a deep copy, reads whole sums too.
  */
-export type Accepted = { readonly fields: Map<string, Kept>; readonly metas: object[] };
+export type Accepted = { readonly fields: Map<string, Kept>; readonly metas: object[]; readonly named: Map<string, Named> };
+
+/** A part the room made for the facts it read (`sign`), as the far widths read the room's widest ids, kept until the room's facts change. */
+type Named = { readonly sign: string; readonly field: string; readonly part: Part<unknown> };
 
 /** No entry under a key, apart from an entry whose value is undefined. */
 export const ABSENT: unique symbol = Symbol("absent");
@@ -62,7 +65,7 @@ function remember(record: object, part: Part<unknown>, value: unknown): void {
 }
 
 export function newAccepted(): Accepted {
-  return { fields: new Map(), metas: [] };
+  return { fields: new Map(), metas: [], named: new Map() };
 }
 
 /** The room's accepted work for a state of it, if the room keeps any. */
@@ -86,6 +89,28 @@ export function releaseAccepted(accepted: Accepted): void {
   for (const meta of accepted.metas) byMeta.delete(meta);
   accepted.metas.length = 0;
   accepted.fields.clear();
+  accepted.named.clear();
+}
+
+/**
+ * The part `name` of the room's `field` for the room's facts `sign`, made
+ * by `make`: the one the room keeps while its accepted state's facts read
+ * `sign`. An accepted state whose facts read otherwise (`take`) replaces
+ * it, and the old part leaves what the field keeps, so no part of facts
+ * the room no longer has is stepped again. Any other state whose facts
+ * differ, and a state of no room, reads with a part of its own, worked out
+ * whole, and moves nothing. So each room holds its own parts, whatever
+ * other rooms read, and one part a name.
+ */
+export function roomPart<V, T>(state: { readonly meta: object }, field: string, name: string, sign: string, make: () => Part<V, T>, take = false): Part<V, T> {
+  const accepted = acceptedOf(state);
+  const held = accepted?.named.get(name);
+  if (held?.sign === sign) return held.part as Part<V, T>;
+  const part = make();
+  if (accepted === undefined || !take) return part;
+  if (held) accepted.fields.get(held.field)?.parts.delete(held.part);
+  accepted.named.set(name, { sign, field, part: part as Part<unknown> });
+  return part;
 }
 
 /** The entries of `next`, whose keys are `keys`, that differ from `taken` by value object, or null past MOST_CHANGED of them. */

@@ -16,7 +16,7 @@ import { turnUnderWay } from "#shared/rules/path.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { isWritable } from "#shared/writable.ts";
-import { ABSENT, keptPart, markAccepted, newAccepted, releaseAccepted, type Part } from "#shared/accepted.ts";
+import { ABSENT, keptPart, markAccepted, newAccepted, releaseAccepted, roomPart, type Part } from "#shared/accepted.ts";
 import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
 
 /**
@@ -175,9 +175,10 @@ export class SizeGuard {
    */
   accept(state: RoomState): void {
     markAccepted(this.#accepted, state);
+    // The widths first: a part of facts the room no longer has leaves what it keeps before the others step.
+    farWidthsByFloor(state, true);
     storedBytes(state, true);
     numberingAdjust(state, true);
-    farWidthsByFloor(state, true);
     acceptSeats(state);
   }
 
@@ -2712,16 +2713,14 @@ const byFloorKept = new WeakMap<object, { templates: object; room: string; out: 
 
 type Widths = ReadonlyMap<string, number>;
 
-/** The parts that sum a kind's FAR_WIDTHS bytes by floor, one for each set of the room's facts they read. */
-const widthParts = new Map<string, Part<Widths, { sceneId: string }>>();
-
-/** A kind's FAR_WIDTHS bytes on each floor where they are more than 0, kept per field of the room (shared/accepted.ts). */
-function widthsPart(fields: readonly WidthField[], kind: string, room: WidthsRoom, sign: string): Part<Widths, { sceneId: string }> {
-  const name = `${kind}:${sign}`;
-  let part = widthParts.get(name);
-  if (part) return part;
+/**
+ * A part that sums a kind's FAR_WIDTHS bytes on each floor where they are
+ * more than 0, for the room's facts `room` reads: made for each room as its
+ * facts are (shared/accepted.ts roomPart).
+ */
+function widthsPart(fields: readonly WidthField[], room: WidthsRoom): Part<Widths, { sceneId: string }> {
   const extraOf = (thing: { sceneId: string }) => Math.max(0, widthsOf(fields, thing as unknown as Record<string, unknown>, room));
-  part = {
+  return {
     whole: (record, keys) => {
       const out = new Map<string, number>();
       for (const key of keys) {
@@ -2747,9 +2746,6 @@ function widthsPart(fields: readonly WidthField[], kind: string, room: WidthsRoo
       return out;
     },
   };
-  if (widthParts.size > 64) widthParts.clear();
-  widthParts.set(name, part);
-  return part;
 }
 
 /**
@@ -2763,8 +2759,8 @@ export function farWidthsByFloor(state: RoomState, take = false): Map<string, nu
   const sign = `${room.sceneIdMost}:${room.listWidth}:${room.damage}`;
   const hit = byFloorKept.get(state.tokens);
   if (!take && hit && hit.templates === state.templates && hit.room === sign) return hit.out;
-  const tokens = keptPart(state, "tokens", state.tokens, widthsPart(FAR_WIDTHS.token, "token", room, sign), take);
-  const templates = keptPart(state, "templates", state.templates, widthsPart(FAR_WIDTHS.template, "template", room, sign), take);
+  const tokens = keptPart(state, "tokens", state.tokens, roomPart(state, "tokens", "widths:tokens", sign, () => widthsPart(FAR_WIDTHS.token, room), take), take);
+  const templates = keptPart(state, "templates", state.templates, roomPart(state, "templates", "widths:templates", sign, () => widthsPart(FAR_WIDTHS.template, room), take), take);
   const out = new Map(tokens);
   for (const [floor, extra] of templates) out.set(floor, (out.get(floor) ?? 0) + extra);
   if (!isWritable(state.tokens) && !isWritable(state.templates)) byFloorKept.set(state.tokens, { templates: state.templates, room: sign, out });
@@ -2774,9 +2770,8 @@ export function farWidthsByFloor(state: RoomState, take = false): Map<string, nu
 /** farWidthsByFloor worked out whole, in one plain pass over the creatures and areas, as tests read it against the kept one. */
 export function farWidthsByFloorWhole(state: RoomState): Map<string, number> {
   const room = widthsRoom(state);
-  const sign = `${room.sceneIdMost}:${room.listWidth}:${room.damage}`;
-  const out = new Map(widthsPart(FAR_WIDTHS.token, "token", room, sign).whole(state.tokens, Object.keys(state.tokens)));
-  for (const [floor, extra] of widthsPart(FAR_WIDTHS.template, "template", room, sign).whole(state.templates, Object.keys(state.templates))) out.set(floor, (out.get(floor) ?? 0) + extra);
+  const out = new Map(widthsPart(FAR_WIDTHS.token, room).whole(state.tokens, Object.keys(state.tokens)));
+  for (const [floor, extra] of widthsPart(FAR_WIDTHS.template, room).whole(state.templates, Object.keys(state.templates))) out.set(floor, (out.get(floor) ?? 0) + extra);
   return out;
 }
 

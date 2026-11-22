@@ -87,6 +87,24 @@ describe("storedBytes is the snapshot's size, from the sizes kept per entity", (
     }
   });
 
+  test("a room accepted back at a state it left, as an abandoned batch leaves it, reads that state's direct sums", () => {
+    const direct = (state: RoomState) => [snapshotBytes(state), sum(Object.values(state.tokens), tokenNumbering) + sum(Object.values(state.scenes), sceneNumbering) - (state.numbering === undefined ? 0 : serializedBytes({ numbering: state.numbering }) - 1), [...farWidthsByFloorWhole(state)].sort()];
+    const read = (state: RoomState) => [storedBytes(state), numberingAdjust(state), [...farWidthsByFloor(state)].sort()];
+    let a = randomState(rng(5));
+    a = { ...a, meta: { ...a.meta } };
+    for (let k = 0; k < 150; k++) a.tokens[`many${k}`] = token(`many${k}`, { kind: k % 2 === 0 ? "monster" : "npc", x: k % 30, y: Math.floor(k / 30) });
+    const tokens = { ...a.tokens };
+    for (let k = 0; k < 10; k++) tokens[`many${k}`] = { ...tokens[`many${k}`]!, number: 3, met: 2, notes: "n".repeat(k * 7) };
+    delete tokens.many20;
+    const b = { ...a, tokens };
+    const guard = new SizeGuard();
+    for (const state of [a, b, a]) guard.accept(state);
+    assert.deepEqual(read(a), direct(a), "the state accepted again");
+    assert.deepEqual(read(b), direct(b), "the state it left");
+    guard.accept(b);
+    assert.deepEqual(read(b), direct(b), "and back again");
+  });
+
   test("the shed line's id is outside both measures", () => {
     const state = fullRoom().state;
     const marked = { ...state, dmLogShed: `7:${DM_LINE_BASE}` };

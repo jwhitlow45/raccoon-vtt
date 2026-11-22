@@ -3,7 +3,7 @@ import { describe, test, type TestContext } from "node:test";
 import { keptWork, MOST_CHANGED } from "#shared/accepted.ts";
 import { seatWork } from "#shared/limits.ts";
 import type { Op } from "#shared/protocol.ts";
-import { token } from "#shared/testutil.ts";
+import { scene, token } from "#shared/testutil.ts";
 import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /*
@@ -128,4 +128,77 @@ describe("a player's op costs its own writes, whatever hidden work came before i
     });
     assert.deepEqual(beside, alone);
   });
+
+  /*
+   * The far widths read the room's facts, the widest scene id among them,
+   * a hidden scene's too, so each room keeps one part for them a kind and
+   * replaces it as its own facts change (shared/accepted.ts roomPart). New
+   * scenes take ids of one width, so the DM moves the widest id by deleting
+   * a scene with an older, wider one, or by bringing it back.
+   */
+  test("rooms loaded beside it with 40 sets of facts, past what a registry shared by every room would hold", async (t) => {
+    const alone = await playerWork(t, hiddenRoom(), async () => []);
+    const beside = await playerWork(t, hiddenRoom(), async () => {
+      for (let i = 0; i < 40; i++) {
+        const other = withLegacyScenes(scopeFixture(), 1, i % 20);
+        other.state.meta = { ...other.state.meta, settings: { ...other.state.meta.settings, playersApplyDamage: i >= 20 } };
+        await scopeActor(t, other.state);
+      }
+      return [];
+    });
+    assert.deepEqual(beside, alone);
+  });
+
+  test("another room's DM narrowing its widest scene id again and again", async (t) => {
+    const alone = await playerWork(t, hiddenRoom(), async () => []);
+    const other = withLegacyScenes(scopeFixture(), LEGACY);
+    const h = await scopeActor(t, other.state);
+    const elsewhere = await h.connect(other.dm);
+    const beside = await playerWork(t, hiddenRoom(), async () => {
+      for (let i = 0; i < LEGACY; i++) await elsewhere.apply({ t: "scene.delete", sceneId: legacyId(i) });
+      return [];
+    });
+    assert.deepEqual(beside, alone);
+  });
+
+  test("the DM's deletions of hidden scenes, each narrowing the widest id, before the player's walk", async (t) => {
+    const works: Work[] = [];
+    const counts = [0, 1, 3, 8, LEGACY];
+    for (const n of counts) {
+      works.push(
+        await playerWork(t, withLegacyScenes(hiddenRoom(), LEGACY), async (dm) => {
+          // The scenes left over are as many in every case: those past n go before the room loads.
+          for (let i = 0; i < n; i++) await dm.apply({ t: "scene.delete", sceneId: legacyId(i) });
+          return [];
+        }),
+      );
+    }
+    for (const [i, work] of works.entries()) assert.deepEqual(work, works[0], `after the DM deleted ${counts[i]} hidden scenes`);
+  });
+
+  test("a hidden scene with the widest id deleted and brought back before the player's walk", async (t) => {
+    const alone = await playerWork(t, withLegacyScenes(hiddenRoom(), 1), async () => []);
+    const after = await playerWork(t, withLegacyScenes(hiddenRoom(), 1), async (dm) => {
+      await dm.apply({ t: "scene.delete", sceneId: legacyId(0) });
+      // A scene's deletion is the DM's setup, and its Undo is there.
+      await dm.restore("setup");
+      assert.ok(dm.actor.committed.state.scenes[legacyId(0)], "the scene is back");
+      return [];
+    });
+    assert.deepEqual(after, alone);
+  });
 });
+
+/** How many hidden scenes with older, wider ids a room may hold. */
+const LEGACY = 20;
+
+/** A hidden scene's id from before ids took one width, wider than any new one's, the first widest. */
+function legacyId(i: number): string {
+  return `legacy${String(i).padStart(2, "0")}`.padEnd(60 - i, "x");
+}
+
+/** The fixture with `count` hidden scenes of legacy ids, from the `from`th widest. */
+function withLegacyScenes<F extends ReturnType<typeof scopeFixture>>(f: F, count: number, from = 0): F {
+  for (let i = from; i < from + count; i++) f.state.scenes[legacyId(i)] = scene(legacyId(i), { order: 5 + i });
+  return f;
+}
