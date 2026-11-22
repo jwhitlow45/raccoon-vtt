@@ -1,5 +1,1197 @@
 # Changelog
 
+## v0.4.0 (2026-11-22)
+
+### Features
+
+- **limits**: a batch's close sheds a room past its stored bound, its oldest archived DM lines then its oldest history steps, and the DM's live log starts after them
+- **effects**: hiding a condition reads to players as its removal and closes its save request, showing it reads as its add, and the dm reads both
+- **reducer**: change format 65 and room format 49 with the shed op, a step's walks, hide and show effect lines, shown ends on climb and fall records, and a player's own lines
+- **floors**: a fall card names the riders that fell with its creature, and its apply asks each the fall's damage and prone
+- **outliner**: an Other floors group lists creatures on the scene's other floors and a companion one floor away is not away
+- **uvtt**: a new scene from several universal vtt files, one floor each, lowest first
+- **tracker**: start a fight on this floor or every floor of the scene
+- **mapexport**: export every floor as one zip, the player view holding only the floors players reached
+- **mapexport**: a stored zip writer with crc-32 for several pictures in one file
+- **iso**: each opening on the floor shown draws as a drop to the floor below, its bottom the window, black where the floor below is not held
+- **iso**: read each opening's drop to the floor below from the device's own copy
+- **builder**: the end pane says the far end lies on other squares and offers line up
+- **builder**: move an end by dragging it and resize both by its corner handle, judged in the server's words
+- **dice**: the dm's ask card counts, and a player's ask block names, the creatures an area reaches across an opening
+- **dice**: an area's group save holds the floors its openings join, so its damage reaches the creatures below
+- **areas**: the areas panel lists the creatures an area reaches across an opening, a player's device only on live ground
+- **casts**: a player's cast may name a target across an opening they were sent, where players see both floors
+- **areas**: an area catches a creature across an opening by its part over the squares, at its height moved by the floors' separation
+- **traps**: a trapdoor's card says it opened onto the floor below, not a pit
+- **floors**: the keys' sheet names flying through an opening
+- **floors**: the floor below in each opening, its map, build, creatures, fog and sight under a veil, and a black drop where the floor is not held
+- **floors**: an opening's marks, its hole's rim and height chip, and the dm's hidden mark on stairs
+- **builder**: between floors places openings up to 8 by 8, and an end's pane hides kind and locked on an opening and adds hidden from players
+- **traps**: the dm's toast for each new fall card, with show
+- **traps**: fall cards on the dm desk with apply, show and dismiss
+- **dice**: a fall card's group save, no save, its drop's d6 bludgeoning and prone unless unhurt, removing the card on apply
+- **traps**: a pit trap on a floor with one below may drop creatures to it, by the pane's into choice
+- **floors**: the owner's polite line says a creature fell to the floor it follows it to
+- **tokens**: move to floor is off where a creature would land over an opening
+- **movement**: a drag that would fall through an opening says where it falls
+- **measure**: a ruler carried over stairs lands by the far end's offset and never takes an opening
+- **floors**: fly up and fly down through an opening for a creature in the air, on the bar, the strip and the keys
+- **floors**: an opening's words, fly up and fly down, the hidden switch and the dm's hidden mark
+- **import**: fall cards follow their floors and creatures under the new room's ids, and the new room counts on past every card's op
+- **server**: a player's fall keeps the records of roots they received, its undo and redo carry them and the card an undo removed, and the explore step explores every floor at once
+- **undo**: a player's fall is one step of its records without the card, never merged, that crosses back by each record's floors with the areas that follow
+- **floors**: players get nothing of a hidden end, and an end's shift only while its far end is itself projected
+- **explore**: every floor explores with each floor's joins to its holder list pending, so a joining player borrows across an opening whatever the floors' order
+- **vision**: every reader of a floor's sight asks its class's sight joined through the floor's openings
+- **vision**: sight and light cross an opening between two floors players see with vision on, each class joined with its own class on the other floor
+- **floors**: a player's fly up and fly down, hidden stairs, trapdoors kept off ends, and the undo and redo of a fall
+- **floors**: falls through openings with the dm's fall cards, trapdoors, flights, hidden and moved stairs, and arrival traps and reminders on every landing, from change format 64
+- **floors**: an opening's rules, its words by kind, the drop and its dice, a flight's landing, and stairs on their own squares
+- **floors**: phase 4's named rules, passes and records as stubs, and sight by class at each floor's own answer
+- **floors**: change format 64 and room format 48 behind opensOps, a room's first commit at 64 carrying its snapshot
+- **floors**: phase 4 contract, an opening kind, hidden ends, trapdoors, the dm's fall cards and fall.settle, refused until built
+- **rules**: token.move carries where a rider was dropped, and she sits there where the walk ends full size, from change format 63
+- **rules**: change format 62 gates walks in single file on hexes going hex by hex
+- **ids**: a room load tells the operator once when the stored ids cutover is ahead of the clock
+- **scenes**: deleting the players' map asks first and leaves them with no map on a yes
+- **ids**: an edit that hides or changes the automatic unconscious sends a fresh id for it
+- **limits**: a group save can pick every token a scene holds with players' seats full
+- **ids**: an ask for saves takes its id from the room's clock and follows a fresh one
+- **ids**: editors make a new thing's id as its first save goes, and follow a fresh one the room's queue gives it
+- **limits**: the DM's page says once when the room is over its size limit, and again as the MiB over it changes
+- **ids**: a device dates new ids by the room's clock, makes them again where the room would refuse them, and asks the room about creates whose answer was lost
+- **rooms**: an exempt kind reads the far line itself and an op that meets it stops the bookkeeping reserve short
+- **rooms**: an exempt kind meets no byte line, the DM's either, its growth counted
+- **rooms**: the tag check reads the sender's roll receipt from the room's receipts
+- **rooms**: a player's ops spend a bucket of their member's, at one socket's numbers, and the DM's and the server's the room's
+- **rooms**: an older room's hidden or edited automatic Unconscious takes its converted id once the ops stored before it replay
+- **rooms**: the byte lines read the DM's part, a player's op meets the far line alone, and marked scenes keep fixed shares
+- **limits**: the fight's history keeps to its bytes, and copies take fresh condition ids never shaped as version 7
+- **limits**: a player's rows, asks, clear and restore read their own copy, and the dm can leave the players on no map
+- **rooms**: at each batch's close the server ends areas and kept rulers on creatures their owners no longer see
+- **assets**: a player's upload is refused for space only at the quota and spends a budget of the player's own
+- **import**: an import records the ids it made as the server's
+- **rooms**: a socket's send buffer holds the largest snapshot of a room at the far line
+- **rooms**: a socket passes its ids ask to the room after its hello
+- **import**: an import takes a file by today's checks or by the far lines
+- **import**: an import gives every condition but the automatic unconscious a fresh id
+- **rooms**: the room checks a new thing's id, records it with its batch and answers a device's ids ask
+- **rooms**: a batch writes the ids its ops brought and the rolls its asks took
+- **rooms**: the id gate: a new thing's id is dated near the server's clock, taken once, within a member's budget
+- **db**: a table of the ids new things took, the server's cutover time, and the ask a roll receipt went with
+- **ids**: read a version 7 id's own time, and the words a refused id gets
+- **limits**: conditions count shown and hidden apart, with one automatic unconscious kept bare
+- **limits**: seats by each player's own view, the DM's caps over the rest and the far line's counts
+- **limits**: player limits contract with op 61, snapshot 47, seats, far line and id rules
+- **rooms**: a room's load warns once for each scene that creature numbers put over its size limit
+- **selection**: all of a kind orders a dm's creatures by the numbers their labels show
+- **tokens**: the token panel's header names a creature by its label, with a help line for a dm
+- **board**: a dm's bracketed number draws as outlined initials and an outlined badge
+- **board**: token labels keep a bracketed number or a disguise's shown name and cut the name first
+- **tokens**: each device keeps one label per creature, with a dm's bracketed number and a disguise's shown name
+- **bench**: a creature numbers row times a party's walk beside 100 unseen goblins and the door that shows them
+- **sizes**: every size check counts a monster's or npc's number, group and rev at their widest and a scene's rev at its widest without its numbers
+- **log**: undo labels, a session's file and a climb's refusal name a creature with the table's number
+- **undo**: a DM's undo of a move takes back the creature's number with its scene
+- **rooms**: an older room's creature numbers are settled once at load and import, and a backup keeps the room's group count
+- **rooms**: a batch's end meets the creatures the party now holds, and a room's first commit after an older snapshot always stores today's
+- **undo**: a restore gives back a creature's number exactly, a scene keeps its numbers, and undo guards leave numbers out
+- **tokens**: a creature is made with no number, an attached one keeps the number the table gave it, and copies carry none
+- **tokens**: sys.meet gives creatures their numbers by the table's three rules, the meet step's candidates and the upgrade that settles an older room's numbers once
+- **project**: every copy carries a creature's number as the table gives it, the DM's with its mark, and the party's copy reads once for many creatures
+- **rooms**: a backup keeps creature numbers and is refused when its group count is below a group id it holds
+- **tokens**: creature number rules: shown name, what can carry one, membership, the table's number, labels, previews, caps and the register's byte bound
+- **tokens**: creature numbers contract: a creature's group mark, a scene's numbers, the room's group count and key, sys.meet, a sent number refused, op version 60 and snapshot 46
+- **import**: a backup whose log is dated after the server's clock is refused
+- **rooms**: an address's snapshot budget counts requests alone
+- **rooms**: a walk's batch runs its explore and map steps before it, in place
+- **rooms**: a deletion step waits for the open batch's own commit
+- **rooms**: room numbers follow the server's clock, snapshots and resends answer at a batch's close, and batches close on the clock's grid
+- **builder**: the wing pane shows the shared choices and opens on theme, and a tap on a ghost room opens its room panel with room edits
+- **scenes**: a hex scene's floors take a generated dungeon, and only a file's square walls stay off there
+- **dungeon**: generate a dungeon on hex scenes, with room edits in the dialog, edit rooms, the room panel, the edits line and bring them back
+- **dungeon**: the preview numbers every room while editing, rings the picked one and picks the room a tap falls nearest, on squares and hexes
+- **dungeon**: room edits as the dialog holds them, frozen on the first edit, dropped by a change with bring them back for one step
+- **dungeon**: the room panel, one room's height, doors, trap, dressing and light with its reports
+- **builder**: the wing pane plans with the worker's wing, adds it with its asks, asks the forget question and says each outcome
+- **dungeon**: send a wing behind its asks, the first refusal final, the key after the rest is taken, compared by its own chunks and entities
+- **dungeon**: previews carry room edits, facts and the fitted count, land on hexes, and plan a wing on a posted base with what its asks carry
+- **dungeon**: hex and wing ops: free walls with placeholder ids, a hex join's wall replaced by its leaf, difficult ground, hex traps, and fresh wall ids at make
+- **rooms**: a wing's ask is refused when its join changed or its footprint so far meets something, read as each part comes
+- **rules**: the server's wing checks: the join as planned, and the footprint clear of all but the joined room's structure
+- **protocol**: a builder ask carries free walls, stamps and a wing's clear, and hex asks take both
+- **builder**: the wing pane beside the map, its area line, warnings, status and ghost, with seams for the shared choices and the send
+- **builder**: the wing pane docks at the map edge farther from the area, a sheet on a phone
+- **builder**: draw a wing's area, ringed join and ghost on the dm's board
+- **builder**: add a wing mode that picks the wing's area and the wall it joins, on squares and hexes
+- **builder**: the wing's ghost, what a scratch room adds to the scene
+- **builder**: the blocks icon for add a wing, credited with lucide's others
+- **dungeon**: the key on hexes and for a wing: pins on hex centers, W numbers from the scene's highest, its own page title
+- **dungeon**: plan a wing in its area's open ground, joined to a tapped wall, with the scene's allowances
+- **dungeon**: per-room edits: height and door pins as inputs, trap, lit and dressing pins reconciled per room, with facts and reports
+- **dungeon**: fit a hex plan to the wall budget, one room fewer at a time, at most 12 plans
+- **dungeon**: hex plans: walls, rough ground, heights and stairs on the scene's keys, mirrored on hex columns
+- **dungeon**: hex traps, lights and dressing, each stamp's box kept in its room away from doorways
+- **dungeon**: plan on the hex lattice: six-sided halos, runs along a hex axis, an even-row way in
+- **dungeon**: the hex wall pass, one wall or leaf per side between spaces and toward the outside
+- **dungeon**: phase 3 contract: grid kinds, the lattice, plan walls, wing base, edits and the wing clear shape
+- **measure**: the walking ruler's stairs button carries it to the far floor, the climb counted
+- **state**: a device records and receives a carried ruler as the server forwards it, without its creatures and ends
+- **measure**: a walking ruler measures on from what it carried over stairs, in the walker's shape and count
+- **floors**: the ruler's words for stairs, the feet before this floor and a carried ruler's hints
+- **search**: move to floor rows for the dm's selected creature
+- **floors**: the floors group's map choice adds a floor blank, from a universal vtt file or as a generated dungeon
+- **floors**: generate a dungeon aimed at a floor, every close held while its create waits
+- **floors**: a dungeon floor's key page and pins go after its create is taken, titled from the stored name
+- **floors**: the words of a dungeon made as a floor, from its title to how make ended
+- **floors**: generate a dungeon on a floor opens at the floor's size and leaves the remembered size alone
+- **floors**: the universal vtt import aimed at a floor, its refusals asked before and after the upload and its words naming the stored floor
+- **floors**: the words of the floors group's map choice, its hex reason and where to pick a floor made elsewhere
+- **ui**: a dialog its owner keeps open opens again after a close the browser makes itself
+- **floors**: a floor from a file takes its map's size and video facts from the asset row
+- **floors**: a batch that takes a creature or stairs from a screen's copy ends the previews there that name them
+- **floors**: the server sends a carried ruler only to who sees its creatures and holds its stairs, never naming them, and ends a shown preview over what a screen lost
+- **floors**: a player's end carries the climb's height with its far floor, and a height edit re-projects every copy
+- **floors**: the refusals a file or dungeon floor asks on the latest view, before and after its upload
+- **floors**: a floor from a file brings a map of this room, its video checked as a new scene's
+- **floors**: a floor add takes its name, numbered while taken, and a file's or a dungeon's own settings
+- **floors**: phase 3 contract, a floor add's name and own settings, carried ruler frames in and out, an end's rise and op version 59
+- **floors**: a scene's size measure counts both ends of its stairs and ladders
+- **floors**: a backup carries stairs and the feet of floors left, and its import starts past the stairs' stamps
+- **undo**: a dm's undo or redo that stairs refuse keeps its step, in words true whoever placed them
+- **floors**: the floor check meets every op on stairs, a climb, a pit trap and any build chunk written
+- **undo**: a player's climb undoes and redoes by the stairs it took, with what rode on the climber and their areas
+- **scenes**: add, move up and move down are off with the stairs' reason between linked floors
+- **builder**: the stairs pane with kind, lock, go to floor and remove
+- **builder**: between floors mode with kind and to choices, the draft and a tap on an end
+- **floors**: the turn's marker and a drag read the feet and diagonals of floors left
+- **floors**: stairs and ladders drawn on the board, named by what the viewer holds
+- **floors**: the board's cut holds the stairs and ladders on the floor shown
+- **floors**: the } and { keys take the one selected creature up and down its stairs
+- **floors**: go up and go down lead the bar's passing row, and the strip as words or the stairwell
+- **floors**: which end a creature may climb on the viewer's copy, and one wait for its climb
+- **floors**: a turn's feet on floors left reach its owners whole and other players as the diagonals they could count
+- **floors**: a viewer's copy holds the stairs and ladders they may see, cut to the players' fields, sent again with the fog under them, and filed by the fan-out under their floor
+- **floors**: a player's climb by the stairs they get, its undo and redo by the stairs it took, and no pit under stairs
+- **floors**: stairs and ladders' rules and reducer: placing a pair on fixed ground, climbs with their cost and passengers, the turn's feet kept across floors, stairs going with their floor, and duplicate
+- **floors**: the stairs and ladders contract: the end and prior model, link and climb ops, versions 58 and 45, the rules' signatures and words, the stairwell icon and the test ids
+- **rooms**: a room saved before the count writes its snapshot again in its first commit that answers anything
+- **rooms**: a room count beside the op sequence for the numbers devices get
+- **rooms**: the room count contract: pub columns, versions 57 and 44, uncounted envelopes refuse lines, bookkeeping ops start no turn, and the counted op classes
+- **search**: a typed formula with a label or adv, like 2d6+3 fire, gets its Roll row
+- **display**: the table display's volume
+- **sound**: the ask's second answer reads stay muted
+- **ui**: the speaker's tooltip names u, the key that mutes
+- **ui**: a speaker on the top bar that opens this device's volume
+- **ui**: volume as a dm menu and you menu row that opens the speaker's card or sheet
+- **sound**: u mutes and unmutes this device
+- **search**: this device's volume, found by mute, in place of room sound
+- **sound**: this device's volume with a mute, in place of room sound
+- **sound**: the engine scales every channel by this device's volume, a display's by its own level
+- **sound**: one set of volume controls with a mute toggle for this device
+- **sound**: a volume in this device's mix, the display's own level, and the mute helpers and icons
+- **floors**: a tracker row on another floor names it, and a tap shows that floor
+- **floors**: the display follows the party's floor, and the dm panel and the turn chip name floors
+- **floors**: the floor button, the floors menu and the [ and ] keys
+- **floors**: each device's floor shown, what it follows and the board's cut to it
+- **floors**: the dm menu and the search know floors
+- **floors**: move to floor in the action bar and the group's more sheet
+- **floors**: copy settings, builder note, import, export name and new tokens know floors
+- **floors**: one scenes row a scene with floors, delete, duplicate and thumbnail by main floor
+- **floors**: the floors group and a floor's page in the scene settings
+- **floors**: the floors icon, lucide's layers, credited to lucide and feather
+- **floors**: the board reads floorView, the cut of the floor shown
+- **floors**: client sites ask the floor questions: players scene, floor shown, floors they hold
+- **floors**: undo labels and the log, receipt and player view routes name floors
+- **floors**: backups carry floors and their opened marks
+- **floors**: the actor checks a scene's floors, explores each floor players see and names a dm's scene by its main floor
+- **floors**: the size guard measures a scene's floors together
+- **floors**: ephemeral events reach the sockets holding their floor, with their tokens on it
+- **floors**: the fan-out projects each socket's held floors, whole when they change
+- **floors**: each viewer's projection covers the floors they hold, with levels renumbered among them, the dm's opened marks and a display's party floors
+- **floors**: floor refusals and a player's access by the floors they hold
+- **floors**: adding, ordering, showing, renaming, removing and copying floors, with the opened marks
+- **floors**: traps, sight, rolls, companions, caps, explore reserves and prediction ask the floor questions
+- **floors**: the floor rules: held floors, open floors, the delete set and floorProblem
+- **floors**: the several floors contract: the floor model, ops, eph's floor, versions 56 and 43, the rules' signatures, the store's floor cut and the dm menu's flags
+- **clock**: the chip, to dawn and the display read dawn and dusk
+- **clock**: dawn and dusk in time
+- **vision**: time of day light
+- **clock**: versions 55 and 42 for time of day light
+- **clock**: dawn and dusk
+- **clock**: scene light that follows the time of day
+- **clock**: the time of day light and dawn and dusk contract
+- **display**: show the date and time
+- **clock**: a device knows its own clock lines
+- **effects**: pick a length of time
+- **effects**: versions 54 and 41 for time spans and clock line claims
+- **clock**: clock lines name the op that wrote them
+- **effects**: time spans that run out with the clock
+- **effects**: the time span and clock line claim contract
+- **dungeon**: secret doors land with cover auto and are no longer held at none
+- **dungeon**: dialog rows for phase 2, marks, look closer and the key hold
+- **dungeon**: a dungeon sent with lost answers is checked by its stamps, lights, stones, pins and key page, references through make's ids
+- **dungeon**: land stamps, lights, rolling stones, placed trap hits and the dm key with each dungeon
+- **dungeon**: fresh ids for every phase 2 op, and a 100-op make measured at 4x
+- **dungeon**: the generator lights rooms with theme lights, dresses them with shipped props, and writes the dm key's rooms with an srd trinket each
+- **dungeon**: the generator places collapsing roofs, poisoned darts, fire-casting statues whose cone reaches their plate, and rolling stones
+- **dungeon**: the generator's cave, mine and sewer themes, dead ends, secret doors and secret rooms, and each room's pin square
+- **dungeon**: phase 2 contract for the generator, landing and dialog: themes, new choices, plan fields, the key and the room's scale
+- **srd**: import the trinkets table from the srd for the dungeon key
+- **walls**: a hidden secret door looks to players like the wall it stands in, automatic or drawn
+- **traps**: a creature in single file half a square off its grid stops at a trap on seen ground
+- **traps**: a creature of one square or less stops on a trap at the edge of seen ground
+- **measure**: the walking ruler reads the way a drag takes with creatures in single file
+- **movement**: a drag on hexes takes the holder's own way where what it drags follows in single file
+- **attach**: on hexes what a squeezing holder drags follows it in single file, and its riders take hexes of their own
+- **sound**: the only dm devices play switch and what players see
+- **sound**: only dm devices play, kept by the room
+- **sound**: only dm devices play's contract: the room's setting, its room.update field and versions 50 and 39
+- **search**: a token's and a character's groups are searchable
+- **search**: a field can be offered for some creatures only
+- **search**: a dm's search finds this device's recent showings, as the dm menu lists them
+- **search**: shift+enter on a dice row puts it in the dice field unrolled
+- **search**: a playlist, a track, a monster's card and a handout open at their own control
+- **search**: scenes, time and sound, initiative, dice, the log and a creature's fields are searchable
+- **search**: ctrl+k, the top bar's search and the panels list's field open the search
+- **search**: a search of the room that goes to a panel, a setting or a token, or does an action, in one sheet with its own keys
+- **search**: the dm panel, this device, room settings and members are searchable
+- **ui**: the kit's controls take the room search's anchor id
+- **search**: the room lands focus on the route's control after the panel's own
+- **search**: menu, scenes and the journal turn to the route's page
+- **search**: one route opens a panel at a page, a section and a control
+- **sound**: a now playing chip in the dm's top bar opens the player
+- **ui**: a popover can say its close takes its anchor away, so focus goes where its owner names
+- **encounter**: an overrun turn timer has a short form for a cramped top bar
+- **ui**: the top bar's chips open the dm, blackout and you menus
+- **ui**: a menu pick can keep its menu open and hand focus to the item that took its place
+- **encounter**: roll monsters' initiative as the fight starts, one undo step for the start
+- **handouts**: recent handouts, each shown again to the players it went to
+- **ui**: this device's tab row picks the panels that may be tabs
+- **ui**: the tab fit holds only the panels a device keeps in its row
+- **dice**: the group save's dc takes recent dcs, and one press rolls saves and damage
+- **rolls**: recent dcs for saves
+- **find**: find my token also selects the token and opens its bar
+- **encounter**: next on the dm's turn chip and band
+- **tokens**: end turn on a phone's own bar
+- **tokens**: save on the group bar opens the group save
+- **tokens**: a monster's bar selects all of its kind
+- **tokens**: conditions start with the three this device used last
+- **tokens**: key c opens the bar's conditions
+- **tokens**: typing a number starts the hp entry
+- **combat**: a creature's attacks on its turn card, with this turn's results and apply to
+- **dice**: a toast of someone's damage roll carries apply to chips on the dm's device
+- **dice**: apply to chips under the dice panel's newest damage roll
+- **tokens**: a token bar's hp entry takes the fill a chip asks for, and an entry's ops say their answers
+- **dice**: who a damage roll's apply to chips name, and what each carries
+- **ui**: a toast can hold a row of buttons that wait on the server
+- **search**: index what a viewer may find, from panels, keys, catalogs and their view
+- **search**: the catalogs' shape, and the dm's catalog loaded for a dm alone
+- **search**: this device's recent picks, per room and member
+- **search**: match and rank entries for the room search
+- **ui**: the top bar's parts and the dm menu's words, declared
+- **search**: the search entry's shape and its data-search ids
+- **handouts**: this device remembers its recent showings
+- **view**: lifting a blackout can name the scene players must be on
+- **bar**: place freely and snap to grid wrap as one unit
+- **dungeon**: the preview fills its column on a wide card
+- **scenes**: scene setting rows read as nouns: square count, light per phase, sight sources, direction and version
+- **scenes**: use the still only joins the picker's line and remove map image keeps a line of its own
+- **weather**: the rules switch says what rolls do, then one line per weather
+- **scenes**: scene groups show their whole summaries
+- **sound**: the sound panel holds the player, with now playing and library views, and the playlist maker is its own pop-up
+- **sound**: table sound shows plain volume names, its scene line is help over use what's playing, and a player's now playing is a card
+- **sound**: the player holds stop all sound's row, an inline crossfade and the idle line with its library link
+- **clock**: time is its own panel again, with its step buttons one size
+- **sound**: the stop icon is lucide circle-stop, and ambiance's icon goes
+- **sound**: the contract for time and sound as panels
+- **sound**: library ends in a guide link to the music window's section
+- **sound**: the shortcut sheet's music rows for a track's handle
+- **sound**: the music window with now playing, up next, library and the playlist maker, opened from a compact now playing in the sound group
+- **sound**: the queue's lists and moves, the tiles and the music window's words
+- **sound**: the queue's ops, add to playlist, a queued track's delete and a scene's shuffle from version 48
+- **sound**: the queue's edits, jumps, seek bound and seeded shuffle
+- **sound**: the queue and music window's contract: the tall sheet, the xl dialog, two icons and the window's slot
+- **sound**: the queue and music window's contract: ops, versions 48 and 38, words and rules that refuse until built
+- **iso**: wall slabs with caps and joins, one outline along raised sides, and tints baked into textures
+- **doors**: a tap on an upright open leaf opens its door's pill, hung over the frame
+- **builder**: leave a standing open leaf's flat leaf and arc off the isometric ground stage
+- **iso**: stand doors and windows in frames from their whole door, and an open door's leaf upright on its hinge
+- **builder**: leave stepping stairs' symbols off the isometric ground stage
+- **iso**: stand creatures on the treads in picks, rings and the drag
+- **iso**: draw stepping stairs as treads, their sides in their floor
+- **iso**: find the stairs that climb in steps, and the stand surface on their treads
+- **ui**: step arrows and a mouse drag for sheets
+- **ui**: the side panel edge's keys and double-click in the shortcut sheet
+- **ui**: the top bar gives way by its own width
+- **ui**: a side panel that resizes from its edge
+- **scenes**: new scene folds
+- **scenes**: light and weather, scene sound and fog and vision groups
+- **ambiance**: time and sound sections that fold, and a weather row
+- **ui**: run the table group and the ambiance panel
+- **ui**: room ends each surface's reveals and an untaken scene request as its panel closes
+- **ui**: a group that opens elsewhere and the scenes request
+- **device**: this device sections fold
+- **dm**: dm panel sections fold
+- **ui**: the fold store, the ambiance request, panel renames and the group and setting row props
+- **animmap**: the board judges each frame's own size, and holds a reported coded or stretched size until the first frame
+- **animmap**: mov in the pickers, the local probe defers, and a turned video's still is read from its stored copy
+- **animmap**: the map layer and the library viewer draw a turned video upright at its drawn size
+- **animmap**: one placement for a turned or mirrored video's frame, for konva, a canvas and css
+- **animmap**: a stored room holds each map's and phase's video geometry to its coded size
+- **animmap**: backups carry each video's geometry, checked before the read and against the parsed size, keyed apart by turn
+- **animmap**: stored video rows keep a video's turn, mirror and stretched width
+- **animmap**: stretched webm display sizes voided into facts and posed projections refused
+- **animmap**: turned, mirrored and stretched mp4 and mov headers rewritten plain, iphone boxes kept by brand and metadata tracks dropped
+- **animmap**: a scrub edit that zeroes dropped metadata samples only inside one mdat and off every kept sample
+- **animmap**: video_hevc and the words for reshaped, mov and hevc videos
+- **animmap**: op version 47 and snapshot version 37 as identity steps for turned videos
+- **animmap**: video turn, mirror and stretch facts, the drawn size and the integer shape rules
+- **sound**: the playing track's and playlist's rows show pause, and play resumes them
+- **sound**: music fades in over 2 s when it starts or resumes, and its last track fades out over its last 2 s
+- **dungeon**: heights and traps sliders with named marks
+- **dungeon**: corridor styles that look different at every size
+- **panels**: list the dm's panels in three groups, with dm, scenes, time and sound under run the table
+- **sound**: the sound panel
+- **sound**: this device and the table display play sound
+- **sound**: synced playback on every device
+- **sound**: room sound and its mix on this device, and a table display's own sound
+- **sound**: the sound engine's clock, drift check, effects and one page per browser
+- **sound**: say when a pick past 20 files keeps its first 20
+- **sound**: add sounds from any file the browser reads
+- **sound**: read, measure and encode a sound file in the dm's browser
+- **backup**: sounds in backups: include sounds in the room export, the import's own walk and left-out count, mp3 in the nightly copy, and the server's sound switch
+- **sound**: sound files the server checks frame by frame in a worker, stores, serves by ranges and sweeps, behind its switch
+- **sound**: the mp3 frame walk and tag strip both sides run, with frames of silence for tests
+- **sound**: the server moves playlists on: the queued tick and its back-off, the members rule, the load's stop, the switch, the quota, a sound's length from its row and the time frame
+- **sound**: sounds in the stored-state schema, the size guard and the import remap, with refillSoundFacts and withoutSound
+- **sound**: typed sound references both ways on undo, and sound files among the room's referenced assets
+- **sound**: the room's sound library and what plays: ops, reducer, permissions, reads, undo scopes and the players' projection
+- **sound**: op version 46 and snapshot version 36 as identity steps, and the timeline and schedule helpers
+- **sound**: the synced music and sound contract: the sound model, caps, codes, mp3 signatures, server switch, asset row, import count, panel option and add sounds props
+- **animmap**: a video's film strip tile and viewer page in the library, and export's still line
+- **animmap**: take a video in new scene, the map image row and add a phase, with the device line and use the still only
+- **animmap**: read a video's first frame in the form and upload the video then its still
+- **api**: an upload path that reports the percent sent, through the upload queue and its 503 retries
+- **display**: animated maps moving or still in the table display's menu
+- **device**: this device's animated maps row and low power's line
+- **animmap**: the board plays a map's video in the map layer, under a cover, one decoder per window
+- **animmap**: the draw gate on media time with a wall-clock cap, and the one-way step-down
+- **animmap**: the playback rule and what the browser can play, one codec per track
+- **device**: animated maps moving or still as a device setting
+- **animmap**: the nightly backup copies and restores webm and mp4 files, and the switch joins the server's environment
+- **animmap**: videos in room export and import, reserving each entry's size under a cap derived from the quota
+- **animmap**: video intake, storage and range serving behind the server's switch
+- **animmap**: the video header check, a bounded webm and mp4 parser that zeroes off-list metadata in place
+- **animmap**: videos in the stored-state schema, the import remap and refillMapVideos
+- **animmap**: the actor fills a video's facts from its row and passes the server's switch
+- **animmap**: the video rules: a checked video row, the still's shape and the server's switch
+- **animmap**: video references, the visible set and the players' projection of a video phase
+- **animmap**: a map's and a phase's video in the protocol and the reducer
+- **animmap**: op version 45 and snapshot version 35 as identity steps
+- **animmap**: the animated maps contract: the video model, caps, codes, kind, words, status store and server switch
+- **a11y**: a token drawn between squares says so in its bar's name
+- **shortcuts**: alt-drag and place freely in the sheet
+- **canvas**: alt-drag, the drawn node adapter, the rules outline set and the drag label's free line
+- **canvas**: place freely and snap to grid in the token bar's play row
+- **movement**: drops between squares, the drag boundary's rules reads, and arrow steps that keep a placement
+- **canvas**: the marquee, find, area names, light captions, mount presses and tethers read the drawn spot
+- **iso**: standees, ghosts, decor, text and press areas at the drawn spot, rules boxes at the stored one
+- **canvas**: a nudged token draws at its drawn spot, with the dashed rules outline when the board asks
+- **canvas**: drawnAt and rulesSpot, a nudged token's drawn spot and its way back to rules coordinates
+- **snapoff**: every copy of a token it reaches carries its nudge, frames are judged by the rules box, and backups keep it
+- **snapoff**: undo and redo put a placement back with the pose, and their labels name it
+- **snapoff**: owners place their own unlocked tokens in place, and a player's undo never changes a locked token's placement
+- **snapoff**: a named move keeps its placement only where it lands as aimed, and one pass after every op drops placements that no longer hold
+- **snapoff**: the nudge rules, its bound, a free drop's drawn spot and the tokens the pass judges
+- **snapoff**: the token's nudge, drawnAt on moves and token updates, and versions 44 and 34
+- **ui**: the color picker's sample and note follow the scheme and the dying word takes dangerText
+- **ui**: member color dots and swatches wear a thin mark ring
+- **ui**: names in a member's color read as text through memberInk in the log and recent rolls
+- **display**: the table display holds the dark theme for its page
+- **dm**: the preview's waiting and error screens stay dark on its black stage
+- **builder**: the height pill keeps the board's dark look in the light theme
+- **dice**: the whole dice tray keeps the board's dark look in the light theme
+- **room**: the map's ground stays dark, and floating tools and the map's focus wear the board's two-tone ring
+- **dev**: the kit's theme switch, for this page only
+- **theme**: a black strip under the home-screen app's status bar on a light page, over pages and inside dialogs
+- **theme**: the highlight and your turn's flare keep the cream under ink in both themes
+- **theme**: a room sets the accent for the page's scheme and for the board, and the pause screen stays dark
+- **theme**: the page ground, focus rings and selection read the scheme, and rings on the board stand on a dark halo
+- **theme**: color the page from the device's theme before the first render
+- **device**: a theme row in this device, dark, light or auto, and the menu row names it
+- **theme**: the scheme colors and shadows are css variables with the dark value as fallback, and the tests read the palettes
+- **theme**: the light theme's contract: palettes per scheme, the board palette, scheme.ts and the theme setting
+- **dungeon**: generate a dungeon from new scene's builder form, with its preview and make the scene
+- **dungeon**: the generate dialog's words and this device's remembered choices
+- **canvas**: frame a newly opened scene on a one-shot request from its own room scope
+- **dungeon**: send a dungeon in one setup group with the import's outcome
+- **dungeon**: draw previews in a worker, answering only the newest
+- **dungeon**: land a plan as builder ops through a scratch room with the server's checks
+- **dungeon**: generate a plan, with the drops and its invariants
+- **dungeon**: doors, dressing and trap spots
+- **dungeon**: corridors by cost search under one budget
+- **dungeon**: raised and sunk rooms with stair runs, and daises
+- **dungeon**: rooms, entrance, links and doorways
+- **dungeon**: chacha20 stream with ranged draws, checked against rfc 8439
+- **dungeon**: contract for the generator, landing and dialog
+- **ddb**: an imported weapon keeps d&d beyond's ranged or thrown, so strong wind knows a weapon named for itself
+- **dice**: named and shared attacks roll with their weapon signal for the weather
+- **dice**: roll presets and notes read the weather of the scene a creature stands on
+- **weather**: say the scene's weather in the polite status, joined with the view's line
+- **weather**: the weather fold in what players see
+- **ui**: wind toward icon for the weather compass
+- **weather**: compose a valid weather from the fold's picks
+- **device**: weather in this device and the table display's menu
+- **weather**: the room's weather clock and its layer in top-down and isometric
+- **device**: weather on the map setting, kept per device and apart for a table display
+- **weather**: larger fog banks at two sheet sizes so no repeat shows, and leaves drawn at their full size
+- **weather**: the mode with its tick gate, warm-ups and one-way step-down
+- **weather**: draw each kind batched into a clipped 2d context
+- **weather**: tiling noise sheets and a leaf atlas made in code
+- **weather**: the particle field with its pan wrap, resize and step clamp
+- **weather**: each kind's look as data
+- **weather**: drawing core api for the looks, the field, the draw and the mode
+- **dice**: named rolls say their range and whether a weapon or a spell makes them
+- **weather**: weather's roll presets and notes from the srd 5.2.1 environment text
+- **weather**: a scene's weather through ops, undo, backups and versions 43 and 33
+- **weather**: the scene weather contract and the attack's weapon signal
+- **clock**: the time panel links to its guide section
+- **clock**: rests and the journal read the clock
+- **clock**: the clock in the top bar and its toasts
+- **clock**: the time panel
+- **ui**: the calendar-clock time icon
+- **clock**: fights and long rests move the clock
+- **clock**: the room clock and its calendar
+- **clock**: the clock's model, calendar math, ops and versions
+- **guide**: the ask card picture is a phone shot
+- **dm**: join requests section, joining setting, toast and badge
+- **state**: count the joinRequests signal apart from the access signal
+- **dm**: join request toast throttle, words and retrying list loader
+- **join**: the ask page, the join page's three modes and a room that opens only with its member
+- **join**: the ask page's wait loop as a reducer, and the refusals of an ask
+- **api**: join request routes: ask, wait, cancel, the DM's list and answers, and the join mode
+- **rooms**: the joinRequests signal to DM sockets
+- **auth**: the join request store, its sweep and the ask limits
+- **auth**: ask tokens adopted by every session-making path, and the only-by-asking password boundary
+- **auth**: join/complete writes a new player's member before its grant, through admitPlayer
+- **api**: join request contract: routes, error codes and the joinRequests signal
+- **scripts**: pnpm coverage reports line coverage of shipped code and scripts
+
+### Fixes
+
+- **fall**: a crowd of one creature reads singular, and the blank line before fallNamed's doc is gone
+- **guide**: the guide scene scripts find the area spell field by its label
+- **guide**: the guide scene scripts find the area spell field by its role
+- **fall**: a character's tokens read as one name from the cached names too, and a crowd toast counts holders
+- **floors**: a hole's pill never hangs over its own hole
+- **floors**: hole pills in isometric are placed together by the fewest covers, from the pills' drawn boxes
+- **floors**: a hole's pills in isometric keep off the floor's other ends and the pills before them
+- **draw**: the free draw hint says one finger only on touch, and the area spell field's placeholder fits a phone
+- **floors**: the refusal for squares that already have an opening names the floor it is on
+- **fall**: a card names each holder once, in the card, its region, its buttons and the toast
+- **scenes**: the several-files scene name takes 80 characters, and rows whose cut names collide show the names the floors get
+- **limits**: the Undo and Redo of a show in a fight, which shows the creature's row too, are bookkeeping
+- **limits**: revealing or hiding a creature's name is bookkeeping too, as a show or a hide is
+- **limits**: the Undo of a hide or a lock reads the creature as the restore writes it, numbered since or not
+- **ui**: the character and companion stat block editors say Not saved. with a full stop, as the room's refusals do
+- **pcstats**: a refused stat block save shows why at the top of the editor, scrolled into view
+- **limits**: a room at its storage limit tells a player to ask the DM to free some space, and the DM to free some in the Library
+- **limits**: the room keeps the same for the players with nobody chosen under Chosen players as under No one
+- **limits**: a hide, a show, a lock and an unlock are bookkeeping, so the DM can reveal a creature or an area at the room's lines
+- **limits**: a far widths part a room dropped goes with its kept values, though the records it read stay
+- **limits**: each room keeps one far widths part a kind for its own facts, and drops the old part when they change
+- **fanout**: the changed tiles' box reads only whole-number tiles, as a range's are
+- **fanout**: every batch's fan-out works out its state's token lists and reaches, a global one's too, and again where a scene's grid changed
+- **limits**: the seats sort every thing by id whoever owns it, from each room's kept token order, and read every token of the scene
+- **limits**: kept size sums step from each room's accepted state, moved on by every op it accepts and never by a trial or another room
+- **fall**: the off-scene words follow the same reach rule as the plan, so a holder reached by another token does not read as moved away
+- **fall**: a fall card's holder stays on the page while any token of it the card names is in the DM's view
+- **limits**: a refused stat block save reads in words its sender's role can act on, so a DM is never told to ask the DM
+- **fall**: a fall card's creature whose row token left the scene is reached through its token that stayed
+- **scenes**: a scene from several files shows one toast, and its scene name is cut like a floor name
+- **floors**: a hole's pills stand clear of the hole on the isometric board and are not drawn flat under the dark
+- **limits**: a player's exact part places each thing by kind, the room, the blocks or a floor by id, so a scene with any id reads as a scene
+- **limits**: the room keeps for the players what the DM's choices put in their exact part, from the room's settings and roster, and a setting turned on at the DM's line is refused
+- **limits**: a player's far readings name the room and each scene by kind, so a scene with any id is read as a scene and the room as the room
+- **limits**: the room keeps 1 MiB for the players plus the widest every creature, character and seat area takes in their exact part, 2 MiB in whole steps
+- **log**: a player's own lines start where their live log does, as their copy holds them
+- **limits**: a player's far check reads both stepped parts exactly on every op, the room's and every scene's, with no bound carried between ops
+- **previews**: held previews are judged again after every batch while a screen holds one, and a stale frame waits for its sender's next frame or close
+- **undo**: a player's undo step leaves out a walk their op took off a creature outside the turn
+- **limits**: a player's far reading is their exact part on both copies plus the room's stepped part, with turn walks in one pool and fight history counted as empty
+- **dungeon**: make's words say delete asks first while the players are on the scene
+- **undo**: a player's undo neither checks nor puts back a walk the turn rule took off
+- **floors**: a player's undo and redo of a climb or a fall find both ends as they were shown, never by rev or made
+- **project**: a companion's hp, life and life lines follow the link a player's copy holds, from change format 65 where a line settles
+- **rolls**: a player's initiative and a cast's damage read only the lines the player holds, from change format 65 for a cast
+- **rooms**: an import leaves the newest shed dm line behind, as it does a step's walks
+- **reducer**: from change format 65 a mount that leaves the turn takes its walk with it, and every op ends with walks of the turn only on its creature and the mounts sharing it
+- **reducer**: a walk kept from before change format 65 is filed before the history is bounded, and a step it does not fit in goes with every older step
+- **reducer**: from change format 65 every history step holds its walks, Previous keeps a walk of the turn it resumes, and a turn's end keeps an older walk in the step that ended its turn
+- **reducer**: from change format 65 a turn's end takes every creature's walk off, Next keeps the turn's for Previous, and a restore keeps a walk only on its own turn
+- **limits**: a full room's refusals name what to delete in place of a size, for the DM and a player
+- **traps**: the floor below strips the 10 ft pit that a pit writes back over a higher-level spiked pit's spikes
+- **traps**: turning opens a pit back on makes the same 10 ft pit with its falling damage as picking a pit
+- **traps**: the floor below strips a pit preset's fall only while its damage and note are both one level's preset, and A pit makes the 10 ft pit
+- **dice**: a player's ask on another floor of the scene on screen names that floor on the DM's card, and another scene's its place
+- **traps**: a crowd's fall toast names another scene's floor with its scene, and an unknown one as another floor
+- **traps**: a crowd's fall toast says 10 or more creatures once its op's cards fill the room
+- **traps**: picking the floor below takes an unchanged pit preset's falling part and pit words off the stored trap, and A pit puts the fall back
+- **traps**: one op that drops more than three cards toasts once with the count
+- **traps**: a fall card whose creature moved to another scene keeps its name and says it is not on this scene now
+- **traps**: a pit preset opened onto the floor below leaves its falling damage and pit words to the fall card
+- **dice**: a fall card's save page keeps every creature the card names, so Apply works on a card with riders
+- **ui**: the no scene words centre in the clear band, with the bar insets unscaled and the sheet's safe area counted
+- **ui**: the no scene words stand clear of a phone's open sheet
+- **ui**: more's menu stays open when a new fit refits the tab row
+- **limits**: a floor of a scene counts a comma for each entry, so a creature, area or ruler crossing floors never moves the scene's measure
+- **floors**: a group save that settles a creature on a fall card takes every token of it off the card, on whatever scene, so its fall applies once
+- **dice**: a trap's, a fall card's or a selection's group save whose creatures all moved to another scene says so, and the floor words stay for an area's
+- **dice**: a fall card's group save takes every token of each creature it settles off the card, so two riders that show one character take the fall once
+- **traps**: a trap's toast and the Passive Perception hint name the floor on a scene with floors
+- **floors**: a fall card's apply reaches its riders on any floor of the scene and takes off the card only those it settles, and a trap's page takes its hits on any floor too
+- **limits**: a reached floor's mark counts at its widest on every floor, so a landing that writes one moves no measure
+- **limits**: the far line holds a pit or trapdoor scene's headroom for what its drop writes past the fixed widths, from the seat-inclusive bounds
+- **limits**: fall cards count in every measure as ten at their widest while a room may hold one, never at their own bytes
+- **attach**: a drag that lands beside its holder on another floor or scene takes the height and walls it lands on there
+- **attach**: from change format 64 a dragged creature ends on its own squares or hexes inside the scene and off its holder, else beside it in reach or let go
+- **floors**: the floor below's fog in an opening's window composites over its map, creatures and sight, filling only what lies past that floor's edge
+- **floors**: an opening's window draws its crop again when the floor below's map is calibrated anew, keyed on the rectangle the map is drawn in
+- **floors**: move to floor judges each creature where it really lands, a flier on the far floor's ground and what it drags included, so no choice drops one through an opening
+- **floors**: the words of the pair limit, the key off any end and the stored room's check name openings beside stairs and ladders
+- **floors**: only placing or moving an opening drops what stands on it, so a copied scene's creatures on a hole stand, with no card
+- **floors**: a restore takes as many fall records as its entries, so a move of 100 creatures that drags one more through a hole still undoes
+- **floors**: a player's undo or redo across stairs or a hole reads the ends' rev and made only while their copy holds both ends, so a far end the DM moved under fog answers as any withheld end
+- **uvtt**: new scene's picker keeps one hint, the several files sentence joined to it, so the picker and its hint stay in line
+- **bench**: row open-iso runs first and alone under its only option, before other rooms' loads pass what one address may hold
+- **bench**: the iso bench's new things take version 7 ids dated as made, which the room's id gate asks of every create
+- **server**: undo steps name hiding, moving and resizing stairs, ladders and openings
+- **server**: a dm's op that lands a creature on another floor by a fall or a trapdoor meets that floor's limits, as a dm's climb does
+- **mapexport**: the player view of a floor nobody looks at drops every floor's creatures, so no next floor lends live sight through an opening
+- **movement**: from change format 64 a creature a move carries, or a fall or a trapdoor lands, outside its turn keeps the path it had
+- **limits**: only the room's far line gives a fight's start the history words, and a scene's line keeps its own
+- **limits**: a fight's start the far line refuses says the room has no space left for its turn history
+- **limits**: on a scene whose fog cuts a walk's bends from its owners' copy, a player's creature's walk counts its bends at one width for the whole walk
+- **limits**: a clock line counts in a player's exact part only while no blackout holds players back, as their copy holds it
+- **limits**: where players may apply damage, what a hit writes on any creature counts at its widest in the far line, and the damage types it took count at their widest where a player's copy lacks them
+- **limits**: a fight's history counts at its bound in the room's far reading and as empty in a scene's, where a turn began counts at its widest, and a player's creature keeps its walk past its turn as their copy held it
+- **limits**: a shared line counts in a player's exact part as they read it when it was written, for each player on the roster then
+- **limits**: a player's area or drawing the DM hid reads as a deleted one in their exact part, where they see it or not
+- **limits**: a player's drawing, ask or area on a floor they do not hold stays in their exact part, and an ask's floor mark counts at its width
+- **limits**: a shared line counts in a player's exact part by its own rules, not by where their live log starts
+- **limits**: an HP line counts the conditions its change put on or took off as players are shown them
+- **limits**: a creature a player may move but does not own counts its walk at the walk width only on the turn their copy shows
+- **limits**: a creature a player may move but does not own counts its walk at the walk width while it has one, not only on its turn
+- **limits**: a player's areas and rulers on creatures out of their sight are held without reading what changes while unseen
+- **limits**: a player's exact part matches the elements of a list by key only where each key names one
+- **limits**: a player's rulers, areas, rides and asks that follow a creature stay in their exact part, its fields at fixed widths
+- **limits**: a dice line of a player's own counts who read each roll at a fixed width
+- **limits**: the far line counts what an op may write on creatures and areas a player does not receive at fixed widths
+- **limits**: what a player's own ops write past their copy counts in their exact part at a fixed width
+- **rooms**: a dm's undo and redo read the players' far line
+- **limits**: a player's far reading holds exactly everything their own ops can grow, as their copy holds it
+- **reducer**: a token's own route that comes back to where it started, or to the first square clear of its mount, records its leg and feet
+- **rules**: a hidden drag set down beside a dropped seat searches every spot both footprints and her reach allow, so large creatures keep the drag
+- **rules**: a hidden creature a seated rider drags lands in the scene at its drag height on any clear spot in her reach, and a walk back to its start meets traps and areas
+- **rules**: every reader of a moved token's way reads it through one reader, and a seated rider's drags walk as her place carries her
+- **rules**: a seated rider and what she carries keep their own seats until the walk ends, so a trap's stop short reads, hits and lands them there
+- **movement**: a rider dropped on a hex or square of her mount's stand sends her seat with the move
+- **rules**: a trap's stop steps each creature in single file off its holder onto a clear spot in reach where one is left
+- **rules**: a creature in single file on hexes beside its holder's start steps onto it where the way by the one ahead ends out of reach
+- **rules**: a walk in single file on hexes holds its last hex to its holder's end from change format 63
+- **server**: a server stop checks every room it loaded or deleted against what the database stored, and names each one left behind
+- **server**: deleting a room saves its snapshot as it unloads, so a delete that fails, however often, leaves the room saved
+- **server**: a server stop still names a room whose delete failed before the rooms began to close
+- **server**: a server stop counts a room deleted during it as gone, and a room whose delete failed as unsaved
+- **server**: a server stop that meets a periodic snapshot still being written saves the room's newest state after it
+- **server**: a server stop that cannot save a room still saves the rest, then names each room and anything else it lost and exits 1
+- **server**: a server stop closes its HTTP connections after every shutdown hook, leaving no gap for a request to hold it
+- **server**: a server stop logs each step's time, and a forced or failed stop says so and exits 1
+- **server**: a server stop with phones connected ends in a few seconds and saves every room, where it hung 25 s
+- **dice**: a selection across floors of one scene keeps every creature, and an ask page is never stranded by the floor words
+- **dice**: a group save from a trap, area or ask takes its source's floor and refuses an empty plan with words
+- **scenes**: a dm device left on no scene in a room with scenes asks for one from the scenes panel, and opens the players' scene once it is back
+- **movement**: a squeezed hex walker standing up at a corridor's mouth plans the drag it tows as the server walks it, so it comes out
+- **traps**: the trap step reads every walk hex by hex where the move has it, in the file or not
+- **traps**: the poses a stop leaves read the named token where its cut lands it, and what rides it by its change there
+- **traps**: before a stop the trap step reads a walk in single file hex by hex at the move's height from its start on
+- **movement**: the board holds a walk in single file hex by hex to as many points as its heights
+- **traps**: before a stop the trap step reads a walk in single file hex by hex at the height the move has it then
+- **traps**: a stop stands a walk in single file hex by hex level with its holder where the stop lands the holder
+- **rules**: the board works out heights in single file hex by hex holder before member, as the move does
+- **traps**: the trap step reads a walk in single file hex by hex with its holder at its own moment, and a stop stands it level with its holder
+- **rules**: a holder in single file hex by hex is read at its height between its leg's ends
+- **rules**: an area's sweep reads a walk in single file hex by hex along its current leg's hexes and height
+- **traps**: a walk in single file hex by hex keeps spots of its own where its points are its lead's offset by its place
+- **rules**: the reach cap counts each leg of a walk in single file hex by hex on the lead's piece it ends on
+- **traps**: a trap's cut keeps how far along its lead's cut walk each point of a walk in single file hex by hex is reached
+- **rules**: a creature in single file on hexes goes by the one ahead of it where that one starts as near as the holder
+- **board**: a drop's followers go where the copy holds them once its answer lands
+- **movement**: the board's drag checks a walk in single file on hexes hex by hex as the move walks it
+- **rules**: an area's sweep reads a walk in single file hex by hex at its holder's moments
+- **traps**: a trap's step reads a walk in single file hex by hex at its holder's moments
+- **rules**: a creature dragged in single file on hexes walks onto the hex its holder starts on and on hex by hex
+- **limits**: a player's far line holds their own things as their own copy holds them, in count and in bytes
+- **limits**: a player's far counts and bytes hold exactly only their own copy's own things, so whose an unseen thing is never moves their answer
+- **limits**: the DM's adds stop 1 MiB before a player's on the room's far line, read at the widest, so the players always keep room
+- **rooms**: redo setup of the players' scene's delete is refused while undo setup has them back on it
+- **limits**: a player's free areas on every floor of a scene leave the DM's areas, not only those on the op's floor
+- **movement**: a walk across a platform's wall holds on its edge at the wall's end, not down its stairs and round on the ground below
+- **movement**: no creature named meets no spot, where a clear spot read as meeting it
+- **movement**: a towing walk held at a ledge's foot takes the way its creatures follow
+- **movement**: a walk a ledge closes holds at the ledge's foot along the closed search's route, and its note names the ledge
+- **movement**: where a walker tows, the creature that closes the way is read from its own search
+- **movement**: the creature named in the way is the one under the last spot the closed search reaches on the open way
+- **movement**: a walk holds short of the creature its note names, not the first creature on its straight leg
+- **dungeon**: a dungeon's way back names Delete in the scene's menu without waiting for the players, and Undo setup once they are on another scene
+- **ids**: the clock's check on a group save's condition ids reads no row
+- **ids**: a group save whose new condition id is dated past the clock's 5 seconds ahead is refused
+- **ids**: the refusal of an id not made just now says to reload the page and try again
+- **rooms**: a load across the player limits version drops asks whose caster is gone
+- **ids**: the gate holds far-dated rows apart from its expiry order and forgets members' ids past the window
+- **ids**: the daily cleanup deletes every room's id rows past both their times
+- **limits**: the DM's room block totals refuse only an op that adds blocks, read per version of blocks, characters and members
+- **limits**: the room's far reading and the DM's over notice count players' companion blocks
+- **ids**: a group save's version 7 condition ids get the server's rows with its batch
+- **scenes**: the question before deleting the players' map starts on cancel and carries its words as cancel's description
+- **ids**: the dev room answers a reconnect's ids ask, and the import's lost answers settle by it
+- **limits**: a player's restore answers for a drawing their copy does not hold as for a deleted one
+- **rooms**: a deletion's and a server op's growth count on the size guard's bounds
+- **rooms**: the far line reads every scene, so growth of the room-level part meets each scene's line
+- **limits**: bookkeeping fills a reserve inside the far line, and past the line every growing op is refused
+- **limits**: the full room's rows and asks stop where the far count does, whatever the roster
+- **limits**: a restore stores conditions as every writer does
+- **limits**: the far line keeps the dm's 20 asks beside full seats, and a fight stores rows to the far line
+- **limits**: the full room's asks stop where the far line's count does
+- **limits**: the full room keeps each character's companion blocks within its own caps
+- **rooms**: a meeting that throws as it is applied fails closed with the meet step
+- **movement**: a walk whose note names a creature in the way holds before the first creature on its straight leg it cannot pass, as at a wall
+- **movement**: the creature named in the way is the one under the last spot the closed search reaches on the open way, not one the walk goes round
+- **movement**: a player's drop of a rider out of a squeeze ties only the mount's stands clear of a ledge where any is, so beside a rise she lands beside it
+- **movement**: only a player's walk reads what a mount drags to settle its rider's stand, and the tie is worked out only where stands tie
+- **movement**: the creature named in the way is the one under the footprint the route search reads there, squeezed where the walker squeezes
+- **movement**: the tie between a mount's stands reads each dragged creature at the height the move gives it, so a flying rider's goblin passes over a rise
+- **movement**: a creature that closes the only way is named in the drop's note, not a wall that is not there
+- **movement**: a rider dragged out of a squeezed mount lands on the square or hex she is dropped on, where the goblin she drags still stands clear
+- **movement**: a group drag pressed on a token sitting on its lead moves by the pointer's own offset again
+- **builder**: a wing's join tap reaches 22 px from a wall, not from any grid line, so open ground at a fit view clears the join
+- **movement**: a rider's drag aims its mount by the square the rider is dropped on, so a touch plans as a mouse does
+- **movement**: the gate lets the put-back pieces of one wall leave together, as it does rounded ones
+- **builder**: the wing pane's automatic walls note names Walls and movement, where the setting is
+- **walls**: a player's device reads a held piece along an axis, or one with its stored ends, as the stored wall rather than by its band
+- **measure**: a carried ruler ends when the room's last stairs are removed, though the copy then has no stairs field
+- **dungeon**: on a phone nothing scrolled under the Generate a dungeon preview shows above it
+- **builder**: the wing pane's room panel gives focus back to Edit rooms on Done
+- **builder**: on a phone the wing pane keeps its counts and Add the wing in sight, its rows scrolling above them
+- **builder**: the wing pane's room panel names rooms W3 and to room W2, as the ghost numbers them
+- **builder**: the wing pane's no way line offers Reroll first
+- **dungeon**: a wing's step in Setup history reads adding a wing to its scene, not changing walls and doors
+- **builder**: an added wing clears the wing row's note, and a tap near no wall drops the join while the wing pane is closed
+- **dungeon**: a wing's way to the wall it joins stays inside its area, or between the area and the wall, never round the joined room
+- **builder**: the wing's revealed warning counts only ground the DM revealed, not ground the party explored
+- **import**: an imported companion keeps the number and the group mark the table gave it
+- **rooms**: a batch meets creatures once at its close, on the state it publishes
+- **bench**: a table sits down only once every socket has its snapshot, so its first op is answered
+- **rooms**: the size guard counts players' chunk positions and wall pieces on a square scene with fog off whose automatic walls are on
+- **project**: a player's copy of a square scene with fog off reads a covered door as the walls round it do
+- **combat**: an add behind a waiting end and a new start counts in the new fight, so showing its token shows its row
+- **combat**: a new fight button pressed while a rolling start waits adds its creatures behind it, and they roll with the start's
+- **combat**: with end the fight waiting, add to the fight starts a new fight behind it
+- **project**: a player's labels and stamps come in id order, remembered ones too
+- **tracker**: a new fight button whose start waits stays busy when another is pressed
+- **tokens**: turning hidden off while a fight's start waits shows the rows that start sent
+- **combat**: the dm's next pill keeps its focus while a turn change waits
+- **combat**: creatures added while a fight's start waits go in behind it
+- **project**: a player's stamps and labels go out in one key order
+- **rooms**: reads of the log and receipts stop at the stored number
+- **rooms**: a queued command takes its number and times from when it was queued
+- **project**: a player's copy of an area shows a caster it cannot see the same way, whether the caster stays or goes
+- **combat**: the tracker's turn controls keep their width while busy
+- **log**: an HP line offers Undo once it is confirmed
+- **combat**: a turn change waits for its answer on the DM's device
+- **reads**: no device predicts an op that can change the turn
+- **rooms**: each player connection ranks the stamps its copy holds
+- **project**: a player's copy carries rev 0 and its stamps ranked on their scene
+- **canvas**: the edge pass reaches each token by the widest label its own style can draw, a large token's wrapped name included
+- **measure**: the gone-stairs check follows the room for the ruler's whole active life, not the options row's
+- **canvas**: a cut name kept across a pan stays within the screen's sides, the edge pass reaches a far token's side label and Isometric is left alone
+- **canvas**: a token's name stays between the screen's sides, cut with an ellipsis instead of by the edge
+- **measure**: the gone-stairs check reads the whole copy without the board's floor-cut guard tripping
+- **view**: the turning notice leaves once the board shows isometric
+- **search**: move to rows rank in floor order, not by the length of the floor's name
+- **floors**: the height row drops its stepper under the words when they would get under 8em
+- **measure**: a ruler carried over stairs ends on the device when its stairs leave the copy
+- **floors**: a stairs name keeps its first spot when the turn marker meets the spot under the end too
+- **dungeon**: closing the wing pane while it asks about players' remembered map ends the send as Cancel
+- **dungeon**: changing Corridor width in the wing pane with rooms edited keeps Bring them back
+- **dungeon**: a tap on a room of a hex wing's ghost opens the room drawn there
+- **dungeon**: a tap on a room in the preview or the wing's ghost opens the room drawn there, with DM key off or rooms dropped
+- **dungeon**: a wing whose first op the server refuses says part of it may be missing, not that nothing was added
+- **dungeon**: room edits in the wing pane hold on a small area
+- **dungeon**: a hex wing joined on a slanted side or with Wide corridors is added instead of refused
+- **dungeon**: edit rooms stands over a drawn picture tall enough for it beside reroll, else above the choices
+- **dungeon**: the dialog's preview call reads the same with or without the landing's edits argument
+- **protocol**: a wing ask's stamps are listed among the ids an op makes
+- **dungeon**: a wing counts objects in the room it joins, reaches a hex join by corridor moves, and refuses a join reached from both sides
+- **dungeon**: a floor's dialog keeps the remembered rooms beside the kept size when the DM leaves the count it opened with
+- **measure**: a carried ruler keeps every fraction its walk counted, a rise's fifths of a diagonal too
+- **floors**: a global batch still finds the floors each socket gained or lost, so a floor hidden beside a height edit ends its previews
+- **dungeon**: a floor whose lost create never shows reads as no floor added, as a new scene does
+- **measure**: a pinch that cancels a replacement drag puts back the carried ruler with its carry
+- **measure**: a ruler carried over stairs keeps a tiny walker's half feet and half diagonals
+- **floors**: a floor height edit re-projects every copy without judging shown previews again
+- **dungeon**: a floor's dialog saves rooms left at the default as the kept size's default
+- **floors**: a carried ruler's chain reads its ends and creatures as the room's own entries
+- **rolls**: a capped roll card folds by the height its reason lines really free, measured at the card's own scale
+- **rolls**: a held strip folds a roll card by the reason lines it has, measured into state with its height
+- **rolls**: why a player's roll waits keeps to screen readers where its line would squeeze a held strip, so roll asked opens the card
+- **floors**: a stairs name keeps off the turn's marker where both draw, in Isometric too
+- **floors**: a refused restore onto a taken level names no floor and asks for the press that failed
+- **rolls**: a player's Roll keeps its reason for screen readers only on any screen under 600 px tall
+- **floors**: a stairs end's name hangs under the end where the turn marker would meet it, and the sweep measures the bar's Go up
+- **combat**: a turn card's Dismiss stays at its top when a long name wraps
+- **rolls**: a player's Roll says why it waits in a line, kept for screen readers only on a short sideways phone
+- **floors**: a stairs end's name keeps its whole words and puts Not reached yet on a line under it
+- **bench**: the iso bench's room sockets give up on a snapshot that never comes and answer waiting ops when they close
+- **floors**: a floor's page joins the reasons Move up and Move down are off and describes each button by them
+- **floors**: an undo refused because a new floor holds the restored floor's level keeps its step and names the new floor
+- **floors**: a player's copy reads a floor it holds only through a hidden creature as not open, as the server does
+- **floors**: a player's undo and redo of a climb leave both floors' own limits unread, as the climb leaves the far floor's
+- **floors**: stairs a refused undo would put back are judged on the room as restored, so a floor's own stairs keep the placer's words
+- **floors**: a same-kind stairs update is labeled by its lock, with two comments back on their functions and a test's title
+- **floors**: a dm's climb meets the far floor's limits and a player's leaves them unread
+- **floors**: an undo that puts removed stairs back names what blocks them now, not stairs to remove
+- **floors**: a restore that puts a creature on another floor takes every area attached to it now, not only the step's
+- **floors**: a climb's undo and redo read an end's kind only once the player receives that end
+- **builder**: the stairs draft is drawn over placed stairs so a refusal's red shows
+- **undo**: a change to stairs is named by its new kind only when the kind changes
+- **builder**: the stairs pane's title is a heading and the draft's outline keeps its width at any zoom
+- **floors**: the stairs' names stand up in isometric, as trap names do
+- **floors**: the lock sits on the stairs' bottom corner, clear of their name
+- **movement**: a drag's route search counts on from the diagonals players saw on floors left
+- **rooms**: a room whose replay failed stores no explore or map step row of its own, and its refusals answer at once
+- **rooms**: the batch-end explore runs for a batch that answered something, and never for one that only kept the room's books
+- **rooms**: a room whose replay failed reads its log and receipts only up to the last number it replayed
+- **rooms**: a load counts past every number an older build stored, its rows and its snapshot alike
+- **dice**: one rule names an hp target's holder, so a filled chip leaves once applied
+- **dice**: a filled group entry records the holders whose op was taken, each answer kept per op
+- **bench**: the only option trims every word and drops an empty one on both paths
+- **dice**: a filled hp entry marks its chip applied only once the server takes it
+- **iso**: a cull step repaints the relief whole again when its layout keeps every run
+- **ui**: a sheet made modal inside view as a player leaves the preview under it
+- **encounter**: the band's Your turn gives way to a few letters where End turn would run off the screen
+- **canvas**: the bar's Move to floor list scrolls into view when it opens
+- **dice**: a shared attack's note names the creatures an effect bears on when it is not all of them
+- **ui**: a sheet made modal puts the dialogs it opened back above it
+- **encounter**: type several values keeps each portrait as tall as its controls
+- **canvas**: the group bar's More, Delete and Clear wrap as one, so Clear never stands alone
+- **dice**: a player's Fill chip leaves its row once the entry applied it
+- **dice**: a turn card scrolls a new damage result and its chips into view
+- **encounter**: a player's turn band keeps Your turn whole, giving up the round first
+- **ui**: the first chip on a damage toast is the primary one, as under a roll
+- **handouts**: picked image's view and change wrap as one group, recent rows show a title whole with the button under it
+- **ui**: a phone chip's dot is judged again after each step the bar takes
+- **traps**: a found trap's name draws above the fog and the dark
+- **dungeon**: a generated fire-casting statue drops the note that tells the dm to place the cone
+- **sound**: volume's help drops the music data line while the server offers no sound files
+- **dungeon**: the dm key closes with the traps in the corridors
+- **ui**: a phone's player chip draws its dot alone where its cut name would be under a letter
+- **movement**: a hex group drag with a follower that cannot follow stops at the corridor's mouth
+- **floors**: a player's floors row names another player's companion by the party mark
+- **bench**: the iso dungeon seed's last character moves with the generator's pin rule
+- **dungeon**: centre the preview's corner buttons while its picture has failed
+- **dungeon**: keep trap zones off a room's pin square
+- **sound**: a loop whose blob fetch failed tries the blob again at its next pass
+- **canvas**: a group or carried token's drag spot names squeeze false, as token.moveMany lands it
+- **ui**: a phone's bar moves search to the panels field and tightens its gaps before it cuts a player's name
+- **ui**: on a short landscape phone the turn strip goes to the band only after the dm chip's dot and search's move to the panels field
+- **sound**: the volume popover's toggle names u again, as u works there
+- **display**: the volume row wraps its name above the radios and the radios on a small display
+- **sound**: the engine sets its gains at once while it is not playing
+- **sound**: the kept volume is taken again at release, for the key press that may follow
+- **sound**: the speaker names no shortcut to a screen reader, as u mutes and does not open it
+- **sound**: the volume card and sheet name no key, since every key stops under a dialog
+- **movement**: the compact stop note keeps even room above and below
+- **alerts**: the summary row's shadow fits in a notch's inset, so it rises over the room's name again
+- **floors**: a dragged creature taken to another floor lands on the ground under its own space
+- **floors**: an ask made on a floor reaches only a player who holds that floor, whatever becomes of it
+- **floors**: an ask for saves goes when its floor stops being one, however it goes, and its undo brings it back
+- **floors**: move to floor keeps a selected rider at the height its mount carries it to
+- **floors**: a device counts no one seen by every player on a floor no player sees, as the server does
+- **permissions**: an area changed keeps its caster and what it follows on its floor
+- **permissions**: a group move takes creatures on one floor
+- **floors**: move to floor lands a squeezed creature on the ground of its full space
+- **floors**: an ask for saves reaches only a player who holds its floor
+- **floors**: a switch of floors keeps the selection on the new floor
+- **floors**: the floor on the dm's screen reads on screen, and its page's button reads go to this floor
+- **search**: floor rows wear the floors icon
+- **floors**: hide from players stays on for a floor where a party member stands on a scene the players are not on
+- **floors**: a ruler, area or drag that ends after a floor switch leaves no preview on the old floor
+- **floors**: move to floor sends holders first, so a rider named before its mount stays on it
+- **floors**: replacing the map of a floor players have asks first, as on the players' floor
+- **floors**: a party member on a scene the players are not on makes no players here and warns of no opening
+- **floors**: the viewing notice's back puts focus on the map where the bar folded floor into the menu panel
+- **floors**: view as a player follows a floor pick in its own store, and floors marks the player's floor
+- **floors**: a floor's map loading and failure name the floor
+- **floors**: the party panel names the floor a member stands on and shows it on a tap
+- **floors**: the dm menu says on screen why bring everyone here is off on a floor players have not reached
+- **floors**: a floor's page gives show this floor its own row and back to floors no tag beside it
+- **floors**: move to floor takes no search anchor, and every floors anchor names a control
+- **floors**: the token action bar reads the floor shown, and the board's guard checks it
+- **floors**: a lost move names the players' place by floor, and the alignment sweep measures the dm menu on an unreached floor
+- **floors**: held floors read owners on the players' scene alone and take a record without owners as none
+- **sound**: sound names stop saying for everyone while only the dm's devices play
+- **test**: the coverage take clears its timeout whether the take resolves or rejects
+- **effects**: only a turn choice shows the whose-turn select, not keep current duration
+- **effects**: a save that never touched duration sends none, so a duration added elsewhere survives
+- **project**: the scene field list says byclock stays the dm's, and the character comment names what can re-project one
+- **effects**: an existing effect opens on keep current duration so no duration takes its end away
+- **effects**: show the whole duration names in the select
+- **vision**: time of day light keeps each choice its own width in a narrow panel
+- **ui**: the clock chip's steps keep clear of the alert so an expiry notice never stands under them
+- **effects**: no duration takes a time span's end away with the count
+- **dungeon**: the drawing pill appears only with its words
+- **dungeon**: look closer revokes a picture that finishes after the dialog closed
+- **dungeon**: look closer shows the drawing words at once
+- **dungeon**: the key's made with line says secret doors none on a cave
+- **dungeon**: nothing of the secret door hold ships, and the server fixture's dungeons have secret doors again
+- **dungeon**: make sends its id map, the key's journal check reads the planned choices, and the dialog holds secret doors while the landing does
+- **dungeon**: light rings take the theme tokens
+- **rooms**: a socket the room is closing still spends its frame budget, so a flood from it closes it as abuse
+- **server**: a change to a list the sender may not edit is refused for that alone, whatever ids the list holds
+- **rooms**: a socket closed for its third failed change gets that refusal though it held no snapshot then
+- **server**: a class resource, roll or map phase named for a reserved id before ids were checked no longer blocks edits to its list
+- **walls**: a new secret door takes its look from the wall line it stands in, never from a wall past open ground
+- **rooms**: a device disconnected for its third failed change in a minute still hears why the change was refused
+- **rooms**: the fault refusal throttle counts by session, so a fresh client id keeps the count
+- **maps**: a build.edge key named twice gives its cover only to a hidden door still standing
+- **ruler**: a follower that cannot follow in file gives the walking ruler no way, as the drag does
+- **iso**: an automatic wall between two painted squares a player holds stands as a drawn wall
+- **server**: a live op that adds an array entry named for an Object.prototype member is refused
+- **server**: an op that throws before staging is refused with its socket open, the third fault in a minute closes it
+- **guide**: the table display picture has its own size
+- **panels**: the phone list's first heading keeps the room over it the others have
+- **members**: the color picker's done stands under its help, not beside a help that wraps on a phone
+- **tokens**: the bar's condition and status tiles stand in rows of one height when a name wraps
+- **images**: the picker's source tabs on a phone stand in rows of one height when a name wraps
+- **theme**: dark's floating bars lie at 0.92 like light's, so a chosen tool's name reads 4.5:1 over white art
+- **ui**: reduced motion turns transitions off rather than giving every property a 0.01 ms one
+- **dungeon**: the foot counts the dungeon on screen while the next one draws, so a phone's preview and reroll hold still
+- **sound**: an ask closed unpassed never comes back for an effect listed before the close
+- **sound**: an ask closed unpassed comes back only for an effect fired after the close
+- **dice**: a dm's turn card result read back after a reload offers no apply to
+- **dice**: a turn card reads back damage rolled with a kept d20 by its label and type
+- **sound**: a crossfade change keeps the next track's reveal within 20 s
+- **dice**: a turn card reads this turn's results back from the log after a reload
+- **combat**: an open turn card on an upright phone stops above the bar under it
+- **dice**: each new group save page offers the dc the last one rolled under recent
+- **combat**: type several values puts focus in the first value field, in view
+- **search**: the highlight stays on its entry, and enter runs nothing once that row leaves
+- **tokens**: all of a kind counts and selects the living only
+- **handouts**: a refused re-show says that handout could not be shown
+- **search**: offer playlists, play and tracks only while the server has sound files
+- **weather**: the step-down also counts the busy time a second the weather and its loop add, against 6.1's 60 ms
+- **sound**: a converted sound's level is measured from the mp3 the room keeps, so it plays as loud as a copied one
+- **sound**: a decode error in a track or background sound loads its file again and plays on from its place
+- **sound**: a voice released late leaves the handlers of the newer voice on its element
+- **sound**: let go the prefixed pitch switch on older safari and firefox too
+- **iso**: a standing name slides along its pointer off another name when the only token-clear spot is on it
+- **dungeon**: the rooms hint says fewer fit when the layout is tight
+- **dungeon**: the preview keeps one place in the tree and the errors pin above the foot
+- **dungeon**: an invalid seed cancels the render in flight and keeps the last picture
+- **video**: count hidden webm blocks apart from the video frame header cap
+- **video**: accept an anamorphic mov whose tapt enof is the sample entry's coded size
+- **animmap**: the hevc scan answers null when an hdlr or stsd field lies in the unread middle
+- **clock**: a draft keeps its month when only the era changed, even with doubled month names
+- **join**: the tapping device drops its own refused let-in words after the minute the list keeps them
+- **rooms**: a refusal that came while its socket waited on a snapshot goes just ahead of that snapshot
+- **combat**: the uses and lair reads wait on the stat blocks' own failure, not the rolls table's
+- **ui**: a preloaded lazy part draws in its first render, so the party bar never pushes the side panel down
+- **alerts**: a card unfolded in the alerts column with no room for it asks for the cards instead of folding them into the row
+- **scenes**: a move whose refusal a resync lost reads its snapshot and says the players were not moved
+- **shortcuts**: change and reset go under a row's words below 320 px, so the sheet fits 390 px at 130%
+- **encounter**: end turn's and next's focus ring hugs the pill, so it never falls on the map
+- **combat**: the turn card's uses say their own wait, and a failed rolls table says so beside them
+- **toasts**: a roll's toast with apply chips comes even when its words repeat one shown
+- **dice**: a toast's apply chip says so and stays while another chip of the roll applies
+- **find**: find my token adds its token to a multi-select group and opens the bar
+- **search**: the hp digits' row reads change hp with this device's digits
+- **combat**: keep an attacks-only turn card with its failure when the rolls table fails
+- **search**: offer a creature's field only where its panel or page draws it
+- **search**: enter on the sheet's buttons presses the button and runs no row
+- **tokens**: a compact bar short of its header rises into the margin under the notices, so its close shows whole
+- **traps**: a map pane short of room under its label rises over it, so the toolbar never takes a tap on its done
+- **dice**: the newest roll keeps its line and apply to chips in the middle of its box
+- **dice**: an ask's buttons wrap under its words together, so keep it never stands alone
+- **dice**: the group save's recent dcs take a line under its dc field, which keeps beside its label
+- **tokens**: c then escape on a strip with no conditions keeps the bar grown with focus on its conditions
+- **handouts**: recent handouts offer an image the form listed or added without a reload
+- **combat**: the turn card counts results from the turn's start for a creature with no turn record
+- **ui**: the top bar's last step slims a blackout's crossed eye to the dot's width
+- **encounter**: the top bar's your turn flare is as tall as the acting face
+- **search**: a refusal whose row has left the list is said under the search field
+- **search**: an action that is off lands focus on the field that turns it on, or on its panel
+- **search**: ctrl+k and cmd+k open the search from a select box too
+- **search**: a choice under a wide setting's name lands at its row, so the name stays in view
+- **ui**: the top bar gives back what it took when its content or width changes
+- **encounter**: the turn chip's next faces stand in one group, so the top bar's row heights agree
+- **weather**: a slow device steps down even when moves keep a beat that locks to the step-down's holds
+- **weather**: weather that slows a device steps down even while a finger or a mouse keeps moving
+- **weather**: a pinch, a drag or an animated map no longer holds the weather still on a device that keeps up
+- **weather**: rain and snow stay on the ground through a zoom
+- **weather**: the fog rule lines read without a second colon
+- **sound**: a short effect does not bring up stop all sound
+- **ui**: the waiting card says its sentence once and ask again has no wrapper
+- **ui**: swatches line up with the rows around them
+- **device**: map detail says held still whenever weather does
+- **device**: dice tiles share one border and padding, with the die in flow
+- **tokens**: characters with one long rest stamp share a note, in short dates
+- **device**: room sound's help starts with this device only
+- **settings**: the backup command wraps at its spaces
+- **clock**: starting the clock here focuses the new date and brings it into view
+- **animmap**: refuse an hevc mp4 or mov on the device before it uploads
+- **sound**: without web locks a page fading out for a display goes quiet at once when another page claims to play
+- **sound**: without web locks a page starts by time only from a post on time, its own come back, never from a timer that waited out a stall
+- **sound**: without web locks a hidden page takes the sound over as a shown one does, whatever its browser's timer throttling
+- **sound**: a seek drag sends nothing for the rest of its press once another dm changes the run or track
+- **sound**: the maker's play starts the playlist the room store holds as the save is answered, with nothing laid over it
+- **sound**: a tap on a track's handle drops nothing, in up next and the maker
+- **sound**: a seek slider drag sends only at its release, whatever a key armed before it or a track change during it
+- **sound**: the maker's play starts the stored playlist with the fields its save sent over it
+- **sound**: a maker save sends the tracks only when the draft changed them, a track gone elsewhere aside
+- **sound**: a drop or end at up next's end stays in up next when the second list is empty or its only row moves
+- **sound**: a drag past the last row in up next or the maker takes the last place
+- **components**: a menu item that is off draws its note dim like its title
+- **sound**: a claim window that ends in a stall waits for the posts that waited, whatever task runs first
+- **iso**: draw a riser up to a tread at exactly 0 inside its pit's openings, so none of it shows over the ground beside the stair
+- **iso**: seat a rider on its holder's drawn base in its standee, ring, drag and drag preview
+- **iso**: draw only what a stair has below 0 inside its pit's openings, so its treads above 0 show
+- **bench**: a dungeon seed with raised and sunk runs under the generator's percent heights
+- **ui**: down keeps a sheet with something typed in it, as a swipe down does
+- **ui**: a scene made from a scrolled form no longer lets the browser jump scenes into its settings
+- **dm**: the player preview maps an old panel id as the room store does
+- **scenes**: a scene request scrolls only the panel's body and takes the scroller over as ambiance does
+- **ambiance**: clock lines come as toasts while a sound subpage stands in for an open time
+- **ambiance**: drop the chip request's next-frame retry, which its own state change always cancelled
+- **ambiance**: a player's clock chip brings time to the top of ambiance
+- **paste**: a pasted image opens a folded new scene
+- **device**: this device's groups take only a folding group's props
+- **paste**: a pasted image opens its folded destination
+- **tokens**: a stat block with no fold keeps its name at its folding peers' edge
+- **animmap**: the bench puts its video row back to plain before the long session
+- **animmap**: konva keeps the still until a frame callback has judged the first frame's size
+- **animmap**: write every byte of each video header edit and scrub, and fail a write that lands nothing as a disk error
+- **animmap**: count each handler's tracks and every dropped track's samples before their tables are read, and keep a shared sample size as one number
+- **sound**: music that first sounds late, as after a slow first load, fades in afresh then
+- **sound**: a voice a reanchor renames plays on on its element, with no dip
+- **dungeon**: retry straight's failed links from fresh doorways too
+- **dungeon**: crypt pillars in rooms from 5 by 5, so a sparse crypt has them
+- **dungeon**: say what party level changes
+- **sound**: seek a loaded-ahead pass once when a throttled phone ran its start timer more than 2 s late
+- **sound**: play an effect that arrives up to 2 s late whole
+- **sound**: place music and background sounds once and let them play, with no drift seeks or speed changes
+- **join**: offer ask again on requests are off once the dm turns requests back on, with no reload
+- **sound**: load music and background sounds a server restart cut off again once the room reconnects
+- **sound**: keep the clock's last reading through a wake until the new epoch answers
+- **sound**: resample the drift check's nudges, since a time-stretch clicks at every change of speed
+- **clock**: say turning sharing off stops new log lines, not the ones players have
+- **theme**: say the map and the table display stay dark in light too
+- **sound**: clearer words for room sound, a silent device, playlist changes, empty effects, the loop cap and scene sound
+- **animmap**: say vorbis sound is not accepted rather than why
+- **dungeon**: extra ways around, in american english
+- **join**: say the newcomer's device carries on as the player, say checking you're human, and say when let in as reads online
+- **weather**: clearer words for the rules switch and the reduced motion line
+- **clock**: clearer words for the time panel's intro, sharing switch, fight note, stop and 1-day months
+- **panels**: keep a player's tab row gaps as before run the table, and name the group in comments and notes
+- **clock**: reword the months calendar's help line
+- **sound**: a track whose play the browser refuses waits for the next tap and plays inside it, and its loading line never blinks
+- **sound**: a stop takes the plan and a start waiting for an element with it, so a page that stopped starts no track later
+- **sound**: move players sends the scene's sound while the server's switch is not known yet, and skips it only once the switch is off
+- **rooms**: the import's sound refill reads rows by soundFactsOfRow, and the import keeps one withoutSound
+- **sound**: with the switch off a scene's sound that starts no file passes, and a move sends none
+- **rooms**: the actor reads a sound row's facts by soundFactsOfRow, the intake's one rule for the audio column
+- **backup**: an import takes each sound's length from its row and leaves out a sound whose file or length did not come through
+- **sound**: read a file's header past an id3v2 tag larger than the probe's first read
+- **sound**: budget an mp3's whole decode by its own frames, never by a count it declares
+- **sound**: the frame walk refuses a tag frame anywhere after the first frame
+- **sound**: the panel waits for the server's switch with the loading line, never the off line, and a failed read says so with try again
+- **sound**: a kept voice whose gain a new plan moves ramps there over 0.3 s, never in a step
+- **sound**: a track that finds every music element fading out starts once one is free, not at the next check
+- **sound**: effects count from the page's load, so the effect whose fire loads the engine plays
+- **sound**: a bless cut short by a voice's source counts, a held element that is not sounding is unlocked in place, and the check puts back a voice that lost its element
+- **sound**: stop all sound and the x-card's stop the sound show while any effect sounds, behind a blackout too, and go once it ends
+- **sound**: a gesture never blesses an unlocked pool again, and a bless leaves the elements a sound holds alone
+- **sound**: an effect whose sound stops being an effect stops on a dm's device, its load goes, and it stays spent
+- **sound**: a short loop loads its very next pass ahead, so a later one never cancels it
+- **sound**: a paused run plays nothing on a dm's device either, and fades as a stop does there
+- **sound**: follow another window's room sound from the first read, not from import
+- **sound**: this device's music, background and effects sliders share one grid
+- **sound**: six effects at once keep the long one, stop all's late decodes start nothing, a sound plays on two elements at most, and a gone engine says nothing
+- **sound**: copy an mp3's audio frames without its info frame, and send crc or emphasis files to the encoder
+- **sound**: a play's order holds each track once and a tick's next track lies in its order, with the reducer's and labels' cases
+- **animmap**: a vp8 block with show_frame clear is a hidden frame, as ffmpeg writes alt-refs without the invisible flag
+- **animmap**: a webm frame keeps its own BlockDuration, and two shown frames at one time are refused
+- **animmap**: an mp4's stand-in for a missing edit is at most four typical frames, so a sixteen-frame start stays a gap
+- **animmap**: an mp4 with no edit list takes its first composition time as the edit's media time, up to a second
+- **animmap**: an mp4's presentation interval comes from its composition times and edit, is capped on its own, and reorders by typical frames
+- **animmap**: a webm cue's CueDuration is checked against the timeline's end, not the last block's time
+- **animmap**: a webm's timeline is capped on its own, a frame's BlockDuration beats DefaultDuration, and the tolerance is at most a second
+- **animmap**: an sgpd of version 2 reads its default and per-entry lengths as version 1 does
+- **animmap**: the zeroing's batched writes stop at media data, and each write is checked against it before it runs
+- **animmap**: the video's cover paints the board's dark ground on a light page too, with an e2e pass in light
+- **animmap**: the map image row and the library viewer judge a video from live device inputs, with no board needed, keeping only the browser's answer
+- **animmap**: the board stops, lets go of its source and lease and clears its status when its controller unmounts, as a blackout does, and stops hearing the step-down when disposed
+- **assets**: a live video's commit checks its quota headroom again, even at its reserved size
+- **animmap**: a video's whole timeline must be the one its durations say, under the length cap, in webm and mp4
+- **animmap**: every box an mp4 keeps is read to its last byte, its reserved fields zeroed, unknown sample groups dropped, and its facts checked against the protocol
+- **animmap**: every value a webm keeps is read and checked, once, and the cues and seek head point where the file's parts are
+- **animmap**: the video header check runs in a worker thread ended at its deadline, and a disk's error passes as itself
+- **animmap**: the media-edit guard sweeps sorted ranges, edits land a window at a time and mdat search halves, all under the budget
+- **animmap**: only the tree that draws the video tells the board what Konva holds
+- **animmap**: the board's subscribe works unbound, as useSyncExternalStore calls it
+- **animmap**: draw only once the map layer holds the video, and judge a slow device by its decoder's frames
+- **animmap**: the cover takes the board's ground from the theme tokens
+- **animmap**: the fixture script reads its browser globals through a typed shape, so it typechecks without the dom library
+- **snapoff**: a dragged standee's base, decor and outline in isometric stand on the square its landing squeezes into
+- **snapoff**: a lone drag's outline, aura, areas and shadow read the box its drop lands it in, squeezed or not
+- **snapoff**: the first alt keyup within a second after a drag let go with alt held is swallowed too
+- **snapoff**: placed between squares is spoken by the board's polite status, not shown as a toast
+- **canvas**: the rules outline stands beside the dragged node, on the box the drop would count it in
+- **snapoff**: a free drag's frames say so, and every device reads a frame's point where that drag aims
+- **movement**: a free drop held at a wall is let go where the finger was, not at the hold
+- **dungeon**: reroll wears the board's dark halo over the picture's stone, and lt-3 reads the pixels beside its ring with a blue accent
+- **dungeon**: reroll in the preview's corner keeps the board's dark look and rings in the dark accent
+- **display**: the table display holds dark from boot and outside its lazy pages, so a light device never flashes light on the tv
+- **room**: the map's focus target shows its ring and halo under keys only, as before the light theme
+- **ui**: a name in a member's color stays apart from accentSoft, the turn's text and the whisper label
+- **encounter**: the turn strip's tracker target rings on the board's dark halo
+- **ui**: sheets that fill the screen and the player preview draw the home-screen app's status strip
+- **room**: the chip's member dot wears the shared mark ring
+- **ui**: the folded party pill's dying word takes dangerText
+- **ui**: the ac badge colors its shield in style so a scheme variable reaches it
+- **builder**: the height tool's area outline draws in the accent, from the board palette
+- **dungeon**: make only the pictured preview, hold every choice while it sends, and start the form over after
+- **dungeon**: outcome words that name delete as the sure way back once the players move
+- **dungeon**: answer a preview worker that cannot start as the bug error
+- **dungeon**: retry a tree link flat only when its search finds no way
+- **dungeon**: take the scratch room's member color from the theme
+- **dungeon**: hold a preview to the sight cap whatever players see
+- **dice**: a shared attack is a group named for the attack, so its Target's AC field says whose
+- **weather**: at 30 fps the tick after a held frame steps the whole gap, and a window holds frames only while it still wants costs
+- **weather**: at 33 fps or fewer the step-down holds one tick in four and needs two slow windows in a row, so a noisy board keeps a healthy canvas moving
+- **dice**: weather and condition reminders show under the group or roll they bear on before a tap, not only in a button's name
+- **ddb**: a re-sync brings d&d beyond's weapon range to an untouched imported roll, with nothing to review
+- **weather**: a sandstorm's haze and sheet thin until a pill's words keep 4.5:1, checked at 1x as well as 2x
+- **ui**: this device's menu line names weather and the roll animation
+- **dice**: a weapon named as d&d beyond's 2014 items name it, crossbow, light, is the srd's light crossbow
+- **weather**: the fold's forced wind reason shows only while the scene keeps the weather it was about
+- **display**: the table display says the weather in its polite status
+- **weather**: the weather's voice remembers what it said for the whole page, so a remounted view button says nothing again
+- **dice**: roll options name their reminders, and an attacks group and a shared attack say what each weapon brings
+- **weather**: a scene edit keeps the weather's particles, and a turned wind turns them and redraws a still layer
+- **weather**: a tick's frame cost is judged against the frames beside it, so pans and the board's own work never step weather down
+- **weather**: the compass's centre cell is as tall as its buttons
+- **weather**: the compass icons let a tap through to their radios
+- **weather**: the layer reads its stage's camera through the camera helper, and the controllers' list names weather
+- **weather**: the step-down counts what a tick adds to its whole frame, paint included
+- **weather**: a new look restarts the step-down's warm-up
+- **weather**: the scene outline through the camera helpers
+- **clock**: set follows a month changed elsewhere by its name, not its place
+- **clock**: the party rest card keys its notes by character
+- **clock**: the calendar dialogs say their discard question aloud
+- **clock**: the top bar chip comes back once its text is shorter
+- **clock**: the running clock's controls go with the clock they were for
+- **clock**: a device claims only the clock lines its answered ops wrote
+- **clock**: calendar edits keep the date chosen, follow its month and name a month that went
+- **clock**: calendar and set send a time only when its fields changed it, and keep the clock's seconds
+- **clock**: players get no clock and no clock lines behind a blackout
+- **clock**: an undo or redo that keeps the stored time writes no clock line
+- **auth**: read a member's grants again after its relabel, so a dm claim landing meanwhile keeps its label
+- **auth**: clear a let-in's refusal in the sweep once its minute is up, and tell the DMs
+- **auth**: save every hold of a turn away in one bounded write, so a stalled database delays the 204 once
+- **auth**: date a turn away's hold on the database's clock, so a fresh session never reads as older than it
+- **auth**: compare a room's generation as bumped since the read, so a forgotten one never closes asks
+- **auth**: date a turn-away hold to the turn away, and retry owed holds one run at a time with a bounded checkout
+- **dm**: reconcile a let-in's 202 with the list that settled it, and say why a let-in failed on every DM device
+- **auth**: tell the DM list when a join's member leaves flight or a device gets in, so the carry-on list never stays stale
+- **auth**: bound the relabels after a revoke, owe the ones that stall, and follow up room by room
+- **auth**: a join route past its deadline writes no grant, so no kick is forgotten while a route that began before it can still grant
+- **api**: a database error in a join request route answers 503 busy, never 500
+- **auth**: a turn away whose hold fails to save logs it, still answers 204, and the sweep saves it dated to the turn away
+- **auth**: an ask that recovers its identity under the admission lock meets that identity's saved hold
+- **dm**: the many-asks notice keeps the 20 second gap between join toasts
+- **dm**: the carry-on list is fetched again when the roster changes, and shows the names the room knows now
+- **join**: requests are off offers ask again once the room takes requests again
+- **join**: cancel stops its own held wait before it is sent, and a cancel after the DM answered asks where the device stands
+- **join**: the password step reads the mode again after the hash, so a switch to only by asking shows no roster
+- **join**: the join page shows Loading until a device's own request is looked up, and leaves Who are you? once Only by asking is on
+- **dm**: a request being let in stays on the DM list, busy on every DM device, so its words show and it never toasts again
+- **auth**: every phase of a join answers within its bound, and its undo never holds the answer
+- **auth**: a kick cancels or waits out every admission of its member that began before it
+- **join**: answer 204 when a device holds no request, so the join page logs no error
+- **dm**: turn away all refusals never name a person
+- **join**: look up a device's own request only in the modes that take requests
+- **join**: a request's card is spent once Back leaves it, so the next ask starts on a fresh card
+- **grid**: hide the app's own grid lines while lining up the grid
+- **audio**: unlock the turn chime and ping sound on a gesture touch counts
+- **rooms**: cap a fault line's message and stack, and pin what it logs
+- **rooms**: keep a commit's end from throwing on its undo summaries or a resync it owes
+- **rooms**: settle the number of an op that throws once staged, and commit what a throw leaves staged
+- **scripts**: coverage counts shipped files no test loads and leaves out test helpers
+- **ci**: release assets take each file from the job that made it, checked by digest
+- **reducer**: replay ops stored before op version 41 with the record reads they applied with
+- **shared**: read every state record by its own keys
+- **reducer**: refuse new ids that name object members, and replay stored ops that named them
+- **traps**: one every player sees that a hidden creature in single file carries steps back off the holder too, its holder with it
+- **traps**: from op version 41 a trap's stop steps each creature in single file back off its holder's square
+- **attach**: from op version 41 a mount off its grid carries its riders by its snapped box, so a rider keeps its square and its prisoner
+- **attach**: the single-file reach rule reads a rider every player sees on its seat, so a prisoner it leads in reach follows
+- **traps**: a trap a scene shrink left off its scene takes edits that leave its zone and hits alone
+- **party**: an off row's portrait draws its initials dim, and a dead member's faded portrait carries the readonly mark
+- **dice**: the result line's +2 settles on the nodes in one pass, so a count it moves back cannot loop the render
+- **build**: the same source maps from every build
+
+### Performance
+
+- **limits**: only a DM's Undo or Redo is read for toggles, so a player's never reads stored fields it cannot see
+- **limits**: seats and scene counts read each tokens collection's tokens by floor and those a seat may hold, and put only owned things in id order
+- **limits**: the stored size, creature numbers and far widths of a replaced collection sum from the last one of its field, over the entries that differ
+- **fanout**: stableStringify appends its parts and quotes plain keys itself, and hash128 writes its digest a byte at a time
+- **fanout**: dependents reads each tokens collection's walking, ref and carried lists and each token's tile reach once, and only the changed tiles' box
+- **limits**: a player's far check reads every scene from one pass over the room a side, each scene by the floors its group holds
+- **floors**: the stairs' check and the openings' joins are kept per scene while the links, floors, build and traps stay as they were
+- **limits**: the far check builds a player's copy only where a bound read from the stored room could reach its line
+- **limits**: seat-held rows read their owners from the row's creature and character
+- **canvas**: a pan lays labels out again only for the tokens near the screen, and only while a name crosses a side
+- **dungeon**: hex halos in a plain loop and hex lattices reused across a fit's plans
+- **floors**: a refused restore reads only the scenes it brings back to find a taken level
+- **grid**: the grid's lines are kept in world cells, in tiles on hexes, and a pan moves the path made from them, so a camera move walks no hexes
+- **device**: the map size makes its touch screen query once a page, not on every board render
+- **board**: paths of many polygons that only fill or clip leave each open, so area hexes, pit and draft clips, hex relief and rough hatch build in linear time
+- **floors**: the stairs check tests only the walls whose box meets an end's box, with a bench of a walled hex tower
+- **iso**: a cull step merges only the buckets it brings into view into the last depth order
+- **iso**: a pit clips to the openings that meet what it paints, its floor and far sides, not all up to 0
+- **iso**: a column or a pit is drawn where its top and sides paint, not through its whole bounds down to 0
+- **iso**: a scroll's toned pass reads only the cells whose ground at 0 reaches past an edge, sorted once a layout
+- **iso**: a scroll repairs a toned top through its own box, and only while its copy keeps some ground, each top toned in its own color
+- **iso**: a cull step reuses the layout's merge and every run it lays out the same, so the board commits only what changed
+- **iso**: paths of many polygons close each on its own, so a sunk scene's openings clip in linear time
+- **dungeon**: a preview's ops are parsed once as it lands, so the press finds the checks built
+- **journal**: the journal button reads its unread count alone
+- **dice**: others' rolls as toasts draw apart from the room page
+- **floors**: the floors held stay one list while they hold the same floors
+- **floors**: the floors group reads the scenes, and its rows only what their marks read
+- **floors**: the board's cut keeps a dm's predicted ops on a scene not shown off the board
+- **dungeon**: make dispatches all but the scene in one view rebuild, under 100 ms at 4x for 100 ops
+- **areas**: a placed area keeps its outline while nothing it reads changes, so its name's pill keeps its memo
+- **iso**: a run of one pit region's pits draws inside one clip of its openings, not one clip a pit
+- **animmap**: the bench draws its 1080p video turned 90 against the same draw gates
+- **weather**: the bench's software canvas run, a fresh page for each kind, and the level each reaches
+- **weather**: a bench for weather's cost on a 3x phone
+- **iso**: a cull box of one size moves with its top-left step, so a pan relays out half as often
+- **memory**: the change scan reads only the edges a batch can change
+
 ## v0.3.1 (2026-11-02)
 
 ### Fixes
