@@ -14,6 +14,21 @@ export function mintedOf(op: ClientOp | HistoryCommand): string[] {
 
 const NO_NEW_IDS: NewIds = { minted: [], recorded: [], keys: [], nested: [] };
 
+const TAG_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+
+/**
+ * A value an op carries that is no thing's id, such as a clock line's
+ * claim or a shuffle's seed: 16 random characters, which hold no time, so
+ * no key change makes one again and the room's id gate never reads one.
+ */
+export function randomTag(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let tag = "";
+  // 64 characters, so the low six bits of a byte pick one evenly.
+  for (const b of bytes) tag += TAG_CHARS[b & 63];
+  return tag;
+}
+
 /** Every field of one op that can hold a new thing's id (shared/protocol.ts newIdsOf). Undo and redo hold none. */
 export function newIdsOfOp(op: ClientOp | HistoryCommand): NewIds {
   return op.t === "undo" || op.t === "redo" ? NO_NEW_IDS : newIdsOf(op);

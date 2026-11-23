@@ -14,6 +14,7 @@ import { calendarOf, calendarUpdate, draftOf, draftYearDays, followMonth, type C
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
 import { composeDraft, draftDate, firstDay, keptSeconds, reconcileDate, type DateDraft } from "./words.ts";
+import { randomTag } from "../../state/ids.ts";
 
 export const KIND_OPTIONS = [
   { value: "days", label: "Day count", help: "Day 1, Day 2 and on." },
@@ -86,7 +87,7 @@ export function CalendarDialog(props: {
       return;
     }
     const update = calendarUpdate({ before: clock.calendar, calendar: result.calendar, today: composed, todayTouched: dateEdit !== null, now });
-    if (update) actions.dispatch({ t: "clock.update", ...update, ...(update.at !== undefined ? { claim: actions.newId() } : null) });
+    if (update) actions.dispatch({ t: "clock.update", ...update, ...(update.at !== undefined ? { claim: randomTag() } : null) });
     props.onClose();
   };
 

@@ -5,7 +5,7 @@ import { idKeyOf, sealedId, uuidv7 } from "#shared/ids.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { NEW_ID_PATHS, newIdsOf, nestedIdsIn, type Op, type OpType } from "#shared/protocol.ts";
 import type { Playing } from "#shared/sound.ts";
-import { actor, character, room } from "#shared/testutil.ts";
+import { actor, character, room, token } from "#shared/testutil.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 
 const DM = { memberId: "dm1", role: "dm" as const };
@@ -31,7 +31,25 @@ function table(): RoomState {
   s.pins = { [old]: { id: old, sceneId: "s1", x: 1, y: 1, color: "#ff0000", visibility: "all", rev: 0 } } as never;
   s.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor(), stats: { rolls: [roll(old)] } as never, resources: [{ id: old, name: "Rage", max: 2, used: 0 }] as never });
   s.playing = playing({ music: { run: old, repeat: "all", fade: 0 } as never, loops: { [old]: { soundId: "x", at: 0, volume: 50 } as never }, effects: [{ id: old, builtin: "click", at: 0 } as never] });
+  s.scenes.s1 = { ...s.scenes.s1!, phases: [phase(old)] };
+  // Thorn is P1's and the goblin the DM's, each with an ask to change its answer, and Thorn with a change allowed before.
+  s.tokens.thorn = token("thorn", { ownerIds: ["p1"] });
+  s.tokens.gob = token("gob");
+  s.rolls = {
+    r1: { id: "r1", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, at: "2026-11-13T12:00:00.000Z", targets: [{ tokenId: "thorn", tag: "t1", total: 9, change: ask(old), changed: ask(allowed) }, { tokenId: "gob", tag: "t2", total: 4, change: ask(dms) }] },
+  } as never;
   return s;
+}
+
+const allowed = uuidv7(T - 120_000);
+const dms = uuidv7(T - 90_000);
+
+function phase(id: string) {
+  return { id, name: "On fire", assetId: "a1", widthPx: 1000, heightPx: 800 };
+}
+
+function ask(id: string, on = "t1") {
+  return { id, on, reason: "fix-total" as const };
 }
 
 const v7 = (op: Op, viewer: Viewer = DM, held: ReadonlyMap<string, unknown> | null = null, state = table()) => newV7Ids(op, state, viewer, held);
@@ -88,6 +106,26 @@ describe("the new-id fields an op carries (NEW_ID_PATHS)", () => {
     assert.deepEqual(v7({ t: "effect.fire", id: fresh, builtin: "click" } as Op, DM, null, behind), [], "an effect fired behind a blackout is held too");
   });
 
+  test("a scene's map phases: new where the scene lacks them", () => {
+    const update = (...ids: string[]) => ({ t: "scene.update", sceneId: "s1", patch: { phases: ids.map(phase) } }) as unknown as Op;
+    assert.deepEqual(v7(update(old, fresh, sealed)), [fresh]);
+    assert.deepEqual(v7(update(old)), [], "a phase the scene holds");
+    assert.deepEqual(v7({ t: "scene.update", sceneId: "s1", patch: { name: "Crypt" } } as Op), [], "an update with no phases names none");
+  });
+
+  test("an ask to change an answer: new where the request holds no ask or change of its id, read for a player from their own copy", () => {
+    const change = (id: string, tokenId = "thorn") => ({ t: "roll.change", rollId: "r1", target: { tokenId }, ask: ask(id) }) as unknown as Op;
+    assert.deepEqual(v7(change(fresh)), [fresh]);
+    assert.deepEqual(v7(change(old)), [], "the pending ask");
+    assert.deepEqual(v7(change(allowed)), [], "a change allowed before");
+    assert.deepEqual(v7(change(sealed)), []);
+    assert.deepEqual(v7({ t: "roll.change", rollId: "r1", target: { tokenId: "thorn" }, clear: fresh } as Op), [], "a clear names a stored ask");
+    assert.deepEqual(v7(change(fresh), P1), [fresh]);
+    assert.deepEqual(v7(change(old), P1), []);
+    assert.deepEqual(v7(change(dms), P1), [dms], "the goblin's ask is not in P1's copy");
+    assert.deepEqual(v7(change(dms)), [], "the room holds it");
+  });
+
   test("a player's keys are read from what their socket holds, never from the room", () => {
     const pin: Op = { t: "pin.put", pin: { id: old, sceneId: "s1", x: 1, y: 1, color: "#ff0000", visibility: "all" } } as Op;
     assert.deepEqual(v7(pin, P1, new Map()), [old], "the room holds it, the player's copy does not");
@@ -96,7 +134,7 @@ describe("the new-id fields an op carries (NEW_ID_PATHS)", () => {
 
   test("ops that bring things back, the server's own and every other kind list no keys or nested fields", () => {
     const withPaths = (Object.keys(NEW_ID_PATHS) as OpType[]).filter((t) => NEW_ID_PATHS[t] !== "none").sort();
-    assert.deepEqual(withPaths, ["build.label", "build.lights", "build.stamps", "character.create", "character.update", "effect.fire", "journal.update", "loop.start", "music.jump", "music.play", "music.resume", "music.skip", "pin.put", "sound.scene"]);
+    assert.deepEqual(withPaths, ["build.label", "build.lights", "build.stamps", "character.create", "character.update", "effect.fire", "journal.update", "loop.start", "music.jump", "music.play", "music.resume", "music.skip", "pin.put", "roll.change", "scene.update", "sound.scene"]);
     for (const t of ["undo", "redo", "sys.restore"] as const) assert.equal(NEW_ID_PATHS[t], "none");
     for (const t of Object.keys(NEW_ID_PATHS) as OpType[]) if (t.startsWith("sys.")) assert.equal(NEW_ID_PATHS[t], "none", t);
   });

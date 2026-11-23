@@ -5,14 +5,17 @@ import { ID_TIME_REFUSED, idKeyOf, idKeyText, idTime, sealedId, sealedTime, uuid
 import { ID_RETRY_FAILED, ID_TIME } from "#shared/limits.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
-import { actor, character, DM, room, token } from "#shared/testutil.ts";
+import { actor, character, DM, P1, room, scene, token } from "#shared/testutil.ts";
 import { hash12 } from "#shared/rules/pcSync.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { createRoomActions } from "./actions.ts";
 import { CLOCK_WAIT_MS, createRoomStore, IDS_AGAIN_MS, IDS_SETTLE_MS, type RoomStore } from "./store.ts";
-import { sentIdDead, unsentIdStale } from "./ids.ts";
+import { randomTag, sentIdDead, unsentIdStale } from "./ids.ts";
+import { withClaim } from "../features/clock/claim.ts";
+import { partyRestOps } from "../features/clock/ties.ts";
+import { addPhase } from "../features/phases/rules.ts";
 import { applyTestHistory, FakeClock, FakeOutbox } from "./testing.ts";
 import type { OpAnswer, OpRefusal, UnknownCause } from "./types.ts";
 
@@ -544,7 +547,52 @@ describe("what a keyed page makes again before an op leaves, by the op's new-id 
     for (const op of ops) s.room.dispatch(op);
     assert.deepEqual(s.sentOps().map((m) => m.op), ops, "nothing made again");
   });
+
+  test("a map phase made before the key is resealed, and a phase the scene holds keeps its id", () => {
+    const held = v7(-60 * MINUTE);
+    const pending = v7(-30 * MINUTE);
+    const s = keyedSetup(room({ scenes: { s1: { ...mapped(), phases: [phaseOf(held)] } } }));
+    s.connect();
+    const heard = answers();
+    s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { phases: [phaseOf(held), phaseOf(pending)] } }, heard.opts);
+    const [kept, fresh] = (s.sentOps()[0]!.op as Extract<ClientOp, { t: "scene.update" }>).patch.phases!.map((p) => p.id);
+    assert.equal(kept, held);
+    assert.ok(fresh !== pending && sealedTime(KEY, fresh!) !== null);
+    assert.deepEqual(heard.remints, [new Map([[pending, fresh!]])]);
+  });
+
+  test("a player's ask to change an answer made before the key is resealed, and the sender told the id its target will hold", () => {
+    const pending = v7(-30 * MINUTE);
+    const s = keyedSetup(asking(), P1);
+    s.connect();
+    const heard = answers();
+    s.room.dispatch({ t: "roll.change", rollId: "r1", target: { tokenId: "thorn" }, ask: { id: pending, on: "t1", reason: "fix-total" } }, heard.opts);
+    const sent = (s.sentOps()[0]!.op as Extract<ClientOp, { t: "roll.change" }>).ask!.id;
+    assert.ok(sent !== pending && sealedTime(KEY, sent) !== null);
+    assert.deepEqual(heard.remints, [new Map([[pending, sent]])]);
+    s.deliver();
+    assert.equal(s.state().view!.rolls.r1!.targets[0]!.change?.id, sent);
+    s.room.dispatch({ t: "roll.change", rollId: "r1", target: { tokenId: "thorn" }, clear: sent });
+    assert.equal((s.sentOps()[0]!.op as Extract<ClientOp, { t: "roll.change" }>).clear, sent, "a clear names the stored ask as it is");
+  });
 });
+
+/** Scene s1 with a map image and no phase list, so its first edit gives the map a phase of its own. */
+function mapped() {
+  return scene("s1", { map: { assetId: "a1", widthPx: 1000, heightPx: 800, cellPx: 50, originPx: { x: 0, y: 0 } } });
+}
+
+function phaseOf(id: string) {
+  return { id, name: "On fire", assetId: "a2", widthPx: 1000, heightPx: 800 };
+}
+
+/** A request asking P1's Thorn, answered with a typed total that is final for P1 (its DC kept from players, its result shown), so P1 may ask to fix it. */
+function asking(): RoomState {
+  return room({
+    tokens: { thorn: token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"] }) },
+    rolls: { r1: { id: "r1", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 12, dcShown: false, resultShown: true, at: new Date(T0).toISOString(), targets: [{ tokenId: "thorn", tag: "t1", total: 9, result: "fail", by: "p1" }] } },
+  } as Partial<RoomState>);
+}
 
 describe("a keyed page's one retry after the room names new ids", () => {
   test("a refusal naming a new pin's version 7 id is retried once with exactly that id resealed, and a second refusal is told", () => {
@@ -616,6 +664,32 @@ describe("the store's test hook on ids newId made", () => {
   test("a store a test makes without a check of its own throws on such an id, so every client test runs the check", () => {
     const store = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock(), random: () => 0.5, clientId: "c1" });
     assert.throws(() => store.dispatch({ t: "token.move", tokenId: store.newId(), x: 5, y: 5 }), /^Error: raccoon: token\.move first brings/);
+  });
+
+  test("an ask to change an answer and a map's first phases made by newId are fields of a new thing", () => {
+    const problems: string[] = [];
+    const s = hooked(problems, { ...asking(), scenes: { ...room().scenes, s1: mapped() } });
+    s.room.dispatch({ t: "roll.change", rollId: "r1", target: { tokenId: "thorn" }, ask: { id: s.actions.newId(), on: "t1", reason: "fix-total" } });
+    const edit = addPhase(mapped(), { assetId: "a2", widthPx: 1000, heightPx: 800, name: "On fire" }, s.actions.newId);
+    assert.ok("phases" in edit);
+    assert.equal(edit.phases.length, 2, "the map's own phase takes an id, and the new one another");
+    s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { phases: edit.phases } });
+    assert.deepEqual(problems, []);
+  });
+
+  test("a clock line's claim and a shuffle's seed are random tags with no time in them, never ids newId made", () => {
+    const problems: string[] = [];
+    const s = hooked(problems);
+    const ops = [withClaim({ t: "clock.set", at: 3600 }), ...partyRestOps([], true, randomTag()), { t: "music.queue", from: "r1", edit: { t: "shuffle", seed: randomTag() } }] as ClientOp[];
+    for (const op of ops) s.room.dispatch(op);
+    assert.deepEqual(problems, []);
+    const tags = [ops[0], ops[1]].map((op) => (op as { claim: string }).claim);
+    tags.push((ops[2] as Extract<ClientOp, { t: "music.queue" }>).edit.t === "shuffle" ? (ops[2] as { edit: { seed: string } }).edit.seed : "");
+    for (const tag of tags) {
+      assert.match(tag, /^[A-Za-z0-9_-]{16}$/);
+      assert.equal(idTime(tag), null);
+    }
+    assert.equal(new Set(tags).size, 3);
   });
 
   test("a roll tag and a group save's plan made by newId are fields it allows", () => {

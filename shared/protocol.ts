@@ -4182,7 +4182,8 @@ export type NewIdAt = { key: string; id: string };
  *   own id, which is new when the state lacks that key. An upsert names
  *   an old thing and a new one the same way, so only the state says which.
  * - `nested`: an id inside an existing entity's value, new when that value
- *   lacks it (`nestedIdsIn`): a character's rolls and class resources, and
+ *   lacks it (`nestedIdsIn`): a character's rolls and class resources, a
+ *   scene's map phases, a roll request's asks to change an answer, and
  *   what plays now.
  *
  * Ops that bring things back (undo, redo, sys.restore) and the server's own
@@ -4208,7 +4209,8 @@ export const NEW_ID_PATHS: { readonly [T in OpType]: NewIdRule<T> } = {
   "view.blackout": "none",
   "member.update": "none",
   "scene.create": "none",
-  "scene.update": "none",
+  // A map phase is new in a scene that lacks it, as is the id an older phase stored without one takes when the list is next written.
+  "scene.update": { nested: (op) => (op.patch.phases ?? []).map((p) => ({ key: `scene:${op.sceneId}`, id: p.id })) },
   "vision.holders": "none",
   "scene.delete": "none",
   "scene.reorder": "none",
@@ -4347,7 +4349,8 @@ export const NEW_ID_PATHS: { readonly [T in OpType]: NewIdRule<T> } = {
   "roll.ask": "none",
   "roll.answer": "none",
   "roll.reopen": "none",
-  "roll.change": "none",
+  // An ask to change an answer is stored on its target, new in a request that holds no ask or change of its id. A clear names one stored.
+  "roll.change": { nested: (op) => (op.ask !== undefined ? [{ key: `roll:${op.rollId}`, id: op.ask.id }] : []) },
   "roll.close": "none",
   "cast.ask": "none",
   "cast.close": "none",
@@ -4405,8 +4408,9 @@ export function newIdList(op: Op): string[] {
 
 /**
  * The ids an entity's value holds where NEW_ID_PATHS `nested` points: a
- * character's rolls and class resources, and the run, loops and effects
- * of what plays now. Empty for any other entity, or none.
+ * character's rolls and class resources, a scene's map phases, the asks
+ * and allowed changes on a roll request's targets, and the run, loops and
+ * effects of what plays now. Empty for any other entity, or none.
  */
 export function nestedIdsIn(key: string, value: unknown): ReadonlySet<string> {
   const ids = new Set<string>();
@@ -4418,6 +4422,10 @@ export function nestedIdsIn(key: string, value: unknown): ReadonlySet<string> {
   if (key.startsWith("character:")) {
     each((v.stats as { rolls?: unknown } | undefined)?.rolls);
     each(v.resources);
+  } else if (key.startsWith("scene:")) {
+    each(v.phases);
+  } else if (key.startsWith("roll:")) {
+    if (Array.isArray(v.targets)) for (const t of v.targets as ({ change?: unknown; changed?: unknown } | null)[]) each([t?.change, t?.changed]);
   } else if (key === PLAYING) {
     const run = (v.music as { run?: unknown } | null | undefined)?.run;
     if (typeof run === "string") ids.add(run);

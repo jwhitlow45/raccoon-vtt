@@ -46,7 +46,7 @@ export function StartClock(props: { onStart(id: string): void }) {
     if (!composed.ok) return;
     const id = actions.newId();
     props.onStart(id);
-    actions.dispatch(withClaim({ t: "clock.start", id, at: composed.t, shown, calendar }, () => actions.newId()));
+    actions.dispatch(withClaim({ t: "clock.start", id, at: composed.t, shown, calendar }));
   };
 
   return (

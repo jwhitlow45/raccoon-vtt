@@ -28,7 +28,7 @@ export function StepButtons(props: { now: number; clock: Pick<RoomClock, "daylig
   const [count, setCount] = useState("");
   const [unit, setUnit] = useState<AmountUnit>("hours");
   const [error, setError] = useState<string | null>(null);
-  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }, () => actions.newId()));
+  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }));
 
   const moveOn = () => {
     const amount = amountBy(count, unit);
@@ -102,7 +102,7 @@ export function StepButtons(props: { now: number; clock: Pick<RoomClock, "daylig
 export function ClockSteps(props: { now: number; clock: Pick<RoomClock, "daylight"> }) {
   const actions = useRoomActions();
   const dawn = toDawn(props.now, props.clock);
-  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }, () => actions.newId()));
+  const step = (by: number) => actions.dispatch(withClaim({ t: "clock.advance", by }));
   return (
     <>
       {STEPS.map((s) => (

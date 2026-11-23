@@ -874,10 +874,10 @@ function CreatureAnswer(props: {
   const failName = preset?.fails ? CONDITIONS[preset.fails].name : null;
 
   /** Settles one op by its own answer. A lost one is settled by where it landed while the request is open (5.6), never sent again. */
-  const settle = (tag: string, answer: OpAnswer, refusal?: OpRefusal) => {
+  const settle = (tag: string, answer: OpAnswer, refusal?: OpRefusal, sentAs = tag) => {
     const latest = store.getState().view?.rolls[request.id];
     const now = latest?.targets.find((t) => targetKey(t) === tkey);
-    const landing = answer === "unknown" ? landingOf(now, tag) : undefined;
+    const landing = answer === "unknown" ? landingOf(now, sentAs) : undefined;
     step({ t: "answer", tag, answer, ...(refusal ? { text: refusalWords(refusal) } : {}), ...(landing ? { landing } : {}) });
     return answer === "taken" || landing === "mine";
   };
@@ -952,9 +952,11 @@ function CreatureAnswer(props: {
     if (target.tag === undefined) return;
     const id = actions.newId();
     if (step({ t: "tap", op: "ask", tag: id, offers }).busy?.tag !== id) return;
+    // The store sends an ask made before the page's id key under a fresh id, which is the one its target then holds.
+    let sentAs = id;
     const n = actions.dispatch(
       { t: "roll.change", rollId: request.id, target: ref, ask: { id, on: target.tag, ...item.ask } },
-      { quiet: true, onAnswer: (a, refusal) => void settle(id, a, refusal) },
+      { quiet: true, onRemint: (ids) => void (sentAs = ids.get(sentAs) ?? sentAs), onAnswer: (a, refusal) => void settle(id, a, refusal, sentAs) },
     );
     if (n === null) step({ t: "answer", tag: id, answer: "refused", text: "That ask could not be sent." });
   };

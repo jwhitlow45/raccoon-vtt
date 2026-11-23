@@ -54,7 +54,7 @@ export function SetTimeDialog(props: { clock: RoomClock; opener: RefObject<HTMLE
     setTried(true);
     if (dirty && !composed.ok) return;
     const at = setAt(dirty, composed, now);
-    if (at !== null) actions.dispatch(withClaim({ t: "clock.set", at }, () => actions.newId()));
+    if (at !== null) actions.dispatch(withClaim({ t: "clock.set", at }));
     props.onClose();
   };
 

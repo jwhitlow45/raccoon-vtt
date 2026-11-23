@@ -17,6 +17,7 @@ import { useJumps } from "./jumps.ts";
 import { CrossfadeMenu, useWidth } from "./parts.tsx";
 import { Tile, TILE } from "./tile.ts";
 import { CROSSFADE, FADE_WORDS, PREVIOUS, SEEK, seekText, SHUFFLE } from "./words.ts";
+import { randomTag } from "../../../state/ids.ts";
 
 /** A seek is sent this long after the slider's last key, so a held arrow sends one (4.2). */
 export const SEEK_KEY_MS = 400;
@@ -364,7 +365,7 @@ export function NowFull(props: { fadeControl?: FadeControl; stopAll?: boolean; o
         boundMs={boundMs}
         atMs={held?.ms ?? shown.positionMs}
         onSeek={onSeek}
-        onShuffle={() => queue(lists.shuffle ? { t: "unshuffle" } : { t: "shuffle", seed: actions.newId() })}
+        onShuffle={() => queue(lists.shuffle ? { t: "unshuffle" } : { t: "shuffle", seed: randomTag() })}
         onPrevious={() => {
           // While a jump of this window's waits for its answer, the position read against the device's clock is no guide: the track counts as at its start (PLR-35).
           const target = previousTarget(lists, jumps.pending() ? 0 : shown.positionMs);

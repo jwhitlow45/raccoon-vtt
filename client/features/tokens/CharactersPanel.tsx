@@ -17,6 +17,7 @@ import { theme } from "../../lib/theme.ts";
 import { hpDisplay, hpText, initials } from "../../lib/tokenView.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import { randomTag } from "../../state/ids.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
@@ -315,7 +316,7 @@ function PartyLongRest(props: { characters: Character[] }) {
           size="sm"
           style={{ flex: 1 }}
           onClick={() => {
-            dispatchGesture(actions, partyRestOps(resting.map((c) => c.id), moveClock, actions.newId()));
+            dispatchGesture(actions, partyRestOps(resting.map((c) => c.id), moveClock, randomTag()));
             setAsking(false);
             setMoves(true);
           }}
