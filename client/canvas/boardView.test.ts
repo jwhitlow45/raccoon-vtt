@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mock, test } from "node:test";
 import { token } from "#shared/testutil.ts";
 import { areaLabelSpot, tokenBoxes } from "../features/areas/labelSpot.ts";
 import { pillReach } from "../features/measure/pillPlace.ts";
 import { LiveCamera } from "../state/liveCamera.ts";
 import { RoomScope } from "../state/scope.ts";
-import { boardPillsSlot, boardViewOf, boardViewsOf, pillsExcept, publishPillsEffect, REST_MS, restViewSlot, RestViewWatch, retractPillsEffect, type PillSpec } from "./boardView.ts";
+import { boardPillsSlot, boardViewOf, boardViewsOf, jumpCamera, pillsExcept, pillsOnly, publishPillsEffect, REST_MS, restViewSlot, RestViewWatch, retractPillsEffect, type PillSpec } from "./boardView.ts";
 
 test("an area's name keeps off every other layer's pill, never off another area's, so the two never chase each other", () => {
   const marker = { x: 2, y: 3, value: "Moved 20 ft\n10 ft left", size: "screen" as const, small: true, below: true };
@@ -220,8 +221,8 @@ test("random runs of pans, pinches, drawn notices and waits: the rest view chang
         before = st.rest;
       });
       const watch = new RestViewWatch(live, store);
-    watch.set(size, insets, "s1");
-    const stop = () => watch.stop();
+      watch.set(size, insets, "s1");
+      const stop = () => watch.stop();
       started = true;
       assert.deepEqual(store.getState().rest, clear(cam), `run ${runNo}: at once`);
       for (let step = 0; step < 40; step++) {
@@ -288,4 +289,72 @@ test("the rest view settles at once on a camera jump that is no gesture, and whe
   } finally {
     mock.timers.reset();
   }
+});
+
+test("restarting the rest watch for a new scene, canvas or bars, or after a stop, keeps exactly one camera listener, so no restart adds pan work (FU10PILLS-SOL-R2-1)", () => {
+  const { size, insets, live, store } = restRoom();
+  try {
+    let listeners = 0;
+    const subscribe = live.subscribe;
+    // The slot's own count: each subscription adds one until its unsubscribe runs once.
+    (live as { subscribe: typeof subscribe }).subscribe = (listener) => {
+      listeners++;
+      const off = subscribe(listener);
+      let gone = false;
+      return () => {
+        if (!gone) listeners--;
+        gone = true;
+        off();
+      };
+    };
+    live.write({ x: 0, y: 0, scale: 20 });
+    const watch = new RestViewWatch(live, store);
+    watch.set(size, insets, "s1");
+    assert.equal(listeners, 1, "started");
+    watch.set(size, insets, "s1");
+    assert.equal(listeners, 1, "the same place changes nothing");
+    for (const [i, sceneId] of ["s2", "s3", "s4", "s1"].entries()) {
+      watch.set(i % 2 === 0 ? size : { ...size, width: size.width + 10 }, i % 2 === 0 ? { ...insets, top: insets.top + 8 } : insets, sceneId);
+      assert.equal(listeners, 1, `restart ${i + 1}`);
+    }
+    watch.stop();
+    assert.equal(listeners, 0, "stopped");
+    watch.stop();
+    assert.equal(listeners, 0, "a second stop");
+    watch.set(size, insets, "s1");
+    assert.equal(listeners, 1, "started again after a stop");
+    watch.stop();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a camera jump settles the rest view at once, in Stage's setCam, and a pan's frame does not (FU10PILLS-R2)", () => {
+  const { size, insets, live, store, clear } = restRoom();
+  try {
+    const first = { x: 0, y: 100, scale: 20 };
+    live.write(first);
+    const watch = new RestViewWatch(live, store);
+    watch.set(size, insets, "s1");
+    const shown: unknown[] = [];
+    const fit = { x: -300, y: 40, scale: 8 };
+    jumpCamera(live, watch.settle, (c) => shown.push(c), fit);
+    assert.deepEqual(store.getState().rest, clear(fit), "settled with no wait");
+    assert.deepEqual(shown, [fit]);
+    live.write({ ...fit, x: -250 });
+    assert.deepEqual(store.getState().rest, clear(fit), "a pan's frame waits");
+    // Stage's setCam is that call, so a Fit map or a scene's camera never lays pills out against the old view.
+    const stage = readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8");
+    assert.match(stage, /\(c: Camera\) => jumpCamera\(liveCam, settleRestView, setCamState, c\)/);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("pillsOnly keeps the pills under a prefix, the complement of pillsExcept (LP49-PILLS-1)", () => {
+  const pill = (name: string): PillSpec => ({ name, x: 0, y: 0, size: "map" });
+  const all = { "trap:a": [pill("Pit")], "trap:b": [pill("Needle"), pill("DC 15")], turnStart: [pill("Moved")], "area:c": [pill("Cone")] };
+  assert.deepEqual(pillsOnly(all, "trap:").map((p) => p.name), ["Pit", "Needle", "DC 15"]);
+  assert.deepEqual(pillsExcept(all, "trap:").map((p) => p.name), ["Moved", "Cone"]);
+  assert.deepEqual(pillsOnly({}, "trap:"), []);
 });
