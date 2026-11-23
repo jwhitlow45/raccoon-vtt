@@ -120,13 +120,13 @@ function apart(room: Room, labels: Labels, what: string): void {
   }
 }
 
-const hiddenGoblin = (id: string, at = inF(0)) => make(id, at, { name: "Goblin", visibility: "all" });
+const goblinAt = (id: string, at = inF(0)) => make(id, at, { name: "Goblin", visibility: "all" });
 
 describe("twins apart only in when or in what order the DM made what P1 does not see", () => {
   test("C2, C3: a Goblin made out of sight 20 minutes back in A and now in B, then shown, gives P1 the same frames, and its id reads no time but under the DM's key", async (t) => {
     const { pair, labels } = await open(t);
     const goblins = pair.map((room, i) => labels[i]!.dm(room, "goblin", i === 0 ? 20 * MINUTE : 0));
-    await each(pair, (room) => room.apply("dm", hiddenGoblin(goblins[pair.indexOf(room)]!)));
+    await each(pair, (room) => room.apply("dm", goblinAt(goblins[pair.indexOf(room)]!)));
     sameFrames(pair, labels, "made");
     await each(pair, (room) => room.apply("dm", move(goblins[pair.indexOf(room)]!, inR(2))));
     sameFrames(pair, labels, "shown");
@@ -146,7 +146,7 @@ describe("twins apart only in when or in what order the DM made what P1 does not
     for (const [i, room] of pair.entries()) {
       for (const [k, label] of order[i]!.entries()) {
         made[i]![label] = labels[i]!.dm(room, label, (20 - 10 * k) * MINUTE);
-        await room.apply("dm", hiddenGoblin(made[i]![label]!, inF(k)));
+        await room.apply("dm", goblinAt(made[i]![label]!, inF(k)));
       }
     }
     sameFrames(pair, labels, "made");
@@ -162,7 +162,7 @@ describe("twins apart only in when or in what order the DM made what P1 does not
   test("C5: a scene copied with a Goblin out of sight, made at two times, gives P1 the same frames once the copy is shown, each derived id as its labels", async (t) => {
     const { pair, labels } = await open(t);
     const goblins = pair.map((room, i) => labels[i]!.dm(room, "goblin", i === 0 ? 20 * MINUTE : 0));
-    await each(pair, (room) => room.apply("dm", hiddenGoblin(goblins[pair.indexOf(room)]!)));
+    await each(pair, (room) => room.apply("dm", goblinAt(goblins[pair.indexOf(room)]!)));
     const copies = pair.map((room, i) => labels[i]!.dm(room, "copy"));
     for (const [i, room] of pair.entries()) {
       const copy = copies[i]!;
@@ -178,7 +178,7 @@ describe("twins apart only in when or in what order the DM made what P1 does not
   test("C7: a group save on a Goblin out of sight, its condition made at two times, gives P1 the same frames, and each twin records the condition", async (t) => {
     const { pair, labels } = await open(t);
     const goblins = pair.map((room) => labels[pair.indexOf(room)]!.dm(room, "goblin"));
-    await each(pair, (room) => room.apply("dm", hiddenGoblin(goblins[pair.indexOf(room)]!)));
+    await each(pair, (room) => room.apply("dm", goblinAt(goblins[pair.indexOf(room)]!)));
     const plan = "0199f0a8-0000-7000-8000-00000000c0de";
     for (const [i, room] of pair.entries()) {
       const condition = labels[i]!.dm(room, "condition", i === 0 ? 20 * MINUTE : 0);
