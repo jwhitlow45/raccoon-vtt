@@ -31,6 +31,7 @@
  *   node scripts/bench-server4.ts --stamps   (the walk bringing stamps into view alone)
  *   node scripts/bench-server4.ts --far   (the far count of tokens' walk and first snapshots alone)
  *   node scripts/bench-server4.ts --openings   (row OPEN-1 alone, sight through openings against the same room without them)
+ *   node scripts/bench-server4.ts --queue [QB-n]   (the queue's rows, all or one, below)
  *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
  * Then the bright and dark scenes again per player
@@ -56,8 +57,9 @@
 import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FloorLink, type FreeWall, type Light, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
-import { FAR } from "../shared/limits.ts";
+import { FAR, LIMITS } from "../shared/limits.ts";
 import { MAX_ASK_OPS, type Op, type ServerMessage } from "../shared/protocol.ts";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
 import { openingJoins } from "../shared/rules/openingSight.ts";
@@ -69,7 +71,7 @@ import { SnapshotBudget } from "../server/rooms/budgets.ts";
 import { Connection } from "../server/rooms/connection.ts";
 import type { RoomGateway } from "../server/rooms/gateway.ts";
 import { chunkCharge, layerCharge, MEMORY_CAP } from "../server/rooms/memorySize.ts";
-import type { Pool } from "../server/rooms/persistence.ts";
+import { snapshotJson, type Pool } from "../server/rooms/persistence.ts";
 import { actor as testActor, room as testRoom, scene as testScene, token as testToken } from "../shared/testutil.ts";
 import { capRoom, lightReachesEveryHolder, lightScene } from "./bench-vision.ts";
 
@@ -258,12 +260,27 @@ export function timeSight(span: () => Span | null = () => live, now: () => numbe
  * starts the fan-out's span.
  */
 function memoryPool(state: RoomState, at: Span): Pool {
-  const run = (sql: string): Promise<{ rows: unknown[]; rowCount?: number }> =>
-    Promise.resolve().then(() => {
+  const run = (sql: string, params?: unknown[]): Promise<{ rows: unknown[]; rowCount?: number }> =>
+    Promise.resolve().then(async () => {
       const s = sql.trim();
       if (s.includes("from room_snapshots")) return { rows: [{ seq: "0", state, schema_version: SNAPSHOT_VERSION }] };
       if (s.includes("from grants")) return { rows: [{ member_id: "dm" }] };
+      const db = queueDb;
+      if (s.startsWith("select seq, at, actor_member_id")) {
+        const after = Number(params?.[1] ?? 0);
+        const page = db.serve.filter((r) => Number(r.seq) > after);
+        return { rows: params?.[2] === undefined ? page : page.slice(0, Number(params[2])) };
+      }
+      if (s.startsWith("insert into room_ops") && db.capture && params) {
+        const [seqs, ats, ms, rs, os, version, pubs] = params.slice(1, 8) as [number[], string[], string[], string[], string[], number, number[] | undefined];
+        for (let i = 0; i < seqs.length; i++) db.capture.push({ seq: String(seqs[i]), at: new Date(ats[i]!), actor_member_id: ms[i]!, actor_role: rs[i]!, op: JSON.parse(os[i]!), op_version: version, pub: pubs?.[i] === undefined ? null : String(pubs[i]) });
+      }
+      if (s.startsWith("insert into room_snapshots") && db.holdSnapshotMs > 0) await new Promise((resolve) => setTimeout(resolve, db.holdSnapshotMs));
+      if (s.includes("from roll_receipts")) return { rows: db.receipts };
       if (s !== "commit") return { rows: [], rowCount: 0 };
+      if (db.commitMs > 0) await new Promise((resolve) => setTimeout(resolve, db.commitMs));
+      if (db.commitGate) await db.commitGate;
+      db.commits.push(performance.now());
       const landed = () => {
         at.commitAt = performance.now();
         at.drawn = 0;
@@ -275,6 +292,26 @@ function memoryPool(state: RoomState, at: Span): Pool {
     });
   return { query: run, connect: () => Promise.resolve({ query: run, release: () => undefined }) } as unknown as Pool;
 }
+
+/** A stored op row as the room's load reads it. */
+type StoredOp = { seq: string; at: Date; actor_member_id: string; actor_role: string; op: unknown; op_version: number; pub: string | null };
+
+/**
+ * What the memory database does for the queue's rows (QB) beyond answering
+ * at once: op rows to replay, the op rows commits store, a commit's length
+ * and a gate every commit waits on, a snapshot write held, the day's
+ * receipts to load, and when each commit landed. The other rows leave it
+ * as it starts.
+ */
+const queueDb: { serve: StoredOp[]; capture: StoredOp[] | null; commitMs: number; commitGate: Promise<void> | null; holdSnapshotMs: number; receipts: unknown[]; commits: number[] } = {
+  serve: [],
+  capture: null,
+  commitMs: 0,
+  commitGate: null,
+  holdSnapshotMs: 0,
+  receipts: [],
+  commits: [],
+};
 
 type Table = {
   actor: RoomActor;
@@ -300,7 +337,7 @@ export function benchAnswer(messages: readonly string[], n: number): OpAnswer | 
 type SitDownTimes = { load: number[]; first: number[]; later: number[] };
 
 /** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. */
-export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
+export async function sitDown(state: RoomState, times?: SitDownTimes, options?: ActorDeps["options"]): Promise<Table> {
   const t0 = performance.now();
   const db: Span = { commitAt: 0, drawn: 0, read: 0 };
   live = db;
@@ -313,6 +350,8 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
     // One op per batch, committed at once: every row is one op's whole trip, with no batching wait.
     options: { batchMs: 1, roomOpsPerSec: 10_000, snapshotOps: 1_000_000, snapshotIdleMs: 3_600_000, grantRecheckMs: 3_600_000 },
   };
+  // The queue's rows batch on the grid instead (runQueueBench).
+  if (options) deps.options = options;
   const actor = await RoomActor.load(deps);
   if (!actor) throw new Error("the bench room did not load");
   times?.load.push(performance.now() - t0);
@@ -1340,10 +1379,366 @@ export function formatServerBench(rows: Row[], onServer: boolean, revision?: str
   return lines.join("\n");
 }
 
+/*
+ * The queue's rows (QB-1 to QB-11): sustained load through the real actor
+ * on the cap rooms above, batches on the 20 ms grid, each op its own task
+ * at its due time as a socket message is, against the memory database.
+ * Rows that gate "against main" print what main's tree prints with this
+ * file copied in: run both on one quiet machine and compare.
+ *
+ *   node scripts/bench-server4.ts --queue          (every row)
+ *   node scripts/bench-server4.ts --queue QB-7     (one row)
+ *
+ * QB-3 needs the test database (DATABASE_URL, as the itests use).
+ */
+const QUEUE_OPTIONS = { batchMs: 20, roomOpsPerSec: 10_000, grantRecheckMs: 3_600_000 };
+const TICK_MS = 20;
+
+const quantile = (xs: readonly number[], p: number): number => {
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]! : Number.NaN;
+};
+const spread = (xs: readonly number[]) => `n=${xs.length} p50=${quantile(xs, 0.5).toFixed(1)} p99=${quantile(xs, 0.99).toFixed(1)} max=${(xs.length ? Math.max(...xs) : Number.NaN).toFixed(1)}`;
+const mib = (bytes: number) => `${(bytes / 1048576).toFixed(0)} MiB`;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type Sustained = {
+  latency: number[];
+  firstAck: number;
+  lastAck: number;
+  backlogMs: number;
+  spans: number;
+  retries: number;
+  heapPeak: number;
+  activeMsPerSec: number;
+  loopMaxMs: number;
+  publishMs: number[];
+};
+
+type Load = {
+  state: RoomState;
+  seconds: number;
+  /** Ticks between each player's ops: 0 is the full rate, two ticks in five, else one op every `every` ticks. */
+  every: number;
+  chat?: boolean;
+  previews?: boolean;
+  quietSeconds?: number;
+  dmPerTick?: number;
+};
+
+/** Runs a load on a table sat down at the queue's options, and what it measured. */
+async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIONS, keep?: (table: Table) => void): Promise<Sustained> {
+  clearVisionCache();
+  queueDb.commits = [];
+  const table = await sitDown(load.state, undefined, options);
+  keep?.(table);
+  const sentAt = new Map<string, number>();
+  const latency: number[] = [];
+  const frames: number[] = [];
+  let [firstAck, lastAck, spans, retries, heapPeak] = [Number.NaN, 0, 0, 0, 0];
+  for (const conn of [table.dm, ...table.players]) {
+    const send = conn.send.bind(conn);
+    (conn as { send: unknown }).send = (m: ServerMessage) => {
+      const now = performance.now();
+      frames.push(now);
+      // An op turned away or refused is answered, and owes no ack.
+      if (m.t === "retry") {
+        retries++;
+        sentAt.delete(`${conn.memberId}:${m.n}`);
+      }
+      if (m.t === "ev") for (const r of m.rejects ?? []) sentAt.delete(`${conn.memberId}:${r.n}`);
+      if (m.t === "ev" && m.acks && m.acks.length > 0) {
+        const ticks = new Set<number>();
+        for (const n of m.acks) {
+          const key = `${conn.memberId}:${n}`;
+          const t = sentAt.get(key);
+          if (t === undefined) continue;
+          latency.push(now - t);
+          if (Number.isNaN(firstAck)) firstAck = now - t;
+          lastAck = now - t;
+          ticks.add(Math.floor(sentTick.get(key)! / TICK_MS));
+          sentAt.delete(key);
+        }
+        if (ticks.size > 1) spans++;
+      }
+      return send(m as never);
+    };
+  }
+  const sentTick = new Map<string, number>();
+  const state = () => table.actor.committed.state;
+  const mine = new Map<Connection, string[]>();
+  for (const t of pcs(state())) mine.set(owner(table, t), [...(mine.get(owner(table, t)) ?? []), t.id]);
+  if (load.previews) for (const [p, ids] of mine) table.actor.ephemeral(p, { sceneId: SCENE, e: { k: "dragStart", tokenId: ids[0]!, x: 4.5, y: 4.5 } }, Date.now());
+  const loop = monitorEventLoopDelay({ resolution: 1 });
+  loop.enable();
+  const elu = performance.eventLoopUtilization();
+  const ticks = Math.round((load.seconds * 1000) / TICK_MS);
+  const start = performance.now() + 50;
+  for (let k = 0; k < ticks; k++) {
+    const due = start + k * TICK_MS;
+    if (k % 25 === 0) setTimeout(() => (heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed)), Math.max(0, due - performance.now()));
+    for (const [idx, p] of table.players.entries()) {
+      if (load.every === 0 ? (k + idx) % 5 >= 2 : (k + idx * 2) % load.every !== 0) continue;
+      for (let j = 0; j < (load.chat ? 2 : 1); j++) {
+        setTimeout(() => {
+          const ids = mine.get(p) ?? [];
+          if (ids.length === 0) return;
+          const id = ids[(k + j) % ids.length]!;
+          const tok = state().tokens[id]!;
+          const n = (table.n.get(p) ?? 0) + 1;
+          table.n.set(p, n);
+          const op = (j === 1 ? { t: "log.chat", text: `tick ${k}` } : { t: "token.move", tokenId: id, x: tok.x + (k % 2 === 0 ? 1 : -1), y: tok.y }) as Op;
+          sentAt.set(`${p.memberId}:${n}`, performance.now());
+          sentTick.set(`${p.memberId}:${n}`, Date.now());
+          void table.actor.op(p, n, op);
+        }, Math.max(0, due + 1 + idx - performance.now()));
+      }
+    }
+    for (let j = 0; j < (load.dmPerTick ?? 0); j++) {
+      setTimeout(() => {
+        const n = (table.n.get(table.dm) ?? 0) + 1;
+        table.n.set(table.dm, n);
+        void table.actor.op(table.dm, n, { t: "log.chat", text: `dm ${k} ${j}` } as Op);
+      }, Math.max(0, due + 2 - performance.now()));
+    }
+  }
+  await pause(start + ticks * TICK_MS - performance.now() + 5);
+  const inputEnd = performance.now();
+  while (sentAt.size > 0 && performance.now() - inputEnd < 60_000) await pause(TICK_MS);
+  const backlogMs = performance.now() - inputEnd;
+  if (load.quietSeconds) await pause(load.quietSeconds * 1000);
+  const used = performance.eventLoopUtilization(elu);
+  loop.disable();
+  heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
+  // Each publish: from its commit to the last frame before the next commit.
+  const publishMs: number[] = [];
+  const commits = queueDb.commits;
+  for (let i = 0, f = 0; i < commits.length; i++) {
+    const end = commits[i + 1] ?? Number.POSITIVE_INFINITY;
+    let last = -1;
+    while (f < frames.length && frames[f]! < end) {
+      if (frames[f]! >= commits[i]!) last = frames[f]!;
+      f++;
+    }
+    if (last >= 0) publishMs.push(last - commits[i]!);
+  }
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+  const seconds = (performance.now() - start) / 1000;
+  return { latency, firstAck, lastAck, backlogMs, spans, retries, heapPeak, activeMsPerSec: (used.active / seconds), loopMaxMs: loop.max / 1e6, publishMs };
+}
+
+function report(row: string, what: string, m: Sustained): string {
+  return [
+    `${row} ${what}`,
+    `  send to ack ms ${spread(m.latency)}, first ${m.firstAck.toFixed(1)}, last ${m.lastAck.toFixed(1)} | frames answering two ticks ${m.spans} | retries ${m.retries}`,
+    `  backlog cleared ${m.backlogMs.toFixed(0)} ms after the input | loop busy ${m.activeMsPerSec.toFixed(0)} ms a second | longest loop task ${m.loopMaxMs.toFixed(1)} ms | heap peak ${mib(m.heapPeak)} | publish ms ${spread(m.publishMs)}`,
+  ].join("\n");
+}
+
+/** A room whose state builds to `bytes` of JSON: the bench room with chat lines in its log. */
+function roomOfBytes(bytes: number): RoomState {
+  const state = remembering(true, true);
+  const text = "x".repeat(900);
+  const log = [...state.log];
+  for (let i = 0; JSON.stringify(state).length + log.length * 1_000 < bytes; i++) {
+    log.push({ id: `${1_800_000_000_000 + i}:0`, at: "2026-11-01T00:00:00.000Z", kind: "chat", from: "dm", text } as RoomState["log"][number]);
+    if (log.length % 1_000 === 0 && JSON.stringify({ ...state, log }).length >= bytes) break;
+  }
+  return { ...state, log };
+}
+
+async function qb3(): Promise<string> {
+  const { startEngine } = await import("../server/rooms/testing.ts");
+  const engine = await startEngine({ rooms: { actor: { roomOpsPerSec: 10_000, queueCap: 20_000 } } });
+  try {
+    const dm = engine.client();
+    const { roomId } = await dm.createRoom("QB-3");
+    const sockets = [await engine.connect(roomId, dm), await engine.connect(roomId, dm)];
+    for (const [i, s] of sockets.entries()) await s.snapshot(`dm${i}`);
+    for (let p = 0; p < 49; p++) {
+      const c = engine.client(`198.51.100.${p + 1}`);
+      await c.join(roomId, `Player ${p}`);
+      const s = await engine.connect(roomId, c, { ip: `198.51.100.${p + 1}` });
+      await s.snapshot(`p${p}`);
+      sockets.push(s);
+    }
+    const loop = monitorEventLoopDelay({ resolution: 1 });
+    loop.enable();
+    const heapBefore = process.memoryUsage().heapUsed;
+    // Starts just past a tick's edge on the rooms' clock, so the whole burst arrives in that tick.
+    while (Date.now() % TICK_MS !== 1) await new Promise((resolve) => setImmediate(resolve));
+    const t0 = performance.now();
+    const sent = sockets.map((s) => Array.from({ length: 60 }, (_, k) => s.op({ t: "log.chat", text: `burst ${k}` })));
+    const acked = await Promise.all(
+      sockets.map(async (s, i) => {
+        const last = sent[i]![sent[i]!.length - 1]!;
+        const answered = () => s.received.find((m) => (m.t === "ev" && Boolean(m.acks?.includes(last) || m.rejects?.some((r) => r.n === last))) || (m.t === "retry" && m.n === last));
+        const until = performance.now() + 30_000;
+        while (!answered() && performance.now() < until) await pause(2);
+        const ev = answered();
+        if (!ev) throw new Error("a socket's burst went unanswered");
+        const frames = s.received.filter((m) => m.t === "ev" && (m.acks ?? []).some((n) => sent[i]!.includes(n)));
+        return { ms: performance.now() - t0, frames: frames.length, seqs: frames.map((m) => (m as { seq: number }).seq), retried: ev.t === "retry" };
+      }),
+    );
+    loop.disable();
+    const seqs = new Set(acked.flatMap((a) => a.seqs));
+    return [
+      `QB-3 3,060 answers in one tick (49 players and the DM's two sockets at 60 each), small room, test database`,
+      `  batches ${seqs.size} | sockets acked in one frame ${acked.filter((a) => a.frames === 1).length} of ${acked.length} | sockets turned away at the end ${acked.filter((a) => a.retried).length}`,
+      `  send to last ack ms ${spread(acked.map((a) => a.ms))} | heap gain ${mib(process.memoryUsage().heapUsed - heapBefore)} | longest loop task ${(loop.max / 1e6).toFixed(1)} ms`,
+    ].join("\n");
+  } finally {
+    await engine.close();
+  }
+}
+
+async function qb8(): Promise<string> {
+  clearVisionCache();
+  queueDb.capture = [];
+  queueDb.holdSnapshotMs = 4_900;
+  let flood: Sustained;
+  try {
+    flood = await sustained({ state: remembering(true, true), seconds: 30, every: 0, dmPerTick: 120 }, { ...QUEUE_OPTIONS, queueCap: 500 });
+  } finally {
+    queueDb.holdSnapshotMs = 0;
+  }
+  const rows = queueDb.capture;
+  queueDb.capture = null;
+  queueDb.serve = rows;
+  const loop = monitorEventLoopDelay({ resolution: 1 });
+  loop.enable();
+  const t0 = performance.now();
+  const table = await sitDown(remembering(true, true), undefined, QUEUE_OPTIONS);
+  const replayMs = performance.now() - t0;
+  loop.disable();
+  queueDb.serve = [];
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+  return [
+    report("QB-8", "a 30 s flood at the bounds, six holders, the DM at 120 a tick, the snapshot write held 4.9 s, then a crash", flood),
+    `  stored rows ${rows.length} (bound 25,860 at W = 5 s) | replayed in ${replayMs.toFixed(0)} ms with the room's load | longest loop task in the replay ${(loop.max / 1e6).toFixed(1)} ms`,
+  ].join("\n");
+}
+
+function qb9(): string {
+  const state = roomOfBytes(9 * 1048576);
+  const times: number[] = [];
+  let bytes = 0;
+  for (let i = 0; i < 11; i++) {
+    const t0 = performance.now();
+    bytes = snapshotJson(state).length;
+    times.push(performance.now() - t0);
+  }
+  return `QB-9 a mark's build of a ${mib(bytes)} room: ms ${spread(times)} (under 15)`;
+}
+
+async function qb10(): Promise<string> {
+  let release!: () => void;
+  queueDb.commitGate = new Promise<void>((resolve) => (release = resolve));
+  let table!: Table;
+  const views: number[] = [];
+  let heapPeak = 0;
+  const heap = setInterval(() => (heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed)), 100);
+  const answers = { busy: 0, readers: 0, readersBusy: 0 };
+  const run = sustained({ state: remembering(false, true), seconds: 10, every: 6 }, QUEUE_OPTIONS, (t) => (table = t));
+  await pause(2_000);
+  const actor = table.actor as RoomActor & { viewCount?: number };
+  const conns = [table.dm, ...table.players];
+  for (const conn of conns) {
+    const send = conn.send.bind(conn);
+    (conn as { send: unknown }).send = (m: ServerMessage) => {
+      if (m.t === "retry" && m.code === "busy") answers.busy++;
+      if (actor.viewCount !== undefined) views.push(actor.viewCount);
+      return send(m as never);
+    };
+  }
+  // 500 queued commands of 64 KiB, which the queue holds as they arrived.
+  const junk = "j".repeat(64 * 1024);
+  for (let i = 0; i < 500; i++) {
+    const conn = conns[i % conns.length]!;
+    const n = (table.n.get(conn) ?? 0) + 1;
+    table.n.set(conn, n);
+    void actor.op(conn, n, { t: "log.chat", text: "held", junk } as unknown as Op);
+  }
+  // 200 readers as of now, which wait for the held batches.
+  const readers = typeof actor.asOf === "function" ? Array.from({ length: 200 }, () => actor.asOf(Date.now()).then(() => answers.readers++, () => answers.readersBusy++)) : [];
+  // Every socket's frames held while their tick is not yet read.
+  for (const conn of conns) for (let i = 0; i < 100; i++) actor.ephemeral(conn, { sceneId: SCENE, e: { k: "ruler", id: "0199f0a0-0000-7000-8000-0000000000c1", points: [{ x: 1.5, y: 1.5 }, { x: 2.5 + (i % 5), y: 1.5 }] } as never }, Date.now());
+  await pause(8_000);
+  const held = { queue: actor.queueLength, heap: process.memoryUsage().heapUsed };
+  const t0 = performance.now();
+  release();
+  queueDb.commitGate = null;
+  const m = await run;
+  await Promise.all(readers);
+  clearInterval(heap);
+  return [
+    `QB-10 25 batches held, 500 queued commands of 64 KiB, 200 readers waiting and every socket's frames held, 10 s, then the commits release`,
+    `  while held: queue ${held.queue}, heap ${mib(held.heap)} | heap peak ${mib(Math.max(heapPeak, m.heapPeak))} | views at most ${views.length ? Math.max(...views) : "n/a"} (bound 102)`,
+    `  readers answered ${answers.readers}, busy ${answers.readersBusy} | busy answers ${answers.busy} | drained ${((performance.now() - t0) / 1000).toFixed(1)} s after the release | longest loop task ${m.loopMaxMs.toFixed(1)} ms`,
+  ].join("\n");
+}
+
+async function qb11(): Promise<string> {
+  const day = Date.now() - 60_000;
+  queueDb.receipts = Array.from({ length: 10_000 }, (_, i) => ({ member_id: `p${(i % PLAYERS) + 1}`, tag: uuidv7(), part: 0, state: "committed", seq: String(i + 1), code: null, message: null, at: new Date(day - i * 8_000) }));
+  const bound = roomOfBytes(LIMITS.stateBytes - 64 * 1024);
+  globalThis.gc?.();
+  const before = process.memoryUsage();
+  const actors: RoomActor[] = [];
+  for (let i = 0; i < 50; i++) {
+    const db: Span = { commitAt: 0, drawn: 0, read: 0 };
+    const actor = await RoomActor.load({ pool: memoryPool(structuredClone(bound), db), info: { roomId: `QB11${String(i).padStart(4, "0")}`, pinned: true, createdIp: null, readOnly: false }, log: quiet, budget: new SnapshotBudget(), gateway: {} as RoomGateway, options: QUEUE_OPTIONS });
+    if (!actor) throw new Error("a room did not load");
+    actors.push(actor);
+  }
+  globalThis.gc?.();
+  const after = process.memoryUsage();
+  for (const actor of actors) await actor.shutdown({ code: 1012, snapshot: false });
+  queueDb.receipts = [];
+  return `QB-11 50 rooms at the state bound, each with a day book of 10,000 receipts: RSS ${mib(before.rss)} to ${mib(after.rss)} (gain ${mib(after.rss - before.rss)}), heap gain ${mib(after.heapUsed - before.heapUsed)}${globalThis.gc ? "" : " (run with --expose-gc for steady figures)"}`;
+}
+
+export async function runQueueBench(only: string | null): Promise<string[]> {
+  const out: string[] = [];
+  const want = (row: string) => only === null || only === row;
+  const typical = (state: RoomState, extra: Partial<Load> = {}) => sustained({ state, seconds: 10, every: 12, ...extra });
+  if (want("QB-1")) {
+    out.push(report("QB-1", "typical heavy play, whole party, every layer full", await typical(remembering(false, true))));
+    out.push(report("QB-1", "typical heavy play, six holders, every layer full", await typical(remembering(true, true))));
+  }
+  if (want("QB-2")) out.push(report("QB-2", "every player at the full rate, whole party, every layer full, 10 s then 10 s quiet", await sustained({ state: remembering(false, true), seconds: 10, every: 0, quietSeconds: 10 })));
+  if (want("QB-3")) out.push(await qb3());
+  if (want("QB-4")) out.push(report("QB-4", "players' moves near the far line at the full rate", await sustained({ state: farBenchRoom(), seconds: 10, every: 0, quietSeconds: 10 })));
+  if (want("QB-5")) {
+    const without = await typical(remembering(false, true));
+    const with_ = await typical(remembering(false, true), { previews: true });
+    out.push(report("QB-5", "typical heavy play, each player holding a drag preview", with_));
+    out.push(`  previews add ${(quantile(with_.publishMs, 0.5) - quantile(without.publishMs, 0.5)).toFixed(2)} ms a publish at the median, ${(quantile(with_.publishMs, 0.99) - quantile(without.publishMs, 0.99)).toFixed(2)} at p99 (under 2)`);
+  }
+  if (want("QB-6")) out.push(report("QB-6", "typical heavy play with a chat line for each op", await typical(remembering(false, true), { chat: true })));
+  if (want("QB-7")) {
+    queueDb.commitMs = 30;
+    try {
+      out.push(report("QB-7", "typical heavy play, each commit 30 ms long (p99 within 70)", await typical(remembering(false, true))));
+    } finally {
+      queueDb.commitMs = 0;
+    }
+  }
+  if (want("QB-8")) out.push(await qb8());
+  if (want("QB-9")) out.push(qb9());
+  if (want("QB-10")) out.push(await qb10());
+  if (want("QB-11")) out.push(await qb11());
+  return out;
+}
+
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   const revision = benchRevision(argv);
-  if (argv.includes("--openings")) console.log(formatOpeningsBench(await runOpeningsBench(), argv.includes("--server"), revision));
+  if (argv.includes("--queue")) {
+    const only = argv[argv.indexOf("--queue") + 1];
+    console.log([`Revision: ${revision ?? "unrecorded"}`, ...(await runQueueBench(only?.startsWith("QB-") ? only : null))].join("\n"));
+  } else if (argv.includes("--openings")) console.log(formatOpeningsBench(await runOpeningsBench(), argv.includes("--server"), revision));
   else if (argv.includes("--numbers")) console.log(formatNumbersBench(await runNumbersBench(), argv.includes("--server"), revision));
   else {
     const rows: Row[] = [];
