@@ -370,6 +370,23 @@ describe("a page with an id key makes version 8 ids under it", () => {
     assert.equal(sealedTime(KEY, s.actions.newId()), T0 + 1_500);
   });
 
+  test("a clock read in fractions of a millisecond, as a browser's is, makes ids at the whole millisecond under it, new and made again", () => {
+    const s = keyedSetup(room());
+    s.connect();
+    s.clock.advance(0.3);
+    assert.equal(sealedTime(KEY, s.actions.newId()), T0);
+    s.room.suspend();
+    const offline = s.actions.newId();
+    const heard = answers();
+    s.room.dispatch(made(offline), heard.opts);
+    s.clock.advance(40 * MINUTE + 0.4);
+    s.connect();
+    const fresh = tokenIdOf(s.sentOps()[0]!.op);
+    assert.notEqual(fresh, offline);
+    const at = sealedTime(KEY, fresh)!;
+    assert.ok(Number.isInteger(at) && Math.abs(at - (T0 + 40 * MINUTE)) < 1_000, "made again by the server's clock, in whole milliseconds");
+  });
+
   test("a create the room refuses for its id goes once more under a fresh sealed id, and lands", () => {
     const s = keyedSetup(room());
     s.connect();

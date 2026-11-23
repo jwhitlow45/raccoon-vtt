@@ -73,9 +73,15 @@ export function idTimeRefused(r: { code: RefusalCode; message: string }): boolea
   return r.code === "invalid" && r.message === ID_TIME_REFUSED;
 }
 
-/** A fresh id for each of `ids`, made at `now`: sealed under `key`, or version 7 while the device holds none. */
+/**
+ * A fresh id for each of `ids`, made at `now`: sealed under `key`, or
+ * version 7 while the device holds none. `now` may hold a fraction of a
+ * millisecond, as a browser's monotonic clock reads, and each id the whole
+ * millisecond under it.
+ */
 export function freshIds(ids: readonly string[], now: number, key: IdKey | null): Map<string, string> {
-  return new Map(ids.map((id) => [id, key === null ? uuidv7(now) : sealedId(key, now)]));
+  const at = Math.floor(now);
+  return new Map(ids.map((id) => [id, key === null ? uuidv7(at) : sealedId(key, at)]));
 }
 
 /**

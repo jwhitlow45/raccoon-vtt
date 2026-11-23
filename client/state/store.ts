@@ -867,7 +867,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const made = options.newIdCheck ? new Set<string>() : null;
   const introduced = new Set<string>();
   const newId = (): string => {
-    const at = serverNow();
+    // The room's reckoning holds fractions of a millisecond from the monotonic clock, and an id the whole one under it.
+    const at = Math.floor(serverNow());
     const id = idKey === null ? uuidv7(at) : sealedId(idKey, at);
     made?.add(id);
     return id;
