@@ -5,14 +5,21 @@ import { COUNT_OP_VERSION, COUNT_SNAPSHOT_VERSION, NUMBERING_SNAPSHOT_VERSION, O
 import type { Member, RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { seqTwins } from "#shared/seqTestutil.ts";
-import { stateThrough } from "../http/receipts.ts";
 import type { ActorDeps } from "./actor.ts";
 import { Connection } from "./connection.ts";
-import { captureView } from "./logHistory.ts";
+import { captureView, ReceiptLines } from "./logHistory.ts";
 import { ScanBusyError } from "./logScanBudget.ts";
 import { loadRoom, snapshotJson } from "./persistence.ts";
 import { memoryGrowth } from "./remember.ts";
 import { restartStored as restartStoredAt, ScopeClient, scopeFixture, storedActor as storedActorAt, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
+
+/** The state a receipt lookup of one committed receipt at `seq` projects against, read through the lookup itself. */
+async function receiptState(state: RoomState, through: number, seq: number): Promise<RoomState> {
+  const client = { query: async () => ({ rows: [{ part: 0, state: "committed", seq: String(seq), code: null, message: null, at: new Date(0) }] }), release: () => undefined, once: () => undefined, removeListener: () => undefined };
+  const lines = new ReceiptLines({ pool: { connect: async () => client } as never, cancel: async () => undefined });
+  await lines.lookup("UNDOSCOPE", { memberId: "p1", role: "player" }, "tag", AbortSignal.timeout(1_000), { state, through }, Date.now());
+  return state;
+}
 
 /**
  * The snapshot a room saved before the room count writes again here
@@ -342,8 +349,9 @@ describe("reads in a room whose replay stopped", () => {
       assert.equal(through, 1, `${when}: the state holds the ops through 1`);
       assert.equal(pub, when === "before a refusal" ? 3 : 4, `${when}: the count takes every stored row's number, and the refusal's`);
       assert.equal(captureView(h.actor.committed, "UNDOSCOPE", { memberId: f.dm.id, role: "dm" }).through, 1, `${when}: a log read stops at 1`);
-      assert.equal(await stateThrough(h.actor, 1, AbortSignal.timeout(1_000)), state, `${when}: a receipt of 1 reads the state`);
-      for (const seq of [2, 3, pub]) await assert.rejects(stateThrough(h.actor, seq, AbortSignal.timeout(1_000)), ScanBusyError, `${when}: a receipt of ${seq} answers busy`);
+      // A receipt lookup reads the state for a receipt at or below `through` and answers busy past it (ReceiptLines.lookup).
+      assert.equal(await receiptState(state, through, 1), state, `${when}: a receipt of 1 reads the state`);
+      for (const seq of [2, 3, pub]) await assert.rejects(receiptState(state, through, seq), ScanBusyError, `${when}: a receipt of ${seq} answers busy`);
       if (when === "before a refusal") {
         assert.equal((await dm.send({ t: "log.chat", text: "read only" })).rejects?.length, 1);
         assert.equal(db.pub, 4);

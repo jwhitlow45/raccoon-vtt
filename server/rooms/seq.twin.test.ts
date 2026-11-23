@@ -8,7 +8,6 @@ import { COUNT_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { FAMILIAR, FrameReader, IMAGE, IN_Q, numbersIn, seqTwins, T0, TRACK_END, type SeqTwinOptions } from "#shared/seqTestutil.ts";
 import { template, trap } from "#shared/testutil.ts";
 import { forgetRememberedStamps } from "../assets/cleanup.ts";
-import { stateThrough } from "../http/receipts.ts";
 import { RoomActor, type ActorDeps, type ActorOptions } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { Connection } from "./connection.ts";
@@ -253,8 +252,8 @@ describe("twin rooms give their devices the same frames", () => {
     for (const twin of pair) {
       const seq = seqs[0]![0]!;
       assert.ok(numbersIn(twin.clients.p1.sent).some((g) => g.what === "id" && g.n === seq), `${twin.name}: the receipt's number is the roll line's`);
-      const state = await stateThrough(twin.actor, seq, AbortSignal.timeout(1_000));
-      assert.equal(state, twin.actor.committed.state, `${twin.name}: the receipt's state is there at once`);
+      // A lookup projects against a view at or past the receipt's number (ReceiptLines.lookup).
+      assert.ok(twin.actor.committed.through >= seq, `${twin.name}: the receipt's state is there at once`);
     }
   });
 

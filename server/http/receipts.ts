@@ -1,13 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, Viewer } from "#shared/model.ts";
 import { projectArchivedLog } from "#shared/project.ts";
 import { mainFloorId } from "#shared/rules/floors.ts";
 import { accessErrors, type AuthKit, HttpError, roomParam } from "../auth/http.ts";
+import { ViewBusyError } from "../rooms/actor.ts";
 import { ReceiptLines, receiptWait } from "../rooms/logHistory.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 import type { RoomManager } from "../rooms/manager.ts";
-import type { ReceiptRow } from "../rooms/persistence.ts";
 
 /**
  * The receipt lookup (docs/design/design-v1-dice.md 1.2): what became of the
@@ -21,17 +21,22 @@ import type { ReceiptRow } from "../rooms/persistence.ts";
  * paging the log, so a hidden stretch of the log leaves no gap to count.
  * An op's lines no longer in memory come from the archive by the caller's
  * own streams and the op's seq once the room's metadata is complete, and by
- * the raw query before (ReceiptLines). Every part is projected against one
- * committed state, captured once, after the receipt rows are read and once
- * it holds each of their ops, so a commit during the lookup never mixes two
- * states and never meets a state older than its op. The rows and the lines
- * use bounded, cancellable connections under the lookup's deadline,
- * released while waiting for the state. Behind the room's grant, and
- * limited per member and room before anything is read.
+ * the raw query before (ReceiptLines).
+ *
+ * The answer is the room as of the request's arrival (RoomActor.asOf): the
+ * view after every batch through the last tick before it, which the room
+ * gives once those batches have landed, and the receipt rows written before
+ * that tick (persistence.ts readReceipts). So every row read belongs to a
+ * batch the view holds, and a commit, a sweep or a tag's reuse landing
+ * during the lookup never changes what it answers. Every part is projected
+ * against that one view. The rows and the lines use bounded, cancellable
+ * connections under the lookup's deadline, and none is held while the
+ * room gives its view. Behind the room's grant, and limited per member and
+ * room before anything is read.
  */
 const TAG = z.string().min(1).max(64);
 
-/** How long a whole lookup may authorize, charge, read and wait for the room's state. */
+/** How long a whole lookup may authorize, charge, read and wait for the room's view. */
 const RECEIPT_DEADLINE_MS = 5_000;
 
 export type ReceiptPart =
@@ -40,15 +45,13 @@ export type ReceiptPart =
 
 export type ReceiptRouteOptions = { lines?: ReceiptLines; deadlineMs?: number };
 
-/** How often a lookup looks again for the room's state to reach a receipt's seq. */
-const CAUGHT_UP_POLL_MS = 10;
-
-export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, deps: { manager: RoomManager; options?: ReceiptRouteOptions }): Promise<void> {
+export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, deps: { manager: Pick<RoomManager, "acquire" | "arrivalTick">; options?: ReceiptRouteOptions }): Promise<void> {
   const archive = deps.options?.lines ?? new ReceiptLines({ pool: kit.pool });
   const deadlineMs = deps.options?.deadlineMs ?? RECEIPT_DEADLINE_MS;
   await app.register(async (r) => {
     r.setErrorHandler(accessErrors);
     r.get("/api/rooms/:id/receipts/:tag", async (req, reply) => {
+      const arrivedAt = req.arrivedAt;
       const roomId = roomParam(req);
       const tag = TAG.safeParse((req.params as { tag?: unknown }).tag);
       if (!tag.success) throw new HttpError(400, "invalid_query");
@@ -72,9 +75,9 @@ export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, 
         if (grant instanceof HttpError) throw grant;
         const actor = await receiptWait(deps.manager.acquire(roomId), signal);
         const viewer: Viewer = { memberId: grant.memberId, role: grant.role };
-        // The state is taken after the rows are read, once it holds every committed receipt's op (stateThrough).
-        const found = await archive.lookup(roomId, viewer, tag.data, signal, (rows) => stateThrough(actor, newestCommitted(rows), signal));
-        const { rows, state, lines } = found;
+        const view = await receiptWait(actor.asOf(arrivedAt, { signal }), signal);
+        const { rows, lines } = await archive.lookup(roomId, viewer, tag.data, signal, view, deps.manager.arrivalTick(arrivedAt));
+        const state = view.state;
         // The DM's lines read as on the players' scene, every floor of it (docs/design/design-v1-floors.md 8.3).
         const start = grant.role === "dm" ? state.meta.playerSceneId : null;
         const scene = start === null ? null : mainFloorId(state, start);
@@ -89,48 +92,11 @@ export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, 
         reply.header("cache-control", "no-store");
         return { parts };
       } catch (err) {
-        if (err instanceof ScanBusyError || err instanceof ScanCancelledError) throw new HttpError(503, "busy", { retryAfter: 1 });
+        if (err instanceof ScanBusyError || err instanceof ScanCancelledError || err instanceof ViewBusyError) throw new HttpError(503, "busy", { retryAfter: 1 });
         throw err;
       } finally {
         reply.raw.off("close", onClose);
       }
     });
   });
-}
-
-function newestCommitted(rows: readonly ReceiptRow[]): number {
-  let seq = 0;
-  for (const row of rows) if (row.state === "committed" && row.seq !== null && row.seq > seq) seq = row.seq;
-  return seq;
-}
-
-/**
- * The room's committed state once it holds the op of `seq`, a receipt's
- * number (RoomActor.committed's `through`). A receipt is written in its
- * batch's transaction, a moment before the room takes that batch as its
- * committed state, so a row read in that moment is newer than the state.
- * Projecting its op's lines against a state without the op could drop
- * lines the caller may read, so the lookup waits for the state, and a
- * cancel or the deadline ends the wait as ScanCancelledError (busy). A
- * closed room, and one whose replay stopped before the op, never get there
- * and answer busy at once.
- */
-export async function stateThrough(actor: { readonly committed: { state: RoomState; through: number }; readonly closed?: boolean; readonly replayFailed?: boolean }, seq: number, signal: AbortSignal): Promise<RoomState> {
-  for (;;) {
-    if (signal.aborted) throw new ScanCancelledError(signal.reason);
-    const committed = actor.committed;
-    if (committed.through >= seq) return committed.state;
-    if (actor.closed || actor.replayFailed) throw new ScanBusyError();
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(new ScanCancelledError(signal.reason));
-      };
-      const timer = setTimeout(() => {
-        signal.removeEventListener("abort", onAbort);
-        resolve();
-      }, CAUGHT_UP_POLL_MS);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-  }
 }

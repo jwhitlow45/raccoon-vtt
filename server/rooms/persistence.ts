@@ -673,12 +673,29 @@ export async function loadReceipts(pool: Pool, roomId: string, since: Date): Pro
   return rows.map((r) => ({ memberId: r.member_id, tag: r.tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString(), ...(r.ask ? { ask: r.ask } : {}) }));
 }
 
-/** One member's receipts of one tag, every part, read by key: the lookup reads nothing of anyone else's. */
-export async function readReceipts(q: Queryable, roomId: string, memberId: string, tag: string): Promise<ReceiptRow[]> {
+/** How long a receipt is kept from its own time, which bounds what a lookup reads. */
+const RECEIPT_KEPT_MS = LIMITS.receiptDays * 24 * 60 * 60_000;
+
+/**
+ * One member's receipts of one tag as of a tick, every part, read by key:
+ * the lookup reads nothing of anyone else's. For each part it takes the
+ * newest row written before `before` and within the receipt days of it,
+ * from roll_receipts and the rows reused tags replaced alike, in one
+ * statement, so one snapshot answers for both tables and a replacement
+ * landing during the read shows its old row in exactly one of them. A row
+ * written at or after `before` is left out whether or not its batch has
+ * landed, so a later commit never changes the answer.
+ */
+export async function readReceipts(q: Queryable, roomId: string, memberId: string, tag: string, before: number): Promise<ReceiptRow[]> {
   const { rows } = await q.query<{ part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
-    `select part, state, seq::text, code, message, at from roll_receipts
-     where room_id = $1 and member_id = $2 and tag = $3 order by part`,
-    [roomId, memberId, tag],
+    `select distinct on (part) part, state, seq::text, code, message, at from (
+       select part, state, seq, code, message, at from roll_receipts
+       where room_id = $1 and member_id = $2 and tag = $3 and at < $4::timestamptz and at > $5::timestamptz
+       union all
+       select part, state, seq, code, message, at from roll_receipts_retired
+       where room_id = $1 and member_id = $2 and tag = $3 and at < $4::timestamptz and at > $5::timestamptz
+     ) kept order by part, at desc`,
+    [roomId, memberId, tag, new Date(before).toISOString(), new Date(before - RECEIPT_KEPT_MS).toISOString()],
   );
   return rows.map((r) => ({ memberId, tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
 }

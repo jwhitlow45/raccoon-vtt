@@ -8,40 +8,27 @@ import { AT, rng, room } from "#shared/testutil.ts";
 import { setupAuth } from "../auth/plugin.ts";
 import { loadConfig } from "../config.ts";
 import { ReceiptLines } from "../rooms/logHistory.ts";
-import { registerReceiptRoutes, stateThrough } from "./receipts.ts";
+import { ViewBusyError, type RoomView } from "../rooms/actor.ts";
+import { registerReceiptRoutes } from "./receipts.ts";
 import { sortedReplies } from "./sortedReplies.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
-
-for (const property of ["closed", "replayFailed"] as const) test(`a behind actor that is ${property} answers busy promptly`, async () => {
-  const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 100);
-  try {
-    actor[property] = true;
-    await assert.rejects(stateThrough(actor, 2, abort.signal), ScanBusyError);
-  } finally { clearTimeout(timer); }
-});
-
-test("actor closure while waiting answers busy, and cancellation rejects a caught-up state", async () => {
-  const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 100);
-  try {
-    const waiting = stateThrough(actor, 2, abort.signal);
-    actor.closed = true;
-    await assert.rejects(waiting, ScanBusyError);
-    abort.abort();
-    await assert.rejects(stateThrough(actor, 1, abort.signal), ScanCancelledError);
-  } finally { clearTimeout(timer); }
-});
 
 // Exercise the real auth and limit services without a database or a listening socket.
 /** A committed receipt of P1's at `seq`, the state the room holds, and the op's lines as the archive's jsonb rows give them back. */
 type Held = { seq: number; state: RoomState; archived: LogEntry[]; sorted: boolean };
 
-async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean; noGrant?: boolean; noSession?: boolean; held?: Held } = {}) {
+/** When the rig's requests arrive, on the clock the app's hook reads (server/app.ts). */
+const ARRIVED = 1_000_007;
+
+async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean; noGrant?: boolean; noSession?: boolean; held?: Held; through?: number; asOf?: (at: number) => Promise<RoomView> } = {}) {
   const app = Fastify();
   if (opts.held?.sorted) sortedReplies(app);
+  const arrivals: number[] = [];
+  app.decorateRequest("arrivedAt", 0);
+  app.addHook("onRequest", (req, _reply, done) => {
+    req.arrivedAt = ARRIVED;
+    done();
+  });
   const stats = { cancels: 0, destroyed: 0, active: 0, unbounded: 0, closed: 0, created: 0, checkouts: 0, reused: 0 };
   const sql: { text: string; bounded: boolean; values?: unknown[] }[] = [];
   const stalled = (text: string) => stage === "grant" ? text.includes("from grants g") : stage === "limit" ? text.includes("from rate_events") : stage === "charge" && text.startsWith("insert into rate_events");
@@ -90,10 +77,15 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
   const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://localhost/test" });
   const kit = await setupAuth(app, { config, pool: pool as never, gateway: { closeSockets: () => { stats.closed++; } } as never });
   const lines = new ReceiptLines({ pool: pool as never, cancel: async () => { stats.cancels++; } });
-  const committed = opts.held ? { state: opts.held.state, through: opts.held.seq } : { state: {} as never, through: 0 };
-  await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed, closed: false, replayFailed: false }) } as never, options: { lines, deadlineMs: opts.held ? 2_000 : 25 } });
+  const view: RoomView = { tick: ARRIVED - (ARRIVED % 20), state: opts.held?.state ?? ({} as never), seq: 0, pub: 0, through: opts.through ?? opts.held?.seq ?? 0 };
+  const asOf = (at: number) => {
+    arrivals.push(at);
+    return opts.asOf?.(at) ?? Promise.resolve(view);
+  };
+  const manager = { acquire: async () => ({ asOf }), arrivalTick: (at: number) => at - (at % 20) };
+  await registerReceiptRoutes(app, kit, { manager: manager as never, options: { lines, deadlineMs: opts.held ? 2_000 : 25 } });
   await app.ready();
-  return { app, stats, sql, pool, request: (cookie = true) => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: cookie ? { cookie: `rvtt=${"a".repeat(43)}` } : {} }) };
+  return { app, stats, sql, pool, arrivals, request: (cookie = true) => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: cookie ? { cookie: `rvtt=${"a".repeat(43)}` } : {} }) };
 }
 
 for (const stage of ["grant", "limit", "charge"] as const) test(`the receipt deadline cancels the route's ${stage} SQL`, async () => {
@@ -166,41 +158,49 @@ for (const cookie of [false, true]) test(`a request without a live session refus
   } finally { await r.app.close(); }
 });
 
-describe("a lookup's wait for the room's state", () => {
-  test("returns the state once it reaches the newest receipt's seq, and a cancel ends the wait", async () => {
-    const actor = { committed: { state: { meta: { name: "five" } } as never, through: 5 } };
-    assert.equal(await stateThrough(actor, 5, new AbortController().signal), actor.committed.state, "a state already there is taken at once");
-    const later = stateThrough(actor, 6, new AbortController().signal);
-    setTimeout(() => (actor.committed = { state: { meta: { name: "six" } } as never, through: 6 }), 30);
-    assert.equal(((await later) as unknown as { meta: { name: string } }).meta.name, "six");
-    const abort = new AbortController();
-    const never = stateThrough(actor, 99, abort.signal);
-    setTimeout(() => abort.abort(new Error("deadline")), 30);
-    await assert.rejects(never, ScanCancelledError);
-  });
-});
+describe("a lookup as of its arrival", () => {
+  const line: LogEntry = { id: "2:0", at: AT, kind: "chat", from: "p1", text: "ready" };
 
-test("random actor capture, close, replay failure, cancellation and late progress never return a behind state", async () => {
-  const random = rng(4105);
-  const modes = new Set<number>();
-  for (let i = 0; i < 80; i++) {
-    const actor = { committed: { state: {} as never, through: 1 }, closed: false, replayFailed: false };
-    const abort = new AbortController();
-    const mode = Math.floor(random() * 4);
-    modes.add(mode);
-    const result = stateThrough(actor, 2, AbortSignal.any([abort.signal, AbortSignal.timeout(100)])).then((s) => ({ state: s, error: null }), (e: unknown) => ({ state: null, error: e }));
-    if (mode === 0) actor.closed = true;
-    if (mode === 1) actor.replayFailed = true;
-    if (mode === 2) abort.abort();
-    if (mode === 3) actor.committed = { state: {} as never, through: 2 };
-    const found = await result;
-    if (mode < 2) assert.ok(found.error instanceof ScanBusyError, `sequence ${i}: terminal actors answer busy`);
-    else if (mode === 2) assert.ok(found.error instanceof ScanCancelledError, `sequence ${i}: cancellation rejects`);
-    else assert.equal(found.state, actor.committed.state, `sequence ${i}: one caught-up capture`);
-    actor.committed = { state: {} as never, through: 3 };
-    if (found.state) assert.notEqual(found.state, actor.committed.state, "late progress cannot replace captured state");
-  }
-  assert.equal(modes.size, 4);
+  test("asks the room for its view at the moment the request arrived, and reads the rows after it, before that tick", async () => {
+    let give!: (view: RoomView) => void;
+    const given = new Promise<RoomView>((resolve) => (give = resolve));
+    const held: Held = { seq: 2, state: room({ log: [line] }), archived: [asJsonb(line)], sorted: false };
+    const r = await routeRig("", { held, asOf: () => given });
+    try {
+      const answer = r.request();
+      for (let i = 0; i < 50 && r.arrivals.length === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(r.arrivals, [ARRIVED], "the moment the hook stamped, after the session, grant and limit reads");
+      assert.equal(r.sql.some((q) => q.text.includes("from roll_receipts")), false, "no receipt row is read before the view");
+      give({ tick: 0, state: held.state, seq: 2, pub: 2, through: 2 });
+      const result = await answer;
+      assert.equal(result.statusCode, 200, result.body);
+      const read = r.sql.find((q) => q.text.includes("from roll_receipts"));
+      assert.equal(read?.values?.[3], new Date(ARRIVED - (ARRIVED % 20)).toISOString(), "rows written before the arrival's tick");
+      assert.deepEqual(result.json(), { parts: [{ part: 0, state: "committed", seq: 2, lines: [line] }] });
+    } finally { await r.app.close(); }
+  });
+
+  test("a committed receipt past the view's through answers busy at once, without reading its lines", async () => {
+    const r = await routeRig("", { held: { seq: 3, state: room({ log: [] }), archived: [line], sorted: false }, through: 2 });
+    try {
+      const result = await r.request();
+      assert.equal(result.statusCode, 503, result.body);
+      assert.deepEqual(result.json(), { error: "busy" });
+      assert.equal(result.headers["retry-after"], "1");
+      assert.equal(r.sql.some((q) => q.text.includes("from room_log")), false);
+      assert.equal(r.stats.active, 0);
+    } finally { await r.app.close(); }
+  });
+
+  test("a view the room cannot give answers busy", async () => {
+    const r = await routeRig("", { held: { seq: 2, state: room({ log: [line] }), archived: [], sorted: false }, asOf: () => Promise.reject(new ViewBusyError("too old")) });
+    try {
+      const result = await r.request();
+      assert.equal(result.statusCode, 503, result.body);
+      assert.equal(result.headers["retry-after"], "1");
+      assert.equal(r.sql.some((q) => q.text.includes("from roll_receipts")), false);
+    } finally { await r.app.close(); }
+  });
 });
 
 /*

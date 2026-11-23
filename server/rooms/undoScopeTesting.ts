@@ -160,6 +160,19 @@ export class StoredRoomDb extends UndoScopeDb {
           .map((r) => ({ seq: String(r.seq), at: new Date(r.at), actor_member_id: r.actorMemberId, actor_role: r.actorRole, op: structuredClone(r.op), op_version: r.opVersion, pub: r.pub === null ? null : String(r.pub) })),
       };
     }
+    // The lookup (persistence.ts readReceipts): one key's rows of both tables inside its window, the newest per part.
+    if (sql.includes("from roll_receipts_retired")) {
+      const [, memberId, tag, before, after] = params as [string, string, string, string, string];
+      const newest = new Map<number, StoredReceipt>();
+      for (const r of [...this.receipts.values(), ...this.retired]) {
+        const at = Date.parse(r.at);
+        if (r.memberId !== memberId || r.tag !== tag || at >= Date.parse(before) || at <= Date.parse(after)) continue;
+        const kept = newest.get(r.part);
+        if (!kept || Date.parse(kept.at) < at) newest.set(r.part, r);
+      }
+      const rows = [...newest.values()].sort((a, b) => a.part - b.part);
+      return { rows: rows.map((r) => ({ part: r.part, state: r.state, seq: r.seq === null ? null : String(r.seq), code: r.code, message: r.message, at: new Date(r.at) })) };
+    }
     if (sql.includes("from roll_receipts")) {
       const since = Date.parse(params[1] as string);
       const rows = [...this.receipts.values()].filter((r) => Date.parse(r.at) > since).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));

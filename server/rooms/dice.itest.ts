@@ -230,7 +230,8 @@ describe("dice on the server", () => {
     const oldest = (await t.manager.acquire(room.roomId)).committed.state.log[0]!.id;
     const seq = Number(oldest.slice(0, oldest.indexOf(":")));
     await t.pool.query("delete from room_log where room_id = $1 and split_part(id, ':', 1) = $2", [room.roomId, String(seq)]);
-    await t.pool.query(`insert into roll_receipts (room_id, member_id, tag, part, state, seq, at) values ($1, $2, $3, 0, 'committed', $4, now())`, [room.roomId, pip.id, pruned, seq]);
+    // Written a minute ago, before the lookup arrives: a lookup reads the rows written before its tick.
+    await t.pool.query(`insert into roll_receipts (room_id, member_id, tag, part, state, seq, at) values ($1, $2, $3, 0, 'committed', $4, now() - interval '1 minute')`, [room.roomId, pip.id, pruned, seq]);
     assert.deepEqual((await pip.client.get(`/api/rooms/${room.roomId}/receipts/${pruned}`)).json<Lookup>(), { parts: [{ part: 0, state: "committed", seq, lines: [] }] });
     // Pip rolls for a token of theirs, then the DM takes it and hides it.
     const id = uuidv7();

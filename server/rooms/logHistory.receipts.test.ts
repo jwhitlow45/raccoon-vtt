@@ -40,48 +40,40 @@ function rig(live = true) {
   return { state, line, lines, clients, active: () => active };
 }
 
-for (const live of [true, false]) test(`receipt capture holds no connection, live=${live}`, async () => {
+for (const live of [true, false]) test(`a lookup reads its rows on one connection, and the archive on a second only for lines the view lacks, live=${live}`, async () => {
   const r = rig(live);
-  const capture = deferred<typeof r.state>();
-  let captures = 0;
-  const pending = r.lines.lookup("ROOM", viewer, "tag", new AbortController().signal, async () => { captures++; return capture.promise; });
-  await tick();
-  try {
-    assert.equal(r.active(), 0, "receipts released before capture");
-    assert.equal(r.clients.length, 1, "archive checkout waits for capture");
-  } finally { capture.resolve(r.state); }
-  const found = await pending;
-  assert.equal(captures, 1);
-  assert.equal(found.state, r.state);
+  const found = await r.lines.lookup("ROOM", viewer, "tag", new AbortController().signal, { state: r.state, through: 2 }, 1_000);
+  assert.deepEqual(found.rows.map((row) => row.seq), [2]);
   assert.deepEqual(found.lines.get(2), [r.line]);
   assert.equal(r.clients.length, live ? 1 : 2, "all-live lookup needs no second checkout");
   assert.equal(r.active(), 0);
 });
 
-test("random capture, abort, and late checkout sequences release once and send no SQL after cancellation", async () => {
+test("a committed receipt past the view's through answers busy before any archive read", async () => {
+  const r = rig(false);
+  await assert.rejects(r.lines.lookup("ROOM", viewer, "tag", new AbortController().signal, { state: r.state, through: 1 }, 1_000), ScanBusyError);
+  assert.equal(r.clients.length, 1, "only the rows were read");
+  assert.equal(r.active(), 0);
+});
+
+test("random abort sequences release once and send no SQL after cancellation", async () => {
   const random = rng(4101);
   const modes = new Set<number>();
   for (let i = 0; i < 120; i++) {
     const r = rig(random() < 0.5);
-    const mode = Math.floor(random() * 4);
+    const mode = Math.floor(random() * 3);
     modes.add(mode);
     const abort = new AbortController();
-    const gate = deferred<typeof r.state>();
-    const pending = r.lines.lookup("ROOM", viewer, "tag", abort.signal, () => gate.promise);
-    const outcome = pending.then(() => "ok", (e: unknown) => { assert.ok(e instanceof ScanCancelledError); return "cancelled"; });
     if (mode === 0) abort.abort();
-    await tick();
-    const heldDuringCapture = r.active();
+    const pending = r.lines.lookup("ROOM", viewer, "tag", abort.signal, { state: r.state, through: 2 }, 1_000);
+    const outcome = pending.then(() => "ok", (e: unknown) => { assert.ok(e instanceof ScanCancelledError); return "cancelled"; });
     if (mode === 1) abort.abort();
-    gate.resolve(r.state);
-    if (mode === 2) abort.abort();
-    assert.equal(await outcome, mode === 3 ? "ok" : "cancelled", `sequence ${i}`);
+    assert.equal(await outcome, mode === 2 ? "ok" : "cancelled", `sequence ${i}`);
     await tick();
-    assert.equal(heldDuringCapture, 0, `sequence ${i}: capture holds no connection`);
     assert.equal(r.active(), 0, `sequence ${i}: no held connection`);
     for (const c of r.clients) assert.equal(c.releases, 1);
   }
-  assert.equal(modes.size, 4);
+  assert.equal(modes.size, 3);
 });
 
 /** A connection whose answers a test controls: pending queries fail when it is destroyed, as a real one's do. */
@@ -175,23 +167,6 @@ describe("a receipt lookup's connection, every step bounded and cancellable", ()
   });
 });
 
-test("cancelling a gated capture returns promptly without a connection or another checkout", async () => {
-  const r = rig(false);
-  const gate = deferred<typeof r.state>();
-  const abort = new AbortController();
-  const result = r.lines.lookup("ROOM", viewer, "tag", abort.signal, () => gate.promise).then(() => "ok", (e: unknown) => { assert.ok(e instanceof ScanCancelledError); return "cancelled"; });
-  await tick();
-  abort.abort();
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    assert.equal(await Promise.race([result, new Promise((resolve) => { timer = setTimeout(() => resolve("still waiting"), 100); })]), "cancelled");
-    assert.equal(r.active(), 0);
-    assert.equal(r.clients.length, 1);
-  } finally { clearTimeout(timer); gate.resolve(r.state); }
-  await tick();
-  assert.equal(r.clients.length, 1, "late capture cannot start SQL");
-});
-
 test("random late archive checkouts are destroyed once without SQL after a cancel", async () => {
   const random = rng(4102);
   for (let i = 0; i < 80; i++) {
@@ -202,7 +177,7 @@ test("random late archive checkouts are destroyed once without SQL after a cance
     first.query = async () => ({ rows: [{ part: 0, state: "committed", seq: "2", code: null, message: null, at: new Date(0) }] });
     const lines = new ReceiptLines({ pool: { connect: () => ++checkouts === 1 ? Promise.resolve(first) : hand.promise } as never, cancel: async () => undefined });
     const abort = new AbortController();
-    const pending = lines.lookup("ROOM", viewer, "tag", abort.signal, async () => r.state);
+    const pending = lines.lookup("ROOM", viewer, "tag", abort.signal, { state: r.state, through: 2 }, 1_000);
     const outcome = pending.then(() => "ok", (e: unknown) => { assert.ok(e instanceof ScanCancelledError); return "cancelled"; });
     await tick();
     assert.equal(checkouts, 2);

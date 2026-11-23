@@ -835,9 +835,9 @@ export type ReceiptLinesOptions = {
 
 /**
  * The receipt lookup's reads (server/http/receipts.ts): the caller's
- * receipt rows and the lines their committed ops wrote, unprojected: the
- * caller projects them against the one state it captured. Once the room's
- * metadata is complete the lines are
+ * receipt rows as of the lookup's tick and the lines their committed ops
+ * wrote, unprojected: the caller projects them against the room's view it
+ * read first. Once the room's metadata is complete the lines are
  * read by the caller's own streams and the op's seq, the access table's key
  * (design: access-prefix receipts), and otherwise by the raw query, which
  * reads every row of the room to find the op's. Either way the projection
@@ -866,20 +866,28 @@ export class ReceiptLines {
     this.#before = opts.beforeQuery;
   }
 
-  /** Reads receipts before capturing state, borrowing another connection only for missing archive lines. */
-  async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, capture: (rows: readonly ReceiptRow[]) => Promise<RoomState>): Promise<{ rows: ReceiptRow[]; state: RoomState; lines: Map<number, LogEntry[]> }> {
-    const rows = await this.withQueries(signal, (q) => readReceipts(q, roomId, viewer.memberId, tag));
-    const state = await receiptWait(capture(rows), signal);
+  /**
+   * The rows written before `before`, the lookup's tick, read once the room
+   * has given its view as of that tick, and their ops' lines: from the
+   * view's state while its live log holds them, else from the archive on
+   * another connection. Every such row belongs to a batch the view holds,
+   * so a committed one past the view's `through` can only follow a replay
+   * that stopped short of its op, and the lookup answers busy rather than
+   * project its lines against a state without it (ScanBusyError).
+   */
+  async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, view: { readonly state: RoomState; readonly through: number }, before: number): Promise<{ rows: ReceiptRow[]; lines: Map<number, LogEntry[]> }> {
+    const rows = await this.withQueries(signal, (q) => readReceipts(q, roomId, viewer.memberId, tag, before));
+    if (rows.some((row) => row.state === "committed" && row.seq !== null && row.seq > view.through)) throw new ScanBusyError();
     const lines = new Map<number, LogEntry[]>();
     const missing = new Set<number>();
     for (const row of rows) {
       if (row.state !== "committed" || row.seq === null || lines.has(row.seq)) continue;
-      const held = heldOpLines(state, viewer, row.seq);
+      const held = heldOpLines(view.state, viewer, row.seq);
       if (held) lines.set(row.seq, held);
       else missing.add(row.seq);
     }
     if (missing.size > 0) for (const [seq, read] of await this.read(roomId, [...missing], viewer, signal)) lines.set(seq, read);
-    return { rows, state, lines };
+    return { rows, lines };
   }
 
   /** Each seq's lines from the archive, read on one connection after one completeness check. */
