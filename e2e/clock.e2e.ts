@@ -315,7 +315,10 @@ describe("the room clock's Time panel", () => {
     assert.match(date, /^(Moonday|Tuesday|Octday), Month 3 7, 1204 AF$/);
     await panel.getByText("Players don't see the date and time.", { exact: true }).waitFor();
     assert.equal(patSocket.state?.clock ?? null, null, "Pat has no clock");
-    assert.equal(patSocket.everSaw("1204"), false, "no frame Pat got names the year");
+    // The year as the clock writes it, with the calendar's words after it, and the clock's own id: a bare "1204" can sit in any id or timestamp in a frame.
+    assert.equal(patSocket.everSaw("1204 AF"), false, "no frame Pat got names the year");
+    assert.equal(dmSocket.everSaw(dmSocket.state!.clock!.id), true, "the DM's frames do carry the clock's id, so the check below can fail");
+    assert.equal(patSocket.everSaw(dmSocket.state!.clock!.id), false, "no frame Pat got holds the hidden clock");
     assert.equal(patSocket.everSaw("Month 3"), false, "no frame Pat got names a month");
 
     // Set reads the weekday under its fields and writes a DM-only line.
