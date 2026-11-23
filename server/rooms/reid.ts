@@ -1,6 +1,6 @@
 import { idTime } from "#shared/ids.ts";
 import { SEALED_IDS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import { FALL_RIDERS_MOST, type LogEntry, type RoomState, type TrapDue, type Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { playersToken } from "#shared/players.ts";
 import { ownEntry } from "#shared/records.ts";
@@ -177,10 +177,12 @@ export function renamedText(text: string, renames: ReadonlyMap<string, string>):
 /**
  * The state with each renamed id written as its new one in every string,
  * keys included and in their places, so maps keep their order. A sync
- * record follows its rolls' and resources' new ids, and the lists the
- * reducer keeps in id order are sorted again (inIdOrderAgain).
+ * record follows its rolls' and resources' new ids, the lists the reducer
+ * keeps in id order are sorted again (inIdOrderAgain), and those it cut at
+ * a cap by id go (withoutCutLists).
  */
-export function renamedState(state: RoomState, renames: ReadonlyMap<string, string>): RoomState {
+export function renamedState(stored: RoomState, renames: ReadonlyMap<string, string>): RoomState {
+  const state = withoutCutLists(stored);
   if (renames.size === 0) return state;
   const walk = (v: unknown): unknown => {
     if (typeof v === "string") return v.length >= 36 ? renamedText(v, renames) : v;
@@ -194,6 +196,46 @@ export function renamedState(state: RoomState, renames: ReadonlyMap<string, stri
 }
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * A trap occurrence's list of creatures cut at its cap kept the first by
+ * version 7 id, and those it left out were never stored, so no new id can
+ * choose among them again. Such a list goes, its creatures counted as an
+ * occurrence that named none counts them (`hitsMore`, `more`), and the DM
+ * picks who it hits. A fall card's riders stop at FALL_RIDERS_MOST with no
+ * count, so a full list goes, and the card names its creature alone.
+ */
+function withoutCutLists(state: RoomState): RoomState {
+  let traps: RoomState["traps"] | null = null;
+  for (const [id, trap] of Object.entries(state.traps ?? {})) {
+    const due = trap.rig?.due;
+    if (!trap.rig || !due?.some((d) => (d.hitsMore ?? 0) > 0 || (d.more ?? 0) > 0)) continue;
+    traps ??= { ...state.traps };
+    traps[id] = { ...trap, rig: { ...trap.rig, due: due.map(uncut) } };
+  }
+  let falls: NonNullable<RoomState["falls"]> | null = null;
+  for (const [id, card] of Object.entries(state.falls ?? {})) {
+    if ((card.riders?.length ?? 0) < FALL_RIDERS_MOST) continue;
+    falls ??= { ...state.falls };
+    const { riders: _cut, ...rest } = card;
+    falls[id] = rest;
+  }
+  if (traps === null && falls === null) return state;
+  return { ...state, ...(traps === null ? {} : { traps }), ...(falls === null ? {} : { falls }) };
+}
+
+function uncut(due: TrapDue): TrapDue {
+  const out = { ...due };
+  if ((due.hitsMore ?? 0) > 0) {
+    out.hits = [];
+    out.hitsMore = due.hits.length + due.hitsMore!;
+  }
+  if ((due.more ?? 0) > 0) {
+    out.by = [];
+    out.more = due.by.length + due.more!;
+  }
+  return out;
+}
 
 /**
  * The lists the reducer writes in id order, sorted again by the ids they
