@@ -236,6 +236,25 @@ create table if not exists roll_receipts (
   primary key (room_id, member_id, tag, part)
 );
 create index if not exists roll_receipts_room_at on roll_receipts (room_id, at);
+-- A receipt whose tag was used again after its 24 hours. The batch that
+-- replaces it in roll_receipts copies the old row here first, in the same
+-- transaction, so the lookup still finds each receipt by its own time.
+-- Rows are only added, and the daily sweep deletes them by time as it does
+-- roll_receipts. Keyed by the receipt's key and time, so a batch written
+-- again adds nothing.
+create table if not exists roll_receipts_retired (
+  room_id text not null references rooms on delete cascade,
+  member_id text not null,
+  tag text not null,
+  part int not null,
+  state text not null check (state in ('committed', 'refused')),
+  seq bigint,
+  code text,
+  message text,
+  at timestamptz not null,
+  primary key (room_id, member_id, tag, part, at)
+);
+create index if not exists roll_receipts_retired_at on roll_receipts_retired (at);
 -- A starter pick's work key, `<pack>/<work>` (docs/design/design-v1-starter-art.md
 -- 5), set by the server from its own catalog. Such a row stays out of the
 -- room's storage quota. Null for every upload.

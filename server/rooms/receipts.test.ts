@@ -174,7 +174,7 @@ class Store {
           this.ops.push({ seq, at: new Date(ats[i]!), actor_member_id: members[i]!, actor_role: roles[i]!, op: JSON.parse(ops[i]!), op_version: version, pub: pubs[i]! });
         }
       });
-    } else if (sql.startsWith("insert into roll_receipts")) {
+    } else if (sql.startsWith("insert into roll_receipts (")) {
       const [, m, t, p, s, q, c, g, a] = params as [string, string[], string[], number[], string[], (number | null)[], (string | null)[], (string | null)[], string[]];
       writes.push(() => {
         for (let i = 0; i < m.length; i++) {

@@ -6,9 +6,9 @@ import { KeyedMutex } from "./locks.ts";
 /**
  * The bytes a room's storage quota counts (design sections 10.1 and 10.5):
  * asset variants, the snapshot, op rows, watermark rows and roll receipts
- * (docs/design/design-v1-dice.md 1.2), for the room id `$1`. Row sizes come from
- * pg_column_size, which is what the room actually costs on disk after TOAST
- * compression.
+ * (docs/design/design-v1-dice.md 1.2), those a reused tag replaced included,
+ * for the room id `$1`. Row sizes come from pg_column_size, which is what the
+ * room actually costs on disk after TOAST compression.
  *
  * A starter pick's row is left out (docs/design/design-v1-starter-art.md 5): its
  * files are shared by every room that picked the work, and the catalog
@@ -25,7 +25,8 @@ export const ROOM_QUOTA_BYTES_SQL = `
      + coalesce((select sum(pg_column_size(s.*)) from room_snapshots s where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(o.*)) from room_ops o where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(w.*)) from client_watermarks w where room_id = $1), 0)
-     + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)`;
+     + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)
+     + coalesce((select sum(pg_column_size(t.*)) from roll_receipts_retired t where room_id = $1), 0)`;
 
 /** The log archive's bytes for the room id `$1`, its access rows included, which a room's size on disk counts and its quota does not. */
 export const ROOM_ARCHIVE_BYTES_SQL = `coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)

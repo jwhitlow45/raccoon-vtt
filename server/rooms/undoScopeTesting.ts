@@ -91,6 +91,8 @@ export class StoredRoomDb extends UndoScopeDb {
   pub: number | null;
   readonly watermarks = new Map<string, number>();
   readonly receipts = new Map<string, StoredReceipt>();
+  /** `roll_receipts_retired`: the rows a reused tag replaced, copied out in the replacing batch's transaction. */
+  readonly retired: StoredReceipt[] = [];
   /** How many snapshot rows the actor wrote, in a commit or on its own. */
   snapshotWrites = 0;
   /** Awaited before a snapshot written on its own (outside a commit) lands, so a test can hold it or make it fail. */
@@ -217,7 +219,17 @@ export class StoredRoomDb extends UndoScopeDb {
         this.rows = this.rows.filter((r) => r.seq > seq);
       };
     }
-    if (sql.startsWith("insert into roll_receipts")) {
+    if (sql.startsWith("insert into roll_receipts_retired")) {
+      const [, m, t, p, a] = params as [string, string[], string[], number[], string[]];
+      return () => {
+        for (let i = 0; i < m.length; i++) {
+          const old = this.receipts.get(JSON.stringify([m[i], t[i], p[i]]));
+          if (!old || Date.parse(old.at) >= Date.parse(a[i]!)) continue;
+          if (!this.retired.some((r) => r.memberId === old.memberId && r.tag === old.tag && r.part === old.part && r.at === old.at)) this.retired.push({ ...old });
+        }
+      };
+    }
+    if (sql.startsWith("insert into roll_receipts (")) {
       const [, m, t, p, st, q, c, g, a] = params as [string, string[], string[], number[], string[], (number | null)[], (string | null)[], (string | null)[], string[]];
       return () => {
         for (let i = 0; i < m.length; i++) this.receipts.set(JSON.stringify([m[i], t[i], p[i]]), { memberId: m[i]!, tag: t[i]!, part: p[i]!, state: st[i]!, seq: q[i] ?? null, code: c[i] ?? null, message: g[i] ?? null, at: a[i]! });

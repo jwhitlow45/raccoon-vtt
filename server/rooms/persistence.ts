@@ -534,7 +534,18 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
     if (batch.snapshot) await storeSnapshot(client, roomId, batch.snapshot.seq, batch.snapshot.json, batch.snapshot.capsPending);
     const receipts = batch.receipts ?? [];
     if (receipts.length > 0) {
-      // A tag used again after its 24 hours of memory replaces its old row, which keeps the newest outcome.
+      // A tag used again after its 24 hours of memory replaces its old row, which keeps the newest outcome. The row it
+      // replaces is copied out first, in this transaction, so each receipt stays readable by its own time
+      // (readReceipts). Only a row older than its replacement is copied, so a batch written again adds nothing.
+      await client.query(
+        `insert into roll_receipts_retired (room_id, member_id, tag, part, state, seq, code, message, at)
+         select r.room_id, r.member_id, r.tag, r.part, r.state, r.seq, r.code, r.message, r.at
+         from unnest($2::text[], $3::text[], $4::int[], $5::text[]) as x(m, t, p, a)
+         join roll_receipts r on r.room_id = $1 and r.member_id = x.m and r.tag = x.t and r.part = x.p
+         where r.at < x.a::timestamptz
+         on conflict do nothing`,
+        [roomId, receipts.map((r) => r.memberId), receipts.map((r) => r.tag), receipts.map((r) => r.part), receipts.map((r) => r.at)],
+      );
       await client.query(
         `insert into roll_receipts (room_id, member_id, tag, part, state, seq, code, message, at)
          select $1, m, t, p, s, q, c, g, a::timestamptz
