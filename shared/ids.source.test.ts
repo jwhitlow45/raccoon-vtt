@@ -32,6 +32,7 @@ const LISTED: Record<string, Uses> = {
   "client/features/dice/groupSave/start.ts": { uuidv7: 2 },
   "client/features/dice/groupSave/reopenContract.ts": { uuidv7: 3, zUuidv7: 3 },
   "client/features/dice/groupSave/chain.ts": { time: 1 },
+  "shared/reducer/saveOutcomes.ts": { time: 1 },
   "shared/saveOutcomeContract.ts": { uuidv7: 1, zUuidv7: 1 },
   // A preview's own ids and a form's id, which never reach the room (M8).
   "client/features/dm/preview.ts": { uuidv7: 2 },
@@ -106,7 +107,7 @@ function scan(dirs: readonly string[] = ["client", "shared", "server", "scripts"
         // A UUID pattern's third group that names its version.
         digit: count(/\{4\}-(?:7|8|\[78\]|\[1-8\])/g),
         // A version 7 id's time read from its first 48 bits.
-        time: count(/slice\(0, ?8\)[^;\n]{0,16}slice\(9, ?13\)|replace\(\/-\/g, ""\)\.slice\(0, ?12\)/g),
+        time: count(/slice\(0, ?8\)[^;\n]{0,16}slice\(9, ?13\)|(?:replace\(\/-\/g, ?|replaceAll\(["']-["'], ?)""\)\.slice\(0, ?12\)/g),
       };
       for (const [k, v] of Object.entries(found)) if (v > 0) uses[k as keyof Uses] = v;
       if (Object.keys(uses).length > 0) out[rel] = uses;

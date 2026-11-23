@@ -41,9 +41,9 @@ function table(): RoomState {
   return s;
 }
 
-async function open(t: TestContext) {
+async function open(t: TestContext, options: Parameters<typeof scopeActor>[2] = {}) {
   const state = table();
-  const { actor: room, connect } = await scopeActor(t, state);
+  const { actor: room, connect } = await scopeActor(t, state, options);
   const dm = await connect(state.members.dm1!, "dm", undefined, undefined, true);
   const p1 = await connect(state.members.p1!, "player", undefined, undefined, true);
   const olderDm = await connect(state.members.dm1!, "dm");
@@ -114,13 +114,11 @@ describe("a keyed page's version 7 id in a field of a new thing", () => {
   });
 
   test("a fired effect: refused naming its id, and taken sealed", async (t) => {
-    const r = await open(t);
+    // Sound switched on: off, the room refuses the op itself before its ids.
+    const r = await open(t, { roomSound: true });
     const fresh = uuidv7();
     const op = { t: "effect.fire", id: fresh, builtin: "click" } as Op;
-    const got = await answer(r.dm, op);
-    // A room with sound switched off refuses the op itself first, which leaves nothing to check here.
-    if (got !== "taken" && got.message !== ID_TIME_REFUSED) return t.skip(`sound is off: ${got.message}`);
-    assert.deepEqual(got, { ...REFUSED, ids: [fresh] });
+    assert.deepEqual(await answer(r.dm, op), { ...REFUSED, ids: [fresh] });
     assert.equal(await answer(r.dm, resealed(r.dm, op, [fresh]).op), "taken");
   });
 
