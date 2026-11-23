@@ -284,12 +284,13 @@ export type Reid = { loaded: LoadedRoom; renamed: number; rows: number };
  * Gives a loaded room's ids anew (ReidPlan) and stores the result: the
  * archived rows that name a renamed id, the receipts' asks, and a snapshot
  * at the loaded seq at today's format with the room's count, in one
- * transaction. The id gate's
- * rows stay as they are. Any failure throws and stores nothing, so the
- * next load starts again from the stored room.
+ * transaction. The id gate's rows stay as they are. `planned` is the room
+ * whose ids players held, read before the load changed it (actor.ts
+ * layersCapped). Any failure throws and stores nothing, so the next load
+ * starts again from the stored room.
  */
-export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, newId: () => string): Promise<Reid> {
-  const plan = new ReidPlan(loaded.state, await storedMemberIds(pool, roomId));
+export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, newId: () => string, planned: RoomState = loaded.state): Promise<Reid> {
+  const plan = new ReidPlan(planned, await storedMemberIds(pool, roomId));
   const rowIds = new Map<string, string[]>();
   for (let after = ""; ; ) {
     const { rows } = await pool.query<{ id: string; text: string; complete: boolean }>(

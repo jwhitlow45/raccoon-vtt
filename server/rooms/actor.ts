@@ -5,7 +5,7 @@ import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION, SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { FallRecord, HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -554,6 +554,12 @@ export class RoomActor {
    * which its next commit carries (#countSnapshot).
    */
   #countSnapshotDue: boolean;
+  /**
+   * The version the room's snapshots are stored at: today's, or below
+   * SEALED_IDS_SNAPSHOT_VERSION while its ids are still to be given anew,
+   * which the next load then does (load).
+   */
+  #storedVersion = SNAPSHOT_VERSION;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -766,15 +772,20 @@ export class RoomActor {
     // ids anew (reid.ts), sealed under the server's key, before anything reads the receipts it rewrites.
     const ids = await loadIds(deps.pool, roomId, stored, opts.now());
     let loaded = stored;
-    const reid = opts.reidAtLoad && reidDue(stored);
+    let reid = opts.reidAtLoad && reidDue(stored);
     if (reid) {
       const serverKey = new RoomIdKeys(opts.idSecret, roomId).server.key;
       // A room from before player limits has its memory layers measured against their caps at its first batch. The load
       // stores it at today's version, which a later load takes as measured, so the measure runs here, on what it stores.
+      // Where the measure fails the load stores nothing, so the next load runs both again.
       const base = stored.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION ? layersCapped(stored, opts, deps.log, roomId) : stored;
-      const done = await reidRoom(deps.pool, roomId, base, () => sealedId(serverKey, opts.now()));
-      loaded = done.loaded;
-      deps.log.info({ roomId, renamed: done.renamed, rows: done.rows }, "room ids given anew at its first load on this build");
+      if (base === null) reid = false;
+      else {
+        // What to keep is read from the room as stored: an id players held only in a layer the measure forgot keeps it.
+        const done = await reidRoom(deps.pool, roomId, base, () => sealedId(serverKey, opts.now()), stored.state);
+        loaded = done.loaded;
+        deps.log.info({ roomId, renamed: done.renamed, rows: done.rows }, "room ids given anew at its first load on this build");
+      }
     }
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design/design-v1-dice.md 1.2).
     const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
@@ -789,6 +800,8 @@ export class RoomActor {
     // The load stored the room at today's version, with its count, so no commit needs to carry a snapshot. The rest
     // of what the stored version decides, as whether the caps were measured, still goes by the version it had.
     if (reid) actor.#countSnapshotDue = false;
+    // A load whose new ids were due and did not run stores the room below their version, so the next load runs them.
+    else if (opts.reidAtLoad && reidDue(stored)) actor.#storedVersion = SEALED_IDS_SNAPSHOT_VERSION - 1;
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
@@ -3308,7 +3321,7 @@ export class RoomActor {
     while (this.#snapshotting) await this.#snapshotting;
     // A snapshot write that landed meanwhile was at today's version.
     if (!this.#countSnapshotDue) return null;
-    write.snapshot = { seq: batch.seq, json };
+    write.snapshot = { seq: batch.seq, json, version: this.#storedVersion };
     let done!: () => void;
     const held = new Promise<void>((resolve) => (done = resolve));
     this.#snapshotting = held;
@@ -3410,7 +3423,7 @@ export class RoomActor {
     if (seq <= this.#snapshotSeq) return Promise.resolve();
     this.#snapshotting = (async () => {
       try {
-        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state), state);
+        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state, this.#storedVersion), state);
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
       } finally {
@@ -3771,18 +3784,18 @@ function seatedLanding(state: RoomState, token: Token, at: { x: number; y: numbe
  * measure of every layer leaves it (#remember with `everyLayer`), for a
  * load that stores the room before its first batch. A step the schema or
  * the reducer refuses forgets all of its scene's layers but their sight,
- * as there. A step that throws leaves the room as it was, for the first
- * batch to measure.
+ * as there. Null where a layer may be left unmeasured: the step threw, or
+ * a forgetting was refused too.
  */
-function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomId: string): LoadedRoom {
+function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomId: string): LoadedRoom | null {
   let state = loaded.state;
   let ops: OpOf<"sys.remember">[];
   try {
     const before = state;
     ops = opts.mapStep({ before, after: before, touched: [], cap: (scene, layer) => layerCap(before, scene, layer), everyLayer: true });
   } catch (err) {
-    log.error({ err, roomId }, "map step failed at load, its first batch measures every layer");
-    return loaded;
+    log.error({ err, roomId }, "map step failed at load, the room keeps its stored version and its first batch measures every layer");
+    return null;
   }
   const at = new Date(opts.now()).toISOString();
   const applied = (op: OpOf<"sys.remember">): boolean => {
@@ -3795,7 +3808,10 @@ function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomI
   for (const op of ops) {
     if (applied(op)) continue;
     const forget = forgetSceneOp(state, op.sceneId);
-    if (forget && !applied(forget)) log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load");
+    if (forget && !applied(forget)) {
+      log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load, the room keeps its stored version");
+      return null;
+    }
   }
   return state === loaded.state ? loaded : { ...loaded, state };
 }
