@@ -254,7 +254,7 @@ If you replace the map image of the scene the players are on, they see the new i
 
 **Copying and organizing scenes.** Each scene's **⋯** menu (More for the scene) holds **Duplicate…**, **Move to folder…**, **Update thumbnail** and **Delete**. A duplicate always copies the map, its phases and the build, and lets you choose what else comes along: **Monsters, NPCs and objects** (on to begin with), **Player characters**, **Fog**, and **Drawings and placed areas**. Folders fold away with a tap, and players never see your folders or thumbnails. To change the order of the list, press **Reorder** at the top and move scenes and folders up or down.
 
-Delete asks you to tap twice: the first tap turns the row red and reads "Tap again to delete", and tapping anywhere else cancels it. It takes the scene's tokens, drawings, build and fog with it, and a room's last scene cannot be deleted. On the scene your players are on, Delete asks first instead: "The players are on this map. Delete it and leave them with no map?" Cancel is the button ready to press, so a stray Enter keeps the map. Say yes and the players wait with no map ("Waiting for the DM to pick a scene.") until you move them, and **Undo setup** brings the scene back with them on it. This is the way to clear a map that is taking up room the table needs, though usually you will simply move the players on first. An **Undo setup** or **Redo setup** that would take away the players' scene is refused and asks you to move them first, a **Redo setup** of that delete after **Undo setup** put them back included. That refused **Redo setup** step is gone, so once you have moved the players, delete the scene again if you still want it gone. If you moved them there yourself and the move is still in your Play history, **Undo setup** names it instead, "Undo the play step first: moving players to the scene Tavern.", since undoing it takes them off the scene.
+Delete asks you to tap twice: the first tap turns the row red and reads "Tap again to delete" ("Click again to delete" with a mouse), and tapping anywhere else cancels it. It takes the scene's tokens, drawings, build and fog with it, and a room's last scene cannot be deleted. On the scene your players are on, Delete asks first instead: "The players are on this map. Delete it and leave them with no map?" Cancel is the button ready to press, so a stray Enter keeps the map. Say yes and the players wait with no map ("Waiting for the DM to pick a scene.") until you move them, and **Undo setup** brings the scene back with them on it. This is the way to clear a map that is taking up room the table needs, though usually you will simply move the players on first. An **Undo setup** or **Redo setup** that would take away the players' scene is refused and asks you to move them first, a **Redo setup** of that delete after **Undo setup** put them back included. That refused **Redo setup** step is gone, so once you have moved the players, delete the scene again if you still want it gone. If you moved them there yourself and the move is still in your Play history, **Undo setup** names it instead, "Undo the play step first: moving players to the scene Tavern.", since undoing it takes them off the scene.
 
 Feet per square and the rule for diagonals aren't scene settings: they apply to the whole room. You'll find them under **Menu**, **Room settings**, **Grid and distance**.
 
@@ -863,7 +863,7 @@ On a scene with fog on, a player's device holds only the part of the map the par
 
 **Walking into the dark.** Players can still move their tokens onto ground they haven't seen. If something stops a move there, the token stops at the last spot it could reach, and the note names what stopped it only when the player can see it right now. Otherwise it says only "Something blocks the way.", since their map can't know.
 
-- A wall or a closed door right beside a square they can see is named, even with unexplored ground behind it, so a door in Bree's torchlight still says "A door is in the way. Tap it to open."
+- A wall or a closed door right beside a square they can see is named, even with unexplored ground behind it, so a door in Bree's torchlight still says "A door is in the way. Tap it to open." ("Click it" with a mouse)
 - A ledge is named only when they can see the ground on both sides of it, since its height says something about the far side.
 - A wall in the dark, or a wall the party only remembers, which may have changed, gets the plain words.
 - A wall the party remembers keeps stopping their moves even after you take it away, a one-square step into it as much as a longer drag, until they see that spot again.
@@ -1481,7 +1481,7 @@ Under **⋯** (More area options) you will also find:
 **Why the caster matters.** An area with a caster fills in the group save for you: the save's DC comes from the caster's spell save DC, and the damage from the caster's own spell. Your areas start with no caster. The easiest way to give one a caster is to cast a Cone, Line, Cube or Emanation from the caster's token. For a Sphere, press **Set caster** under **⋯**, then tap the caster's token. The hint then reads "Cast by Ivo.", and the row shows **From Ivo**, which you can tap to drop the caster or restore it.
 
 > [!TIP]
-> If the hint still reads "Tap the caster." after your tap, the tap only closed the **⋯** pop-up. Tap the token again.
+> If the hint still reads "Tap the caster." ("Click the caster." with a mouse) after your tap, the tap only closed the **⋯** pop-up. Tap the token again.
 
 ### Placed areas
 
@@ -2374,7 +2374,7 @@ In the **Journal**, **Add the date**, beside **Add a secret**, adds a heading su
 
 ### Stopping the clock
 
-**Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock"), and removes the date and time for everyone. Starting and stopping the clock, the calendar and the switch are setup, so **Undo setup** in **Setup history** brings a stopped clock back, with what it held. Moving or setting the time is play, which **Undo** in the top bar takes back.
+**Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock", or "Click again to stop the clock" with a mouse), and removes the date and time for everyone. Starting and stopping the clock, the calendar and the switch are setup, so **Undo setup** in **Setup history** brings a stopped clock back, with what it held. Moving or setting the time is play, which **Undo** in the top bar takes back.
 
 The clock guards itself as a whole. If you change the calendar and then move the clock on, **Undo setup** refuses to take the calendar back and says "Undo the play step first", because the step after it is in the way. Undo that step first, or open **Calendar…** and change it back yourself. The other way round works the same: after a calendar save, **Undo** refuses a step from before it, and **Set the date and time** puts the time right.
 
