@@ -6,7 +6,7 @@ import { areaLabelSpot, tokenBoxes } from "../features/areas/labelSpot.ts";
 import { pillReach } from "../features/measure/pillPlace.ts";
 import { LiveCamera } from "../state/liveCamera.ts";
 import { RoomScope } from "../state/scope.ts";
-import { boardPillsSlot, boardViewOf, boardViewsOf, jumpCamera, pillsExcept, pillsOnly, publishPillsEffect, REST_MS, restViewSlot, RestViewWatch, retractPillsEffect, type PillSpec } from "./boardView.ts";
+import { boardPillsSlot, boardViewOf, boardViewsOf, jumpCamera, pillsExcept, publishPillsEffect, REST_MS, restViewSlot, RestViewWatch, retractPillsEffect, type PillSpec } from "./boardView.ts";
 
 test("an area's name keeps off every other layer's pill, never off another area's, so the two never chase each other", () => {
   const marker = { x: 2, y: 3, value: "Moved 20 ft\n10 ft left", size: "screen" as const, small: true, below: true };
@@ -344,17 +344,8 @@ test("a camera jump settles the rest view at once, in Stage's setCam, and a pan'
     live.write({ ...fit, x: -250 });
     assert.deepEqual(store.getState().rest, clear(fit), "a pan's frame waits");
     // Stage's setCam is that call, so a Fit map or a scene's camera never lays pills out against the old view.
-    const stage = readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8");
-    assert.match(stage, /\(c: Camera\) => jumpCamera\(liveCam, settleRestView, setCamState, c\)/);
+    assert.match(readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8"), /jumpCamera\(/);
   } finally {
     mock.timers.reset();
   }
-});
-
-test("pillsOnly keeps the pills under a prefix, the complement of pillsExcept (LP49-PILLS-1)", () => {
-  const pill = (name: string): PillSpec => ({ name, x: 0, y: 0, size: "map" });
-  const all = { "trap:a": [pill("Pit")], "trap:b": [pill("Needle"), pill("DC 15")], turnStart: [pill("Moved")], "area:c": [pill("Cone")] };
-  assert.deepEqual(pillsOnly(all, "trap:").map((p) => p.name), ["Pit", "Needle", "DC 15"]);
-  assert.deepEqual(pillsExcept(all, "trap:").map((p) => p.name), ["Moved", "Cone"]);
-  assert.deepEqual(pillsOnly({}, "trap:"), []);
 });

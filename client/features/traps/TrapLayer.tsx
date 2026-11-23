@@ -149,6 +149,21 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
 }
 
 /**
+ * Every trap name of a scene as `trapNamePill` places it, before Isometric's
+ * nudge away from token text. A floor link's pills keep off these and not off
+ * the published, nudged names: token text keeps off the link pills (IsoBoard
+ * tokenLayoutPills), the nudge keeps trap names off token text, so reading the
+ * nudged spot would let a link pill move token text that moves a trap name
+ * that moves the link pill.
+ */
+export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec[] {
+  return Object.values(traps)
+    .filter((t) => t.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .flatMap((t) => trapNamePill(g, t, chunks, scale, dm) ?? []);
+}
+
+/**
  * Where a hex trap's name points: the top of its outline, as the ground
  * draws it, nearest the middle of its box. That is a top point on hex rows
  * and a top side's middle on hex columns. The box's own top middle can lie

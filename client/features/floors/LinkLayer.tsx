@@ -1,11 +1,11 @@
 import type Konva from "konva";
 import { memo, useMemo } from "react";
 import { Circle, Group, Path, Shape } from "react-konva";
-import type { FloorLink, Scene } from "#shared/model.ts";
+import type { BuildChunk, FloorLink, Scene, Trap } from "#shared/model.ts";
 import { linkDir } from "#shared/rules/floorLinks.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { useStore } from "zustand";
-import { boardPillsSlot, useBoardPillsOnly, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
+import { boardPillsSlot, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
 import { useScoped } from "../../state/scope.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
@@ -13,6 +13,7 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
+import { trapNameMarkers } from "../traps/TrapLayer.tsx";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
@@ -22,6 +23,8 @@ import { holeDrops } from "./openingView.ts";
 const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
 const NO_SCENES: Readonly<Record<string, Scene>> = {};
 const NO_PILLS: readonly PillSpec[] = [];
+const NO_TRAPS: Readonly<Record<string, Trap>> = {};
+const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 
 /** The lock's disc on screen, in pixels, as a trap's badge is drawn. */
 const LOCK_PX = 18;
@@ -77,12 +80,15 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const far = useMemo(() => new Set(notReached.split(" ")), [notReached]);
   const hushed = useMemo(() => new Set(quiet.split(" ")), [quiet]);
   const feet = useMemo(() => dropsById(drops), [drops]);
-  // The pills a name and a chip keep off: the turn's marker and the traps' names, read from their own keys. None of them moves for a link's pill, so the layers never chase each other.
-  const turn = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
-  const traps = useBoardPillsOnly("trap:");
-  const markers = useMemo(() => (traps.length === 0 ? turn : [...turn, ...traps]), [turn, traps]);
-  const iso = useIsoGround();
   const { scale } = props;
+  // The pills a name and a chip keep off: the turn's marker, and the traps' names where trapNamePill puts them. Not the published names: in Isometric those were nudged off token text, which keeps off this layer's pills, so reading them would close a loop (trapNameMarkers).
+  const turn = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
+  const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
+  const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
+  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm), [grid, props.scene.id, traps, chunks, scale, dm]);
+  const trapKey = JSON.stringify(trapNames);
+  const markers = useMemo(() => (trapNames.length === 0 ? turn : [...turn, ...trapNames]), [turn, trapKey]);
+  const iso = useIsoGround();
   const shown = trapNameShown(scale);
   // Every end's pills are placed together, in order of id, so a hole's pills can keep off the other ends and the pills before them (placeEnds).
   const ends = useMemo(
