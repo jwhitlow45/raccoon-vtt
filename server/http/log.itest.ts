@@ -1183,3 +1183,79 @@ describe("GET /api/rooms/:id/log with the archive's metadata complete", () => {
     }
   });
 });
+
+describe("log reads as of their arrival", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+  });
+  after(() => t.close());
+
+  /** Holds every read of `table` until `release`, from a connection of its own. */
+  async function lockTable(table: string): Promise<() => Promise<void>> {
+    const holder = await t.pool.connect();
+    await holder.query("begin");
+    await holder.query(`lock table ${table} in access exclusive mode`);
+    return async () => {
+      await holder.query("rollback");
+      holder.release();
+    };
+  }
+
+  test("each log route hands the room the moment it arrived, before its grant read waits, and answers from the view the room gives", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Arrivals");
+    const s = await t.connect(roomId, dm);
+    await s.snapshot("dm");
+    await s.apply({ t: "log.chat", text: "first" });
+    const actor = await t.manager.acquire(roomId);
+    const given = actor.committed;
+    const own = actor.asOf.bind(actor);
+    const asked: number[] = [];
+    actor.asOf = (at: number) => {
+      asked.push(at);
+      return Promise.resolve({ tick: t.manager.arrivalTick(at), ...given });
+    };
+    try {
+      for (const [route, url] of [
+        ["page", `/api/rooms/${roomId}/log?limit=50`],
+        ["sessions", `/api/rooms/${roomId}/log/sessions`],
+        ["export", `/api/rooms/${roomId}/log/export`],
+      ] as const) {
+        const unlock = await lockTable("grants");
+        const sent = Date.now();
+        const answer = dm.get(url);
+        await new Promise((r) => setTimeout(r, 50));
+        const before = Date.now();
+        await s.apply({ t: "log.chat", text: `second ${route}` });
+        await unlock();
+        const res = await answer;
+        assert.equal(res.statusCode, 200, `${route}: ${res.body}`);
+        const at = asked.pop()!;
+        assert.ok(at >= sent && at < before, `${route}: the arrival ${at} is before the grant read let go at ${before}`);
+        assert.ok(!res.body.includes("second"), `${route}: answered from the view the room gave`);
+        if (route !== "sessions") assert.ok(res.body.includes("first"), route);
+      }
+    } finally {
+      actor.asOf = own;
+      s.close();
+    }
+  });
+
+  test("a log page asked while its room loads answers the loaded room's lines", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Loading");
+    const s = await t.connect(roomId, dm);
+    await s.snapshot("dm");
+    await s.apply({ t: "log.chat", text: "kept across the load" });
+    s.close();
+    await t.restart();
+    const unlock = await lockTable("room_snapshots");
+    const answer = dm.get(`/api/rooms/${roomId}/log?limit=50`);
+    await new Promise((r) => setTimeout(r, 2_500));
+    await unlock();
+    const res = await answer;
+    assert.equal(res.statusCode, 200, res.body);
+    assert.ok(res.json<Page>().entries.some((e) => e.text === "kept across the load"));
+  });
+});

@@ -9,6 +9,7 @@ import { sha256 } from "../auth/tokens.ts";
 import type { GrantContext } from "../auth/types.ts";
 import { admissionHolds, canonicalId, captureView, compareIds, LogHistory, viewNames, type ExportRange, type HistoryAdmission, type LogHistoryOptions } from "../rooms/logHistory.ts";
 import { LogScanBudget, ScanBusyError, ScanCancelledError, type ScanBudgetOptions, type ScanPool } from "../rooms/logScanBudget.ts";
+import { ViewBusyError, type RoomActor, type RoomView } from "../rooms/actor.ts";
 import type { RoomManager } from "../rooms/manager.ts";
 import { ExportFormatter, exportFileName, validTimeZone } from "./logExport.ts";
 
@@ -24,6 +25,11 @@ import { ExportFormatter, exportFileName, validTimeZone } from "./logExport.ts";
  * Players read with the player scene. A DM may name the scene it is
  * viewing, which the DM's projection does not narrow by: a DM's pages and
  * files hold every scene's lines.
+ *
+ * Each request reads the room as of its arrival (RoomActor.asOf): the
+ * state after every batch through the last tick before it, and only the
+ * archive's rows that state holds, so a commit landing while the request
+ * waits on its grant, its limits or the room never changes its answer.
  *
  * A DM may also ask a page `as` a player of the roster, for View as a
  * player (docs/design/design-v1-per-player-vision.md 7.4): the page is that
@@ -120,6 +126,28 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
     return { sessionId: grant.sessionId, tokenHash: sha256(session.token), roomId: grant.roomId, memberId: grant.memberId, role: grant.role };
   }
 
+  /**
+   * The room as of the request's arrival (RoomActor.asOf), stamped before its
+   * grant, limit and admission reads, so what those cost never moves which
+   * commits it reads. A room that cannot give that view answers busy, and the
+   * wait ends with the request.
+   */
+  async function arrivalView(req: FastifyRequest, reply: FastifyReply, actor: RoomActor): Promise<RoomView> {
+    const gone = new AbortController();
+    const onClose = () => {
+      if (!reply.raw.writableFinished) gone.abort(new Error("client went away"));
+    };
+    reply.raw.on("close", onClose);
+    try {
+      return await actor.asOf(req.arrivedAt, { signal: gone.signal });
+    } catch (err) {
+      if (err instanceof ViewBusyError) throw new HttpError(503, "busy", { retryAfter: 1 });
+      throw err;
+    } finally {
+      reply.raw.off("close", onClose);
+    }
+  }
+
   async function stillAdmitted(a: HistoryAdmission): Promise<void> {
     if (!(await admissionHolds(kit.pool, a))) throw new HttpError(403, "no_access");
   }
@@ -164,7 +192,7 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
       await kit.limits.recordLogExport(roomId, grant.memberId, kit.ip(req));
       const admitted = await admission(req, grant);
       const actor = await deps.manager.acquire(roomId);
-      const view = captureView(actor.committed, roomId, { memberId: grant.memberId, role: grant.role });
+      const view = captureView(await arrivalView(req, reply, actor), roomId, { memberId: grant.memberId, role: grant.role });
       const { scan, close } = openScan(reply, "page", roomId, grant.memberId, pageMs);
       try {
         const page = await history.sessions(view, { before, limit: query.data.limit }, scan).catch((err: unknown) => {
@@ -200,7 +228,7 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
         await kit.limits.recordLogExport(roomId, grant.memberId, kit.ip(req));
         const admitted = await admission(req, grant);
         const actor = await deps.manager.acquire(roomId);
-        const view = captureView(actor.committed, roomId, { memberId: grant.memberId, role: grant.role });
+        const view = captureView(await arrivalView(req, reply, actor), roomId, { memberId: grant.memberId, role: grant.role });
         opened = openScan(reply, "export", roomId, grant.memberId, exportMs);
         const { scan, close } = opened;
         // The first pass finds the title's dates and the file's name, so the headers go out right before the lines.
@@ -280,7 +308,7 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
       try {
         const admitted = await admission(req, grant);
         const actor = await deps.manager.acquire(roomId);
-        const committed = actor.committed;
+        const committed = await arrivalView(req, reply, actor);
         if (as !== undefined && committed.state.members[as]?.kind !== "player") throw new HttpError(403, "no_access");
         // A DM's page reads the scene they view, every floor of it, named by its main floor as their socket is (docs/design/design-v1-floors.md 10).
         const asked = grant.role === "dm" && as === undefined ? (sceneId ?? committed.state.meta.playerSceneId) : null;
