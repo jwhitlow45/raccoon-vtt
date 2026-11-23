@@ -1045,3 +1045,61 @@ describe("the steps before a walk, where the walk's end reads what they explored
     assert.ok(stops >= 3, `${stops} walks stopped at the pit`);
   });
 });
+
+/*
+ * A batch that closes with the clock short of its tick. Set back, the
+ * clock reads 10 ms at the timer's second firing for a batch of tick 20,
+ * and the batch keeps its own tick: a reader that arrived at 3 ms, before
+ * the batch's command at 5 ms, reads the room without it however late it
+ * asks. Under a test's standing number clock the batch is viewed at the
+ * tick the clock reads, so a read-back after its commit sees it.
+ */
+describe("a batch closed with the clock short of its tick", () => {
+  const quiet = { info() {}, warn() {}, error() {}, debug() {} };
+  const said = (view: { state: RoomState }, text: string) => view.state.log.some((l: LogEntry) => l.kind === "chat" && l.text === text);
+
+  test("the clock set back across the timer's two firings: a reader that arrived before the batch's command, asking after its commit, reads the room without it", async (t) => {
+    const room = privTwins(1).door;
+    const base = T0 + BASE;
+    const clock = { now: base };
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.after(() => t.mock.timers.reset());
+    const db = new StoredRoomDb(structuredClone(room));
+    const h = await storedActor(t, db, { batchMs: 20, now: () => clock.now, numberClock: null }, quiet);
+    const conn = new Connection({ readyState: 1, OPEN: 1, CONNECTING: 0, send() {}, close() {}, terminate() {} } as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", memberId: room.members.p1!.id, role: "player" }, "203.0.113.9", { now: () => clock.now });
+    h.actor.attach(conn);
+    void h.actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
+    const step = async (ms: number) => {
+      for (let i = 0; i < ms; i++) {
+        clock.now += 1;
+        t.mock.timers.tick(1);
+        await flush();
+      }
+    };
+    await step(5);
+    void h.actor.op(conn, 1, chat("at 5"));
+    await step(1);
+    // Back 20 ms: the timer armed at 5 ms fires at 0 ms on the clock, short of the tick, and waits once more.
+    clock.now -= 20;
+    await step(15);
+    // Back again: the second firing reads 10 ms, still short, and the batch closes there.
+    clock.now -= 10;
+    await step(40);
+    const published = await h.actor.asOf(clock.now);
+    assert.ok(said(published, "at 5"), "the batch published");
+    const early = await h.actor.asOf(base + 3);
+    assert.equal(said(early, "at 5"), false, "a reader that arrived at 3 ms does not take the command of 5 ms");
+  });
+
+  test("under a test's standing number clock, a read-back after the commit sees the batch", async (t) => {
+    // One clock for numbers and times that never moves: the batch's tick is a tick past every reading.
+    const NOW = Date.parse("2026-11-10T20:00:00.000Z");
+    const room = privTwins(1).door;
+    const db = new StoredRoomDb(structuredClone(room));
+    const h = await storedActor(t, db, { batchMs: 20, now: () => NOW, numberClock: null }, quiet);
+    const p1 = await ScopeClient.open(h.actor, room.members.p1!, "player", () => NOW);
+    await p1.apply(chat("standing"));
+    const view = await h.actor.asOf(NOW);
+    assert.ok(said(view, "standing"), "the read-back at the clock's reading takes the batch");
+  });
+});
