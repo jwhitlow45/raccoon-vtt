@@ -31,6 +31,9 @@ describe("the openings snapshot fence (D-261119-088)", () => {
           // No timer writes a snapshot while a test runs: the fence alone must.
           snapshotOps: 1_000,
           snapshotIdleMs: 600_000,
+          // A load that gives a room's ids anew (reid.ts) would store it at today's format itself, so the first batch
+          // would have no fence to store: off, so each room's first batch is the first at its older format.
+          reidAtLoad: false,
           retryBaseMs: 5,
           retryMaxMs: 20,
           snapshotJson: (state: RoomState) => {
