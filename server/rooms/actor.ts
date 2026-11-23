@@ -72,7 +72,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
-import { growthBound, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, shedOf, SizeGuard, storedBytes, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
+import { growthBound, layerCap, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, shedOf, SizeGuard, storedBytes, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
 import { climbOf, fallsKept, fallsRestored, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, withoutFallCards, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -769,7 +769,10 @@ export class RoomActor {
     const reid = opts.reidAtLoad && reidDue(stored);
     if (reid) {
       const serverKey = new RoomIdKeys(opts.idSecret, roomId).server.key;
-      const done = await reidRoom(deps.pool, roomId, stored, () => sealedId(serverKey, opts.now()));
+      // A room from before player limits has its memory layers measured against their caps at its first batch. The load
+      // stores it at today's version, which a later load takes as measured, so the measure runs here, on what it stores.
+      const base = stored.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION ? layersCapped(stored, opts, deps.log, roomId) : stored;
+      const done = await reidRoom(deps.pool, roomId, base, () => sealedId(serverKey, opts.now()));
       loaded = done.loaded;
       deps.log.info({ roomId, renamed: done.renamed, rows: done.rows }, "room ids given anew at its first load on this build");
     }
@@ -3761,6 +3764,40 @@ function seatedLanding(state: RoomState, token: Token, at: { x: number; y: numbe
   if (!link || !holder || !inSightOfNonOwners(state, token, {}) || !inSightOfNonOwners(state, holder, {})) return null;
   if (linkHolds(gridOfToken(state, token), state.meta.settings, link.kind, { ...token, x: at.x, y: at.y, elevation: holder.elevation }, holder)) return holder.elevation;
   return landedElevation(state.buildChunks, token, at, holder);
+}
+
+/**
+ * The room with every memory layer kept within its cap, as the map step's
+ * measure of every layer leaves it (#remember with `everyLayer`), for a
+ * load that stores the room before its first batch. A step the schema or
+ * the reducer refuses forgets all of its scene's layers but their sight,
+ * as there. A step that throws leaves the room as it was, for the first
+ * batch to measure.
+ */
+function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomId: string): LoadedRoom {
+  let state = loaded.state;
+  let ops: OpOf<"sys.remember">[];
+  try {
+    const before = state;
+    ops = opts.mapStep({ before, after: before, touched: [], cap: (scene, layer) => layerCap(before, scene, layer), everyLayer: true });
+  } catch (err) {
+    log.error({ err, roomId }, "map step failed at load, its first batch measures every layer");
+    return loaded;
+  }
+  const at = new Date(opts.now()).toISOString();
+  const applied = (op: OpOf<"sys.remember">): boolean => {
+    const checked = checkServerOp(op);
+    const result = checked.ok ? applyOp(state, checked.op, SERVER_ACTOR, { seq: loaded.pub, at, uncounted: true }) : null;
+    if (!result?.ok) return false;
+    state = result.state;
+    return true;
+  };
+  for (const op of ops) {
+    if (applied(op)) continue;
+    const forget = forgetSceneOp(state, op.sceneId);
+    if (forget && !applied(forget)) log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load");
+  }
+  return state === loaded.state ? loaded : { ...loaded, state };
 }
 
 /**

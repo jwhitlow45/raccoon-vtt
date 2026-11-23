@@ -4512,7 +4512,9 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
         assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= share, "the next step measured every layer");
         void goblinId;
       },
-      { mapStep },
+      // A load that gives the room's ids anew measures every layer first (actor.ts layersCapped): off, so the first
+      // batch's step is the first to measure.
+      { mapStep, reidAtLoad: false },
       PLAYER_LIMITS_SNAPSHOT_VERSION - 1,
     );
   });
