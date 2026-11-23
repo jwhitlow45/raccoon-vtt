@@ -482,7 +482,7 @@ const NOBODY: Viewer = { memberId: "", role: "player" };
  * back: the staged room, the batch's lengths, its global flag, step cursor
  * and memory estimate, and the size guard's own fields.
  */
-type StepsMark = { batch: Batch; staged: { state: RoomState; seq: number }; ops: number; touched: number; doors: number; global: boolean; step: StepCursor; estimate: Map<string, number>; guard: GuardMark };
+type StepsMark = { batch: Batch; staged: { state: RoomState; seq: number }; ops: number; touched: number; doors: number; global: boolean; step: StepCursor; estimate: Map<string, number>; measured: boolean; guard: GuardMark };
 
 /** What step 5 of the id gate reads a live op with (newIdPaths.ts): the op as sent, whether its socket holds a key, and what that socket holds. */
 type FreshIds = { clientOp: Op; keyed: boolean; held: ReadonlyMap<EntityKey, unknown> | null };
@@ -1923,7 +1923,7 @@ export class RoomActor {
   }
 
   #markSteps(batch: Batch): StepsMark {
-    return { batch, staged: this.#staged, ops: batch.ops.length, touched: batch.touched.length, doors: batch.doors.length, global: batch.global, step: batch.step, estimate: new Map(batch.estimate), guard: this.#sizes.mark() };
+    return { batch, staged: this.#staged, ops: batch.ops.length, touched: batch.touched.length, doors: batch.doors.length, global: batch.global, step: batch.step, estimate: new Map(batch.estimate), measured: batch.measured === true, guard: this.#sizes.mark() };
   }
 
   /** Puts back what the steps before a walk changed (StepsMark), when they ran and the walk has not installed. */
@@ -1939,6 +1939,9 @@ export class RoomActor {
     batch.step = mark.step;
     batch.estimate.clear();
     for (const [layer, bytes] of mark.estimate) batch.estimate.set(layer, bytes);
+    // A map step put back measured nothing, so the commit settles no owed measure (#capsPending).
+    if (mark.measured) batch.measured = true;
+    else delete batch.measured;
     this.#staged = mark.staged;
     this.#sizes.restore(mark.guard, mark.staged.state);
     // Its entries were read at seqs the walk's own op takes again.
