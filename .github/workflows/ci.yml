@@ -1,8 +1,8 @@
 # Every check on pushes to main or ci/ branches, and on pull requests to
 # main: typecheck, integration tests (twice, the second on the real clock),
-# unit tests, e2e files in 14 shards, and the desktop app's LAN file in
-# Chromium and WebKit. That is 20 jobs with the build and the CI passed job,
-# and e2e-macos when it has files. One run peaks at 18
+# unit tests in 3 shards, e2e files in 14 shards, and the desktop app's LAN file in
+# Chromium and WebKit. That is 22 jobs with the build and the CI passed job,
+# and e2e-macos when it has files. One run peaks at 20
 # Linux jobs of the account's 20, so a run that overlaps it queues part of
 # its shards: a single run's speed was chosen over two runs at full speed at
 # once.
@@ -195,12 +195,21 @@ jobs:
       - name: Integration tests on the real clock
         run: pnpm -s test:int:clock
 
-  # About 5 minutes alone, which ends before the e2e shards do, so the unit
-  # tests are not split with --test-shard.
+  # The unit tests in 3 shards of about 12 minutes each, 22 to 26 alone,
+  # which ran against a 30 minute limit and was cancelled on a slow runner.
+  # Node's own --test-shard splits the same file list `pnpm test` runs, so
+  # every file runs in exactly one shard. The limit is a real one: a shard
+  # that outgrows it should be split further, not given more time. CI
+  # passed reads this job's one result, which is a failure when any shard
+  # failed. They need no database.
   unit:
     if: ${{ !(startsWith(github.head_ref, 'ci/') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -212,8 +221,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Unit tests
-        run: pnpm -s test
+      - name: Unit tests, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
+        run: pnpm -s test --test-shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   e2e:
     needs: build
