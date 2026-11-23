@@ -1349,9 +1349,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * An op as `dispatch` queues it, numbered, or null where it refuses it at
    * input with its toast. Its new things' version 7 ids go under ids sealed
    * now (unsentRemints), and `tells` gets the call that tells its sender,
-   * to make once it is queued.
+   * to make once it is queued. `renames` carries the ids made again so far
+   * in one `dispatchMany`: each op names them as they are now, so a move
+   * queued after its token's create names the create's new id, and each
+   * takes in the ids this op makes again.
    */
-  function queued(op: ClientOp | HistoryCommand, opts: DispatchOptions | undefined, tells: (() => void)[]): PendingOp | null {
+  function queued(op: ClientOp | HistoryCommand, opts: DispatchOptions | undefined, tells: (() => void)[], renames: Map<string, string> = new Map()): PendingOp | null {
     // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
     if (held.length > 0 && overtakes(op)) return null;
     if (opts?.groupScope && (!opts.group || get().you?.role !== "dm")) {
@@ -1370,13 +1373,24 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     if (made) checkIntroduced(parsed.data);
     let sent = parsed.data;
     if (sent.t !== "undo" && sent.t !== "redo") {
+      // Its sender is told every id this op went under anew: those made again before it in the batch that it names, and its own.
+      const used = new Map<string, string>();
+      if (renames.size > 0) {
+        const named = stringsOf(sent);
+        sent = renamedOp(sent, renames);
+        for (const [from, to] of renames) if (named.has(from)) used.set(from, to);
+      }
       const stale = unsentRemints(sent, serverNow(), true, get().confirmed as unknown as RoomState | null);
       if (stale.length > 0) {
         const fresh = freshIds(stale, serverNow(), idKey);
         sent = renamedOp(sent, fresh);
-        const onRemint = opts?.onRemint;
-        if (onRemint) tells.push(() => onRemint(fresh));
+        for (const [from, to] of fresh) {
+          used.set(from, to);
+          renames.set(from, to);
+        }
       }
+      const onRemint = opts?.onRemint;
+      if (onRemint && used.size > 0) tells.push(() => onRemint(used));
     }
     const pendingOp: PendingOp = { n: nextN++, op: sent, at: clock.now() };
     if (opts?.group !== undefined) pendingOp.group = opts.group;
@@ -1578,8 +1592,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     dispatchMany(entries) {
       const added: PendingOp[] = [];
       const tells: (() => void)[] = [];
+      const renames = new Map<string, string>();
       const ns = entries.map(({ op, opts }) => {
-        const pendingOp = queued(op, opts, tells);
+        const pendingOp = queued(op, opts, tells, renames);
         if (pendingOp) added.push(pendingOp);
         return pendingOp?.n ?? null;
       });

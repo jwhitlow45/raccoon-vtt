@@ -387,6 +387,30 @@ describe("a page with an id key makes version 8 ids under it", () => {
     assert.ok(Number.isInteger(at) && Math.abs(at - (T0 + 40 * MINUTE)) < 1_000, "made again by the server's clock, in whole milliseconds");
   });
 
+  test("in one batch, an op after a create names the create's new id, and each sender is told the ids its op went under", () => {
+    const s = keyedSetup(room());
+    s.connect();
+    // A draft's id, made before the page held its key.
+    const old = v7();
+    const created = answers();
+    const moved = answers();
+    s.room.dispatchMany([
+      { op: made(old), opts: created.opts },
+      { op: { t: "token.move", tokenId: old, x: 5, y: 5 }, opts: moved.opts },
+    ]);
+    const [create, move] = s.sentOps();
+    const fresh = tokenIdOf(create!.op);
+    assert.notEqual(fresh, old);
+    assert.notEqual(sealedTime(KEY, fresh), null);
+    assert.deepEqual(move!.op, { t: "token.move", tokenId: fresh, x: 5, y: 5 });
+    assert.deepEqual(created.remints, [new Map([[old, fresh]])]);
+    assert.deepEqual(moved.remints, [new Map([[old, fresh]])]);
+    assert.equal(s.state().view?.tokens[fresh]?.x, 5, "the predicted token moved");
+    s.deliver();
+    assert.deepEqual(Object.keys(s.server.state.tokens), [fresh]);
+    assert.equal(s.server.state.tokens[fresh]?.x, 5, "and the room's");
+  });
+
   test("a create the room refuses for its id goes once more under a fresh sealed id, and lands", () => {
     const s = keyedSetup(room());
     s.connect();
