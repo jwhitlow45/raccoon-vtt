@@ -110,15 +110,23 @@ export class StoredRoomDb extends UndoScopeDb {
     const read = (sql: string, params: unknown[]) => this.#read(sql.trim(), params);
     const connect = async () => {
       let writes: (() => void)[] = [];
+      // A snapshot written on its own runs its statements under a statement timeout (persistence.ts writeSnapshotJson),
+      // which a batch's commit never sets: its commit waits on `beforeSnapshot`, not `beforeCommit`.
+      let snapshotOnly = false;
       const query = async (text: string, params: unknown[] = []) => {
         const sql = text.trim();
         if (sql === "begin" || sql === "rollback") {
           writes = [];
+          snapshotOnly = false;
           return { rows: [], rowCount: 0 };
         }
         if (sql === "commit") {
-          await this.beforeCommit?.();
+          await (snapshotOnly ? this.beforeSnapshot?.() : this.beforeCommit?.());
           for (const w of writes.splice(0)) w();
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.startsWith("select set_config('statement_timeout'")) {
+          snapshotOnly = true;
           return { rows: [], rowCount: 0 };
         }
         const write = this.#write(sql, params);

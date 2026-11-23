@@ -15,6 +15,7 @@ import { ipKey } from "./auth/ipKey.ts";
 import { testConfig } from "./auth/testing.ts";
 import { sha256 } from "./auth/tokens.ts";
 import { applySchema } from "./db.ts";
+import { SNAPSHOT_WRITE_MS } from "./rooms/persistence.ts";
 import { randomIp, Socket, TestClient } from "./rooms/testing.ts";
 import { closeServer, shutDown, type StepFailure } from "./shutdown.ts";
 
@@ -32,6 +33,19 @@ function poolWith(answer: (text: string, values: unknown[] | undefined) => Promi
   const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 5 });
   const query = pool.query.bind(pool) as (text: string, values?: unknown[]) => Promise<unknown>;
   pool.query = ((text: string, values?: unknown[]) => answer(text, values) ?? query(text, values)) as typeof pool.query;
+  // A snapshot is written on a connection of its own (persistence.ts writeSnapshotJson), whose statements answer alike.
+  // Only the promise form is wrapped: the pool's own query takes a connection by the callback form.
+  const connect = pool.connect.bind(pool) as (cb?: unknown) => Promise<pg.PoolClient> | void;
+  pool.connect = ((cb?: unknown) => {
+    if (typeof cb === "function") return connect(cb);
+    return (connect() as Promise<pg.PoolClient>).then((client) => {
+      const own = client.query.bind(client) as (text: string, values?: unknown[]) => Promise<unknown>;
+      return new Proxy(client, {
+        get: (target, prop, receiver) =>
+          prop === "query" ? (text: unknown, values?: unknown[]) => (typeof text === "string" ? answer(text, values) : null) ?? own(text as string, values) : Reflect.get(target, prop, receiver),
+      });
+    });
+  }) as typeof pool.connect;
   return pool;
 }
 
@@ -256,7 +270,8 @@ test("a stop whose snapshot write for one room never ends still saves the other,
       closeServer(own, () => pool.end()),
       [{ roomId: lost, why: "timed out" }],
     );
-    assert.ok(Date.now() - started < 5_000, "bounded by the rooms' deadline");
+    // The stuck write holds its connection until its own deadline, which the pool's end waits for.
+    assert.ok(Date.now() - started < SNAPSHOT_WRITE_MS + 2_000, "bounded by the rooms' deadline and the write's own");
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
   } finally {
     for (const socket of sockets) socket.ws.terminate();

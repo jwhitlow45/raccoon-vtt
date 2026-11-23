@@ -658,13 +658,84 @@ export async function readWatermark(pool: Pool, roomId: string, key: WatermarkKe
 /**
  * Writes the committed state as the room's snapshot, then prunes what it
  * covers (design 16.2): ops at or below its seq that are also older than an
- * hour. The log archive is never trimmed: it keeps every line for the
- * members who may read it. Returns the serialized size in UTF-8 bytes.
+ * hour, in one transaction within SNAPSHOT_WRITE_MS (writeSnapshotJson). The
+ * log archive is never trimmed: it keeps every line for the members who may
+ * read it. Returns the serialized size in UTF-8 bytes.
  */
 export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState, capsPending = false): Promise<number> {
   const json = snapshotJson(state);
-  await storeSnapshot(pool, roomId, seq, json, capsPending);
+  await writeSnapshotJson(pool, roomId, seq, json, capsPending);
   return Buffer.byteLength(json);
+}
+
+/** How long a snapshot write may take, from asking for its connection to its commit. */
+export const SNAPSHOT_WRITE_MS = 5_000;
+
+/** A snapshot write that ran past its deadline: its transaction ended with its connection, and nothing of it is stored. */
+export class SnapshotWriteTimeout extends Error {
+  constructor(roomId: string, ms: number) {
+    super(`room ${roomId}'s snapshot write passed its ${ms} ms`);
+    this.name = "SnapshotWriteTimeout";
+  }
+}
+
+/**
+ * Writes a snapshot already built (snapshotJson) with its `capsPending`
+ * mark, on one connection in one transaction: the row and the prune of the
+ * rows it covers (storeSnapshot), so the two land together or not at all.
+ * The whole write has `deadlineMs` from asking for the connection: the
+ * checkout waits at most that, every statement runs under a statement
+ * timeout of what is left, and once it has passed the connection is
+ * released as broken, which ends the transaction, and the write fails
+ * (SnapshotWriteTimeout). A connection the pool hands over after that goes
+ * straight back unused.
+ */
+export async function writeSnapshotJson(pool: Pool, roomId: string, seq: number, json: string, capsPending = false, deadlineMs = SNAPSHOT_WRITE_MS): Promise<void> {
+  const started = performance.now();
+  const left = () => deadlineMs - (performance.now() - started);
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new SnapshotWriteTimeout(roomId, deadlineMs)), deadlineMs);
+  });
+  expired.catch(() => undefined);
+  const checkout = pool.connect();
+  let client: pg.PoolClient;
+  try {
+    client = await Promise.race([checkout, expired]);
+  } catch (err) {
+    clearTimeout(timer);
+    checkout.then((late) => late.release(), () => undefined);
+    throw err;
+  }
+  let broken = false;
+  const bounded: Queryable = {
+    query: async <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> => {
+      const ms = Math.floor(left());
+      if (ms < 1) throw new SnapshotWriteTimeout(roomId, deadlineMs);
+      await client.query("select set_config('statement_timeout', $1, true)", [String(ms)]);
+      return client.query<R>(text, values);
+    },
+  };
+  const write = (async () => {
+    await client.query("begin");
+    try {
+      await storeSnapshot(bounded, roomId, seq, json, capsPending);
+      await bounded.query("commit");
+    } catch (err) {
+      if (!broken) await client.query("rollback").catch(() => (broken = true));
+      throw err;
+    }
+  })();
+  write.catch(() => undefined);
+  try {
+    await Promise.race([write, expired]);
+  } catch (err) {
+    if (err instanceof SnapshotWriteTimeout) broken = true;
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    client.release(broken);
+  }
 }
 
 /** A state as its snapshot row stores it, its save ledger checked first, so a ledger that does not check is never stored. */
