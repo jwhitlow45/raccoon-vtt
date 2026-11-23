@@ -1625,7 +1625,9 @@ const ARMED_MS = 4000;
  * reader hears what the next tap does.
  *
  * In a slot it draws at the width of its armed words, so the first tap
- * never moves what stands beside it (6.2), `short` is its compact form's
+ * never moves what stands beside it (6.2), and a row in a pop-up does the
+ * same so the pop-up takes the armed width and the question reads whole.
+ * `short` is its compact form's
  * armed words ("Delete?"), and its second press closes the popover it
  * stands in (7.2).
  *
@@ -1688,7 +1690,7 @@ function LiveConfirm(props: { label: string; confirm: string; worded?: true; tit
       }}
       style={{ flex: "none", whiteSpace: "nowrap", ...(row ? { width: "100%", justifyContent: "flex-start" } : null) }}
     >
-      {slotted ? <StableWords current={words} all={[props.label, confirmWords(props, form, true)]} align="center" /> : words}
+      {slotted || row ? <StableWords current={words} all={[props.label, confirmWords(props, form, true)]} align={row ? "start" : "center"} /> : words}
     </Button>
   );
 }
