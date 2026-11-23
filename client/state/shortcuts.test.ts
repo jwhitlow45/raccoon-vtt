@@ -828,6 +828,18 @@ describe("the sheet's rows beside the keys", () => {
     assert.match(row("rollOptionsRight").does, /Right-click it again to close them$/);
   });
 
+  test("a phone reads Tap for the standee's second tap, where a mouse reads Click (FW-7)", () => {
+    const g = globalThis as { matchMedia?: unknown };
+    const before = g.matchMedia;
+    g.matchMedia = (query: string) => ({ matches: query === "(pointer: coarse)" });
+    try {
+      for (const role of ROLES) assert.ok(inputs(role, IPHONE, POINTER_SECTION).includes("Tap a standee again"), `${role}: a touch screen`);
+    } finally {
+      g.matchMedia = before;
+    }
+    for (const role of ROLES) assert.ok(inputs(role, DESKTOP, POINTER_SECTION).includes("Click a standee again"), `${role}: a mouse`);
+  });
+
   test("a stat block's ability boxes and their rolls: the pointer rows on every device, the keys under Token and character fields before HP's roll keys, the same for the DM and players (docs/design/design-v1-stat-block-rolls.md 13)", () => {
     const row = (id: string) => BEHAVIORS.find((b) => b.id === id)!;
     for (const role of ROLES) {
