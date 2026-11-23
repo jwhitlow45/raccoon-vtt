@@ -354,3 +354,247 @@ export function seated(state: RoomState, players: number, drawings: number = SEA
   }
   return out;
 }
+
+/**
+ * A database pool as the room engine and the HTTP routes use it: pg's Pool,
+ * or the room tests' in-memory ones (server/rooms/undoScopeTesting.ts).
+ * Statements go through `query`, and a transaction through a client from
+ * `connect`.
+ */
+export type HookablePool = { query: (...args: never[]) => unknown; connect: (...args: never[]) => unknown };
+
+/** Picks statements by their SQL text. */
+export type StatementMatch = RegExp | ((sql: string) => boolean);
+
+/** Statements the hooks' callers hold most often, by their SQL text. */
+export const STATEMENT = {
+  /** A transaction's COMMIT. */
+  commit: /^\s*commit\s*$/i,
+  /** A grant read of an HTTP route or a socket's admission. */
+  grantRead: /^\s*select\b[\s\S]*\bfrom grants\b/i,
+  /** A room load's read of its snapshot row, its first statement. */
+  roomLoad: /^\s*select\b[\s\S]*\bfrom room_snapshots\b/i,
+  /** A read of the receipt rows. */
+  receiptRead: /^\s*select\b[\s\S]*\bfrom roll_receipts/i,
+  /** A write of a snapshot row. */
+  snapshotWrite: /^\s*insert into room_snapshots\b/i,
+} as const;
+
+/**
+ * Statements held at their start until a test lets them on, in arrival
+ * order. `waiting` counts those held now, and `seen` every one the hold
+ * picked, let on or not.
+ */
+export type Hold = {
+  readonly waiting: number;
+  readonly seen: number;
+  /** Resolves once `n` statements in all (`seen`) have reached the hold. */
+  reached(n?: number): Promise<void>;
+  /** Lets the oldest held statement on. */
+  releaseOne(): void;
+  /** Lets every held statement on, and stops holding. */
+  release(): void;
+};
+
+/** How a lost COMMIT answer goes: `committed` commits, `rolledBack` rolls back, and either then fails as a dropped connection does. */
+export type LostCommit = "committed" | "rolledBack";
+
+export type PoolHooks = {
+  /**
+   * From now on each COMMIT waits `ms` before it runs, or `ms(i)` for the
+   * i-th from 0. The wait reads the timers as they stand when the COMMIT
+   * comes, so under mocked timers it lasts that long on the test's clock.
+   * `0` ends it.
+   */
+  commitLength(ms: number | ((i: number) => number)): void;
+  /** The next COMMITs, one mode each in order, lose their answer. */
+  loseCommits(modes: readonly LostCommit[]): void;
+  /** How many lost answers are still to come. */
+  readonly lostToCome: number;
+  /** Holds each statement `match` picks at its start until released. */
+  hold(match: StatementMatch): Hold;
+  /** Holds every COMMIT, so closed batches wait behind the one in flight. */
+  holdCommits(): Hold;
+  /** Every statement run since the hooks went on, in order. */
+  readonly statements: readonly string[];
+  /** Ends every hold and puts the pool's own methods back. */
+  restore(): void;
+};
+
+type Run = (sql: string, args: unknown[]) => Promise<unknown>;
+
+/** Waits `ms` on the timers as they stand now, mocked or real, as no skew moves (skewTimers). */
+function waitOn(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    ownTimer = true;
+    try {
+      globalThis.setTimeout(resolve, ms);
+    } finally {
+      ownTimer = false;
+    }
+  });
+}
+
+/** Set while a hook arms a timer of its own, which skewTimers leaves alone. */
+let ownTimer = false;
+
+const picks = (match: StatementMatch, sql: string) => (typeof match === "function" ? match(sql) : match.test(sql));
+
+/**
+ * Test hooks on a pool, put on in place so a room or an app that already
+ * holds the pool goes through them: how long each COMMIT takes, COMMIT
+ * answers lost after it ran or after a rollback, and holds on any
+ * statement, the commit (backpressure), a route's grant read, a room's
+ * load or a receipt read among them. Only the promise forms the engine
+ * uses go through the hooks. pg's callback forms, which its own
+ * `pool.query` uses inside, pass through, so no statement is seen twice.
+ */
+export function hookPool(pool: HookablePool): PoolHooks {
+  const target = pool as unknown as { query: (...args: unknown[]) => unknown; connect: (...args: unknown[]) => unknown };
+  const ownQuery = Object.prototype.hasOwnProperty.call(target, "query");
+  const ownConnect = Object.prototype.hasOwnProperty.call(target, "connect");
+  const query = target.query;
+  const connect = target.connect;
+  let length: (i: number) => number = () => 0;
+  let commits = 0;
+  const lost: LostCommit[] = [];
+  const holds: Array<{ match: StatementMatch; queue: Array<() => void>; seen: number; off: boolean; reached: Array<{ n: number; resolve: () => void }> }> = [];
+  const statements: string[] = [];
+
+  const through = async (sql: string, args: unknown[], run: Run): Promise<unknown> => {
+    statements.push(sql);
+    for (const h of holds) {
+      if (h.off || !picks(h.match, sql)) continue;
+      h.seen++;
+      const reached = h.reached.filter((r) => r.n <= h.seen);
+      h.reached = h.reached.filter((r) => r.n > h.seen);
+      const held = new Promise<void>((resolve) => h.queue.push(resolve));
+      for (const r of reached) r.resolve();
+      await held;
+    }
+    if (!STATEMENT.commit.test(sql)) return run(sql, args);
+    const ms = length(commits++);
+    if (ms > 0) await waitOn(ms);
+    const mode = lost.shift();
+    if (mode === undefined) return run(sql, args);
+    await run(mode === "committed" ? "commit" : "rollback", []);
+    throw Object.assign(new Error("simulated lost commit answer"), { code: "ECONNRESET" });
+  };
+
+  const wrapClient = <C extends object>(client: C): C => {
+    const run = (client as { query: (...args: unknown[]) => Promise<unknown> }).query.bind(client);
+    return new Proxy(client, {
+      get(t, prop, receiver) {
+        if (prop !== "query") return Reflect.get(t, prop, receiver);
+        return (text: unknown, ...rest: unknown[]) => {
+          if (typeof text !== "string" || rest.some((a) => typeof a === "function")) return run(text, ...rest);
+          return through(text.trim(), rest, (sql, args) => run(sql, ...args));
+        };
+      },
+    });
+  };
+
+  target.query = (text: unknown, ...rest: unknown[]) => {
+    if (typeof text !== "string" || rest.some((a) => typeof a === "function")) return query.call(pool, text, ...rest);
+    return through(text.trim(), rest, (sql, args) => query.call(pool, sql, ...args) as Promise<unknown>);
+  };
+  target.connect = (...args: unknown[]) => {
+    if (typeof args[0] === "function") return connect.call(pool, ...args);
+    return (connect.call(pool) as Promise<object>).then(wrapClient);
+  };
+
+  const hold = (match: StatementMatch): Hold => {
+    const h = { match, queue: [] as Array<() => void>, seen: 0, off: false, reached: [] as Array<{ n: number; resolve: () => void }> };
+    holds.push(h);
+    return {
+      get waiting() {
+        return h.queue.length;
+      },
+      get seen() {
+        return h.seen;
+      },
+      reached: (n = 1) => (h.seen >= n ? Promise.resolve() : new Promise<void>((resolve) => h.reached.push({ n, resolve }))),
+      releaseOne: () => h.queue.shift()?.(),
+      release: () => {
+        h.off = true;
+        for (const resolve of h.queue.splice(0)) resolve();
+      },
+    };
+  };
+
+  return {
+    commitLength(ms) {
+      length = typeof ms === "function" ? ms : () => ms;
+    },
+    loseCommits(modes) {
+      lost.push(...modes);
+    },
+    get lostToCome() {
+      return lost.length;
+    },
+    hold,
+    holdCommits: () => hold(STATEMENT.commit),
+    statements,
+    restore() {
+      for (const h of holds) {
+        h.off = true;
+        for (const resolve of h.queue.splice(0)) resolve();
+      }
+      length = () => 0;
+      lost.length = 0;
+      if (ownQuery) target.query = query;
+      else delete (target as { query?: unknown }).query;
+      if (ownConnect) target.connect = connect;
+      else delete (target as { connect?: unknown }).connect;
+    },
+  };
+}
+
+/**
+ * Moves timers off their due time, as a loaded event loop runs them late
+ * or a clock set back makes them early: each timer armed through the
+ * global setTimeout while the skew is on runs `skew(ms, i)` ms later (less
+ * when negative, never before 0), where `ms` is the delay it was armed for
+ * and `i` counts the timers armed since. Put it on after mocking the
+ * timers and take it off before their reset. A hook's own wait
+ * (hookPool's commit length) is not moved.
+ */
+export function skewTimers(skew: (ms: number, i: number) => number): { readonly armed: number; readonly skewed: number; restore(): void } {
+  const armedWith = globalThis.setTimeout;
+  let armed = 0;
+  let skewed = 0;
+  const skewing = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    if (ownTimer) return armedWith(fn, ms, ...args);
+    const delay = Math.max(0, ms ?? 0);
+    const by = skew(delay, armed++);
+    if (by !== 0) skewed++;
+    return armedWith(fn, Math.max(0, delay + by), ...args);
+  }) as typeof globalThis.setTimeout;
+  globalThis.setTimeout = skewing;
+  return {
+    get armed() {
+      return armed;
+    },
+    get skewed() {
+      return skewed;
+    },
+    restore() {
+      if (globalThis.setTimeout === skewing) globalThis.setTimeout = armedWith;
+    },
+  };
+}
+
+/**
+ * A skew for skewTimers: `by` ms (negative for early) on the timers whose
+ * delay `which` picks, at most `times` of them, and none on the rest. The
+ * room's batch timer is armed for at most its batchMs, and a delayed
+ * snapshot's waits for 2 s steps and its due time.
+ */
+export function skewOf(by: number, which: (ms: number) => boolean = () => true, times = Number.POSITIVE_INFINITY): (ms: number) => number {
+  let left = times;
+  return (ms) => {
+    if (left <= 0 || !which(ms)) return 0;
+    left--;
+    return by;
+  };
+}
