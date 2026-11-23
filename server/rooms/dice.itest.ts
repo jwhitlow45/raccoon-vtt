@@ -251,23 +251,39 @@ describe("dice on the server", () => {
     assert.equal((await room.dmClient.get(`/api/rooms/${room.roomId}/receipts/${uuidv7()}`)).statusCode, 200, "another member's limit is their own");
   });
 
-  test("pruning deletes rows older than 7 days and keeps a room's newest 10,000 of those past a day, never one younger than 24 hours", async () => {
+  test("the sweep deletes receipts of either table an hour past their 7 days, by time alone", async () => {
     const room = await setup(t, "Dice prune");
-    const insert = (count: number, age: string, prefix: string) =>
+    const insert = (table: string, count: number, age: string, prefix: string) =>
       t.pool.query(
-        `insert into roll_receipts (room_id, member_id, tag, part, state, seq, at)
-         select $1, 'm', $2 || g, 0, 'committed', 1, now() - $3::interval - g * interval '1 second' from generate_series(1, $4) g`,
+        `insert into ${table} (room_id, member_id, tag, part, state, seq, at)
+         select $1, 'm', $2 || g, 0, 'committed', 1, now() - $3::interval - g * interval '1 millisecond' from generate_series(1, $4) g`,
         [room.roomId, prefix, age, count],
       );
-    await insert(5, "1 hour", "young-");
-    await insert(LIMITS.receiptsKeptOlder + 3, "2 days", "aged-");
-    await insert(4, "8 days", "old-");
+    const tables = ["roll_receipts", "roll_receipts_retired"] as const;
+    for (const table of tables) {
+      await insert(table, 5, "1 hour", "young-");
+      // More past a day than the 10,000 a room once kept of them: no count decides, only each receipt's own time.
+      await insert(table, 10_003, "2 days", "aged-");
+      // Past their 7 days but inside the sweep's hour, and past both.
+      await insert(table, 3, "7 days 59 minutes", "lagging-");
+      await insert(table, 4, "7 days 61 minutes", "old-");
+    }
     await pruneReceipts(t.pool);
-    const { rows } = await t.pool.query<{ kind: string; n: string }>(`select split_part(tag, '-', 1) as kind, count(*)::text as n from roll_receipts where room_id = $1 group by 1`, [room.roomId]);
-    const counts = Object.fromEntries(rows.map((r) => [r.kind, Number(r.n)]));
-    assert.deepEqual(counts, { young: 5, aged: LIMITS.receiptsKeptOlder });
-    const kept = await t.pool.query<{ tag: string }>(`select tag from roll_receipts where room_id = $1 and tag like 'aged-%' order by at asc limit 1`, [room.roomId]);
-    assert.equal(kept.rows[0]?.tag, `aged-${LIMITS.receiptsKeptOlder}`, "the newest of them stay");
+    for (const table of tables) {
+      const { rows } = await t.pool.query<{ kind: string; n: string }>(`select split_part(tag, '-', 1) as kind, count(*)::text as n from ${table} where room_id = $1 group by 1`, [room.roomId]);
+      assert.deepEqual(Object.fromEntries(rows.map((r) => [r.kind, Number(r.n)])), { young: 5, aged: 10_003, lagging: 3 }, table);
+    }
+  });
+
+  test("a server sweeps receipts as it starts", async () => {
+    const room = await setup(t, "Dice start sweep");
+    for (const table of ["roll_receipts", "roll_receipts_retired"]) {
+      await t.pool.query(`insert into ${table} (room_id, member_id, tag, part, state, seq, at) values ($1, 'm', 'kept', 0, 'committed', 1, now() - interval '7 days 59 minutes'), ($1, 'm', 'gone', 0, 'committed', 1, now() - interval '7 days 61 minutes')`, [room.roomId]);
+    }
+    await t.restart();
+    const tags = async () => (await t.pool.query<{ tag: string }>("select tag from roll_receipts where room_id = $1 union all select tag from roll_receipts_retired where room_id = $1 order by 1", [room.roomId])).rows.map((r) => r.tag);
+    for (let i = 0; i < 200 && (await tags()).includes("gone"); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(await tags(), ["kept", "kept"]);
   });
 });
 

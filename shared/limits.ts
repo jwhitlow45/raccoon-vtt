@@ -386,14 +386,13 @@ export const LIMITS = {
   /**
    * Receipts (1.2): lookups per member and room an hour, receipts a room
    * holds younger than 24 hours, a player's share of them, the share kept
-   * for the DMs whatever the players send, and of the older rows, how many
-   * a room keeps and for how many days.
+   * for the DMs whatever the players send, and how many days each receipt
+   * is kept from its own time.
    */
   receiptLookupsPerHour: 60,
   receiptsPerDay: 10_000,
   receiptsPerPlayerDay: 2_000,
   receiptsDmFloor: 2_000,
-  receiptsKeptOlder: 10_000,
   receiptDays: 7,
 
   // Attached tokens (docs/design/design-v1-attach.md 5.1).

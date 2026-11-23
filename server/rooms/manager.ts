@@ -122,6 +122,9 @@ export class RoomManager {
     this.gateway = new ActorGateway(this, deps.pool);
     this.#pruneTimer = setInterval(() => void this.prune(), DAY_MS);
     this.#pruneTimer.unref();
+    // Receipts go by their own time alone (persistence.ts pruneReceipts), so their sweep runs at start too, and a
+    // server restarted more often than daily still deletes them on time.
+    void this.#pruneReceipts();
   }
 
   get loadedRoomIds(): string[] {
@@ -470,18 +473,22 @@ export class RoomManager {
     } catch (err) {
       this.#log.warn({ err }, "watermark prune failed");
     }
-    try {
-      const n = await pruneReceipts(this.#pool);
-      if (n > 0) this.#log.info({ rows: n }, "pruned old roll receipts");
-    } catch (err) {
-      this.#log.warn({ err }, "receipt prune failed");
-    }
+    await this.#pruneReceipts();
     // A room loaded again prunes its own rows then, and one that never is keeps them until this.
     try {
       const n = await pruneIds(this.#pool, this.options.now());
       if (n > 0) this.#log.info({ rows: n }, "pruned old id rows");
     } catch (err) {
       this.#log.warn({ err }, "id row prune failed");
+    }
+  }
+
+  async #pruneReceipts(): Promise<void> {
+    try {
+      const n = await pruneReceipts(this.#pool);
+      if (n > 0) this.#log.info({ rows: n }, "pruned old roll receipts");
+    } catch (err) {
+      this.#log.warn({ err }, "receipt prune failed");
     }
   }
 }

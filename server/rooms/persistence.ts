@@ -912,24 +912,26 @@ export async function readLogLines(q: Queryable, roomId: string, seq: number): P
 }
 
 /**
- * Receipt retention (docs/design/design-v1-dice.md 1.2): rows older than 7 days
- * go, and of those older than 24 hours each room keeps its newest 10,000. A
- * receipt younger than 24 hours is never deleted, by count or anything
- * else, so the duplicate rule holds for its whole day. Run daily.
+ * How far past a receipt's days the sweep waits before deleting it. A lookup
+ * reads only rows inside its own days (readReceipts) and gives up within
+ * seconds of its arrival, so a row the sweep deletes is one no lookup
+ * still running could read, whatever the two clocks say within the hour.
+ */
+export const RECEIPT_SWEEP_LAG_MS = 60 * 60_000;
+
+/**
+ * Receipt retention (docs/design/design-v1-dice.md 1.2): each receipt is
+ * kept `receiptDays` from its own time, in either receipt table, whatever
+ * other receipts the room holds. The sweep deletes by time alone, a
+ * RECEIPT_SWEEP_LAG_MS past that, so it needs nothing from any room and
+ * waits for none. A receipt younger than 24 hours is never deleted, so the
+ * duplicate rule holds for its whole day. Run daily, and once at start.
  */
 export async function pruneReceipts(pool: Pool): Promise<number> {
-  const old = await pool.query("delete from roll_receipts where at < now() - interval '1 day' * $1", [LIMITS.receiptDays]);
-  const over = await pool.query(
-    `delete from roll_receipts r using (
-       select room_id, member_id, tag, part from (
-         select room_id, member_id, tag, part, row_number() over (partition by room_id order by at desc) as n
-         from roll_receipts where at < now() - interval '24 hours'
-       ) aged where aged.n > $1
-     ) x
-     where r.room_id = x.room_id and r.member_id = x.member_id and r.tag = x.tag and r.part = x.part`,
-    [LIMITS.receiptsKeptOlder],
-  );
-  return (old.rowCount ?? 0) + (over.rowCount ?? 0);
+  const params = [LIMITS.receiptDays, RECEIPT_SWEEP_LAG_MS];
+  const live = await pool.query("delete from roll_receipts where at < now() - interval '1 day' * $1 - interval '1 millisecond' * $2", params);
+  const retired = await pool.query("delete from roll_receipts_retired where at < now() - interval '1 day' * $1 - interval '1 millisecond' * $2", params);
+  return (live.rowCount ?? 0) + (retired.rowCount ?? 0);
 }
 
 /** Watermark rows unused for 7 days (design 16.2). Run daily. */

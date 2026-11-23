@@ -221,8 +221,8 @@ alter table asset_uploaders alter column added_at set not null;
 -- result, which the log rows the seq names hold and the archive may prune.
 -- The room actor holds every row younger than 24 hours in memory, so the
 -- primary key starting with the room keeps one member's tag from ever
--- meeting another's. The daily prune deletes rows older than 7 days, and of
--- those older than 24 hours keeps each room's newest 10,000.
+-- meeting another's. Each row is kept 7 days from its own time: the daily
+-- sweep deletes rows older than that by more than an hour.
 create table if not exists roll_receipts (
   room_id text not null references rooms on delete cascade,
   member_id text not null,
