@@ -35,6 +35,7 @@ import {
 } from "./pcSync.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
 import { DM, P1, actor, character, room } from "../testutil.ts";
+import { uuidv7 } from "../ids.ts";
 
 /**
  * The re-sync merge (docs/design/design-v1-resync.md 2 and 5): a table of each
@@ -86,7 +87,7 @@ function bree(stats: PcStats | undefined, over: Partial<SyncCharacter> = {}): Sy
 }
 
 function plan(c: SyncCharacter, fill: PcFill, mode: SyncInput["mode"] = "resync"): SyncPlan {
-  return planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
+  return planSync({ mode, stats: c.stats, level: c.level, character: c, fill, newId: () => uuidv7() });
 }
 
 /** The character after Apply with these ticks, as the server leaves it. */

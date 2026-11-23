@@ -11,6 +11,7 @@ import { loadRoom, type Pool } from "./persistence.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { UndoTable } from "./undoTesting.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /**
  * A trip wire on a square scene whose ends an import let onto the 1/64
@@ -104,7 +105,7 @@ function exportedThenImported(state: RoomState): RoomState {
   const parsed = parseRoomState(migrateSnapshot(file.state, file.schemaVersion));
   assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, `${id}-new`]));
-  const final = parseRoomState(remapState(parsed.state, { assets: new Map(), memberIds }));
+  const final = parseRoomState(remapState(parsed.state, { assets: new Map(), memberIds, newId: () => uuidv7() }));
   assert.ok(final.ok, final.ok ? "" : final.message);
   return final.state;
 }

@@ -1,5 +1,4 @@
 import { parseFormula, type DiceTerm, type Formula } from "../dice/formula.ts";
-import { uuidv7 } from "../ids.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type PcDice, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
@@ -677,9 +676,10 @@ function cutWarning(over: number, who: string): string {
 /**
  * A D&D Beyond character's JSON, the `{ success, data }` envelope or the
  * bare `data`, as a fill, or null when it does not read as a character.
- * Never throws.
+ * Never throws. `newId` makes each roll's id: the room's maker on a device,
+ * the server key's on the server (server/http/ddbImport.ts).
  */
-export function readDdbCharacter(json: unknown, newId: () => string = () => uuidv7()): PcFill | null {
+export function readDdbCharacter(json: unknown, newId: () => string): PcFill | null {
   try {
     return read(json, newId);
   } catch {

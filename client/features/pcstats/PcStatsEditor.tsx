@@ -172,7 +172,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   /** A D&D Beyond read reviewed as a re-sync is (docs/design/design-v1-resync.md 1.1), against the editor's state as it is now (flow.ts). */
   const syncPlan = (fill: PcFill, state: FlowState): SyncPlan | null => {
     const who = reviewed();
-    return who ? editorSyncPlan(fill, state, opened, who) : null;
+    return who ? editorSyncPlan(fill, state, opened, who, actions.newId) : null;
   };
   const startGet = (id: number) => {
     const controller = new AbortController();
@@ -270,7 +270,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     if (readingJson || !character) return;
     setReadingJson(true);
     setLinkError(null);
-    readPastedJson(ddbJson).then(
+    readPastedJson(ddbJson, actions.newId).then(
       (result) => {
         setReadingJson(false);
         if (!open.current) return;

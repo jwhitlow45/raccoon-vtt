@@ -13,6 +13,7 @@ import { expectHash } from "#shared/permissions.ts";
 import { hash12 } from "#shared/rules/pcSync.ts";
 import { goneDroppedLine } from "./resync.ts";
 import { alsoLine } from "./resync.ts";
+import { uuidv7 } from "../../../shared/ids.ts";
 
 /** The editor's steps and Save (docs/design/design-v1-pc-stats.md 7.2). */
 
@@ -36,7 +37,7 @@ describe("the editor's flow", () => {
     const read = (id: string): PcFill => ({ source: "ddb", stats: { rolls: [{ ...sling, id }] }, level: 5, name: "Bree", actor: { ac: 15 }, warnings: [], read: { weapon: true, spell: true, other: true } });
     const opened = openDraft(bare);
     let state = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
-    const first = editorSyncPlan(read("read-1"), state, opened, bare);
+    const first = editorSyncPlan(read("read-1"), state, opened, bare, () => uuidv7());
     assert.equal(first.source, "first");
     state = run(state, { t: "read", fill: read("read-1"), lines: [], ticks: defaultTicks(first) }, { t: "use", sync: editorSyncUse(syncResult(first, defaultTicks(first)), bare, { fill: read("read-1"), ticks: defaultTicks(first) }) }).state;
     assert.deepEqual(state.draft.stats.rolls.map((r) => r.name), ["Sling"]);
@@ -44,7 +45,7 @@ describe("the editor's flow", () => {
     // Deleting the roll leaves the draft as it opened, with the record still pending.
     state = run(state, { t: "edit", update: (d) => ({ ...d, stats: { ...d.stats, rolls: [] } }) }, { t: "open", step: "ddb" }).state;
     assert.deepEqual(state.draft, opened.draft);
-    const again = editorSyncPlan(read("read-2"), state, opened, bare);
+    const again = editorSyncPlan(read("read-2"), state, opened, bare, () => uuidv7());
     assert.equal(again.source, "same");
     const back = again.items.find((i) => i.type === "roll");
     assert.deepEqual([back?.section, back?.type === "roll" && back.case], ["kept", "deleted"], "listed with Add it back");
@@ -55,14 +56,14 @@ describe("the editor's flow", () => {
     const AT = "2026-10-20T19:00:00.000Z";
     const read = (hpMax: number): PcFill => ({ source: "ddb", stats: { rolls: [] }, level: 5, name: "Bree", actor: { ac: 15, hpMax }, warnings: [], read: { weapon: true, spell: true, other: true } });
     const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15, hp: { cur: 35, max: 38, temp: 0 } }) };
-    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(38) });
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(38), newId: () => uuidv7() });
     const saved = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
     assert.deepEqual(saved.actor.hp, { cur: 35, max: 38, temp: 0 });
     const opened = openDraft(saved);
     let state = openFlow(opened.draft);
     const fill = (f: PcFill) => {
       state = run(state, { t: "open", step: "ddb" }).state;
-      const plan = editorSyncPlan(f, state, opened, saved);
+      const plan = editorSyncPlan(f, state, opened, saved, () => uuidv7());
       const ticks = defaultTicks(plan);
       state = run(state, { t: "read", fill: f, lines: [], ticks }).state;
       return plan;
@@ -86,13 +87,13 @@ describe("the editor's flow", () => {
     const read = (dex: number, ac: number): PcFill => ({ source: "ddb", stats: { abilities: { ...EMPTY_PC_STATS.abilities, dex }, rolls: [] }, level: 5, name: "Bree", actor: { ac }, warnings: [], read: { weapon: true, spell: true, other: true } });
     // Bree as saved: synced once from dex 14 and AC 15.
     const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15 }) };
-    const first = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(14, 15) });
+    const first = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(14, 15), newId: () => uuidv7() });
     const saved = afterSync(bare, syncPatch(bare, syncResult(first, defaultTicks(first)))!.patch, AT);
     const opened = openDraft(saved);
     let state = openFlow(opened.draft);
     const fill = (f: PcFill) => {
       state = run(state, { t: "open", step: "ddb" }).state;
-      const plan = editorSyncPlan(f, state, opened, saved);
+      const plan = editorSyncPlan(f, state, opened, saved, () => uuidv7());
       const ticks = defaultTicks(plan);
       state = run(state, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks }) }).state;
       return plan;
@@ -282,13 +283,13 @@ describe("the editor's class resources", () => {
   /** Bree as saved: synced once with Rage, which she has spent 1 of since. */
   function savedBree(): SyncCharacter {
     const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
-    const p = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read([rageRead()]) });
+    const p = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read([rageRead()]), newId: () => uuidv7() });
     const synced = afterSync(bare, syncPatch(bare, syncResult(p, defaultTicks(p)))!.patch, AT);
     return { ...synced, resources: synced.resources!.map((r) => ({ ...r, used: 1 })) };
   }
   const review = (saved: SyncCharacter, f: PcFill, state: FlowState, ticks?: ReadonlySet<string>) => {
     const opened = openDraft(saved);
-    const plan = editorSyncPlan(f, state, opened, saved);
+    const plan = editorSyncPlan(f, state, opened, saved, () => uuidv7());
     const t = ticks ?? defaultTicks(plan);
     return { plan, ticks: t, use: editorSyncUse(syncResult(plan, t), saved, { fill: f, ticks: t }) };
   };
@@ -389,7 +390,7 @@ describe("the editor's class resources", () => {
     /** Bree synced with a Sling and Rage, Rage then raised to 5 here, the Sling deleted in the editor, and a read where D&D Beyond raised Rage to 4. */
     function refused() {
       const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
-      const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]) });
+      const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]), newId: () => uuidv7() });
       const synced = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
       const saved: SyncCharacter = { ...synced, resources: synced.resources!.map((r) => ({ ...r, max: 5 })) };
       const f = withSling([rageRead(0, 4)]);
@@ -405,7 +406,7 @@ describe("the editor's class resources", () => {
 
     test("Use it keeps the pending record's roll markers, though a hidden Add it back was ticked, and takes the r: markers from the review", () => {
       const { saved, f, state, slingMarker } = refused();
-      const plan = editorSyncPlan(f, state, openDraft(saved), saved);
+      const plan = editorSyncPlan(f, state, openDraft(saved), saved, () => uuidv7());
       const slingBack = plan.items.find((i) => i.type === "roll" && i.case === "deleted")!;
       const ticks = new Set([...state.review!.ticks!, slingBack.id]);
       const result = syncResult(plan, ticks);
@@ -423,7 +424,7 @@ describe("the editor's class resources", () => {
       const pending = { ...rest, res: {} };
       const f = read([rageRead(1)]);
       const state: FlowState = { ...run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state, record: pending };
-      const plan = editorSyncPlan(f, state, openDraft(saved), saved);
+      const plan = editorSyncPlan(f, state, openDraft(saved), saved, () => uuidv7());
       const ticks = defaultTicks(plan);
       const use = editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks }, { pending });
       assert.equal(use.record, null, "as saved");
@@ -436,7 +437,7 @@ describe("the editor's class resources", () => {
       /** Bree with a Sling and Rage synced, Luck Points removed here the longest ago, then 39 other rolls; D&D Beyond still has Luck Points and sends no other rolls. */
       function boundary(rageMax: number) {
         const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
-        const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]) });
+        const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]), newId: () => uuidv7() });
         const synced = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
         const saved: SyncCharacter = { ...synced, resources: synced.resources!.map((r) => ({ ...r, used: 1 })), ddbSync: { ...synced.ddbSync!, gone: [luck, ...others] } };
         const f: PcFill = { ...withSling([rageRead(0, rageMax), { name: "Luck Points", max: 3, reset: "long", used: 0 }]), read: { weapon: true, spell: true, other: false, resource: true } };
@@ -446,12 +447,12 @@ describe("the editor's class resources", () => {
       function stale(saved: SyncCharacter, f: PcFill, extra: (plan: ReturnType<typeof editorSyncPlan>) => string[] = () => [], live: SyncCharacter = saved) {
         const opened = openDraft(saved);
         const start = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
-        const plan = editorSyncPlan(f, start, opened, saved);
+        const plan = editorSyncPlan(f, start, opened, saved, () => uuidv7());
         const ticks = new Set([...defaultTicks(plan), ...extra(plan)]);
         const use = editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks });
         const state = run(start, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: use }, { t: "edit", update: (d) => ({ ...d, stats: { ...d.stats, rolls: [] } }) }, { t: "save" }, { t: "saved", answer: "refused", stale: true }).state;
         assert.equal(state.review?.only, "resources");
-        const again = editorSyncPlan(f, state, opened, live);
+        const again = editorSyncPlan(f, state, opened, live, () => uuidv7());
         const result = syncResult(again, state.review!.ticks!);
         assert.ok(!result.record.gone!.includes(luck), "the full review's cap took Luck Points for the deleted Sling");
         return run(state, { t: "use", sync: editorSyncUse(result, live, { fill: f, ticks: state.review!.ticks! }, { pending: state.record }) }).state;
@@ -492,7 +493,7 @@ describe("the editor's class resources", () => {
   test("a Barbarian 4 read at 5: Rage's level rides with the Save's other writes, never alone, and the Update question never comes (DDBBUILD-OPUS-1, D-261024-41)", () => {
     const rage4 = { ...rageRead(), level: 4 };
     const bare: SyncCharacter = { name: "Bree", level: 4, stats: structuredClone(EMPTY_PC_STATS) as PcStats, actor: actor({ sheetUrl: SHEET }) };
-    const p0 = planSync({ mode: "resync", stats: bare.stats, level: 4, character: bare, fill: { ...read([rage4]), level: 4 } });
+    const p0 = planSync({ mode: "resync", stats: bare.stats, level: 4, character: bare, fill: { ...read([rage4]), level: 4 }, newId: () => uuidv7() });
     const saved = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
     assert.deepEqual([saved.resources![0]!.level, saved.resources![0]!.atLevel], [4, 4]);
     const f = read([{ ...rageRead(), level: 5 }]);

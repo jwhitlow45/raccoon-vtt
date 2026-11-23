@@ -2259,7 +2259,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design/desi
 
         // The export carries the layer, and the import fits as the room did.
         const exported = JSON.parse(JSON.stringify(roomExport("TESTR00M", actor.committed.seq, actor.committed.state, [dm.id]))) as RoomExport;
-        const imported = remapState(exported.state, { assets: new Map() });
+        const imported = remapState(exported.state, { assets: new Map(), newId: () => uuidv7() });
         assert.equal(Object.keys(imported.exploredTiles).length, Object.keys(actor.committed.state.exploredTiles).length);
         assert.ok(dmPart(imported) + exploredReserve(imported) + memoryStateReserve(imported) <= stateLimit);
 

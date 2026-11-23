@@ -6,6 +6,7 @@ import type { PcFill } from "#shared/rules/pcFill.ts";
 import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, character } from "#shared/testutil.ts";
+import { uuidv7 } from "../../../shared/ids.ts";
 
 /**
  * The review's markup (docs/design/design-v1-resync.md 3.3 and 3.6): its sections
@@ -30,7 +31,7 @@ function fillOf(stats: Partial<PcStats>): PcFill {
 const bree = (stats?: PcStats): Character => character("bree", { name: "Bree", level: 5, ...(stats ? { stats } : {}), actor: actor({ ac: 15, hp: { cur: 38, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: SHEET }) });
 
 function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync", only?: "resources", dropped?: SyncResult["goneDropped"]): { html: string; plan: SyncPlan } {
-  const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
+  const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill, newId: () => uuidv7() });
   const t = ticks ?? defaultTicks(plan);
   const result = syncResult(plan, t);
   const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}`, ...(only ? { only } : {}), ...(dropped ? { dropped } : {}) }));
@@ -42,7 +43,7 @@ const roll = (i: number): PcRoll => ({ id: `r${i}`, name: i === 0 ? "Longsword" 
 describe("the review's markup", () => {
   test("its sections are h3s that take focus, a kept row is a group named by its first line, and Overwrite all is a toggle", () => {
     const c0 = bree();
-    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill: fillOf({ spellAbility: "wis" }) });
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill: fillOf({ spellAbility: "wis" }), newId: () => uuidv7() });
     const synced = { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
     const mine = { ...synced, stats: { ...synced.stats!, spellAbility: "cha" as const } };
     const { html } = render(mine, fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 18 } }));
@@ -60,7 +61,7 @@ describe("the review's markup", () => {
   test("Nothing new shows only when nothing would change, and an empty Changes is left out when Other fields has a line (RS-O-31)", () => {
     const c0 = bree();
     const fill = fillOf({ spellAbility: "wis" });
-    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill });
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill, newId: () => uuidv7() });
     const synced = { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
     const same = render(synced, fill).html;
     assert.match(same, />Nothing new from D&amp;D Beyond\.</);
@@ -125,7 +126,7 @@ describe("the review's class resources (docs/design/design-v1-ddb-resources.md 6
   function synced(): Character {
     const c0 = bree();
     const fill = withResources(fillOf({ spellAbility: "wis" }), [rage]);
-    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill });
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill, newId: () => uuidv7() });
     return { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
   }
 

@@ -226,7 +226,7 @@ class DdbRoute {
           await route.fulfill({ status: 502, json: { error: "fetch_failed" } });
         } else if ("fixture" in answer) {
           if (answer.delayMs) await sleep(answer.delayMs);
-          await route.fulfill({ status: 200, json: { fill: readDdbCharacter(answer.fixture()) } });
+          await route.fulfill({ status: 200, json: { fill: readDdbCharacter(answer.fixture(), () => uuidv7()) } });
         } else {
           await route.fulfill({ status: answer.status, headers: answer.retryAfterSeconds ? { "retry-after": String(answer.retryAfterSeconds) } : {}, json: { error: answer.error } });
         }

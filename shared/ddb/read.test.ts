@@ -6,6 +6,7 @@ import { checkedFill, type PcFill } from "../rules/pcFill.ts";
 import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncCharacter } from "../rules/pcSync.ts";
 import { actor } from "../testutil.ts";
 import { readDdbCharacter } from "./read.ts";
+import { uuidv7 } from "../ids.ts";
 
 /**
  * The D&D Beyond reader over hand-made JSON in the shape of a character's
@@ -175,7 +176,7 @@ describe("readDdbCharacter: the character", () => {
       const fill = readDdbCharacter(json, ids)!;
       assert.equal("jack" in fill.stats, false);
       const stored: SyncCharacter = { name: "Wren Ashdown", level: 5, stats: { ...(readDdbCharacter(wren(), ids)!.stats as PcStats), jack: true } as PcStats, actor: actor({ sheetUrl: "https://www.dndbeyond.com/characters/12345678" }) };
-      const p = planSync({ mode: "resync", stats: stored.stats, level: stored.level, character: stored, fill });
+      const p = planSync({ mode: "resync", stats: stored.stats, level: stored.level, character: stored, fill, newId: () => uuidv7() });
       const sent = syncPatch(stored, syncResult(p, defaultTicks(p)));
       const after = sent ? afterSync(stored, sent.patch, "2026-10-24T10:00:00.000Z") : stored;
       assert.equal(after.stats?.jack, true);
@@ -664,7 +665,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design/design
 
     test("reader to merge: a cut modifier list or an equipped item past 400 leaves the saves, defenses and scores as synced", () => {
       const sync = (c: SyncCharacter, json: J): SyncCharacter => {
-        const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: readDdbCharacter(json, ids)! });
+        const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: readDdbCharacter(json, ids)!, newId: () => uuidv7() });
         const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
         return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
       };

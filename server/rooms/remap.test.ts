@@ -17,6 +17,7 @@ import { lastLineSeq, remapState, type ImportedAsset } from "./remap.ts";
 import { measuredStateBytes } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 function allIds(value: unknown, out = new Set<string>()): Set<string> {
   if (Array.isArray(value)) for (const v of value) allIds(v, out);
@@ -141,7 +142,7 @@ describe("remapState", () => {
     const state = randomState(rng(5));
     state.monsters.mx = customMonster("mx", { defaultImage: imageRef("img-mx") });
     state.srdImages.bandit = srdImage("bandit", "img-bandit");
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     // Shipped icons need no asset, so only they stay.
     for (const t of Object.values(out.tokens)) assert.ok(t.image === undefined || "icon" in t.image);
     for (const t of Object.values(out.tokens)) assert.ok(t.altImages === undefined || t.altImages.every((image) => "icon" in image), "a list left with nothing goes");
@@ -161,7 +162,7 @@ describe("remapState", () => {
     state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "pc1", value: 20 }, { id: "n2", tokenId: "gob1", value: 10 }] });
     state = apply(state, { t: "encounter.next" }, undefined, 2);
     state = apply(state, { t: "encounter.next" }, undefined, 3);
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const goblin = Object.values(out.tokens).find((t) => t.name === "Goblin")!;
     assert.deepEqual(out.encounterHistory.at(-1)!.legendary, { holderId: goblin.id, actionsUsed: 2 });
     const back = apply(out, { t: "encounter.prev" }, undefined, 4);
@@ -179,7 +180,7 @@ describe("remapState", () => {
     assert.ok(state.tokens.pc1!.path);
     state.drawings.k1 = drawing("k1", { kind: "ruler", points: [2.5, 3.5, 6.5, 3.5], anchors: ["pc1", "gob"] });
     state.drawings.k2 = drawing("k2", { kind: "ruler", points: [2.5, 3.5, 9.5, 3.5], anchors: [null, "no-such-token"] });
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const pip = Object.values(out.tokens).find((t) => t.name === "Pip")!;
     const goblin = Object.values(out.tokens).find((t) => t.name === "Goblin")!;
     assert.deepEqual(out.encounter!.turnStart, { entryId: out.encounter!.activeEntryId, tokenId: pip.id, sceneId: pip.sceneId, x: 2, y: 3, elevation: 0, seen: true });
@@ -202,7 +203,7 @@ describe("remapState", () => {
     assert.equal("reminded" in exportableState(state, DM), false);
     const parsed = parseRoomState(JSON.parse(JSON.stringify({ ...exportableState(state, DM), reminded: state.reminded })));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    assert.equal("reminded" in remapState(parsed.state, { assets: new Map() }), false);
+    assert.equal("reminded" in remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() }), false);
   });
 
   test("a file that carries a step's walks and the newest shed DM line imports with neither, since both name the old room's seqs", () => {
@@ -216,7 +217,7 @@ describe("remapState", () => {
     assert.deepEqual(state.encounterHistory.at(-1)!.walks?.map((w) => w.tokenId), ["a"]);
     const parsed = parseRoomState(JSON.parse(JSON.stringify({ ...exportableState(state, DM), encounterHistory: state.encounterHistory, dmLogShed: `2:${DM_LINE_BASE}` })));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.equal("dmLogShed" in out, false);
     assert.equal(out.encounterHistory.length, 2);
     assert.ok(out.encounterHistory.every((step) => step.walks === undefined), "no step keeps a walk");
@@ -230,7 +231,7 @@ describe("remapState", () => {
     state = apply(state, { t: "encounter.next" }, undefined, 2);
     state = apply(state, { t: "encounter.next" }, undefined, 3);
     state = apply(state, { t: "encounter.prev" }, undefined, 4);
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const back = out.log.find((e) => e.data?.type === "turn" && e.data.back)?.data;
     assert.ok(back?.type === "turn");
     assert.equal(back.to, out.encounter!.activeEntryId);
@@ -244,13 +245,13 @@ describe("remapState", () => {
     const out = remapState(state, { assets: new Map(), memberIds: new Map([["p2", "new-p2"]]), newId: () => "x" });
     assert.deepEqual(out.meta.settings.playersMoveAny, ["new-p2"]);
     state.meta.settings.playersMoveAny = "all";
-    assert.equal(remapState(state, { assets: new Map() }).meta.settings.playersMoveAny, "all");
+    assert.equal(remapState(state, { assets: new Map(), newId: () => uuidv7() }).meta.settings.playersMoveAny, "all");
   });
 
   test("a preset member map is honored", () => {
     const state = randomState(rng(2));
     const memberIds = new Map(Object.keys(state.members).map((id) => [id, `member-${id}`]));
-    const out = remapState(state, { assets: new Map(), memberIds });
+    const out = remapState(state, { assets: new Map(), memberIds, newId: () => uuidv7() });
     assert.deepEqual(Object.keys(out.members).sort(), [...memberIds.values()].sort());
     for (const d of Object.values(out.drawings)) assert.match(d.ownerId, /^member-/);
   });
@@ -338,7 +339,7 @@ describe("remapState", () => {
     state.srdImages.bandit = srdImage("bandit", "thumb");
     state.handouts.h1 = { id: "h1", rev: 0, assetId: "night", title: "Letter", to: "all", shownAt: AT };
     const assets = kinds({ day: ["day2", "map"], night: ["night2", "map"], thumb: ["thumb2", "thumb"], art: ["art2", "token"] });
-    const out = remapState(state, { assets });
+    const out = remapState(state, { assets, newId: () => uuidv7() });
     const [s1, s2] = Object.values(out.scenes).sort((a, b) => a.order - b.order);
     assert.equal(s1!.thumb, "thumb2");
     assert.deepEqual(s1!.phases?.map((p) => p.assetId), ["day2", "night2"]);
@@ -385,7 +386,7 @@ describe("remapState", () => {
     const state = room();
     const grid = { refWidthPx: 100, refHeightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } };
     state.scenes.s1 = { ...state.scenes.s1!, map: { assetId: "gone", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } }, phases: [{ id: "p1", name: "Day", assetId: "gone", widthPx: 100, heightPx: 100 }], phaseId: "p1", phaseGrid: grid };
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const s1 = Object.values(out.scenes).find((s) => s.name === "s1")!;
     for (const field of ["map", "phases", "phaseId", "phaseGrid"]) assert.equal(field in s1, false, field);
   });
@@ -415,7 +416,7 @@ describe("remapState, wave 5 (docs/design/design-v1-dm-tools.md 2.5)", () => {
 
   test("pages, pins and links get new ids, a player's access and who may draw follow the member, and open requests stay behind", () => {
     const state = wave5();
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const p1 = out.members[Object.keys(out.members).find((id) => out.members[id]!.name === "p1")!]!;
     const pages = Object.values(out.journal);
     assert.equal(pages.length, 3);
@@ -454,7 +455,7 @@ describe("remapState, wave 5 (docs/design/design-v1-dm-tools.md 2.5)", () => {
     state.traps.a = { ...trap("a"), name: "a", rig: { ...trap("a").rig!, due: [due("12:0")] } };
     state.traps.b = { ...trap("b"), name: "b", rig: { ...trap("b").rig!, due: [due("4:0"), due("10:900000")] } };
     state.trapSeen = [{ id: "12:1", at: AT, kind: "event", data: { type: "trapSeen", by: [], message: "Click." } }];
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const all = Object.values(out.traps).flatMap((t) => (t.rig?.due ?? []).map((d) => ({ name: t.name, id: d.id })));
     const sorted = [...all].sort((x, y) => compareLogIds(x.id, y.id)).map((d) => d.name);
     assert.deepEqual(sorted, ["b", "b", "a"], "4:0, then 10:900000, then 12:0");
@@ -593,7 +594,7 @@ describe("remapState, pdf handouts (docs/design/design-v1-pdf-handouts.md 3.6)",
     state.handouts.h1 = { id: "h1", rev: 0, assetId: "p1", pages: [page("p1"), page("p2", 2048, 1584), page("p3"), page("p2", 2048, 1584), page("p4")], title: "Strange letter", to: "all", shownAt: AT };
     state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "handout", handoutId: "h1" } }];
     const assets = kinds({ p2: ["n2", "handout"], p3: ["n3", "map"], p4: ["n4", "handout"] });
-    const out = remapState(state, { assets });
+    const out = remapState(state, { assets, newId: () => uuidv7() });
     const [h] = Object.values(out.handouts);
     assert.ok(h);
     assert.notEqual(h.id, "h1");
@@ -609,7 +610,7 @@ describe("remapState, pdf handouts (docs/design/design-v1-pdf-handouts.md 3.6)",
     state.handouts.h1 = { id: "h1", rev: 0, assetId: "p1", pages: [page("p1"), page("p2")], title: "Strange letter", to: "all", shownAt: AT };
     state.handouts.h2 = { id: "h2", rev: 0, assetId: "img", title: "Letter", to: "all", shownAt: AT };
     state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "handout", handoutId: "h1" } }];
-    const out = remapState(state, { assets: kinds({ p1: ["n1", "token"], img: ["n9", "handout"] }) });
+    const out = remapState(state, { assets: kinds({ p1: ["n1", "token"], img: ["n9", "handout"] }), newId: () => uuidv7() });
     assert.deepEqual(Object.values(out.handouts).map(({ id: _id, ...h }) => h), [{ rev: 0, assetId: "n9", title: "Letter", to: "all", shownAt: AT }]);
     assert.deepEqual(out.log, []);
   });
@@ -618,7 +619,7 @@ describe("remapState, pdf handouts (docs/design/design-v1-pdf-handouts.md 3.6)",
     const state = room();
     state.handoutDocs.d1 = { id: "d1", rev: 2, title: "Strange letter", pages: [page("p1"), page("p2"), page("p3"), page("p1")], createdAt: AT };
     state.handoutDocs.d2 = { id: "d2", rev: 0, title: "Gone", pages: [page("p3")], createdAt: AT };
-    const out = remapState(state, { assets: kinds({ p1: ["n1", "handout"], p2: ["n2", "token"], p3: ["n3", "map"] }) });
+    const out = remapState(state, { assets: kinds({ p1: ["n1", "handout"], p2: ["n2", "token"], p3: ["n3", "map"] }), newId: () => uuidv7() });
     const docs = Object.values(out.handoutDocs);
     assert.equal(docs.length, 1);
     assert.notEqual(docs[0]!.id, "d1");
@@ -640,7 +641,7 @@ describe("remapState, a player's asks for saves (docs/design/design-v1-player-sa
     });
 
   test("an import drops the open asks, as it drops open requests, and keeps their lines with the caster's new id", () => {
-    const out = remapState(asks(), { assets: new Map() });
+    const out = remapState(asks(), { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(out.casts, {});
     const lines = out.log.filter((e) => e.data?.type === "cast");
     assert.equal(lines.length, 2);
@@ -659,7 +660,7 @@ describe("attached tokens in an import (docs/design/design-v1-attach.md 5.2)", (
     state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "bree", value: 20 }] });
     state = apply(state, { t: "encounter.next" }, undefined, 2);
     assert.deepEqual(state.encounter!.turnStart!.mounts, ["horse"]);
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const tokens = Object.values(out.tokens);
     const horse = tokens.find((t) => t.name === "Warhorse")!;
     assert.deepEqual(tokens.find((t) => t.name === "Bree")!.attached, { to: horse.id, kind: "ride", steer: true });
@@ -685,7 +686,7 @@ describe("traps in an import (docs/design/design-v1-traps.md 6.8)", () => {
     state.traps.plate = t;
     state.trapLog = [{ id: "7:0", at: AT, kind: "event", data: { type: "trap", trapId: "plate", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn", "nobody"], hits: 1, did: [], seen: [0] } }];
     state.trapSeen = [{ id: "7:1", at: AT, kind: "event", data: { type: "trapSeen", by: ["thorn"], message: "Click." } }];
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const traps = Object.values(out.traps);
     assert.equal(traps.length, 1);
     const copy = traps[0]!;
@@ -717,7 +718,7 @@ describe("traps in an import (docs/design/design-v1-traps.md 6.8)", () => {
     // A springing players saw, a hidden one only the DM holds, then another they saw.
     state.trapLog = [dmLine("7:900000"), dmLine("9:900000", true), dmLine("11:900000")];
     state.trapSeen = [seenLine("7:0"), seenLine("11:0")];
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(out.trapSeen.map((e) => e.id), ["7:0", "11:0"], "the hidden springing took no number of theirs");
     assert.deepEqual(out.trapLog.map((e) => e.id), ["7:900000", "9:900000", "11:900000"]);
     assert.equal(Object.values(out.traps)[0]!.rig!.due![0]!.id, "9:900000", "the occurrence still names its line");
@@ -747,7 +748,7 @@ describe("party lines in an import (shared/logRings.ts)", () => {
       hp("5:802000", "pet", ["p1"], "5:900000"),
     ];
     const memberIds = new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]);
-    const out = remapState(state, { assets: new Map(), memberIds });
+    const out = remapState(state, { assets: new Map(), memberIds, newId: () => uuidv7() });
     const ranks = rosterRanks(out.members);
     const run = (id: string) => partyIndex(ranks.get(id)!, 0);
     // Each line keeps its op, and each reader's copies count in the run the new roster gives them there.
@@ -773,7 +774,7 @@ describe("party lines in an import (shared/logRings.ts)", () => {
     const state = room();
     state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "hp", tokenId: "t1", change: "damage", amount: 2, label: "Healthy" }, parts: { exact: ["p1", "gone1"], rolls: [null, ["p2"]] } }];
     state.tokens.t1 = token("t1", { ownerIds: ["p1"] });
-    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]) });
+    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]), newId: () => uuidv7() });
     assert.deepEqual(out.log[0]!.parts, { exact: ["m-p1"], rolls: [null, ["m-p2"]] });
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
@@ -783,7 +784,7 @@ describe("party lines in an import (shared/logRings.ts)", () => {
 describe("an imported log (importRoom)", () => {
   /** As importRoom keeps it: the log's rings in memory, and the whole log in the archive. */
   function imported(state: RoomState): { room: RoomState; archive: LogEntry[] } {
-    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]) });
+    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]), newId: () => uuidv7() });
     return { room: { ...out, log: ringed(out.log, out.members) }, archive: out.log };
   }
 
@@ -881,7 +882,7 @@ describe("an imported log (importRoom)", () => {
     state.trapLog = Array.from({ length: LIMITS.trapLogLines }, (_, i) => sprung(i)).reverse();
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     for (const lines of [out.trapSeen, out.trapLog]) assert.deepEqual(lines.map((e) => e.id), lines.map((e) => e.id).sort(byId));
     // The room's own ops start after the file's last line (importRoom).
     const tx = new Tx(out, DM, { seq: lastLineSeq(out) + 1, at: AT });
@@ -922,7 +923,7 @@ describe("whispers through an export (shared/logRings.ts)", () => {
     assert.equal(state.log.filter((e) => e.kind === "whisper").length, memberRing("whisper", Object.keys(state.members).length).lines);
     const exported = parseRoomState(JSON.parse(JSON.stringify(exportableState(state, DM))));
     assert.ok(exported.ok, exported.ok ? "" : exported.message);
-    const imported = remapState(exported.state, { assets: new Map() });
+    const imported = remapState(exported.state, { assets: new Map(), newId: () => uuidv7() });
     const parsed = parseRoomState(JSON.parse(JSON.stringify(imported)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     assertWithinLimits(imported);

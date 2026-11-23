@@ -3,6 +3,7 @@ import { request, type Dispatcher } from "undici";
 import { z } from "zod";
 import { ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { readDdbCharacter } from "#shared/ddb/read.ts";
+import { sealedId } from "#shared/ids.ts";
 import { checkedFill } from "#shared/rules/pcFill.ts";
 import { untilAborted } from "../assets/egress.ts";
 import { WindowLimiter } from "../assets/limits.ts";
@@ -10,6 +11,7 @@ import { Semaphore } from "../assets/slots.ts";
 import { accessErrors, HttpError, parseBody, roomParam } from "../auth/http.ts";
 import { clientIp } from "../auth/clientIp.ts";
 import { ipKey } from "../auth/ipKey.ts";
+import { RoomIdKeys } from "../rooms/idKeys.ts";
 
 /**
  * A public D&D Beyond character read into a stat block's fill
@@ -161,7 +163,9 @@ export async function registerDdbImportRoutes(app: FastifyInstance, options: Ddb
         req.log.info({ ddbStatus: fetched.kind === "body" ? fetched.status : "failed", bytes: fetched.kind === "body" ? fetched.bytes : 0 }, "ddb import");
         const verdict = judge(fetched);
         if (!verdict.ok) throw new HttpError(verdict.status, verdict.code);
-        const fill = checkedFill(readDdbCharacter(verdict.json));
+        // The fill's roll ids are the server's, sealed under the room's server key, as every id the server makes is.
+        const serverKey = new RoomIdKeys(app.config.roomSecretKey, roomId).server.key;
+        const fill = checkedFill(readDdbCharacter(verdict.json, () => sealedId(serverKey, Date.now())));
         if (!fill) throw new HttpError(422, "unreadable");
         reply.header("cache-control", "no-store");
         return { fill };

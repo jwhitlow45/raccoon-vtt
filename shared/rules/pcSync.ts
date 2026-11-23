@@ -1,6 +1,5 @@
 import { ddbCharacterId } from "../ddb/link.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type ClassResource, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
-import { uuidv7 } from "../ids.ts";
 import { expectOf } from "../permissions.ts";
 import { hash128, stableStringify } from "../project.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
@@ -151,8 +150,8 @@ export type SyncInput = {
    * (DDBBUILD-ASTRA-02).
    */
   resourceRecord?: Pick<DdbSyncPatch, "res" | "gone" | "from"> | null;
-  /** The ids additions take, for a test to fix. */
-  newId?: () => string;
+  /** The ids additions take: the room's maker (client/state/store.ts newId), or a test's. */
+  newId: () => string;
 };
 
 export type SyncPlan = {
@@ -578,7 +577,7 @@ export function planSync(input: SyncInput): SyncPlan {
     whole: fill.read?.resource === true,
     list: character.resources,
     record: resourceRecord,
-    newId: input.newId ?? (() => uuidv7()),
+    newId: input.newId,
   });
   const resourceItems = [...resources.slots.flatMap((s) => (s.item ? [s.item] : [])), ...resources.extra];
 

@@ -6507,7 +6507,7 @@ export function fu30Tests(): void {
   test(`fu30-c. the D&D Beyond review with class resources, 14 read and 12 kept, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, its Class resources group folded and open, within ${LIMIT_PX} px (docs/design/design-v1-ddb-resources.md 6.3, DDBRES-ALIGN)`, async () => {
     // Thorn linked to D&D Beyond, whose answer Pat's page gets from here: no request leaves the machine.
     await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { sheetUrl: ddbSheetUrl(DDB_THORN) } } });
-    await pat.route("**/api/rooms/*/ddb-import", (route) => route.fulfill({ status: 200, json: { fill: readDdbCharacter(ddbThorn()) } }));
+    await pat.route("**/api/rooms/*/ddb-import", (route) => route.fulfill({ status: 200, json: { fill: readDdbCharacter(ddbThorn(), () => uuidv7()) } }));
     const lines: string[] = [];
     try {
       for (const at of FU30_AT) {

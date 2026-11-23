@@ -9,6 +9,7 @@ import type { Op } from "#shared/protocol.ts";
 import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, drawing, entry, imageRef, randomState, rng, room, srdImage, template, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 describe("roomStateSchema", () => {
   test("an encounter holds as many rows as the far line allows, so a big fight's backup imports", () => {
@@ -180,7 +181,7 @@ describe("roomStateSchema", () => {
     s.characters[first].ddbSync = { at: "9999-12-31T23:59:59.999Z", base: { level: 5 }, rolls: {} };
     const parsed = parseRoomState(s, NOW);
     assert.ok(parsed.ok);
-    const remapped = remapState(parsed.state, { assets: new Map() });
+    const remapped = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(Object.values(remapped.characters).map((c) => c.ddbSync?.at).filter(Boolean), ["2026-10-22T12:00:00.000Z"]);
   });
 
@@ -688,12 +689,12 @@ describe("roomStateSchema, a Druid's known forms (docs/design/design-v1-known-fo
   test("an empty list imports, and the remap stores it as none", () => {
     const parsed = parseRoomState(withForms([]));
     assert.ok(parsed.ok);
-    const out = remapState(parsed.ok ? parsed.state : room(), { assets: new Map() });
+    const out = remapState(parsed.ok ? parsed.state : room(), { assets: new Map(), newId: () => uuidv7() });
     for (const c of Object.values(out.characters)) assert.equal("knownForms" in c, false);
   });
 
   test("the forms travel through the remap as they are, since SRD ids are not room ids", () => {
-    const out = remapState(withForms(["wolf", "owl"]), { assets: new Map() });
+    const out = remapState(withForms(["wolf", "owl"]), { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(Object.values(out.characters).flatMap((c) => c.knownForms ?? []), ["wolf", "owl"]);
   });
 
@@ -758,7 +759,7 @@ describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)",
     const state = played();
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(out.clock, state.clock);
     const [rested] = Object.values(out.characters);
     assert.deepEqual(rested!.longRest, { at: 16 * 3_600, clock: "clock-1" });
@@ -769,7 +770,7 @@ describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)",
     for (const clock of [undefined, null]) {
       const parsed = parseRoomState({ ...JSON.parse(JSON.stringify(room())), ...(clock === null ? { clock } : {}) });
       assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-      assert.ok(!("clock" in remapState(parsed.state, { assets: new Map() })));
+      assert.ok(!("clock" in remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() })));
     }
   });
 
@@ -812,7 +813,7 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
     assert.ok(state.encounterHistory.length > 0);
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     const [bree] = Object.values(out.characters);
     assert.deepEqual(bree!.actor.effects[0]!.ends, { span: 8 * H, at: 16 * H, clock: "clock-1" });
     const [gob] = Object.values(out.tokens);
@@ -845,7 +846,7 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
     const state = apply(timed(), { t: "clock.advance", by: 60, claim }, DM, 9);
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(out.log.filter((l) => l.data?.type === "clock").map((l) => (l.data as { claim?: string }).claim), [undefined, claim]);
     const long = JSON.parse(JSON.stringify(state));
     long.log.find((l: { data?: { claim?: string } }) => l.data?.claim === claim).data.claim = "x".repeat(65);
@@ -868,7 +869,7 @@ describe("time of day light and dawn and dusk in a backup (docs/design/design-v1
     assert.deepEqual(state.scenes.s1!.vision, { on: true, light: "dim", byClock: true });
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(out.clock?.daylight, { dawn: 5 * H + 30 * 60, dusk: 19 * H + 30 * 60 });
     assert.deepEqual(Object.values(out.scenes).find((s) => s.name === "s1")?.vision, { on: true, light: "dim", byClock: true });
   });
@@ -905,7 +906,7 @@ describe("placements between squares in a backup (docs/design/design-v1-snap-off
     const state = placed();
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     const byName = (name: string) => Object.values(out.tokens).find((t) => t.name === name);
     assert.deepEqual(byName("Bree")!.nudge, { x: 3, y: -3 });
     assert.deepEqual(byName("Cat")!.nudge, { x: -1, y: 0 });

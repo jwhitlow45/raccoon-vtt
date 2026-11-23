@@ -69,9 +69,10 @@ export const PASTE_LIMIT = 5 * 1024 * 1024;
 /**
  * Pasted JSON read on this device (6.3): the `{ success, data }` envelope
  * or the bare data, up to 5 MiB, refused before reading past it. The reader
- * loads in its own chunk on first use.
+ * loads in its own chunk on first use. Its roll ids are `newId`'s, the
+ * room's maker.
  */
-export async function readPastedJson(text: string): Promise<{ fill: PcFill } | { error: string }> {
+export async function readPastedJson(text: string, newId: () => string): Promise<{ fill: PcFill } | { error: string }> {
   if (text.length > PASTE_LIMIT || new Blob([text]).size > PASTE_LIMIT) return { error: DDB_WORDS.tooBig };
   let json: unknown;
   try {
@@ -80,6 +81,6 @@ export async function readPastedJson(text: string): Promise<{ fill: PcFill } | {
     return { error: DDB_WORDS.unreadable };
   }
   const { readDdbCharacter } = await import("#shared/ddb/read.ts");
-  const fill = checkedFill(readDdbCharacter(json));
+  const fill = checkedFill(readDdbCharacter(json, newId));
   return fill ? { fill } : { error: DDB_WORDS.unreadable };
 }

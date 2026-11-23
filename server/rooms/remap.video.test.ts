@@ -5,6 +5,7 @@ import { projectState, visibleAssetIds } from "#shared/project.ts";
 import { P1, room } from "#shared/testutil.ts";
 import { refillMapVideos, remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /**
  * A backup's videos on import (docs/design/design-v1-animated-maps.md 9.3):
@@ -57,7 +58,7 @@ const REAL = new Map<string, VideoFacts>([
 ]);
 
 function imported(rows: [string, ImportedAsset][] = ROWS, real: ReadonlyMap<string, VideoFacts> = REAL): RoomState {
-  return refillMapVideos(remapState(file(), { assets: new Map(rows) }), real);
+  return refillMapVideos(remapState(file(), { assets: new Map(rows), newId: () => uuidv7() }), real);
 }
 
 describe("a backup's videos on import (docs/design/design-v1-animated-maps.md 9.3)", () => {
@@ -138,7 +139,7 @@ describe("how to draw a backup's videos on import (docs/design/design-v1-video-t
     const claimed = file();
     // The file says the plain crypt video is turned and the turned day video is plain: the rows win.
     claimed.scenes.s2!.map!.video = { ...claimed.scenes.s2!.map!.video!, turn: 180 };
-    const state = refillMapVideos(remapState(claimed, { assets: new Map(ROWS) }), real);
+    const state = refillMapVideos(remapState(claimed, { assets: new Map(ROWS), newId: () => uuidv7() }), real);
     const [s1, s2] = Object.values(state.scenes).sort((a, b) => a.order - b.order);
     assert.deepEqual(s1!.map?.video, { assetId: "v-day2", ...facts({ turn: 180, mirror: true }) });
     assert.deepEqual(s1!.phases?.[1]?.video, { assetId: "v-night2", ...facts({ widthPx: 1440, displayWidthPx: 1920 }) });
@@ -152,7 +153,7 @@ describe("how to draw a backup's videos on import (docs/design/design-v1-video-t
     assert.equal(Object.values(imported(ROWS, real).scenes).find((s) => s.map?.assetId === "crypt2")?.map?.video, undefined, "1080 x 1920 drawn over a 1920 x 1080 still");
     const portrait = file();
     portrait.scenes.s2!.map = { ...MAP, assetId: "crypt", widthPx: 1080, heightPx: 1920, video: v("v-crypt") };
-    const state = refillMapVideos(remapState(portrait, { assets: new Map(ROWS) }), real);
+    const state = refillMapVideos(remapState(portrait, { assets: new Map(ROWS), newId: () => uuidv7() }), real);
     assert.deepEqual(Object.values(state.scenes).find((s) => s.map?.assetId === "crypt2")?.map?.video, { assetId: "v-crypt2", ...facts({ turn: 90 }) });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
   });

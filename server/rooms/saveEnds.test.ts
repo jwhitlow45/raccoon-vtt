@@ -5,6 +5,7 @@ import { AT, actor, effect, room, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { describeOp } from "./undoLabels.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /** A save that ends an effect in a room's export and its undo words (docs/design/design-v1-roll-options.md 6.1). */
 function withSave(): RoomState {
@@ -23,7 +24,7 @@ describe("save ends in a room's export", () => {
   });
 
   test("remap keeps the save, moves the line to the new token, and drops the occurrence, whose line and request stay behind", () => {
-    const out = remapState(withSave(), { assets: new Map() });
+    const out = remapState(withSave(), { assets: new Map(), newId: () => uuidv7() });
     const gob = Object.values(out.tokens)[0]!;
     const fx = (gob.actor as { inline: { effects: Effect[] } }).inline.effects[0]!;
     assert.deepEqual([fx.save, fx.due], [{ ability: "wis", dc: 15, spell: true }, undefined]);

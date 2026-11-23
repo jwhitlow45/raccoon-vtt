@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Dispatcher, MockAgent } from "undici";
+import { idTime, sealedTime } from "#shared/ids.ts";
 import { FakeAuth, randomRoomId, testConfig } from "../assets/testApp.ts";
 import { tempDir } from "../assets/testImages.ts";
+import { RoomIdKeys } from "../rooms/idKeys.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./ddbImport.ts";
 import { registerSecurity } from "./security.ts";
 
@@ -99,6 +101,25 @@ describe("POST /api/rooms/:id/ddb-import", () => {
     // The read marks reach the device, since a re-sync removes a linked roll or class resource only of a kind read whole. This character sends no spell lists or actions.
     assert.deepEqual(fill.read, { weapon: true, spell: false, other: false, resource: false });
     assert.equal(res.headers["cache-control"], "no-store");
+  });
+
+  test("a fill's roll ids are version 8, sealed under the room's server key at the fetch", async () => {
+    const { post, service, roomId, app } = await setup();
+    const armed = character() as { data: Record<string, unknown> };
+    armed.data.inventory = [{ equipped: true, definition: { id: 903, name: "Rapier", filterType: "Weapon", damage: { diceString: "1d8" }, damageType: "Piercing", attackType: 1, properties: [{ name: "Finesse" }], grantedModifiers: [] } }];
+    service.intercept({ path: PATH("12345678"), method: "GET" }).reply(200, armed);
+    const before = Date.now();
+    const res = await post("https://www.dndbeyond.com/characters/12345678");
+    assert.equal(res.statusCode, 200);
+    const { fill } = res.json() as { fill: { stats: { rolls: { id: string }[] } } };
+    assert.equal(fill.stats.rolls.length, 1);
+    const keys = new RoomIdKeys(app.config.roomSecretKey, roomId);
+    for (const { id } of fill.stats.rolls) {
+      assert.equal(idTime(id), null);
+      const at = sealedTime(keys.server.key, id);
+      assert.ok(at !== null && at >= before && at <= Date.now(), "read under the server key, at the fetch");
+      assert.equal(sealedTime(keys.member("m").key, id), null);
+    }
   });
 
   test("CSRF, the grant, and a link that is not D&D Beyond's", async () => {

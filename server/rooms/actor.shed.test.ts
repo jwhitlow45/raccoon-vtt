@@ -16,6 +16,7 @@ import { remapState } from "./remap.ts";
 import { storedBytes } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { restartStored, scopeFixture, storedActor, StoredRoomDb, type ScopeClient } from "./undoScopeTesting.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /*
  * The shed at a batch's close (actor.ts #shed, sizeGuard.ts shedOf,
@@ -227,7 +228,7 @@ describe("a batch's close sheds a room past its stored bound (design 1.4)", () =
     assert.ok(state.dmLogShed !== undefined);
     const parsed = parseRoomState(JSON.parse(JSON.stringify({ ...exportableState(state, { memberId: room.f.dm.id, role: "dm" }), dmLogShed: state.dmLogShed })));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    const out = remapState(parsed.state, { assets: new Map() });
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
     assert.equal("dmLogShed" in out, false);
     assert.equal(liveStart(out, { memberId: room.f.dm.id, role: "dm" }), null);
   });

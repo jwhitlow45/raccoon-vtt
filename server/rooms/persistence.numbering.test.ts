@@ -12,6 +12,7 @@ import { withNumberingUpgrade } from "./importRoom.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /*
  * The numbering upgrade on load and import (shared/reducer/numbering.ts):
@@ -108,7 +109,7 @@ describe("an import", () => {
     const file = JSON.parse(JSON.stringify({ ...roomExport("ABCDEFGH", 9, exportableState(state, DM), ["dm1"]), schemaVersion: version })) as RoomExport;
     const parsed = parseRoomState(migrateSnapshot(file.state, file.schemaVersion));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    return withNumberingUpgrade(remapState(parsed.state, { assets: new Map() }), version);
+    return withNumberingUpgrade(remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() }), version);
   }
 
   test("of a file from before settles its numbers on the players' scene", () => {

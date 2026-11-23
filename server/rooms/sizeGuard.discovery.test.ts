@@ -13,6 +13,7 @@ import { capRoom, perPlayerRoom } from "../../scripts/bench-vision.ts";
 import { chunkCharge, layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 import {
   discoveryReserve,
   growthBound,
@@ -372,7 +373,7 @@ describe("the marked scenes' fixed shares (player limits 6.4)", () => {
     assert.ok(stored.ok);
     assert.deepEqual(memoryReserves(stored.state), memoryReserves(back.state));
     // The import makes every member a player until a DM claims it, so its roster has one more holder layer, at a whole cap too.
-    const imported = remapState(back.state, { assets: new Map() });
+    const imported = remapState(back.state, { assets: new Map(), newId: () => uuidv7() });
     assert.equal(Object.values(imported.memoryShared ?? {})[0]?.party, true);
     assert.deepEqual(memoryReserves(imported), { whole: 3 * MEMORY_CAP, sharing: 1 });
     // Undoing the fold is a switch back too: the mark is bookkeeping no undo restores, so the holders' layers take whole caps.

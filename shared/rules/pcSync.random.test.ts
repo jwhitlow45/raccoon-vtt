@@ -36,6 +36,7 @@ import {
   type SyncResult,
 } from "./pcSync.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
+import { uuidv7 } from "../ids.ts";
 
 /**
  * The re-sync merge under many random sequences (docs/design/design-v1-resync.md
@@ -596,7 +597,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
   for (const key of SYNC_FIELD_KEYS) if (readsField(fill, key)) assert.deepEqual(fieldOfBase(after, key), fieldOf(fillStats(fill), key), `5: ${key}'s base`);
   // 11. A re-sync at once with the same data brings nothing in, class resources included.
   if (result.notFit === 0 && result.resourcesNotFit === 0 && result.goneDropped.length === 0) {
-    const again = planSync({ mode, stats: after.stats, level: after.level, character: after, fill: { ...fill, stats: { ...fill.stats, rolls: fill.stats.rolls.map((roll) => ({ ...roll, id: newId("again") })) } } });
+    const again = planSync({ mode, stats: after.stats, level: after.level, character: after, fill: { ...fill, stats: { ...fill.stats, rolls: fill.stats.rolls.map((roll) => ({ ...roll, id: newId("again") })) } }, newId: () => uuidv7() });
     assert.deepEqual(again.items.filter((i) => i.section === "changes").map((i) => i.id), [], "5: nothing comes in");
     const notTaken = (id: string) => !takesTheirs([...plan.items, ...plan.also].find((x) => x.id === id)!, ticks);
     const expected = new Set([
@@ -723,13 +724,13 @@ test("40 markers hold over many deletions under incomplete reads", () => {
     fill.read = { weapon: whole, spell: true, other: true };
     return fill;
   };
-  const first = planSync({ mode: "resync", stats: undefined, level: 5, character: c, fill: read(true) });
+  const first = planSync({ mode: "resync", stats: undefined, level: 5, character: c, fill: read(true), newId: () => uuidv7() });
   c = throughReducer(state, c, syncPatch(c, syncResult(first, defaultTicks(first)))!, 1).after;
   const dropped: string[] = [];
   for (let i = 0; i < 45 && c.stats!.rolls.length > 0; i++) {
     c = { ...c, stats: { ...c.stats!, rolls: c.stats!.rolls.slice(1) } };
     state = { ...state, characters: { bree: c } };
-    const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(false) });
+    const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(false), newId: () => uuidv7() });
     const result = syncResult(p, new Set());
     dropped.push(...result.goneDropped.map((d) => d.k));
     c = throughReducer(state, c, syncPatch(c, result)!, 2 + i).after;

@@ -7,6 +7,7 @@ import { actor } from "../testutil.ts";
 import type { PcStats } from "../model.ts";
 import { readDdbCharacter } from "./read.ts";
 import { resourceNameKey, resourceNameOf } from "./resources.ts";
+import { uuidv7 } from "../ids.ts";
 
 /**
  * The class resources a D&D Beyond character's limited uses read as
@@ -76,7 +77,7 @@ function bree(actions: { class?: J[]; race?: J[]; feat?: J[] }, classes: J[] = [
 }
 
 function read(json: J): PcFill {
-  const fill = readDdbCharacter(json);
+  const fill = readDdbCharacter(json, () => uuidv7());
   assert.ok(fill, "reads as a character");
   assert.ok(checkedFill(fill), "passes the fill schema");
   return fill;
@@ -601,7 +602,7 @@ describe("an action list cut or not a list (DDBBUILD-ASTRA-01)", () => {
 
   test("reader to merge: a linked Wild Shape past the cut, or beside a list that does not read, stays with its entry", () => {
     const sync = (c: SyncCharacter, json: J): SyncCharacter => {
-      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json) });
+      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json), newId: () => uuidv7() });
       const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
       return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
     };
@@ -640,7 +641,7 @@ describe("a source the counts need, cut at its bound or not a list (DDBBUILD-AST
 
   test("reader to merge: Bardic Inspiration stays at 4 through both", () => {
     const sync = (c: SyncCharacter, json: J): SyncCharacter => {
-      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json) });
+      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json), newId: () => uuidv7() });
       const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
       return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
     };

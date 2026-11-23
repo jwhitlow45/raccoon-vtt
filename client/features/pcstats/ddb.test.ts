@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ApiError } from "../../lib/api.ts";
 import { DDB_WORDS, importErrorText, PASTE_LIMIT, quotaWords, readPastedJson } from "./ddb.ts";
+import { uuidv7 } from "../../../shared/ids.ts";
 
 /** The D&D Beyond step's words and pasted JSON (docs/design/design-v1-pc-stats.md 6.3 and Appendix D). */
 describe("the import's words", () => {
@@ -21,15 +22,15 @@ describe("the import's words", () => {
 
 describe("pasted JSON", () => {
   test("over 5 MiB is refused before reading, and what does not read says so", async () => {
-    assert.deepEqual(await readPastedJson("x".repeat(PASTE_LIMIT + 1)), { error: DDB_WORDS.tooBig });
-    assert.deepEqual(await readPastedJson("<html>"), { error: DDB_WORDS.unreadable });
-    assert.deepEqual(await readPastedJson(JSON.stringify({ success: true, data: { name: "x" } })), { error: DDB_WORDS.unreadable });
+    assert.deepEqual(await readPastedJson("x".repeat(PASTE_LIMIT + 1), () => uuidv7()), { error: DDB_WORDS.tooBig });
+    assert.deepEqual(await readPastedJson("<html>", () => uuidv7()), { error: DDB_WORDS.unreadable });
+    assert.deepEqual(await readPastedJson(JSON.stringify({ success: true, data: { name: "x" } }), () => uuidv7()), { error: DDB_WORDS.unreadable });
   });
 
   test("the envelope or the bare data reads into a fill", async () => {
     const data = { id: 7, name: "Ione Marrow", stats: [8, 14, 14, 18, 12, 10].map((value, i) => ({ id: i + 1, value })), classes: [{ level: 3, definition: { name: "Wizard", spellCastingAbilityId: 4 } }], modifiers: {} };
     for (const json of [{ success: true, data }, data]) {
-      const read = await readPastedJson(JSON.stringify(json));
+      const read = await readPastedJson(JSON.stringify(json), () => uuidv7());
       assert.ok("fill" in read);
       assert.equal(read.fill.name, "Ione Marrow");
       assert.equal(read.fill.stats.spellAbility, "int");

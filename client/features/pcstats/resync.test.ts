@@ -34,6 +34,7 @@ import {
   type ReadingBlocks,
 } from "./resync.ts";
 import { ddbCharacterId } from "#shared/ddb/link.ts";
+import { uuidv7 } from "../../../shared/ids.ts";
 
 /** A re-sync's words (docs/design/design-v1-resync.md 3), over the merge's own items. */
 
@@ -59,7 +60,7 @@ const bree = (stats?: PcStats, over: Partial<Character> = {}): Character =>
   character("bree", { name: "Bree", level: 5, ...(stats ? { stats } : {}), actor: actor({ ac: 15, hp: { cur: 20, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: SHEET }), ...over });
 
 function plan(c: Character, fill: PcFill): SyncPlan {
-  return planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill });
+  return planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill, newId: () => uuidv7() });
 }
 
 /** Bree after a first sync of this read. */
@@ -170,7 +171,7 @@ describe("the review's lines (3.3)", () => {
   test("the editor's Replaces line and a group's summary", () => {
     const typed = bree({ ...empty(), spellAbility: "cha", abilities: { ...empty().abilities, wis: 16, dex: 12, con: 14 } });
     const fill = fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 18, dex: 14, con: 15 } });
-    const e = planSync({ mode: "editor", stats: typed.stats, level: 5, character: typed, fill });
+    const e = planSync({ mode: "editor", stats: typed.stats, level: 5, character: typed, fill, newId: () => uuidv7() });
     assert.equal(replacesLine(e.items.find((i) => i.id === "field:spellAbility")!, blocks(e)), "Spellcasting ability: Charisma, becomes Wisdom");
     const d = plan(typed, fill);
     const scores = d.items.filter((i) => i.group === "Ability scores");
@@ -331,7 +332,7 @@ describe("class resources' words", () => {
   test("Check these: the no-room line, and the losses warning's class resources", () => {
     const c = { name: "Bree", level: 5, stats: empty(), actor: actor({ sheetUrl: SHEET }), resources: Array.from({ length: 12 }, (_, i): ClassResource => ({ id: `o${i}`, name: `Own ${i}`, max: 1, used: 0, reset: "long" })) };
     const f: PcFill = { source: "ddb", stats: { rolls: [] }, actor: { sheetUrl: SHEET }, warnings: [], read: { weapon: true, spell: true, other: true, resource: true }, resources: [{ name: "Rage", max: 3, reset: "long" }, { name: "Luck", max: 3, reset: "long" }] };
-    const p = planSync({ mode: "resync", stats: c.stats, level: 5, character: c, fill: f });
+    const p = planSync({ mode: "resync", stats: c.stats, level: 5, character: c, fill: f, newId: () => uuidv7() });
     assert.ok(checkLines(p, syncResult(p, defaultTicks(p)), "Bree").includes("2 class resources from D&D Beyond did not fit, since a character holds 12. They come in once there is room."));
     assert.ok(checkLines(p, { ...syncResult(p, defaultTicks(p)), resourcesNotFit: 1 }, "Bree").includes("1 class resource from D&D Beyond did not fit, since a character holds 12. It comes in once there is room."));
     assert.equal(lossesText({ ...p, losses: { resources: 4 } }, "Bree"), "This takes away 4 class resources. If that is not what changed in D&D Beyond, its format may have changed. Cancel, and check the character there.");

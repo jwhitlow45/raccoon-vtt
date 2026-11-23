@@ -6,6 +6,7 @@ import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { describeOp } from "./undoLabels.ts";
 import { UndoTable } from "./undoTesting.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /** A scene's weather in stored state, a backup's import and the undo stack (docs/design/design-v1-weather.md 9). */
 describe("a scene's weather, stored, imported and undone", () => {
@@ -28,12 +29,12 @@ describe("a scene's weather, stored, imported and undone", () => {
   test("an import stores each scene's weather in its one form", () => {
     const longhand = road({ kind: "rain", wind: "moderate", toward: 135 });
     longhand.scenes.s1!.weather = { kind: "rain", wind: "moderate", toward: 135 };
-    const out = remapState(longhand, { assets: new Map() });
+    const out = remapState(longhand, { assets: new Map(), newId: () => uuidv7() });
     const [imported] = Object.values(out.scenes);
     assert.deepEqual(imported!.weather, { kind: "rain", wind: "moderate" });
-    const calm = remapState(road({ kind: "snow", toward: 90 } as SceneWeather), { assets: new Map() });
+    const calm = remapState(road({ kind: "snow", toward: 90 } as SceneWeather), { assets: new Map(), newId: () => uuidv7() });
     assert.deepEqual(Object.values(calm.scenes)[0]!.weather, { kind: "snow" }, "no toward without a wind");
-    assert.ok(!("weather" in Object.values(remapState(road(), { assets: new Map() }).scenes)[0]!), "none stays none");
+    assert.ok(!("weather" in Object.values(remapState(road(), { assets: new Map(), newId: () => uuidv7() }).scenes)[0]!), "none stays none");
   });
 
   test("its undo step is named, and only when the patch holds nothing else", () => {

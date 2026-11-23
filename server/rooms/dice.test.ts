@@ -6,6 +6,7 @@ import { AT, DM, P1, actor, apply, character, member, room, token } from "#share
 import { batchOf, resolveDice } from "./dice.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 const TAG = "0192f0a8-6c1e-7a4b-9c3d-2e1f0a9b8c7d";
 
@@ -165,7 +166,7 @@ describe("dice lines in a room's export (5.3)", () => {
   });
 
   test("remap moves the roller and every roll's creature to their new ids", () => {
-    const out = remapState(withLines(), { assets: new Map() });
+    const out = remapState(withLines(), { assets: new Map(), newId: () => uuidv7() });
     const data = out.log[0]?.data as Extract<LogEvent, { type: "dice" }>;
     const p1 = Object.values(out.members).find((m) => m.name === "p1")!;
     assert.equal(data.by, p1.id);

@@ -1,4 +1,3 @@
-import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, holderChunkKey, holderTileKey, tileKey, parseKey } from "#shared/keys.ts";
 import { tilesAcross } from "#shared/rules/fog.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
@@ -90,7 +89,8 @@ export type RemapOptions = {
   assets: ReadonlyMap<string, ImportedAsset>;
   /** Old member id to new member id, when the caller already assigned them (asset uploaders need them before the remap). */
   memberIds?: ReadonlyMap<string, string>;
-  newId?: () => string;
+  /** Makes every new id but the members': the import's maker (importRoom.ts), or a test's. */
+  newId: () => string;
 };
 
 class Ids {
@@ -117,7 +117,7 @@ class Ids {
 }
 
 export function remapState(state: RoomState, opts: RemapOptions): RoomState {
-  const newId = opts.newId ?? (() => uuidv7());
+  const newId = opts.newId;
   const members = new Ids(newId, opts.memberIds);
   const scenes = new Ids(newId);
   const tokens = new Ids(newId);

@@ -39,7 +39,7 @@ export default async (c: any) => {
     const next = answers.shift();
     asked.push(String((route.request().postDataJSON() ?? {}).link));
     if (!next) return route.fulfill({ status: 502, json: { error: "fetch_failed" } });
-    return route.fulfill({ status: 200, json: { fill: readDdbCharacter(next as any) } });
+    return route.fulfill({ status: 200, json: { fill: readDdbCharacter(next as any, () => randomUUID()) } });
   });
   const id = randomUUID();
   c.state.wren = id;

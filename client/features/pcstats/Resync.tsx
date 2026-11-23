@@ -26,8 +26,8 @@ function lineIds(plan: SyncPlan): string[] {
   return [...plan.items.map((i) => i.id), ...plan.also.map((a) => a.id), ...plan.spent.map((s) => s.id)];
 }
 
-function planFor(character: Character, fill: PcFill): SyncPlan {
-  return planSync({ mode: "resync", stats: character.stats, level: character.level, character, fill });
+function planFor(character: Character, fill: PcFill, newId: () => string): SyncPlan {
+  return planSync({ mode: "resync", stats: character.stats, level: character.level, character, fill, newId });
 }
 
 /** A refusal sorted by what the dialog does with it (3.5): the stale check's and the save budget's words are known by their text. */
@@ -111,7 +111,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     // Another player's copy of a character lacks the parts a sync reads, so one no longer this viewer's is reviewed as gone.
     if (!now || !editsPcStats(state.you, now)) return null;
     seen.current = now;
-    const plan = planFor(now, fill);
+    const plan = planFor(now, fill, actions.newId);
     return { fill, ids: lineIds(plan), ticks: defaultTicks(plan) };
   };
 
@@ -147,7 +147,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     if (readingJson) return;
     setReadingJson(true);
     setLinkError(null);
-    readPastedJson(json).then(
+    readPastedJson(json, actions.newId).then(
       (result) => {
         setReadingJson(false);
         if (!open.current) return;
@@ -170,7 +170,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
   if (live && yours) lastYours.current = live;
   // The review follows the live character, except while Apply waits, when it holds still on what Apply sent.
   const reviewCharacter = flow.applying ? frozen.current : live === undefined ? null : yours ? live : lastYours.current;
-  const plan = useMemo(() => (flow.fill && reviewCharacter ? planFor(reviewCharacter, flow.fill) : null), [flow.fill, reviewCharacter]);
+  const plan = useMemo(() => (flow.fill && reviewCharacter ? planFor(reviewCharacter, flow.fill, actions.newId) : null), [flow.fill, reviewCharacter, actions.newId]);
   const result = useMemo(() => (plan ? syncResult(plan, flow.ticks) : null), [plan, flow.ticks]);
   const op = useMemo(() => (plan && result && reviewCharacter ? syncPatch(reviewCharacter, result) : null), [plan, result, reviewCharacter]);
   useEffect(() => {

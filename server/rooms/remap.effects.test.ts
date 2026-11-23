@@ -4,6 +4,7 @@ import type { Actor, Effect, LogEntry, RoomState } from "#shared/model.ts";
 import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { actor, character, effect, entry, room, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /*
  * An import gives every condition but the bare automatic Unconscious a
@@ -56,7 +57,7 @@ const effectsOf = (state: RoomState, name: (a: Actor) => boolean): Effect[] => {
 
 describe("an import's condition ids", () => {
   const before = source();
-  const after = remapState(before, { assets: new Map() });
+  const after = remapState(before, { assets: new Map(), newId: () => uuidv7() });
   const tokenNamed = (state: RoomState, effectLabel: string) => Object.values(state.tokens).find((t) => "inline" in t.actor && t.actor.inline.effects.some((e) => e.key === effectLabel))!;
   const g1 = tokenNamed(after, "restrained");
   const g1Effects = "inline" in g1.actor ? g1.actor.inline.effects : [];

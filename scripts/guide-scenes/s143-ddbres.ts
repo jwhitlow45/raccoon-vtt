@@ -39,7 +39,7 @@ export default async (c: any) => {
   await dm.route("**/api/rooms/*/ddb-import", async (route: any) => {
     const next = answers.shift();
     if (!next) return route.fulfill({ status: 502, json: { error: "fetch_failed" } });
-    return route.fulfill({ status: 200, json: { fill: readDdbCharacter(next as any) } });
+    return route.fulfill({ status: 200, json: { fill: readDdbCharacter(next as any, () => randomUUID()) } });
   });
   // The lair fight of s141 and s142 ends first, so no turn card stands behind the dialogs.
   await c.harness.openSideTab(dm, "Initiative");

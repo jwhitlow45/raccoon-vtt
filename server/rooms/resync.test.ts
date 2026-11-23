@@ -521,7 +521,7 @@ describe("class resources in the race (docs/design/design-v1-ddb-resources.md 5)
     ],
   };
   const review = (seen: Character) => {
-    const plan = planSync({ mode: "resync", stats: seen.stats, level: seen.level, character: seen, fill });
+    const plan = planSync({ mode: "resync", stats: seen.stats, level: seen.level, character: seen, fill, newId: () => uuidv7() });
     const sent = syncPatch(seen, syncResult(plan, defaultTicks(plan)));
     assert.ok(sent);
     return { plan, sent, op: { t: "character.update", characterId: seen.id, patch: sent.patch, expect: sent.expect } as Op };

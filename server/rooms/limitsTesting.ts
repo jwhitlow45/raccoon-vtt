@@ -15,6 +15,7 @@ import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 import { farRoomBytes, measuredLog, measuredStateBytes, memoryReserves, memoryShare, projectedSceneBytes, turnWalks, walkPool } from "./sizeGuard.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /*
  * The full fixture of the player limits' bounds (design section 8): a room
@@ -537,7 +538,7 @@ export function measureBounds(full: FullRoom): Bounds {
     history: serializedBytes(state.encounterHistory),
     snapshot: serializedBytes(frame),
     exportJson: serializedBytes(exported),
-    remapped: serializedBytes(remapState(state, { assets: new Map() })),
+    remapped: serializedBytes(remapState(state, { assets: new Map(), newId: () => uuidv7() })),
   };
 }
 

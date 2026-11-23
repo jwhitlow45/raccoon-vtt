@@ -5,6 +5,7 @@ import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { AT, actor, character, room } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 /** A character's stat block in an exported room (docs/design/design-v1-pc-stats.md 3.5): it travels, by the op's own bounds, and sets its actor's numbers. */
 
@@ -41,7 +42,7 @@ describe("a stat block in room.json", () => {
   test("the block travels through the remap, which names nothing in it, and a hand-made file's actor numbers follow it", () => {
     // A hand-made file: the actor's numbers say something else than the block.
     const state = room({ characters: { bree: character("bree", { level: 5, stats: BLOCK, actor: actor({ initBonus: 9, passivePerception: 30 }) }) } });
-    const out = remapState(state, { assets: new Map() });
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const [bree] = Object.values(out.characters);
     assert.deepEqual(bree?.stats, BLOCK);
     assert.equal(bree?.actor.initBonus, 3);
@@ -80,7 +81,7 @@ describe("a sync record in room.json", () => {
   });
 
   test("the record travels through the remap as it was, since its keys hash roll ids the remap leaves alone", () => {
-    const out = remapState(synced(), { assets: new Map() });
+    const out = remapState(synced(), { assets: new Map(), newId: () => uuidv7() });
     const bree = Object.values(out.characters).find((c) => c.stats !== undefined);
     assert.deepEqual(bree?.ddbSync, RECORD);
     assert.deepEqual(bree?.stats?.rolls.map((r) => r.id), ["r1"]);
