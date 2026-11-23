@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { LIMITS } from "#shared/limits.ts";
-import { ActorClosedError, RoomActor, type ActorOptions, type DeletionRun, type Logger } from "./actor.ts";
+import { ActorClosedError, DEFAULT_ACTOR_OPTIONS, RoomActor, type ActorOptions, type DeletionRun, type Logger } from "./actor.ts";
 import { ActorGateway } from "./actorGateway.ts";
 import { SnapshotBudget, type Clock, type SnapshotBudgetLimits } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
@@ -125,6 +125,17 @@ export class RoomManager {
     // Receipts go by their own time alone (persistence.ts pruneReceipts), so their sweep runs at start too, and a
     // server restarted more often than daily still deletes them on time.
     void this.#pruneReceipts();
+  }
+
+  /** The rooms' clock, the one their ops' moments read, which a reader's arrival reads too (server/app.ts). */
+  serverTime(): number {
+    return (this.options.actor.now ?? DEFAULT_ACTOR_OPTIONS.now)();
+  }
+
+  /** The last tick at or before `at` on the rooms' grid: the tick a reader that arrived then answers as of (RoomActor.asOf). */
+  arrivalTick(at: number): number {
+    const batchMs = this.options.actor.batchMs ?? DEFAULT_ACTOR_OPTIONS.batchMs;
+    return Math.floor(at / batchMs) * batchMs;
   }
 
   get loadedRoomIds(): string[] {

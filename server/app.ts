@@ -33,6 +33,7 @@ import { network, type LocalNetwork } from "./local/network.ts";
 import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
 import { sortedReplies } from "./http/sortedReplies.ts";
+import { DEFAULT_ACTOR_OPTIONS } from "./rooms/actor.ts";
 import { TooBusyError } from "./rooms/errors.ts";
 import { RoomNotFoundError, type RoomGateway } from "./rooms/gateway.ts";
 import { RoomManager, type ManagerOptions } from "./rooms/manager.ts";
@@ -104,6 +105,14 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
   sortedReplies(app);
   app.decorate("config", config);
   app.decorate("pool", pool);
+  // Each request's arrival on the rooms' clock, read before any hook or route awaits anything: a route that answers
+  // from a room's state answers as of this moment (RoomActor.asOf), whatever its session, grant and limit reads cost.
+  const roomClock = rooms?.actor?.now ?? DEFAULT_ACTOR_OPTIONS.now;
+  app.decorateRequest("arrivedAt", 0);
+  app.addHook("onRequest", (req, _reply, done) => {
+    req.arrivedAt = roomClock();
+    done();
+  });
 
   // Every scope's own handler answers the refusals it expects and passes the
   // rest up to here. An unexpected failure is logged in full and answered
@@ -237,6 +246,10 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
 }
 
 declare module "fastify" {
+  interface FastifyRequest {
+    /** When the request arrived, on the rooms' clock (RoomManager.serverTime), stamped before anything else runs. */
+    arrivedAt: number;
+  }
   interface FastifyInstance {
     config: Config;
     pool: pg.Pool;
