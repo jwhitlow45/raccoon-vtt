@@ -1,3 +1,4 @@
+import { pointerWords } from "../lib/pointerWords.ts";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { Token } from "#shared/model.ts";
 import { drawsAllowed } from "#shared/permissions.ts";
@@ -997,6 +998,8 @@ export type Behavior = {
   /** Any condition beyond the role, in lowercase, as FEATURES.md writes it after the role: "with the Select tool". */
   when?: string;
   device: BehaviorDevice;
+  /** A screen reader gesture: its words say tap whatever the pointer, so the sheet keeps them. */
+  touch?: true;
   /** The surface it works in, which names its section. Left out, the map or the whole room. */
   surface?: Surface;
 };
@@ -1131,11 +1134,11 @@ export const BEHAVIORS: readonly Behavior[] = [
   // The side panel's edge (docs/design/design-v1-panel-size.md 4.1): pages/PanelEdge.tsx and pages/panelWidth.ts resetWrite.
   { id: "panelEdgeDouble", input: "Double-click the side panel's edge", does: "Put it back to its default width", roles: EVERYONE, device: "mouse" },
   { id: "rollOptionsHold", input: "Hold a roll button", does: "Open its one-roll options after half a second, without rolling. Tap a choice to roll once that way", roles: EVERYONE, device: "pointer" },
-  { id: "rollOptionsReader", input: "Double-tap and hold a roll button with a screen reader", does: "Open its one-roll options. A plain double-tap still rolls", roles: EVERYONE, device: "pointer" },
+  { id: "rollOptionsReader", input: "Double-tap and hold a roll button with a screen reader", does: "Open its one-roll options. A plain double-tap still rolls", roles: EVERYONE, device: "pointer", touch: true },
   // A stat block's ability boxes and the rolls they open (docs/design/design-v1-stat-block-rolls.md 3.3 and 5.1): features/dice/useAbilityMenu.tsx. Their keys are under Token and character fields.
   {
     id: "abilityBoxOpen",
-    input: "Tap, click, hold or right-click an ability box in a stat block",
+    input: "Tap, hold or right-click an ability box in a stat block",
     does: "Open its rolls: the check, the save, its skills, and Initiative under Dexterity. Tap one to roll it",
     roles: EVERYONE,
     when: "where you may roll for the creature",
@@ -1150,7 +1153,7 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "pointer",
   },
   // Generated dungeons' room edits and Add a wing (docs/design: dungeon generator phase 3, 4.1 and 3.1): dungeon/Preview.tsx and builder/wingGhost.ts ghostRoomAt for a room, builder/wingPick.ts withWingMode for the area and the join.
-  { id: "roomEdits", input: "Tap or click a room in the preview or the wing's ghost", does: "Open its edits", roles: DM, when: "in Generate a dungeon, or in Add a wing with Edit rooms on", device: "pointer" },
+  { id: "roomEdits", input: "Tap a room in the preview or the wing's ghost", does: "Open its edits", roles: DM, when: "in Generate a dungeon, or in Add a wing with Edit rooms on", device: "pointer" },
   { id: "wingArea", input: "Drag in Add a wing", does: "Set the wing's area", roles: DM, when: "in the Map builder", device: "pointer" },
   { id: "wingJoin", input: "Tap a wall in Add a wing", does: "Set where the wing joins", roles: DM, when: "in the Map builder", device: "pointer" },
   { id: "linkMove", input: "Drag an end of stairs, a ladder or an opening", does: "Move that floor's end, or both ends of an opening", roles: DM, when: "in Between floors, in the Map builder", device: "pointer" },
@@ -1481,7 +1484,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "setupUndo", input: "Ctrl+Z (Cmd+Z on a Mac)", does: "Undo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
   { id: "setupRedo", input: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", does: "Redo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
   { id: "setupEscape", input: "Escape", does: "Close the sheet and return focus to its opener", roles: DM, device: "keys", surface: "Setup history" },
-  { id: "historyDoubleClick", input: "Double click or tap on Undo or Redo", does: "Take back or restore one step. A second tap in the same double-click sequence never takes the following step", roles: EVERYONE, device: "pointer" },
+  { id: "historyDoubleClick", input: "Double-tap Undo or Redo", does: "Take back or restore one step. A second tap in the same double-click sequence never takes the following step", roles: EVERYONE, device: "pointer" },
   // A panel shown as a sheet: lib/backSwipe.ts, from components/Sheet.tsx.
   {
     id: "panelSwipeBack",
@@ -1566,8 +1569,10 @@ function keyRow(s: Shortcut, keys: KeyMap): SheetRow {
   return key === UNBOUND ? { id: s.id, input: NO_KEY, does: s.does, keys: false, rebind } : { id: s.id, input: keyLabel(key), does: s.does, keys: true, rebind };
 }
 
+/** The sheet reads Click for a mouse where its rows say Tap: they hold fixed words and no names. */
 function sheetRow(b: Behavior): SheetRow {
-  return { id: b.id, input: b.input, does: b.does, ...(b.when ? { when: b.when } : {}), keys: b.device === "keys" };
+  const words = (text: string) => (b.touch ? text : pointerWords(text));
+  return { id: b.id, input: words(b.input), does: words(b.does), ...(b.when ? { when: b.when } : {}), keys: b.device === "keys" };
 }
 
 /**
