@@ -276,13 +276,15 @@ that changes the desktop app. A push to a `ci/` branch that changes
 checks and the Windows x64 and Linux x64 installers on its own.
 
 The checks run what CI on Ubuntu cannot: the desktop packages' typecheck,
-the unit and integration tests on Windows, the server's integration tests
-against the bundled PostgreSQL, and the desktop app's own tests. A
-failure fails the run, except in the app's own unit and integration
-suites on Windows, which only report. Before the first desktop release,
-check on a real Mac what CI cannot: download the arm64 DMG from a dry run
-in Safari, open the app, approve it with **Open Anyway**, and see the
-database start with no further prompt.
+the shared, server and client unit tests, the server's integration tests
+against the bundled PostgreSQL, and the desktop app's own tests. A release
+run and a dry run check on Windows and macOS, and a branch run on Windows
+and Ubuntu. A failure fails the run, except in the shared, server and
+client unit tests and the server's integration tests on Windows, which
+only report. The desktop app's own tests are a gate on every system.
+Before the first desktop release, check on a real Mac what CI cannot:
+download the arm64 DMG from a dry run in Safari, open the app, approve it
+with **Open Anyway**, and see the database start with no further prompt.
 
 Dependabot proposes updates to the desktop packages (`desktop/package.json`)
 apart from the server's. CI does not install them, so push an update's
