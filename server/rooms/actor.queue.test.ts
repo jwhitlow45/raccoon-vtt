@@ -7,7 +7,7 @@ import { RoomActor, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { ScopeClient, scopeFixture, StoredRoomDb } from "./undoScopeTesting.ts";
+import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
 /*
  * The queue in arrival order (RoomActor #enqueue, #drain, #armTimer): each
@@ -156,6 +156,44 @@ describe("a batch closes once its tick's commands are handled", () => {
     const frames = new Set(sent.map(([client, n]) => frameOf(client.sent, n)?.seq));
     assert.equal(frames.size, 1, "every chat in the one batch of tick T + 20");
     assert.ok([...frames][0]! >= T + 20);
+  });
+
+  test("a command that arrives once the drain has let the loop go waits for the drain's next turn", async (t) => {
+    const r = await room(t, { dms: 3, options: { roomOpsPerSec: 100_000 } });
+    const step = heldStep(r.actor);
+    await flush();
+    for (let i = 0; i < 12; i++) chat(r.dms[i % 3]!, `dm ${i}`);
+    await flush();
+    assert.equal(r.actor.queueLength, 12);
+    // Every reading of the loop's clock moves it 3 ms, so a turn takes a few commands and lets the loop go.
+    let loopClock = 0;
+    const loop = t.mock.method(performance, "now", () => (loopClock += 3));
+    step.release();
+    // The step's end drains one turn and queues the next. This callback was queued first, so it runs between them.
+    await new Promise((resolve) => setImmediate(resolve));
+    const left = r.actor.queueLength;
+    assert.ok(left > 0 && left < 12, `${left} commands left after one turn`);
+    const late = chat(r.dms[0]!, "late");
+    assert.equal(r.actor.queueLength, left + 1, "the arrival took no command");
+    loop.mock.restore();
+    await flush();
+    assert.equal(r.actor.queueLength, 0);
+    assert.equal(await until(() => answerOf(r.dms[0]!, late), "the late chat's answer"), "taken");
+  });
+
+  test("the drains of one turn of the loop share its budget, so arrivals past it wait for the next turn", async (t) => {
+    const r = await room(t, { dms: 3, options: { roomOpsPerSec: 100_000 } });
+    await flush();
+    let loopClock = 0;
+    const loop = t.mock.method(performance, "now", () => (loopClock += 3));
+    // Twelve chats arrive in one turn of the loop, each drained as it arrives while the turn's budget lasts.
+    const sent = Array.from({ length: 12 }, (_, i) => chat(r.dms[i % 3]!, `dm ${i}`));
+    const waiting = r.actor.queueLength;
+    assert.ok(waiting > 0 && waiting < 12, `${waiting} chats wait for the next turn`);
+    loop.mock.restore();
+    await flush();
+    assert.equal(r.actor.queueLength, 0);
+    for (const [i, n] of sent.entries()) assert.equal(await until(() => answerOf(r.dms[i % 3]!, n), `chat ${i}'s answer`), "taken");
   });
 
   test("a timer that fires late closes the batch at its tick, and one an op arrives after is in the next batch", async (t) => {

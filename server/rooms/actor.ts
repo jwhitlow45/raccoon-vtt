@@ -716,6 +716,8 @@ export class RoomActor {
   #draining = false;
   /** The drain's next turn, once it let the event loop go with commands still queued (DRAIN_TURN_MS). */
   #drainTurn: NodeJS.Immediate | null = null;
+  /** When this turn of the event loop's DRAIN_TURN_MS ends: set by its first drain, cleared once the loop reaches its immediates. */
+  #turnEnds: number | null = null;
   /** The newest moment the drain took a command at, and the newest tick a batch closed at, which a delayed snapshot never goes behind. */
   #lastTaken: Moment | null = null;
   #lastClosedTick = Number.NEGATIVE_INFINITY;
@@ -1654,9 +1656,16 @@ export class RoomActor {
   }
 
   #drain(): void {
-    if (this.#draining || this.#closed) return;
+    // One DRAIN_TURN_MS for every drain in a turn of the event loop, and once a turn is owed, a command that arrives or a
+    // commit that lands only waits for it. A turn that delivers many arrivals, one drain each, would otherwise hold the
+    // loop for all of their handling end to end, past any bound, once they come faster than the room handles them.
+    if (this.#draining || this.#closed || this.#drainTurn !== null) return;
     this.#draining = true;
-    const until = performance.now() + DRAIN_TURN_MS;
+    if (this.#turnEnds === null) {
+      this.#turnEnds = performance.now() + DRAIN_TURN_MS;
+      setImmediate(() => (this.#turnEnds = null));
+    }
+    const until = this.#turnEnds;
     try {
       // Backpressure: past MAX_PENDING_BATCHES closed batches waiting, handling waits for the oldest to land.
       while (this.#pending.length < MAX_PENDING_BATCHES && this.#stepRunning === null && this.#reading === null && !this.#closed) {
