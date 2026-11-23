@@ -1,5 +1,138 @@
 # Changelog
 
+## v0.5.0 (2026-11-23)
+
+### Features
+
+- **desktop**: each part of a start is logged and bounded, and one that overruns stops the start with words
+- **desktop**: the shell's main process, window, tray, updater and preload
+- **desktop**: the shell's rules for closing, quitting, sleep, updates and the window's calls, tested without electron
+- **desktop**: the window page with a fake bridge, every state's words and unit tests
+- **client**: links for other devices use the share origin and Copy falls back on plain HTTP
+- **client**: copy and share origin helpers for plain HTTP, with the secure-context audit
+- **desktop**: the supervisor's states, commands, app server, rooms and crash restarts, with a randomized test
+- **desktop**: the windows network profile watcher, which closes the server to players on any doubt
+- **desktop**: restore into a second database, swapped by renames, that the next start finishes or undoes
+- **desktop**: backups from one snapshot with a shared image store, retention, and the data's format stamp
+- **desktop**: the bundled postgresql, made once and started on a free loopback port, and a throwaway one for ci's tests
+- **desktop**: one supervisor per data folder, held by a socket that a stale one is recovered from under a guard
+- **desktop**: the supervisor's data folder, durable writes, settings, secrets, logs and ports
+- **admin**: the admin script's --no-schema and --json flags, for the desktop app's room list and new dm link
+- **server**: the desktop app's supervisor stops the server over its channel and hears its socket counts
+- **server**: local mode answers only its own hosts and private peers, and only the host computer makes or imports rooms
+- **server**: the socket registry counts other devices, leaving out this computer's own tabs
+- **server**: local mode's session cookies work over plain HTTP, and its image fetches go out directly
+- **server**: local mode's hosts, origins and peers come from this computer's own network addresses
+- **server**: local mode for the desktop app, a production build that refuses the hosted-only settings
+- **ui**: tapped and tapping read clicked and clicking on a mouse
+- **shared**: sortedJson writes json with every object's keys in sorted order
+- **sync**: the server sends its op version to a page that asks, and a page on older code reloads once
+
+### Fixes
+
+- **floors**: a hole's pills keep off a trap's name where it is placed before the isometric nudge, so no layer chases another
+- **xcard**: the card reads someone used the x-card on every device
+- **floors**: a hole's depth chip and name keep off a trap's name pill
+- **ui**: an armed confirm in a tool's more pop-up draws at its armed width and reads whole
+- **server**: local mode's exit waits for its last log lines, so a stop's last line reaches server.log through a full pipe
+- **desktop**: the installer's running check runs once more before it says windows could not tell
+- **server**: local mode logs through node's own stdout, so a server whose supervisor died still exits after its stop
+- **desktop**: the supervisor closes the sockets it inherited from the shell on linux, so a killed shell's renderers end with it
+- **desktop**: the supervisor skips a send to the shell once its channel has closed, so a status sent mid-stop is no uncaught error
+- **desktop**: leftover() takes a postmaster's start reading from the same read as its program, so it never pairs one process's reading with another's facts
+- **desktop**: a remembered postmaster the listing misses holds the proof while it runs with its start reading, or one that can't be read
+- **desktop**: a pass keeps and stops postmasters by the listing's own start readings, so nothing is read between the listing and a stop or kill
+- **desktop**: each process listing row carries its start reading, read by the same parser processStamp uses, with windows reading creationdate for both
+- **desktop**: retention removes a store shard once it lists only files the pass removed, as windows lists a deleted file another process still holds
+- **desktop**: a lock guard swapped between the read and the look is read again, so a contender never reads a newer owner's guard as unreadable
+- **desktop**: a windows postmaster is exact with the space cmd.exe adds after its program, and the real-cluster test prints what each system lists
+- **desktop**: under hidepid a process of this user's that can't be dumped is skipped, and the comment says /proc/<pid> keeps its effective uid
+- **desktop**: a loosely listed process that postmaster.pid names is stopped through pg_ctl once leftover() confirms it is this folder's postmaster, and never killed
+- **desktop**: the bundled pg_ctl start for this folder, as its fork before the shell or windows' restricted copy, holds the proof and is never signalled
+- **desktop**: every postmaster this process started or saw named is kept until postgresql's end is proven and never killed, and a postmaster.pid that can't be read permits no kill
+- **desktop**: a pass signals only from its own listing and one postmaster.pid read, and a pg_ctl stop ends the pass
+- **desktop**: a process with the postmaster's exact command beside the running postmaster that postmaster.pid names is never killed, as it is a child just forked
+- **desktop**: a postmaster that postmaster.pid names, or once named, is never killed: immediate is sent again each minute and its own exit is the proof
+- **desktop**: on windows the listing counts pg_ctl's cmd.exe launcher and an unreadable postgres.exe in this session, and comspec is pinned to windows' own cmd.exe
+- **desktop**: a linux command line that can't be read counts as gone only on enoent or esrch, and a process of this user's fails the listing
+- **desktop**: only a process exactly as pg_ctl starts the bundled postgres for this folder is signalled, and one that only names the folder holds the proof
+- **desktop**: a clean pg_ctl stop of its own postmaster is proof, a named postmaster is stopped immediate before any kill, and its 10 s starts at the first signal
+- **desktop**: the lock goes only once a process listing proves no postmaster of the data folder runs, and initdb is never cancelled
+- **desktop**: the lock's linux and macos socket paths join with posix separators on any host
+- **desktop**: a headless supervisor waits out a stalled part, and the stall words say no progress was reported
+- **desktop**: the cluster owns initdb, pg_ctl and the postmaster to their end, and every database client times out
+- **desktop**: a start part past its bound is still waited for, and quit ends what can end early before the lock goes
+- **desktop**: recovery reads the databases again just before each drop or rename, ends between steps when cancelled, and reports progress
+- **desktop**: a pg_ctl start that fails, overruns or is cancelled stops the postmaster it launched once pg_ctl has exited
+- **desktop**: postgresql connections and the powershell and netsh readings end after a bound
+- **desktop**: pg_ctl start is waited on to its exit, since on windows the postmaster holds its pipes open
+- **desktop**: the installer keeps a programdata folder that is there only with exactly its acl, and moves anything else aside
+- **desktop**: postgresql gets the data folder by a path that depends on the folder alone, from its canonical path, its record or a junction named for it
+- **desktop**: the installer makes the raccoonvtt folder in programdata with its acl in one call, and the windows ci jobs make it as well
+- **desktop**: the data folder keeps the way postgresql was first given it, and a junction's folder is made the user's own in one call under the installer's
+- **desktop**: on windows postgresql gets each folder by a path its code page holds, by short name or a junction in programdata
+- **desktop**: a postmaster.pid is from an earlier boot only when the boot id recorded at its start is another, never by the clock
+- **desktop**: on windows the cluster's folder renames wait out a file another program holds open, for up to 30 s
+- **desktop**: the room list drops its 10 s timer, and a first list that failed is asked for again on focus or show
+- **server**: macos bridge100 and up stay eligible, since internet sharing serves real player devices
+- **desktop**: a postmaster.pid is stale only on evidence, an earlier boot, another program or another user, and running needs postgres in this folder
+- **desktop**: the window's room list is asked for again when the window comes forward and every 10 s while it shows
+- **server**: the address shown to players skips libvirt, lxc, lxd, podman, cni, parallels and macos sharing bridges
+- **desktop**: a restore.json that does not read is deleted once the databases show nothing to recover
+- **desktop**: postgresql's folder appears only once initdb and the app's settings are written and flushed, and a cut-off init is moved aside
+- **desktop**: a postmaster is told from a reused pid without trusting the clock, and its postmaster.pid stays while that is uncertain
+- **desktop**: a log line that cannot be written or rotated is dropped instead of thrown
+- **desktop**: a missing secrets.json beside an existing database stops the start, and new secrets are never written over it
+- **desktop**: the installer's running check parses in powershell, and the installer stops with words while a program runs or the check fails
+- **desktop**: the network watcher drops its sample when its child exits or cannot start, so players are shut out at once
+- **desktop**: desktop paths come from fileURLToPath and the window e2e runs vite on node, so both work on windows
+- **desktop**: the window gets no icon option on macOS and windows, where electron warned about an empty one
+- **desktop**: a --smoke run echoes the shell's log to stderr, so a run that stops before the data folder is known says why
+- **desktop**: the packed app carries the staged server's node_modules, which electron-builder dropped, and pack.ts checks every file arrived
+- **client**: the share origin hooks render on the server with no answer yet
+- **auth**: the common password list still refuses its passwords when checked out with Windows line ends
+- **shortcuts**: the sheet's rows read Click for a mouse where they say Tap
+- **ui**: scene, settings, clock, device, x-card, map video, display and room words read Click for a mouse
+- **tokens**: token, encounter, dice and attach words read Click for a mouse
+- **tools**: ruler, select, fog, ping, pin, area and drop words read Click for a mouse
+- **builder**: wing, label and stamp words read Click for a mouse
+- **ui**: toasts and refusals word their Tap sentences for a mouse
+- **ui**: help and note lines word their fixed text for a mouse
+- **ui**: the three confirm buttons word their second press for a mouse
+- **movement**: a custom size is searched by its hex footprint, a squeezed member at the east or south edge no longer freezes a group, and the ruler reads a group lead where it lands
+- **movement**: a group dragged past the edge keeps its shape, the DM's drops stay free, and the label reads where it lands
+- **permissions**: a player's move, seat or get-off that ends past the scene's edge is refused
+- **movement**: a drop lands inside the scene on every grid and for every role
+- **server**: every json reply lists every object's keys in sorted order
+- **shared**: sortedJson keeps a "__proto__" key as a key
+- **rooms**: frames to player sockets list every object's keys in sorted order
+- **floors**: a hole's two-line name wins only by covering fewer things, never by less area alone
+- **floors**: the holes' rest view settles at once on a scene switch and a camera jump that is no gesture
+- **floors**: a hole's name with a mark can take two lines where one line has no room
+- **floors**: in isometric a hole's pills keep off a creature's standee, not only its squares
+- **floors**: a hole's pills are judged where the screen's edge slides them, from the clear view at the camera's rest
+- **sync**: a page reloads for new code only once the version is kept for the tab and no create waits on its ids
+- **ui**: pointerWords fills a hole only for a name it was given
+- **ui**: a mouse's click words never reword a name from the room
+- **movement**: an Escape another layer used leaves the stopped walk's note open, except Room's letting go of the selection
+- **uvtt**: a floor is made with the name its row shows, and a line under the field says when that differs
+- **ui**: an options line's description reads click for a mouse as its words do
+- **movement**: the stopped walk's note closes on Escape, a new tool or another side panel
+- **undo**: undoing a show or hide of creatures reads showing and hiding
+- **ui**: a mouse reads click where hints and the fight's words say tap
+- **rolls**: a typed bonus reads after the die, with their bonus or with your bonus
+- **uvtt**: typed floor names that collide read as the floors will be named on each row and button
+- **floors**: top-down hole pills are placed together too, and every hole's pills keep off tokens
+- **floors**: a hole's pill over its own hole is a cost below another pill, and pills may hang outward beside a corner
+- **pcstats**: a known form toggle's refusal scrolls into view in the forms list
+
+### Performance
+
+- **project**: snapshots list collections in id order and keep whole-build chunks sorted
+- **floors**: a floor with no hole reads no token spots for its pills
+- **fanout**: a player's projection is never copied for stamp ranks, the stamps at another rank go to the diff as an overlay
+- **fanout**: a player's projection is copied for stamp ranks only when a stamp has to change
+
 ## v0.4.0 (2026-11-22)
 
 ### Features
