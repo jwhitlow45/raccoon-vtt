@@ -3681,6 +3681,13 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
     /** Older clients strictly validate events, so acknowledgment details require an explicit opt-in. */
     ackDetails: z.literal(true).optional(),
     /**
+     * The page makes version 8 ids (shared/ids.ts sealedId): each snapshot
+     * brings its member's key as `you.idKey`, and a refusal of new ids names
+     * them (`ids`). A page that asks is a keyed socket to the id gate
+     * (server/rooms/createIds.ts).
+     */
+    sealIds: z.literal(true).optional(),
+    /**
      * The op version of the page's own code (shared/migrate.ts OP_VERSION). A hello that carries it is answered with
      * a `build` frame, which an older page never asks for and so never receives.
      */
@@ -3724,8 +3731,19 @@ export type RefusalCode = (typeof refusalCodes)[number];
 /** The question a `forget` refusal asks the DM (docs/design/design-v1-map-discovery.md 5.3). */
 export const FORGET_ASK = "Players' remembered map here will be forgotten. Go ahead?";
 
-/** One of this client's ops the server refused, with its words, which only that client's device is sent. */
-const rejectSchema = z.strictObject({ n: z.number().int().min(1), code: z.enum(refusalCodes), message: z.string().max(200) });
+/**
+ * The most ids one refusal names (`ids`): the most new-id fields an op
+ * carries, a build's stamps or lights at their cap.
+ */
+export const MAX_REFUSED_IDS = Math.max(LIMITS.stampsPerOp, LIMITS.lightsPerOp, MAX_PC_ROLLS + LIMITS.resourcesPerCharacter);
+
+/**
+ * One of this client's ops the server refused, with its words, which only
+ * that client's device is sent. `ids` names the version 7 ids of new
+ * things the room refused it for (server/rooms/newIdPaths.ts), sent only
+ * to a socket that asked with `sealIds`.
+ */
+const rejectSchema = z.strictObject({ n: z.number().int().min(1), code: z.enum(refusalCodes), message: z.string().max(200), ids: z.array(id).min(1).max(MAX_REFUSED_IDS).optional() });
 
 /**
  * The most refusals a socket keeps while it holds no snapshot, the newest
@@ -3750,7 +3768,8 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
      * `display` is a table display (wave 5, section 3.1): its projection is a
      * player's who owns nothing, and it sends nothing but `hello` and `ping`.
      */
-    you: z.strictObject({ memberId: id, role: z.enum(["dm", "player", "display"]), sceneId: id.nullable() }),
+    /** `idKey` is the member's key for ids (server/rooms/idKeys.ts), sent only to a socket that asked with `sealIds`, never to a display or a preview. */
+    you: z.strictObject({ memberId: id, role: z.enum(["dm", "player", "display"]), sceneId: id.nullable(), idKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional() }),
     watermark: z.number().int().min(0),
     /**
      * DM sockets only, and only while the room is over its far line: by how
@@ -3932,8 +3951,10 @@ export type SearchResult = {
  * 3.4), for the actor's id gate. `minted` lists the fields that hold an
  * id a device made for a new thing: a create's key, a row's id, a
  * condition's id (single, group, inline and `as`), an ask's id. Those
- * alone meet the gate: version 7, dated within ID_TIME of the server's
- * clock, never held before, and recorded once the op applies. The rest
+ * alone meet the gate: a version 8 id read under the sender's key (a
+ * version 7 one only from a page that holds no key, before the room's
+ * cutover), dated within ID_TIME of the server's clock, never held
+ * before, and recorded once the op applies. The rest
  * carry none (`none`), bring back or copy ids the state held (`copied`:
  * restores, and a duplicate's children, whose ids are derived from the
  * copy's own), carry keys of the thing itself (`natural`: coordinates,
@@ -4140,4 +4161,265 @@ export function recordedIds(op: Op): string[] {
   const rule = ID_RULES[op.t] as IdRule<OpType>;
   if (typeof rule === "string" || !("recorded" in rule)) return [];
   return [...new Set(rule.recorded(op as never))];
+}
+
+/**
+ * A new thing's id in a field the id gate's clock does not read
+ * (NEW_ID_PATHS): `key` is the state's entity key it would be new under
+ * (shared/keys.ts), and `id` the id itself.
+ */
+export type NewIdAt = { key: string; id: string };
+
+/**
+ * The fields beyond ID_RULES `minted` and `recorded` that can hold the id
+ * of a new thing (server/rooms/newIdPaths.ts, client/state/store.ts):
+ *
+ * - `keys`: the key an op writes into a collection keyed by the thing's
+ *   own id, which is new when the state lacks that key. An upsert names
+ *   an old thing and a new one the same way, so only the state says which.
+ * - `nested`: an id inside an existing entity's value, new when that value
+ *   lacks it (`nestedIdsIn`): a character's rolls and class resources, and
+ *   what plays now.
+ *
+ * Ops that bring things back (undo, redo, sys.restore) and the server's own
+ * list none: a thing put back keeps the id it had. Collections keyed by
+ * another thing's id (fog drafts, holders, played and opened marks,
+ * memory, explored and fog tiles) are no new thing's.
+ *
+ * A type left out fails the typecheck, as with ID_RULES.
+ */
+export type NewIdRule<T extends OpType> = "none" | { keys?: (op: OpOf<T>) => readonly NewIdAt[]; nested?: (op: OpOf<T>) => readonly NewIdAt[] };
+
+function characterNested(characterId: string, stats: { rolls?: readonly { id: string }[] | undefined } | null | undefined, resources: readonly { id: string }[] | undefined): NewIdAt[] {
+  const key = `character:${characterId}`;
+  return [...(stats?.rolls ?? []).map((r) => ({ key, id: r.id })), ...(resources ?? []).map((r) => ({ key, id: r.id }))];
+}
+
+const PLAYING = "playing";
+
+export const NEW_ID_PATHS: { readonly [T in OpType]: NewIdRule<T> } = {
+  "room.update": "none",
+  "room.setPlayerScene": "none",
+  "view.follow": "none",
+  "view.blackout": "none",
+  "member.update": "none",
+  "scene.create": "none",
+  "scene.update": "none",
+  "vision.holders": "none",
+  "scene.delete": "none",
+  "scene.reorder": "none",
+  "floor.order": "none",
+  "floor.open": "none",
+  "floorLink.put": "none",
+  "floorLink.update": "none",
+  "floorLink.delete": "none",
+  "scene.setMap": "none",
+  "scene.setGrid": "none",
+  "scene.setPhase": "none",
+  "scene.duplicate": "none",
+  "token.create": "none",
+  "token.update": "none",
+  "token.delete": "none",
+  "token.move": "none",
+  "token.moveMany": "none",
+  "token.countLeg": "none",
+  "token.climb": "none",
+  "token.attach": "none",
+  "token.detach": "none",
+  "actor.hp": "none",
+  "actor.outcome": "none",
+  "actor.damageMany": "none",
+  "actor.deathSave": "none",
+  "actor.life": "none",
+  "actor.rest": "none",
+  "actor.effect.add": "none",
+  "actor.effect.update": "none",
+  "actor.effect.remove": "none",
+  "actor.saveDue": "none",
+  "actor.use": "none",
+  "actor.prompt": "none",
+  // The character's own id is minted. Its rolls and class resources are new in a character that lacks them.
+  "character.create": { nested: (op) => characterNested(op.character.id, op.character.stats, undefined) },
+  "character.update": { nested: (op) => characterNested(op.characterId, op.patch.stats, op.patch.resources) },
+  "character.delete": "none",
+  "monster.create": "none",
+  "monster.update": "none",
+  "monster.delete": "none",
+  "monster.setSrdImage": "none",
+  "companionBlock.create": "none",
+  "companionBlock.update": "none",
+  "companionBlock.delete": "none",
+  "savedEncounter.create": "none",
+  "savedEncounter.update": "none",
+  "savedEncounter.delete": "none",
+  "template.create": "none",
+  "template.update": "none",
+  "template.delete": "none",
+  "drawing.create": "none",
+  "drawing.delete": "none",
+  "drawing.clear": "none",
+  "fog.draft": "none",
+  "fog.publish": "none",
+  "fog.discard": "none",
+  "fog.live": "none",
+  "fog.reset": "none",
+  "build.paint": "none",
+  "build.erase": "none",
+  "build.rect": "none",
+  "build.poly": "none",
+  "build.edge": "none",
+  // A label, stamp or light of the same id is replaced in place, so a put is new only where the room lacks it.
+  "build.label": { keys: (op) => (op.label === null ? [] : [{ key: `label:${op.labelId}`, id: op.labelId }]) },
+  "build.clear": "none",
+  "build.walls": "none",
+  "build.stamps": { keys: (op) => (op.put ?? []).map((s) => ({ key: `stamp:${s.id}`, id: s.id })) },
+  "build.lights": { keys: (op) => (op.put ?? []).map((l) => ({ key: `light:${l.id}`, id: l.id })) },
+  "build.height": "none",
+  "build.stairs": "none",
+  "build.rough": "none",
+  // An ask applies nothing: its ops' own ids meet the check as those ops apply.
+  "build.ask": "none",
+  "door.set": "none",
+  "trap.create": "none",
+  "trap.update": "none",
+  "trap.delete": "none",
+  "trap.spring": "none",
+  "trap.act": "none",
+  "trap.settle": "none",
+  "fall.settle": "none",
+  "encounter.start": "none",
+  "encounter.end": "none",
+  "encounter.add": "none",
+  "encounter.remove": "none",
+  "encounter.setValue": "none",
+  "encounter.setValues": "none",
+  "encounter.reorder": "none",
+  "encounter.next": "none",
+  "encounter.prev": "none",
+  "encounter.update": "none",
+  "clock.start": "none",
+  "clock.stop": "none",
+  "clock.update": "none",
+  "clock.set": "none",
+  "clock.advance": "none",
+  "sound.create": "none",
+  "sound.update": "none",
+  "sound.delete": "none",
+  "playlist.create": "none",
+  "playlist.update": "none",
+  "playlist.delete": "none",
+  "playlist.add": "none",
+  // A run, a loop and a fired effect are new in what plays now when it lacks them.
+  "music.play": { nested: (op) => [{ key: PLAYING, id: op.run }] },
+  "music.pause": "none",
+  "music.resume": { nested: (op) => [{ key: PLAYING, id: op.run }] },
+  "music.skip": { nested: (op) => [{ key: PLAYING, id: op.run }] },
+  "music.stop": "none",
+  "music.set": "none",
+  "music.queue": "none",
+  "music.jump": { nested: (op) => [{ key: PLAYING, id: op.run }] },
+  "loop.start": { nested: (op) => [{ key: PLAYING, id: op.id }] },
+  "loop.set": "none",
+  "loop.stop": "none",
+  "effect.fire": { nested: (op) => [{ key: PLAYING, id: op.id }] },
+  "sound.mix": "none",
+  "sound.scene": { nested: (op) => [{ key: PLAYING, id: op.run }] },
+  "sound.stopAll": "none",
+  "log.chat": "none",
+  "log.whisper": "none",
+  "handout.show": "none",
+  "handout.close": "none",
+  "handoutDoc.create": "none",
+  "handoutDoc.delete": "none",
+  "token.updateMany": "none",
+  "token.deleteMany": "none",
+  "actor.effects": "none",
+  "journal.create": "none",
+  "journal.update": { keys: (op) => [{ key: `journal:${op.pageId}`, id: op.pageId }] },
+  "journal.reveal": "none",
+  "journal.delete": "none",
+  "pin.put": { keys: (op) => [{ key: `pin:${op.pin.id}`, id: op.pin.id }] },
+  "pin.remove": "none",
+  "roll.ask": "none",
+  "roll.answer": "none",
+  "roll.reopen": "none",
+  "roll.change": "none",
+  "roll.close": "none",
+  "cast.ask": "none",
+  "cast.close": "none",
+  "dice.roll": "none",
+  "roll.dice": "none",
+  "actor.deathRoll": "none",
+  "actor.rechargeRoll": "none",
+  undo: "none",
+  redo: "none",
+  "sys.memberJoin": "none",
+  "sys.memberSetKind": "none",
+  "sys.memberRemove": "none",
+  "sys.restore": "none",
+  "sys.explore": "none",
+  "sys.remember": "none",
+  "sys.meet": "none",
+  "sys.rideEnd": "none",
+  "sys.share": "none",
+  "sys.shed": "none",
+  "sys.sound": "none",
+  "sys.dice": "none",
+};
+
+/** Every field of `op` that can hold a new thing's id, by part, each id once per part. */
+export type NewIds = { minted: string[]; recorded: string[]; keys: NewIdAt[]; nested: NewIdAt[] };
+
+const NO_NEW_IDS: NewIds = { minted: [], recorded: [], keys: [], nested: [] };
+
+function eachAtOnce(list: readonly NewIdAt[]): NewIdAt[] {
+  const seen = new Set<string>();
+  return list.filter((at) => {
+    const k = `${at.key} ${at.id}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/** The fields of `op` that can hold a new thing's id (ID_RULES and NEW_ID_PATHS). */
+export function newIdsOf(op: Op): NewIds {
+  const paths = NEW_ID_PATHS[op.t] as NewIdRule<OpType>;
+  const minted = mintedIds(op);
+  const recorded = recordedIds(op);
+  if (paths === "none" && minted.length === 0 && recorded.length === 0) return NO_NEW_IDS;
+  const keys = paths === "none" || !paths.keys ? [] : eachAtOnce(paths.keys(op as never));
+  const nested = paths === "none" || !paths.nested ? [] : eachAtOnce(paths.nested(op as never));
+  return { minted, recorded, keys, nested };
+}
+
+/** Every id in `newIdsOf(op)`, each once. */
+export function newIdList(op: Op): string[] {
+  const n = newIdsOf(op);
+  return [...new Set([...n.minted, ...n.recorded, ...n.keys.map((k) => k.id), ...n.nested.map((k) => k.id)])];
+}
+
+/**
+ * The ids an entity's value holds where NEW_ID_PATHS `nested` points: a
+ * character's rolls and class resources, and the run, loops and effects
+ * of what plays now. Empty for any other entity, or none.
+ */
+export function nestedIdsIn(key: string, value: unknown): ReadonlySet<string> {
+  const ids = new Set<string>();
+  if (value === null || typeof value !== "object") return ids;
+  const v = value as Record<string, unknown>;
+  const each = (list: unknown) => {
+    if (Array.isArray(list)) for (const item of list) if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") ids.add((item as { id: string }).id);
+  };
+  if (key.startsWith("character:")) {
+    each((v.stats as { rolls?: unknown } | undefined)?.rolls);
+    each(v.resources);
+  } else if (key === PLAYING) {
+    const run = (v.music as { run?: unknown } | null | undefined)?.run;
+    if (typeof run === "string") ids.add(run);
+    if (v.loops && typeof v.loops === "object") for (const id of Object.keys(v.loops)) ids.add(id);
+    each(v.effects);
+    each(v.dmEffects);
+  }
+  return ids;
 }

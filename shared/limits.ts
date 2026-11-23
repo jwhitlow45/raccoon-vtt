@@ -1401,6 +1401,13 @@ export const HIDDEN_ROW_REFUSED = "The DM adds a hidden creature to the fight.";
 export const IDS_TOO_FAST = "You are adding things very fast. Wait a few minutes.";
 /** A create still refused for its id's time after the device's one retry with a fresh id. */
 export const ID_RETRY_FAILED = "That could not be added. Try again.";
+/**
+ * The words the room refuses a version 7 id of a new thing with, code
+ * `invalid`, once its cutover's grace has passed (ID_SEAL_GRACE_MS), sent
+ * only to a socket that holds no id key: a page opened before the device
+ * kept one, which has no retry for them.
+ */
+export const ID_PAGE_OLD = "This page is out of date. Reload it, then add that again.";
 /** The DM's 33rd hidden condition on one creature. */
 export const HIDDEN_EFFECTS_FULL = "at most 32 hidden effects per creature";
 /** The DM's confirm before deleting the map the players are on, sent as `leavePlayers` on a yes. */
@@ -1639,6 +1646,13 @@ export const HISTORY_BYTES = 1 * MiB;
  * answers a reconnect's ask, and how many a member may bring in a window.
  */
 export const ID_TIME = { aheadMs: 5_000, behindMs: 30 * 60_000, askMs: 12 * 60 * 60_000 } as const;
+/**
+ * How long after `server_facts.sealed_since` the room still takes version 7
+ * ids of new things from a socket that holds no id key
+ * (server/rooms/createIds.ts): an hour, so pages opened before then finish
+ * what they queued or reload.
+ */
+export const ID_SEAL_GRACE_MS = 60 * 60_000;
 export const ID_BUDGET = { windowMs: 30 * 60_000, player: 2_000, dm: 20_000 } as const;
 
 /**
