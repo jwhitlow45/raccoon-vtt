@@ -1038,6 +1038,7 @@ describe("the steps before a walk, where the walk's end reads what they explored
         const steps = await walk(t, pit, end, { walkCloses: false } as ActorDeps["options"]);
         const closes = await walk(t, pit, end, { walkCloses: true } as ActorDeps["options"]);
         assert.deepEqual(steps, closes, `a pit at ${pit.x},${pit.y}, Ayla to ${end.x},${end.y}`);
+        assert.ok(steps.exploredFirst, `a pit at ${pit.x},${pit.y}: what Bree saw was explored before Ayla's walk`);
         if (closes.answer === "taken" && (closes.a[0] !== end.x || closes.a[1] !== end.y)) stops++;
       }
     }
