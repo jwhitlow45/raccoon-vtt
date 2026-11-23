@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { EventEmitter } from "node:events";
 import Fastify from "fastify";
-import { rng } from "#shared/testutil.ts";
+import { asJsonb } from "#shared/keyOrderTestutil.ts";
+import type { LogEntry, RoomState } from "#shared/model.ts";
+import { AT, rng, room } from "#shared/testutil.ts";
 import { setupAuth } from "../auth/plugin.ts";
 import { loadConfig } from "../config.ts";
 import { ReceiptLines } from "../rooms/logHistory.ts";
 import { registerReceiptRoutes, stateThrough } from "./receipts.ts";
+import { sortedReplies } from "./sortedReplies.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 
 for (const property of ["closed", "replayFailed"] as const) test(`a behind actor that is ${property} answers busy promptly`, async () => {
@@ -33,8 +36,12 @@ test("actor closure while waiting answers busy, and cancellation rejects a caugh
 });
 
 // Exercise the real auth and limit services without a database or a listening socket.
-async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean; noGrant?: boolean; noSession?: boolean } = {}) {
+/** A committed receipt of P1's at `seq`, the state the room holds, and the op's lines as the archive's jsonb rows give them back. */
+type Held = { seq: number; state: RoomState; archived: LogEntry[]; sorted: boolean };
+
+async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean; noGrant?: boolean; noSession?: boolean; held?: Held } = {}) {
   const app = Fastify();
+  if (opts.held?.sorted) sortedReplies(app);
   const stats = { cancels: 0, destroyed: 0, active: 0, unbounded: 0, closed: 0, created: 0, checkouts: 0, reused: 0 };
   const sql: { text: string; bounded: boolean; values?: unknown[] }[] = [];
   const stalled = (text: string) => stage === "grant" ? text.includes("from grants g") : stage === "limit" ? text.includes("from rate_events") : stage === "charge" && text.startsWith("insert into rate_events");
@@ -42,6 +49,8 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
     if (text.includes("from sessions")) return { rows: opts.noSession ? [] : [{ id: "session", slide: opts.slide ?? false, touch: opts.slide ?? false }] };
     if (text.includes("from grants g")) return { rows: opts.noGrant ? [] : [{ member_id: "p1", role: "player", epoch: 1, player_epoch: opts.stale ? 2 : 1, dm_epoch: 1 }] };
     if (text.includes("from rate_events")) return { rows: [{ n: opts.limited ? 60 : 0, oldest_expires_in: 45 }] };
+    if (opts.held && text.includes("from roll_receipts")) return { rows: [{ part: 0, state: "committed", seq: String(opts.held.seq), code: null, message: null, at: new Date(AT) }] };
+    if (opts.held && text.includes("from room_log")) return { rows: opts.held.archived.map((entry) => ({ entry })) };
     return { rows: [] };
   };
   const idle: Client[] = [];
@@ -81,7 +90,8 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
   const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://localhost/test" });
   const kit = await setupAuth(app, { config, pool: pool as never, gateway: { closeSockets: () => { stats.closed++; } } as never });
   const lines = new ReceiptLines({ pool: pool as never, cancel: async () => { stats.cancels++; } });
-  await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed: { state: {} as never, through: 0 } }) } as never, options: { lines, deadlineMs: 25 } });
+  const committed = opts.held ? { state: opts.held.state, through: opts.held.seq } : { state: {} as never, through: 0 };
+  await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed, closed: false, replayFailed: false }) } as never, options: { lines, deadlineMs: opts.held ? 2_000 : 25 } });
   await app.ready();
   return { app, stats, sql, pool, request: (cookie = true) => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: cookie ? { cookie: `rvtt=${"a".repeat(43)}` } : {} }) };
 }
@@ -191,4 +201,28 @@ test("random actor capture, close, replay failure, cancellation and late progres
     if (found.state) assert.notEqual(found.state, actor.committed.state, "late progress cannot replace captured state");
   }
   assert.equal(modes.size, 4);
+});
+
+/*
+ * Two rooms alike except that the later one also holds an earlier line at
+ * seq 1: P1's line at seq 2 then comes from the archive's jsonb rows in one
+ * and from the room's memory in the other, with the same values. The reply's
+ * bytes are the same either way.
+ */
+test("a receipt's reply is the same text whether its lines come from memory or the archive", async () => {
+  const line: LogEntry = { id: "2:0", at: AT, kind: "chat", from: "p1", text: "ready" };
+  const earlier: LogEntry = { id: "1:0", at: AT, kind: "chat", from: "dm1", text: "welcome" };
+  const ask = async (log: LogEntry[], sorted: boolean) => {
+    const r = await routeRig("", { held: { seq: 2, state: room({ log }), archived: [asJsonb(line)], sorted } });
+    try {
+      const result = await r.request();
+      assert.equal(result.statusCode, 200, result.body);
+      return { body: result.body, archive: r.sql.some((q) => q.text.includes("from room_log")) };
+    } finally { await r.app.close(); }
+  };
+  const [read, held] = [await ask([line], true), await ask([earlier, line], true)];
+  assert.deepEqual([read.archive, held.archive], [true, false], "one reads the archive, the other the room's memory");
+  assert.equal(read.body, held.body);
+  assert.deepEqual(JSON.parse(read.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [line] }] });
+  assert.notEqual((await ask([line], false)).body, (await ask([earlier, line], false)).body, "JSON.stringify's text differs between the two");
 });

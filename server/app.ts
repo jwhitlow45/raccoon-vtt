@@ -29,6 +29,7 @@ import { registerStatic } from "./http/static.ts";
 import { registerXCardRoutes } from "./http/xcard.ts";
 import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
+import { sortedReplies } from "./http/sortedReplies.ts";
 import { TooBusyError } from "./rooms/errors.ts";
 import { RoomNotFoundError, type RoomGateway } from "./rooms/gateway.ts";
 import { RoomManager, type ManagerOptions } from "./rooms/manager.ts";
@@ -93,6 +94,8 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
     bodyLimit: 64 * 1024,
   });
   app.server.headersTimeout = 96_000;
+  // Before any scope registers, so every route's JSON reply inherits it.
+  sortedReplies(app);
   app.decorate("config", config);
   app.decorate("pool", pool);
 

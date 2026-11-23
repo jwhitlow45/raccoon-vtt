@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
+import { sortedJson } from "#shared/sortedJson.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { heldOpLines } from "../rooms/logHistory.ts";
@@ -74,6 +75,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     const indexed = await pip.get(`/api/rooms/${roomId}/receipts/${tag}`);
     assert.equal(indexed.statusCode, 200, indexed.body);
     const body = indexed.json<Lookup>();
+    assert.equal(indexed.body, sortedJson(body), "the reply lists every object's keys in sorted order");
     assert.equal(body.parts.length, 1);
     const part = body.parts[0]!;
     assert.ok(part.state === "committed" && part.lines.length === 1 && part.lines[0]!.data?.type === "dice");
