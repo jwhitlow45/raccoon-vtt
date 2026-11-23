@@ -417,6 +417,8 @@ export type PoolHooks = {
   holdCommits(): Hold;
   /** Every statement run since the hooks went on, in order. */
   readonly statements: readonly string[];
+  /** Calls `fn` with each statement and its parameters as it starts, before any hold, so a test can read what a commit wrote. */
+  observe(fn: (sql: string, params: readonly unknown[]) => void): void;
   /** Ends every hold and puts the pool's own methods back. */
   restore(): void;
 };
@@ -461,8 +463,10 @@ export function hookPool(pool: HookablePool): PoolHooks {
   const holds: Array<{ match: StatementMatch; queue: Array<() => void>; seen: number; off: boolean; reached: Array<{ n: number; resolve: () => void }> }> = [];
   const statements: string[] = [];
 
+  const observers: Array<(sql: string, params: readonly unknown[]) => void> = [];
   const through = async (sql: string, args: unknown[], run: Run): Promise<unknown> => {
     statements.push(sql);
+    for (const fn of observers) fn(sql, Array.isArray(args[0]) ? (args[0] as unknown[]) : []);
     for (const h of holds) {
       if (h.off || !picks(h.match, sql)) continue;
       h.seen++;
@@ -535,6 +539,7 @@ export function hookPool(pool: HookablePool): PoolHooks {
     hold,
     holdCommits: () => hold(STATEMENT.commit),
     statements,
+    observe: (fn) => void observers.push(fn),
     restore() {
       for (const h of holds) {
         h.off = true;
@@ -542,6 +547,7 @@ export function hookPool(pool: HookablePool): PoolHooks {
       }
       length = () => 0;
       lost.length = 0;
+      observers.length = 0;
       if (ownQuery) target.query = query;
       else delete (target as { query?: unknown }).query;
       if (ownConnect) target.connect = connect;
