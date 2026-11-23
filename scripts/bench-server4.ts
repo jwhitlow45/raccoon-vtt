@@ -1681,7 +1681,7 @@ async function qb10(): Promise<string> {
 
 async function qb11(): Promise<string> {
   const day = Date.now() - 60_000;
-  queueDb.receipts = Array.from({ length: 10_000 }, (_, i) => ({ member_id: `p${(i % PLAYERS) + 1}`, tag: uuidv7(), part: 0, state: "committed", seq: String(i + 1), code: null, message: null, at: new Date(day - i * 8_000) }));
+  queueDb.receipts = Array.from({ length: 10_000 }, (_, i) => ({ member_id: `p${(i % PLAYERS) + 1}`, tag: `qb11-${i}`, part: 0, state: "committed", seq: String(i + 1), code: null, message: null, at: new Date(day - i * 8_000) }));
   const bound = roomOfBytes(LIMITS.stateBytes - 64 * 1024);
   globalThis.gc?.();
   const before = process.memoryUsage();
