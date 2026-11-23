@@ -98,6 +98,10 @@ export type LoadedRoom = {
   stateBytes: number;
 };
 
+/** How many stored rows a load reads at a time, and how long it applies them before it gives up the event loop. */
+export const REPLAY_PAGE_ROWS = 500;
+export const REPLAY_TURN_MS = 8;
+
 /** A stored row. `pub` is null on rows from before COUNT_OP_VERSION, and absent where a test's stand-in leaves it out. */
 type OpRow = { seq: string; at: Date; actor_member_id: string; actor_role: Viewer["role"]; op: unknown; op_version: number; pub?: string | number | null };
 
@@ -113,9 +117,10 @@ function rowNumber(r: OpRow): number | null {
 
 /**
  * Loads the snapshot, migrates it, then replays every later op through the
- * shared reducer with the envelope each row stored (design 16.2). A replay
- * that fails stops where it is: the state so far is served read-only, so a
- * bug never gets to guess at a room's contents.
+ * shared reducer with the envelope each row stored (design 16.2), a page of
+ * rows at a time and in turns of the event loop. A replay that fails stops
+ * where it is: the state so far is served read-only, so a bug never gets to
+ * guess at a room's contents.
  *
  * Each stored op runs through its migrations before the protocol schema
  * checks it, so a rule that tightens later adapts older ops there (see
@@ -186,52 +191,72 @@ export async function loadRoom(
   // So does the automatic Unconscious upgrade (automaticUpgrade), after the stored ops that may name its old id, with
   // the asks whose caster is gone (withCasterAsks).
   let automatic = row.schema_version < PLAYER_LIMITS_SNAPSHOT_VERSION;
-  const ops = await pool.query<OpRow>(
-    "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq",
-    [roomId, snapshotSeq],
-  );
-  for (const r of ops.rows) {
-    const rowSeq = Number(r.seq);
-    let reason: string | null = null;
-    const number = rowNumber(r);
-    if (rowSeq !== seq + 1) {
-      reason = `op ${rowSeq} does not follow ${seq}`;
-    } else {
-      const stored = storedOp(r, rowSeq, migrations);
-      if (!stored.ok) {
-        reason = stored.reason;
-      } else if (number === null) {
-        reason = `op ${rowSeq} has no number`;
+  // Rows come a page at a time by seq, and the replay gives up the event loop every REPLAY_TURN_MS of applying, inside
+  // a page too, so a long tail never holds every other room's work for its whole length. After a replay failure the
+  // pages are still read, for the numbers their rows hold.
+  let first: OpRow | undefined;
+  let newestNumber = 0;
+  let after = snapshotSeq;
+  let turnStarted = performance.now();
+  for (;;) {
+    const page = await pool.query<OpRow>(
+      "select seq, at, actor_member_id, actor_role, op, op_version, pub from room_ops where room_id = $1 and seq > $2 order by seq limit $3",
+      [roomId, after, REPLAY_PAGE_ROWS],
+    );
+    const rows = page.rows.filter((r) => Number(r.seq) > after);
+    for (const r of rows) {
+      const rowSeq = Number(r.seq);
+      after = rowSeq;
+      first ??= r;
+      const number = rowNumber(r);
+      newestNumber = Math.max(newestNumber, number ?? 0);
+      if (replayFailed) continue;
+      let reason: string | null = null;
+      if (rowSeq !== seq + 1) {
+        reason = `op ${rowSeq} does not follow ${seq}`;
       } else {
-        if (upgrade && r.op_version >= MAP_DISCOVERY_OP_VERSION) {
-          state = mapDiscoveryUpgrade(state);
-          upgrade = false;
-        }
-        if (numbering && r.op_version >= NUMBERING_OP_VERSION) {
-          state = numberingUpgrade(state);
-          numbering = false;
-        }
-        if (automatic && r.op_version >= PLAYER_LIMITS_OP_VERSION) {
-          state = withCasterAsks(automaticUpgrade(state));
-          automatic = false;
-        }
-        // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
-        const uncounted = !counted(stored.op.t, r.op_version);
-        const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: number, at: r.at.toISOString(), opVersion: r.op_version, ...(uncounted ? { uncounted: true as const } : {}) });
-        if (!result.ok) reason = `op ${rowSeq} (${stored.op.t}) was refused on replay: ${result.message}`;
-        else {
-          state = result.state;
-          seq = rowSeq;
-          lastNumber = number;
-          replayed++;
+        const stored = storedOp(r, rowSeq, migrations);
+        if (!stored.ok) {
+          reason = stored.reason;
+        } else if (number === null) {
+          reason = `op ${rowSeq} has no number`;
+        } else {
+          if (upgrade && r.op_version >= MAP_DISCOVERY_OP_VERSION) {
+            state = mapDiscoveryUpgrade(state);
+            upgrade = false;
+          }
+          if (numbering && r.op_version >= NUMBERING_OP_VERSION) {
+            state = numberingUpgrade(state);
+            numbering = false;
+          }
+          if (automatic && r.op_version >= PLAYER_LIMITS_OP_VERSION) {
+            state = withCasterAsks(automaticUpgrade(state));
+            automatic = false;
+          }
+          // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
+          const uncounted = !counted(stored.op.t, r.op_version);
+          const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: number, at: r.at.toISOString(), opVersion: r.op_version, ...(uncounted ? { uncounted: true as const } : {}) });
+          if (!result.ok) reason = `op ${rowSeq} (${stored.op.t}) was refused on replay: ${result.message}`;
+          else {
+            state = result.state;
+            seq = rowSeq;
+            lastNumber = number;
+            replayed++;
+          }
         }
       }
+      if (reason !== null) {
+        replayFailed = true;
+        onReplayFailure?.(rowSeq, reason);
+      }
+      if (performance.now() - turnStarted >= REPLAY_TURN_MS) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        turnStarted = performance.now();
+      }
     }
-    if (reason !== null) {
-      replayFailed = true;
-      onReplayFailure?.(rowSeq, reason);
-      break;
-    }
+    // A short page is the last. So is one holding nothing past the last row, which a stand-in that ignores the
+    // statement's bounds gives back.
+    if (page.rows.length < REPLAY_PAGE_ROWS || rows.length === 0) break;
   }
   if (upgrade) state = mapDiscoveryUpgrade(state);
   if (numbering) state = numberingUpgrade(state);
@@ -239,8 +264,8 @@ export async function loadRoom(
   if (automatic && !replayFailed) state = withCasterAsks(automaticUpgrade(state));
   let pub = row.pub === null || row.pub === undefined ? snapshotSeq : Number(row.pub);
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
-  for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
-  const through = replayFailed ? replayedThrough(state, lastNumber, snapshotSeq, row.schema_version, ops.rows[0]) : pub;
+  pub = Math.max(pub, newestNumber);
+  const through = replayFailed ? replayedThrough(state, lastNumber, snapshotSeq, row.schema_version, first) : pub;
   return { state, seq, pub, through, snapshotSeq, snapshotVersion: row.schema_version, ...(row.caps_pending === true ? { capsPending: true } : {}), replayFailed, replayed, stateBytes: serializedBytes(state) };
 }
 
