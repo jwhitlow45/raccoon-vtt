@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { floorsOf, playersSee } from "#shared/rules/floors.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { accessErrors, type AuthKit, HttpError, requireGrant, roomParam } from "../auth/http.ts";
-import { ActorClosedError } from "../rooms/actor.ts";
+import { ActorClosedError, ViewBusyError } from "../rooms/actor.ts";
 import { TooBusyError } from "../rooms/errors.ts";
 import type { RoomManager } from "../rooms/manager.ts";
 
@@ -88,6 +88,8 @@ async function committedState(manager: RoomManager, roomId: string): Promise<Roo
     return await actor.read((state) => state);
   } catch (err) {
     if (err instanceof TooBusyError || err instanceof ActorClosedError) throw new HttpError(503, "busy", { retryAfter: err instanceof TooBusyError ? 30 : 2 });
+    // The room could not give the state as of the request (RoomActor.read): busy, as any reader it turns away.
+    if (err instanceof ViewBusyError) throw new HttpError(503, "busy", { retryAfter: err.retryAfter });
     throw err;
   }
 }

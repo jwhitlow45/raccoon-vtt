@@ -14,6 +14,7 @@ import { storePlayerPassword } from "../auth/playerSecret.ts";
 import { dmLink, formatRoomId } from "../auth/roomId.ts";
 import { verifyTurnstile } from "../auth/turnstile.ts";
 import { requireHostComputer } from "../local/guard.ts";
+import { ViewBusyError } from "../rooms/actor.ts";
 import { buildExportZip, exportableState, roomExport, roomManifest } from "../rooms/exportRoom.ts";
 import { importRoom, IMPORT_LIMITS } from "../rooms/importRoom.ts";
 import type { RoomManager } from "../rooms/manager.ts";
@@ -148,6 +149,8 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
           .send(out);
       } catch (err) {
         release();
+        // The room could not give the copy as of the request (RoomActor.read): busy, as any reader it turns away.
+        if (err instanceof ViewBusyError) throw new HttpError(503, "busy", { retryAfter: err.retryAfter });
         throw err;
       }
     });

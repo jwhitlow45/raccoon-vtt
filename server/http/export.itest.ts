@@ -11,6 +11,7 @@ import { blockOf, customMonster } from "#shared/testutil.ts";
 import { variantPath } from "../assets/store.ts";
 import { solid, SVG } from "../assets/testImages.ts";
 import type { RoomExport, ExportManifest } from "../rooms/exportRoom.ts";
+import { ViewBusyError } from "../rooms/actor.ts";
 import { CLOSE } from "../rooms/connection.ts";
 import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
@@ -1227,5 +1228,33 @@ describe("room import with Turnstile", () => {
     const refused = await importZip(importer, zip);
     assert.equal(refused.statusCode, 403);
     assert.equal(refused.json<{ error: string }>().error, "turnstile_failed");
+  });
+});
+
+describe("readers of a room's copy that the room turns away", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  test("an export and a scene's player view answer busy when the room cannot give its state as of the request", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Turned away");
+    const actor = await t.manager.acquire(roomId);
+    const sceneId = actor.committed.state.meta.playerSceneId!;
+    const own = actor.read.bind(actor);
+    actor.read = () => Promise.reject(new ViewBusyError("too old"));
+    try {
+      for (const url of [`/api/rooms/${roomId}/export`, `/api/rooms/${roomId}/scenes/${sceneId}/player-view`]) {
+        const res = await dm.get(url);
+        assert.equal(res.statusCode, 503, `${url}: ${res.body}`);
+        assert.deepEqual(res.json(), { error: "busy" });
+        assert.equal(res.headers["retry-after"], "1");
+      }
+    } finally {
+      actor.read = own;
+    }
+    assert.equal((await dm.get(`/api/rooms/${roomId}/export`)).statusCode, 200, "and the next export is served");
   });
 });
