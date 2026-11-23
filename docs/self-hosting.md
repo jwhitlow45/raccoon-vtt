@@ -646,6 +646,7 @@ Each release's formats, from `shared/migrate.ts` at its tag:
 
 | Release | Room format | Change format |
 | --- | --- | --- |
+| v0.5.0 | 49 | 65 |
 | v0.4.0 | 49 | 65 |
 | v0.3.1 | 31 | 40 |
 | v0.3.0 | 31 | 40 |
@@ -658,7 +659,29 @@ formats at the top of `shared/migrate.ts`, as `SNAPSHOT_VERSION` and
 `OP_VERSION`. Each note sits under the first release that has its update,
 newest first.
 
-**Since v0.4.0**
+**Since v0.5.0**
+
+**v0.5.0**
+
+- **The desktop app** ([design](design/design-v1-local-app.md)): room format
+  49, change format 65, the same as v0.4.0, so no format step and no data
+  migrates. A hosted server needs no action. The app server's local mode
+  starts only with `RACCOON_MODE=local`, which the desktop app sets and a
+  hosted server leaves unset, and every local-mode rule (plain HTTP cookies,
+  the host and peer checks, the refused settings) is off without it. Local
+  mode refuses `PUBLIC_ORIGIN`, the egress proxies, Turnstile, the admin
+  password and `TRUST_CF_CONNECTING_IP=1`. The admin script gains
+  `--no-schema` and `--json`, which change nothing for a hosted server that
+  leaves them out. Each release now also carries the desktop installers,
+  which [The desktop app](#the-desktop-app) covers.
+- **A player's move ends inside the scene**: no format step, since stored
+  moves replay as they were made. The server now refuses a player's move,
+  seat or get-off that would end a token past the scene's edge, with "a move
+  ends inside the map". A token that stays where it stands is never refused,
+  so one the DM parked past the edge can still change its height or facing,
+  and the DM's own moves stay free. A page opened before this release may
+  still offer such a drop and shows the refusal until it reloads, so reload
+  every open page after the update, table displays included.
 
 **v0.4.0**
 
