@@ -1,5 +1,6 @@
 import { chunkKey, compareLogIds, holderChunkKey, holderTileKey, tileKey, parseKey } from "#shared/keys.ts";
 import { tilesAcross } from "#shared/rules/fog.ts";
+import { rekeySync } from "#shared/rules/pcSync.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
@@ -293,9 +294,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     // No record of the running turn's reminders (RoomState.reminded): it belongs to that turn, and names old member ids.
     // Nor the newest DM line a shed took out (RoomState.dmLogShed): the new room's archive holds none of the old room's lines.
   };
-  // The clock holds no id but its own, and each character's stamp names that one, so both come through as they are
-  // (docs/design/design-v1-calendar.md 6.6). No clock stays no field.
-  if (state.clock) out.clock = state.clock;
+  // The clock holds no id but its own, which takes a new one, and each character's rest stamp and each effect's end name
+  // it, so they follow it (withClockId). No clock stays no field.
+  if (state.clock) out.clock = { ...state.clock, id: newId() };
   // The room's count of creature number groups is no entity id, so it comes through as it is, and so do the group ids
   // creatures and scenes hold: a new group takes an id above every one the file holds (shared/numbering.ts).
   if (state.numbering) out.numbering = state.numbering;
@@ -474,6 +475,11 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   }
   for (const c of Object.values(state.characters)) {
     const next: Character = { ...c, id: characters.of(c.id), ownerIds: memberList(c.ownerIds), actor: actor(c.actor, c.id) };
+    // Its rolls and class resources take new ids too, and the sync record that keys them by their ids' hashes follows.
+    const own = new Map([...(c.stats?.rolls ?? []), ...(c.resources ?? [])].map((thing) => [thing.id, newId()]));
+    if (c.stats) next.stats = { ...c.stats, rolls: c.stats.rolls.map((roll) => ({ ...roll, id: own.get(roll.id)! })) };
+    if (c.resources) next.resources = c.resources.map((resource) => ({ ...resource, id: own.get(resource.id)! }));
+    if (c.ddbSync) next.ddbSync = rekeySync(c.ddbSync, own);
     if (c.defaultImage) {
       const mapped = image(c.defaultImage);
       if (mapped) next.defaultImage = mapped;
@@ -841,7 +847,25 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // A hand-made or older file is brought within the companion rules (docs/design/design-v1-combat-flow.md 4.7), a character's
   // initiative and Passive Perception follow its stat block, and a Wild Shape mark stands only beside its creature
   // (docs/design/design-v1-pc-stats.md 3.5 and 3.6).
-  return withShapeRules(withPcActors(normalizeCompanionState(out)));
+  const remapped = withShapeRules(withPcActors(normalizeCompanionState(out)));
+  return state.clock && out.clock ? withClockId(remapped, state.clock.id, out.clock.id) : remapped;
+}
+
+/**
+ * The state with the clock's old id written as its new one wherever a
+ * value is that id (docs/design/design-v1-calendar.md 6.6): a character's
+ * rest stamp and an effect's end, wherever they sit, the fight's history
+ * included. Only whole values: a hand-made file's id may be short enough
+ * to sit inside other text.
+ */
+function withClockId(state: RoomState, from: string, to: string): RoomState {
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") return v === from ? to : v;
+    if (Array.isArray(v)) return v.map(walk);
+    if (v === null || typeof v !== "object") return v;
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+  };
+  return walk(state) as RoomState;
 }
 
 /**

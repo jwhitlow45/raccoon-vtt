@@ -71,7 +71,11 @@ describe("combat uses through an import (docs/design/design-v1-combat-controls.m
     for (const t of Object.values(out.tokens)) if ("inline" in t.actor) assert.equal(t.actor.inline.turnRecord ?? t.actor.inline.hurt, undefined, t.name);
     for (const c of Object.values(out.characters)) assert.equal(c.actor.turnRecord ?? c.actor.hurt, undefined);
     assert.deepEqual(inline(out, newId("dragon")).uses, inline(before, "dragon").uses);
-    assert.deepEqual(Object.values(out.characters)[0]!.resources, before.characters.thorn!.resources);
+    // Each resource comes through as it was, under a new id.
+    const apart = (list: readonly { id: string }[] | undefined) => (list ?? []).map(({ id: _id, ...rest }) => rest);
+    const resources = Object.values(out.characters)[0]!.resources!;
+    assert.deepEqual(apart(resources), apart(before.characters.thorn!.resources));
+    assert.ok(resources.every((r, i) => r.id !== before.characters.thorn!.resources![i]!.id));
     const saved = out.encounterHistory.flatMap((s) => s.turnUses ?? []);
     assert.ok(saved.length > 0);
     for (const u of saved) {

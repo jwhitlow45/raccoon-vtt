@@ -755,14 +755,15 @@ describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)",
     return state;
   }
 
-  test("export and import bring back the clock, its calendar, the stamps and the lines whole", () => {
+  test("export and import bring back the clock and its calendar under a new id, the stamps naming it, and the lines whole", () => {
     const state = played();
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
-    assert.deepEqual(out.clock, state.clock);
+    assert.notEqual(out.clock!.id, "clock-1");
+    assert.deepEqual(out.clock, { ...state.clock!, id: out.clock!.id });
     const [rested] = Object.values(out.characters);
-    assert.deepEqual(rested!.longRest, { at: 16 * 3_600, clock: "clock-1" });
+    assert.deepEqual(rested!.longRest, { at: 16 * 3_600, clock: out.clock!.id });
     assert.deepEqual(out.log.filter((l) => l.data?.type === "clock").map((l) => l.data), state.log.filter((l) => l.data?.type === "clock").map((l) => l.data));
   });
 
@@ -814,12 +815,15 @@ describe("time spans in a backup (docs/design/design-v1-calendar-c2c3.md 4.7)", 
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     const out = remapState(parsed.state, { assets: new Map(), newId: () => uuidv7() });
+    // The clock comes under a new id (remap.ts), which every end names.
+    const clock = out.clock!.id;
+    assert.notEqual(clock, "clock-1");
     const [bree] = Object.values(out.characters);
-    assert.deepEqual(bree!.actor.effects[0]!.ends, { span: 8 * H, at: 16 * H, clock: "clock-1" });
+    assert.deepEqual(bree!.actor.effects[0]!.ends, { span: 8 * H, at: 16 * H, clock });
     const [gob] = Object.values(out.tokens);
-    assert.deepEqual("inline" in gob!.actor ? gob!.actor.inline.effects[0]!.ends : null, { span: 60, at: 8 * H + 60, clock: "clock-1" });
+    assert.deepEqual("inline" in gob!.actor ? gob!.actor.inline.effects[0]!.ends : null, { span: 60, at: 8 * H + 60, clock });
     // An import gives the condition a fresh id (remap.ts), so the saved step's copy is found by its kind.
-    assert.deepEqual(Object.values(out.encounterHistory[0]!.effects).flat().find((e) => e.key === "blessed")?.ends, { span: 60, at: 8 * H + 60, clock: "clock-1" });
+    assert.deepEqual(Object.values(out.encounterHistory[0]!.effects).flat().find((e) => e.key === "blessed")?.ends, { span: 60, at: 8 * H + 60, clock });
   });
 
   test("an end is held to its bounds, with its time and clock both, and never beside a count of turns", () => {

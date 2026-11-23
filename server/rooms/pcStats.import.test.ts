@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DdbSync, PcStats } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
+import { hash12 } from "#shared/rules/pcSync.ts";
 import { AT, actor, character, room } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -39,18 +40,19 @@ describe("a stat block in room.json", () => {
     assert.equal(parseRoomState(bad).ok, false);
   });
 
-  test("the block travels through the remap, which names nothing in it, and a hand-made file's actor numbers follow it", () => {
+  test("the block travels through the remap, its rolls under new ids, and a hand-made file's actor numbers follow it", () => {
     // A hand-made file: the actor's numbers say something else than the block.
     const state = room({ characters: { bree: character("bree", { level: 5, stats: BLOCK, actor: actor({ initBonus: 9, passivePerception: 30 }) }) } });
     const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const [bree] = Object.values(out.characters);
-    assert.deepEqual(bree?.stats, BLOCK);
+    assert.deepEqual({ ...bree?.stats, rolls: bree?.stats?.rolls.map((r) => ({ ...r, id: "r1" })) }, BLOCK);
+    assert.notEqual(bree?.stats?.rolls[0]?.id, "r1");
     assert.equal(bree?.actor.initBonus, 3);
     assert.equal(bree?.actor.passivePerception, 10 + 2 + 3);
   });
 });
 
-/** A sync record in an exported room (docs/design/design-v1-resync.md 4): it travels by the op's own bounds, its at required, and the remap leaves it alone. */
+/** A sync record in an exported room (docs/design/design-v1-resync.md 4): it travels by the op's own bounds, its at required, and the remap keys it by its rolls' new ids. */
 describe("a sync record in room.json", () => {
   const RECORD: DdbSync = {
     at: AT,
@@ -80,11 +82,16 @@ describe("a sync record in room.json", () => {
     }
   });
 
-  test("the record travels through the remap as it was, since its keys hash roll ids the remap leaves alone", () => {
-    const out = remapState(synced(), { assets: new Map(), newId: () => uuidv7() });
+  test("the record travels through the remap, each entry keyed by the hash of its roll's new id", () => {
+    const state = synced();
+    const kept = { k: "w:00000000000a", h: "abcdef012345" };
+    // The file's record names roll r1 by its id's hash, and an entry whose roll is gone by a hash no roll has.
+    state.characters.bree!.ddbSync = { ...RECORD, rolls: { [hash12("r1")]: kept, "0123456789ab": kept } };
+    const out = remapState(state, { assets: new Map(), newId: () => uuidv7() });
     const bree = Object.values(out.characters).find((c) => c.stats !== undefined);
-    assert.deepEqual(bree?.ddbSync, RECORD);
-    assert.deepEqual(bree?.stats?.rolls.map((r) => r.id), ["r1"]);
+    const [roll] = bree?.stats?.rolls.map((r) => r.id) ?? [];
+    assert.ok(roll !== undefined && roll !== "r1", "the roll has a new id");
+    assert.deepEqual(bree?.ddbSync, { ...RECORD, rolls: { [hash12(roll)]: kept, "0123456789ab": kept } });
     assert.equal(Object.values(out.characters).filter((c) => c.ddbSync !== undefined).length, 1, "the other character gains none");
   });
 });

@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
-import { idTime, uuidv7 } from "#shared/ids.ts";
+import { sealedId, uuidv7 } from "#shared/ids.ts";
 import { checkLimits, exploredReserve, FAR, farLimits, HARD, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, VIDEO_LIMITS } from "#shared/limits.ts";
 import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
@@ -35,6 +35,7 @@ import { warnArchiveSkipped, type Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName, withoutSound } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { idRow, recordIds, SERVER_MEMBER } from "./createIds.ts";
+import { RoomIdKeys } from "./idKeys.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
 import { lastLineSeq, refillMapVideos, refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
@@ -322,10 +323,13 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // which gives a sound whose file did not come through an id no row has, so the refill leaves it out with its places.
       // Every id the remap makes is the server's own, recorded with the room as an op's would be, so no device can bring one
       // of them again while it is dated near the clock (docs/design/design-v1-player-limits.md 3.4).
-      const minted: string[] = [];
+      // Sealed under the new room's server key (idKeys.ts), each recorded with the time it was made.
+      const minted: { id: string; at: number }[] = [];
+      const serverKey = new RoomIdKeys(deps.assets.config.roomSecretKey, roomId).server.key;
       const newId = () => {
-        const id = uuidv7();
-        minted.push(id);
+        const at = Date.now();
+        const id = sealedId(serverKey, at);
+        minted.push({ id, at });
         return id;
       };
       const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds, newId }), videoFacts), soundFacts);
@@ -353,7 +357,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       await withTx(deps.pool, async (tx) => {
         await deps.gateway.createRoom(roomId, state, tx, startSeq);
         const now = Date.now();
-        await recordIds(tx, roomId, minted.map((id) => idRow(id, SERVER_MEMBER, now, idTime(id) ?? now)));
+        await recordIds(tx, roomId, minted.map((m) => idRow(m.id, SERVER_MEMBER, now, m.at)));
         if (archive) await archiveLines(tx, roomId, remapped.log);
         await markDmMembers(tx, roomId, oldDms);
         if (hooks.afterImages) await hooks.afterImages(tx, room);
