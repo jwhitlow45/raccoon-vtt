@@ -672,7 +672,7 @@ export class RoomActor {
   /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
   #soundRefusedRun: string | null | undefined = undefined;
 
-  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "through" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[], ids: { since: number | null; rows: readonly IdRow[] } = { since: null, rows: [] }) {
+  private constructor(deps: ActorDeps, loaded: Pick<LoadedRoom, "state" | "seq" | "pub" | "through" | "snapshotSeq" | "snapshotVersion" | "replayFailed" | "stateBytes">, receipts: readonly ReceiptRow[], ids: { since: number | null; sealedSince?: number | null; rows: readonly IdRow[] } = { since: null, rows: [] }) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -736,7 +736,7 @@ export class RoomActor {
         ...(r.ask ? { ask: r.ask } : {}),
       })),
     );
-    this.#ids = new IdGate(this.#opts.now, ids.since);
+    this.#ids = new IdGate(this.#opts.now, ids.since, ids.sealedSince ?? null);
     this.#idKeys = new RoomIdKeys(this.#opts.idSecret, this.roomId);
     this.#ids.load(ids.rows);
     // A clock set back after this server first started on this build leaves the cutover ahead of it, and every id
@@ -3832,8 +3832,8 @@ function roomReserves(state: RoomState): number {
  * holds that the clock could still pass, written now. Rows past both their
  * times go first. A room whose replay failed writes nothing.
  */
-async function loadIds(pool: Pool, roomId: string, loaded: LoadedRoom, now: number): Promise<{ since: number | null; rows: IdRow[] }> {
-  const since = await idsSince(pool, now);
+async function loadIds(pool: Pool, roomId: string, loaded: LoadedRoom, now: number): Promise<{ since: number | null; sealedSince: number | null; rows: IdRow[] }> {
+  const { since, sealedSince } = await idsSince(pool, now);
   const seeds = !loaded.replayFailed && loaded.snapshotVersion < PLAYER_LIMITS_SNAPSHOT_VERSION ? seedRows(loaded.state, now) : [];
   if (!loaded.replayFailed) {
     await recordIds(pool, roomId, seeds);
@@ -3841,7 +3841,7 @@ async function loadIds(pool: Pool, roomId: string, loaded: LoadedRoom, now: numb
   }
   const rows = await loadIdRows(pool, roomId, now);
   const stored = new Set(rows.map((r) => r.id));
-  return { since, rows: [...rows, ...seeds.filter((r) => !stored.has(r.id))] };
+  return { since, sealedSince, rows: [...rows, ...seeds.filter((r) => !stored.has(r.id))] };
 }
 
 /**

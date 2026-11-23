@@ -96,11 +96,14 @@ export async function startServer(opts: ServerOptions): Promise<Server> {
   }
 
   // Module-level ids are made before a fresh database's first room load would set the id cutover, so the cutover is set
-  // far in the past, as for a server that has run this build for a long time.
+  // far in the past, as for a server that has run this build for a long time. The raw sockets make version 7 ids, as a
+  // page from before version 8 ids does, so the cutover after which no room takes one is set far ahead.
   const seed = new pg.Client({ connectionString: opts.databaseUrl });
   await seed.connect();
   try {
-    await seed.query("insert into server_facts (one, ids_since) values (true, '2000-01-01T00:00:00Z') on conflict (one) do nothing");
+    await seed.query(
+      "insert into server_facts (one, ids_since, sealed_since) values (true, '2000-01-01T00:00:00Z', '9999-01-01T00:00:00Z') on conflict (one) do update set sealed_since = excluded.sealed_since",
+    );
   } finally {
     await seed.end();
   }

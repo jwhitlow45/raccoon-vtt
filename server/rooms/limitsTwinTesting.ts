@@ -144,11 +144,14 @@ export type StoredId = { roomId: string; id: string; memberId: string; acceptedA
  * `room_ids` and `server_facts` for a room on the stand-in database
  * (undoScopeTesting.ts StoredRoomDb), which keeps neither: rows land at
  * their batch's commit and outlive restarts, as Postgres keeps them, and
- * `since` is the cutover the server stored on its first start.
+ * `since` is the cutover the server stored on its first start. Its other
+ * cutover, `sealedSince`, stays none unless a test sets it, so the rooms
+ * take the version 7 ids their tests mint.
  */
 export class IdTable {
   rows: StoredId[] = [];
   since: number | null = null;
+  sealedSince: number | null = null;
 
   /** The rows of the statements createIds.ts runs, or null for any other statement. */
   answer(sql: string, params: unknown[], staged: StoredId[] | null): { rows: unknown[]; rowCount: number } | null {
@@ -184,7 +187,8 @@ export class IdTable {
       this.since ??= (params[0] as Date).getTime();
       return { rows: [], rowCount: 1 };
     }
-    if (sql.startsWith("select ids_since from server_facts")) return { rows: this.since === null ? [] : [{ ids_since: new Date(this.since) }], rowCount: 1 };
+    if (sql.startsWith("update server_facts")) return { rows: [], rowCount: 0 };
+    if (sql.startsWith("select ids_since")) return { rows: this.since === null ? [] : [{ ids_since: new Date(this.since), sealed_since: this.sealedSince === null ? null : new Date(this.sealedSince) }], rowCount: 1 };
     return null;
   }
 

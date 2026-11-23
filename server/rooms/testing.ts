@@ -98,11 +98,20 @@ export function randomIp(): string {
   return `2001:db8:${h()}:${h()}::${h()}`;
 }
 
+/** The cutover the tests' database holds, far past any clock a test runs at. */
+export const FAR_SEALED_SINCE = new Date("9999-01-01T00:00:00.000Z");
+
 export async function startEngine(opts: EngineOptions = {}): Promise<Engine> {
   const assetDir = await mkdtemp(join(tmpdir(), "rvtt-engine-"));
   const config = testConfig({ TRUST_CF_CONNECTING_IP: "1", ASSET_DIR: assetDir, ...opts.env });
   const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10 });
   await applySchema(pool);
+  // The tests' sockets make version 7 ids, as a page from before version 8 ids does, so the cutover after which a room
+  // takes none (createIds.ts idsSince) is set far ahead, as the e2e harness sets it. A test of the cutover moves it.
+  await pool.query(
+    "insert into server_facts (one, ids_since, sealed_since) values (true, now(), $1) on conflict (one) do update set sealed_since = excluded.sealed_since",
+    [FAR_SEALED_SINCE],
+  );
   const { rows } = await pool.query<{ now: Date }>("select now()");
   const startedAt = rows[0]?.now ?? new Date();
   const build = async (): Promise<FastifyInstance> => {

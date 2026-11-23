@@ -405,6 +405,10 @@ create table if not exists server_facts (
   one boolean primary key default true check (one),
   ids_since timestamptz not null
 );
+-- When this server first ran a build that makes version 8 ids
+-- (server/rooms/createIds.ts idsSince), set once by its own update after the
+-- insert above, so a row an older build wrote takes it too. Null until then.
+alter table server_facts add column if not exists sealed_since timestamptz;
 -- A damage roll's receipt names the ask for saves that took it, written in
 -- that ask's batch, so a roll goes with one ask for as long as its receipt
 -- lives (server/rooms/receipts.ts).

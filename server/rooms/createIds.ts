@@ -370,15 +370,20 @@ export async function pruneIds(q: Queryable, now: number, roomId?: string): Prom
 }
 
 /**
- * The cutover: when this server first loaded a room on a build that keeps
- * the table, written once and read by every room after. Null where the
- * table answers nothing, as a test's stand-in pool does.
+ * The cutovers: `since`, when this server first loaded a room on a build
+ * that keeps the table, and `sealedSince`, when it first loaded one on a
+ * build that makes version 8 ids, each written once and read by every room
+ * after. The insert names `ids_since` alone, as an older build's does, and
+ * `sealed_since` is set by its own update, so a row from before it takes
+ * the time too. Null where the table answers nothing, as a test's stand-in
+ * pool does.
  */
-export async function idsSince(q: Queryable, now: number): Promise<number | null> {
+export async function idsSince(q: Queryable, now: number): Promise<{ since: number | null; sealedSince: number | null }> {
   await q.query("insert into server_facts (one, ids_since) values (true, $1) on conflict (one) do nothing", [new Date(now)]);
-  const { rows } = await q.query<{ ids_since: Date }>("select ids_since from server_facts where one");
-  const since = rows[0]?.ids_since;
-  return since instanceof Date ? since.getTime() : null;
+  await q.query("update server_facts set sealed_since = $1 where sealed_since is null", [new Date(now)]);
+  const { rows } = await q.query<{ ids_since: Date; sealed_since: Date | null }>("select ids_since, sealed_since from server_facts where one");
+  const at = (value: unknown) => (value instanceof Date ? value.getTime() : null);
+  return { since: at(rows[0]?.ids_since), sealedSince: at(rows[0]?.sealed_since) };
 }
 
 /**

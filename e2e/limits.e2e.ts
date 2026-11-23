@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type WebSocketRoute } from "playwright-core";
-import { idTime, uuidv7 } from "../shared/ids.ts";
+import { idKeyFromText, sealedId, sealedTime, uuidv7, type IdKey } from "../shared/ids.ts";
 import { BLOCKS_ROOM_TOO_FULL, KEPT_FOR_PLAYERS_FULL, LEAVE_PLAYERS_ASK, overNotice, ROOM_FULL, SCENE_FULL, SEAT_FULL, sizeRemedy } from "../shared/limits.ts";
 import type { RoomState } from "../shared/model.ts";
 import { actor } from "../shared/testutil.ts";
@@ -162,9 +162,17 @@ function drawingsOf(state: RoomState | null, ownerId: string): string[] {
   return Object.values(state?.drawings ?? {}).flatMap((d) => (d && d.ownerId === ownerId ? [d.id] : []));
 }
 
-/** Within a minute of now: an id made as it was sent, not one made 40 minutes before. */
+/** Ana's id key, from the newest snapshot her page was sent. */
+function anaKey(): IdKey {
+  const snapshot = ana_.got.findLast((f) => f.t === "snapshot") as { you?: { idKey?: string } } | undefined;
+  const key = snapshot?.you?.idKey === undefined ? null : idKeyFromText(snapshot.you.idKey);
+  assert.ok(key, "Ana's page holds an id key");
+  return key;
+}
+
+/** Within a minute of now, read under Ana's key: an id made as it was sent, not one made 40 minutes before. */
 function madeNow(id: string): boolean {
-  const t = idTime(id);
+  const t = sealedTime(anaKey(), id);
   return t !== null && Math.abs(t - Date.now()) < MINUTE;
 }
 
@@ -317,13 +325,14 @@ describe("raccoon-vtt player limits on a device", { timeout: 600_000 }, () => {
     const from = ana_.sent.length;
     let own: string | null = null;
     let refused = false;
-    // The id the page made reaches the room 40 minutes old, so the room refuses it, and that answer is lost.
+    // The id the page made reaches the room sealed under Ana's key 40 minutes back, so the room refuses it for its age,
+    // and that answer is lost.
     ana_.toServer = (frame) => {
       const op = frame.op as Json | undefined;
       if (own !== null || frame.t !== "op" || op?.t !== "drawing.create") return frame;
       const drawing = op.drawing as Json;
       own = String(drawing.id);
-      return { ...frame, op: { ...op, drawing: { ...drawing, id: uuidv7(Date.now() - AWAY) } } };
+      return { ...frame, op: { ...op, drawing: { ...drawing, id: sealedId(anaKey(), Date.now() - AWAY) } } };
     };
     ana_.toPage = (frame) => {
       if (refused || frame.t !== "ev" || !Array.isArray(frame.rejects) || frame.rejects.length === 0) return frame;
