@@ -12,10 +12,9 @@ function randomValue(r: () => number, depth: number): unknown {
     return leaves[Math.floor(r() * leaves.length)];
   }
   if (roll < 0.55) return Array.from({ length: Math.floor(r() * 5) }, () => randomValue(r, depth - 1));
-  const out: Record<string, unknown> = {};
-  const names = ["id", "x", "y", "rev", "sceneId", "a b", "10", "9", "0", "é", "Z", "_", "\u0000k", "toJSONx"];
-  for (let i = Math.floor(r() * 7); i > 0; i--) out[names[Math.floor(r() * names.length)]!] = randomValue(r, depth - 1);
-  return out;
+  const names = ["id", "x", "y", "rev", "sceneId", "a b", "10", "9", "0", "é", "Z", "_", "\u0000k", "toJSONx", "__proto__"];
+  // As own properties, as JSON.parse makes them, "__proto__" included.
+  return Object.fromEntries(Array.from({ length: Math.floor(r() * 7) }, () => [names[Math.floor(r() * names.length)]!, randomValue(r, depth - 1)]));
 }
 
 /** The same value with each object's keys put in a random order at every depth. */
@@ -34,6 +33,10 @@ describe("sortedJson", () => {
   test("writes every object's keys in sorted order at every depth and every list in its own order", () => {
     const value = { z: [{ b: 1, a: 2 }, 3, { d: { y: 1, x: 2 }, c: null }], a: { k: "v", j: [2, 1] } };
     assert.equal(sortedJson(value), '{"a":{"j":[2,1],"k":"v"},"z":[{"a":2,"b":1},3,{"c":null,"d":{"x":2,"y":1}}]}');
+  });
+
+  test("keeps a \"__proto__\" key as a key", () => {
+    assert.equal(sortedJson(JSON.parse('{"b":1,"__proto__":{"y":1,"x":2}}')), '{"__proto__":{"x":2,"y":1},"b":1}');
   });
 
   test("a value already in sorted order is the value itself, written as JSON.stringify writes it", () => {

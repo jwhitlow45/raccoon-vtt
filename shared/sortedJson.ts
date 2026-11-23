@@ -44,9 +44,8 @@ export function inSortedOrder(value: unknown, key = ""): unknown {
   if (typeof (value as { toJSON?: unknown }).toJSON === "function") return inSortedOrder((value as { toJSON: (key: string) => unknown }).toJSON(key), key);
   if (sorted(value)) return value;
   if (Array.isArray(value)) return value.map((item, i) => inSortedOrder(item, String(i)));
-  const out: Record<string, unknown> = {};
-  for (const name of Object.keys(value).sort()) out[name] = inSortedOrder((value as Record<string, unknown>)[name], name);
-  return out;
+  // Each key an own property, "__proto__" too, which a plain assignment would take as the copy's prototype.
+  return Object.fromEntries(Object.keys(value).sort().map((name) => [name, inSortedOrder((value as Record<string, unknown>)[name], name)]));
 }
 
 /** JSON text of `value` as JSON.stringify writes it, with every object's keys in sorted order (inSortedOrder). */
