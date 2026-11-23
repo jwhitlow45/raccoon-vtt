@@ -1094,3 +1094,56 @@ describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 
     assert.equal(t.bree.got.length, before);
   });
 });
+
+/**
+ * A preview's age is read from moments the room gives (design 7.6): a frame
+ * keeps the moment it arrived, its sender's next frame ages the rest by its
+ * own moment, and a batch's judgment by the batch's tick. The sender's clock
+ * reading at the time any of that runs decides nothing.
+ */
+describe("a preview's age by the moments given", () => {
+  const FRAME = 1_000_000;
+  function shown(liveClock: number) {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    let clock = liveClock;
+    const dm = viewer(DM, () => clock);
+    const p1 = viewer(P1, () => clock);
+    const all = [dm.conn, p1.conn];
+    routeEphemeral(state, dm.conn, "s1", { k: "dragMove", tokenId: "gob", x: 3, y: 2 }, all, FRAME);
+    assert.ok(p1.conn.previewsHeld.has("dm1|drag:gob"));
+    const dmOnly: RoomState = { ...state, tokens: { ...state.tokens, gob: { ...state.tokens.gob!, visibility: "dm" } } };
+    return { state, dmOnly, dm, p1, all, set: (ms: number) => (clock = ms) };
+  }
+  const cancels = (got: EphEventOut[]) => got.filter((e) => e.k === "dragCancel");
+
+  for (const path of ["rejudgePreviews", "cancelLost"] as const) {
+    test(`${path} judges a preview by the batch's tick: fresh 1 ms short of its age, though the sender's clock reads past it`, () => {
+      const t = shown(FRAME + PREVIEW_STALE_MS + 1);
+      const tick = FRAME + PREVIEW_STALE_MS - 1;
+      if (path === "rejudgePreviews") rejudgePreviews(t.dmOnly, t.all, tick);
+      else cancelLost(t.p1.conn, ["token:gob"], t.all, tick);
+      assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+    });
+
+    test(`${path} judges a preview by the batch's tick: stale 1 ms past its age, though the sender's clock reads short of it`, () => {
+      const t = shown(FRAME + PREVIEW_STALE_MS - 1);
+      const tick = FRAME + PREVIEW_STALE_MS + 1;
+      if (path === "rejudgePreviews") rejudgePreviews(t.dmOnly, t.all, tick);
+      else cancelLost(t.p1.conn, ["token:gob"], t.all, tick);
+      assert.deepEqual(cancels(t.p1.got), [], "a stale frame waits for its sender's next frame or close");
+      assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"));
+    });
+  }
+
+  test("a frame keeps the moment it arrived, and the sender's next frame ages the rest by its own moment", () => {
+    const t = shown(FRAME + 5 * PREVIEW_STALE_MS);
+    assert.equal(t.dm.conn.previewsSent.get("drag:gob")?.at, FRAME, "kept with its arrival, not the clock's reading");
+    routeEphemeral(t.state, t.dm.conn, "s1", { k: "ruler", id: "r", points: [{ x: 1.5, y: 1.5 }], shared: true }, t.all, FRAME + PREVIEW_STALE_MS - 1);
+    assert.ok(t.dm.conn.previewsSent.has("drag:gob"), "1 ms short of its age by the new frame's moment");
+    assert.deepEqual(cancels(t.p1.got), []);
+    routeEphemeral(t.state, t.dm.conn, "s1", { k: "ruler", id: "r", points: [{ x: 2.5, y: 1.5 }], shared: true }, t.all, FRAME + PREVIEW_STALE_MS);
+    assert.equal(t.dm.conn.previewsSent.has("drag:gob"), false, "at its age by the next frame's moment");
+    assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+  });
+});
