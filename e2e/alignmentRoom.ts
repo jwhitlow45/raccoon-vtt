@@ -9044,13 +9044,13 @@ export function md4Tests(): void {
  * returns the lines for what is wrong with it: the armed words cut off by
  * the button or its pop-up, or the armed pop-up out of line (LP49-CONFIRM-1).
  */
-async function armedConfirmLines(page: Page, sweep: Sweep, tool: string, label: string, armedWords: string): Promise<string[]> {
+async function armedConfirmLines(page: Page, sweep: Sweep, tool: string, label: string, armedWords: string, pressName = label): Promise<string[]> {
   // A phone's tool strip is still scrolling when the page opens, so a first tap can miss.
   await pickTool(page, tool);
   const bar = page.getByRole("toolbar", { name: `${tool} options` });
   if (!(await bar.waitFor({ timeout: 2_000 }).then(() => true, () => false))) await pickTool(page, tool);
   let scope: Locator = bar.locator("[data-options-row]");
-  const inRow = scope.getByRole("button", { name: label, exact: true });
+  const inRow = scope.getByRole("button", { name: pressName, exact: true });
   const more = bar.getByRole("button", { name: "More options" });
   // The strip draws its row once it has measured, so wait for the button or for ⋯.
   await inRow.or(more).first().waitFor();
@@ -9058,7 +9058,7 @@ async function armedConfirmLines(page: Page, sweep: Sweep, tool: string, label: 
     await more.click();
     scope = page.getByRole("dialog", { name: `More ${tool} options` });
   }
-  await scope.getByRole("button", { name: label, exact: true }).click();
+  await scope.getByRole("button", { name: pressName, exact: true }).click();
   const armed = scope.getByRole("button", { name: await pointerText(scope, armedWords) });
   await armed.waitFor();
   const out: string[] = [];
@@ -9076,9 +9076,9 @@ async function armedConfirmLines(page: Page, sweep: Sweep, tool: string, label: 
   return out;
 }
 
-/** LP49-CONFIRM-1: Clear all, Fog all and Reveal all armed, in the row or behind ⋯, whole on both pointer kinds. */
+/** LP49-CONFIRM-1: Clear all, Fog all, Reveal all, Clear build and a stamp's Delete armed, in the row or behind ⋯, whole on a phone, a mouse in a narrow window and a wide one. */
 export function confirmMoreTests(): void {
-  test(`fu11-a. an armed confirm in a tool's ⋯ pop-up reads whole on a phone and a computer, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`fu11-a. an armed confirm in a tool's ⋯ pop-up reads whole on a phone, a mouse in a narrow window and a wide one, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const lines: string[] = [];
@@ -9087,7 +9087,11 @@ export function confirmMoreTests(): void {
     let page: Page | null = null;
     try {
       await ops.send({ t: "scene.create", scene: { id: fogged, name: "Fogged yard", bounds: { w: 12, h: 8 }, fogEnabled: true } });
-      const at = [390, 320, 1440].flatMap((w) => SCALES.map((scale) => ({ size: SIZES.find((s) => s.width === w)!, scale })));
+      // A narrow window with a mouse is where ⋯ holds a confirm with the longer "Click again" words, so it stands beside the phones' and the wide window's. Touch sizes come first, so the DM's touch context closes before the mouse one opens.
+      const narrowMouse: Size = { name: "390x844-mouse", width: 390, height: 844, touch: false };
+      const sizes = [...[390, 320].map((w) => SIZES.find((x) => x.width === w)!), narrowMouse, SIZES.find((x) => x.width === 1440)!];
+      const at = sizes.flatMap((size) => SCALES.map((scale) => ({ size, scale })));
+      await ops.send({ t: "build.stamps", sceneId: fogged, put: [{ id: uuidv7(), art: { key: "barrel" }, x: 2.5, y: 2.5, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] });
       for (const one of at) {
         const sweep = new Sweep(`fu11-${atName(one)}`);
         page = await dmPageFor(one.size);
@@ -9098,6 +9102,12 @@ export function confirmMoreTests(): void {
         lines.push(...(await armedConfirmLines(page, sweep, "Draw", "Clear all", "Tap again to clear all")));
         lines.push(...(await armedConfirmLines(page, sweep, "Fog", "Fog all", "Tap again: fog all")));
         lines.push(...(await armedConfirmLines(page, sweep, "Fog", "Reveal all", "Tap again: reveal all")));
+        lines.push(...(await armedConfirmLines(page, sweep, "Map builder", "Clear build", "Tap again to clear")));
+        // A stamp's Delete stands in the row or behind ⋯ by the room it has, and asks the same way.
+        await pickOption(page, "Map builder", "Builder mode", "Stamp");
+        await tapCell(page, { w: 12, h: 8 }, { x: 2, y: 2 });
+        lines.push(...(await armedConfirmLines(page, sweep, "Map builder", "Delete", "Tap again to delete", "Delete this stamp")));
+        await pickOption(page, "Map builder", "Builder mode", "Brush").catch(() => {});
         await pickTool(page, "Select");
         lines.push(...sweep.lines);
       }
