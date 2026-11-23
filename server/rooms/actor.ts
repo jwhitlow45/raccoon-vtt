@@ -1319,6 +1319,12 @@ export class RoomActor {
    */
   ephemeral(conn: Connection, msg: EphMessage, at = conn.now()): void {
     if (conn.held === null || !conn.eph.take()) return;
+    // Under a number clock of a test's own, ticks do not follow the server's clock, so a frame routes as it arrives,
+    // against the committed room.
+    if (this.#numberClock !== this.#opts.now) {
+      routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
+      return;
+    }
     // Routed against the room as of its arrival, once that is covered (asOf), after the socket's frames before it. Until
     // then it waits in its socket's bounded queue, and past the bound it drops, as an empty bucket drops it.
     const arrived = this.#opts.now();
