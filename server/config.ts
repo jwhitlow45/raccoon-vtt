@@ -103,7 +103,7 @@ export type Config = z.infer<typeof Env> & {
  * Anyone can read it here, so it protects nothing, which is fine for a
  * laptop's own database. Production refuses to start without its own key.
  */
-const DEVELOPMENT_ROOM_SECRET_KEY = createHash("sha256").update("raccoon-vtt development room secret key").digest();
+export const DEVELOPMENT_ROOM_SECRET_KEY = createHash("sha256").update("raccoon-vtt development room secret key").digest();
 
 const KEY_HINT = "32 random bytes in base64, made with: openssl rand -base64 32";
 

@@ -153,6 +153,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
         archiveGuard: () => app.assets.archiveDiskOk(),
         animatedMaps: animatedMapsOn(config),
         roomSound: roomSoundOn(config),
+        idSecret: config.roomSecretKey,
         ...rooms?.actor,
       },
     },

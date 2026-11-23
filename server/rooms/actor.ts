@@ -34,6 +34,7 @@ import { OP_RATE, SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
+import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
 import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
@@ -159,6 +160,8 @@ export type ActorOptions = {
    * send fixture ids, which are not version 7, and then no id is recorded.
    */
   idGate: boolean;
+  /** The ROOM_SECRET_KEY the room's id keys derive from (idKeys.ts). Tests run with the development key. */
+  idSecret: Buffer;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -186,6 +189,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   animatedMaps: false,
   roomSound: false,
   idGate: true,
+  idSecret: DEVELOPMENT_ROOM_SECRET_KEY,
 };
 
 export type ActorDeps = {
