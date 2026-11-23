@@ -1,3 +1,4 @@
+import { pointerWords } from "../lib/pointerWords.ts";
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { listenToastEscape } from "./toastEscape.ts";
@@ -2713,8 +2714,8 @@ function Toolbar(props: {
         <span id={line("shown")}>{TOOLBAR_LINES.shown}</span>
         <span id={line("hidden")}>{TOOLBAR_LINES.hidden}</span>
         <span id={line("menuTucked")}>{TOOLBAR_LINES.menuTucked}</span>
-        <span id={line("again")}>{TOOLBAR_LINES.again}</span>
-        <span id={line("pairIdle")}>{TOOLBAR_LINES.pairIdle}</span>
+        <span id={line("again")}>{pointerWords(TOOLBAR_LINES.again)}</span>
+        <span id={line("pairIdle")}>{pointerWords(TOOLBAR_LINES.pairIdle)}</span>
         {props.hiddenSheet ? <span id={`${ids}-sheet`}>{`Shows ${props.hiddenSheet} again.`}</span> : null}
       </span>
     </nav>

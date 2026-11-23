@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "../../components/Button.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
@@ -118,7 +119,7 @@ export function XCardCard(props: { words: RefObject<HTMLParagraphElement | null>
       }}
     >
       <p ref={props.words} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.input, lineHeight: 1.4 }}>
-        Tap the X to ask the table to edit out what just happened. Nobody will know who tapped it.
+        {pointerWords("Tap the X to ask the table to edit out what just happened. Nobody will know who tapped it.")}
       </p>
       <button
         type="button"

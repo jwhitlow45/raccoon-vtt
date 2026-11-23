@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useStore } from "zustand";
 import { clockNow } from "#shared/calendar.ts";
@@ -1220,7 +1221,7 @@ function DisplaySoundCard() {
   const { here } = useSoundHere();
   const on = useDisplaySound();
   const hear = useRoomView((s) => (s.confirmed ? somethingToHear(s.confirmed.playing, s.confirmed.sounds, Date.now()) : false));
-  const text = !on || !hear ? null : here === "tap" ? DISPLAY_SOUND_TAP : here === "cannot" ? DISPLAY_SOUND_CANNOT : null;
+  const text = !on || !hear ? null : here === "tap" ? pointerWords(DISPLAY_SOUND_TAP) : here === "cannot" ? DISPLAY_SOUND_CANNOT : null;
   if (text === null) return null;
   return (
     <div

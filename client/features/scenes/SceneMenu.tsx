@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { Scene } from "#shared/model.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
@@ -342,7 +343,7 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
   return (
     <div ref={row} style={{ display: "grid" }}>
       <SheetRow
-        label={armed ? (floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : "Tap again to delete") : "Delete"}
+        label={armed ? (floorCount > 1 ? `Delete ${name} and its ${floorCount} floors` : pointerWords("Tap again to delete")) : "Delete"}
         hint={blocked ?? (floorCount > 1 ? "Removes every floor with its tokens, drawings, build and fog too." : "Removes its tokens, drawings, build and fog too.")}
         danger={armed ? "armed" : "rest"}
         disabled={!next}

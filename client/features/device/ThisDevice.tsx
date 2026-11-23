@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -227,7 +228,7 @@ export default function ThisDevice() {
               ? "This device cannot draw the dice, so the result shows at once."
               : lowPower
                 ? "Low power shows each result at once, without dice."
-                : "Your own rolls in the Dice panel and from stat blocks throw dice that land on the result in about a second. A tap or a key shows it at once."
+                : pointerWords("Your own rolls in the Dice panel and from stat blocks throw dice that land on the result in about a second. A tap or a key shows it at once.")
           }
           checked={rollAnimation}
           onChange={setRollAnimation}

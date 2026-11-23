@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { MapVideo, VideoContainer } from "#shared/model.ts";
 import { VIDEO_OFF, VIDEO_SHAPE } from "#shared/permissions.ts";
@@ -61,7 +62,7 @@ export function stillReasonText(reason: StillReason, video?: Pick<MapVideo, "con
     case "phoneSize":
       return `Phone size map detail plays videos up to ${VIDEO_LIMITS.phoneLongSidePx} × ${VIDEO_LIMITS.phoneShortSidePx} at 30 frames a second.`;
     case "notStarted":
-      return "the browser didn't start it. Tap the map to try again.";
+      return pointerWords("the browser didn't start it. Tap the map to try again.");
     case "slowing":
       return "the video was slowing this device, so it stays still until you reload.";
     case "slowingOrSaving":

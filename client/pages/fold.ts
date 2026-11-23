@@ -1,3 +1,4 @@
+import { pointerWords } from "../lib/pointerWords.ts";
 import { useCallback, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
@@ -317,7 +318,7 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   const others = items.length - 1 + (rolls ? Math.max(0, rolls.unnamed ?? 0) : 0);
   const more = others > 0 ? `+${others}` : "";
   const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
-  const way = hides === "bar" ? "Hide the window" : hides === "room" ? "Tap" : hides === "pane" ? "Close the pane" : "Close the sheet";
+  const way = hides === "bar" ? "Hide the window" : hides === "room" ? pointerWords("Tap") : hides === "pane" ? "Close the pane" : "Close the sheet";
   const advice = first.kind === "rolls" && rolls?.waiting ? `${way} to answer.` : several ? `${way} to see them.` : `${way} to see it.`;
   const head = more ? `${first.text} ${more}` : first.text;
   return { text: first.text, more, name: `${head}: ${items.map((i) => i.phrase).join(", ")}. ${advice}`, first: { kind: first.kind, id: first.id } };

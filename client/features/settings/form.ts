@@ -87,7 +87,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
         kind: "toggle",
         key: "playersTypeTotals",
         label: "Players may type their roll totals",
-        help: "Players may answer a roll you ask for, or set their Initiative, with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
+        help: "Players may answer a roll you ask for, or set their Initiative, with a total they rolled at the table. Off, they press Roll and the app rolls for them. On by default.",
       },
       {
         kind: "toggle",

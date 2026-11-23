@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
@@ -98,7 +99,7 @@ export function roomPasteRows(input: RoomPasteInput): RoomPasteRow[] {
     },
   ];
   if (input.token !== null) rows.push({ id: "token", label: `Picture for ${input.token}`, help: "Then crop it to fit the token.", disabled: false });
-  if (input.onScene) rows.push({ id: "stamp", label: "Stamp", help: "Then tap the map to place it.", disabled: false });
+  if (input.onScene) rows.push({ id: "stamp", label: "Stamp", help: pointerWords("Then tap the map to place it."), disabled: false });
   rows.push({
     id: "handout",
     label: "Handout",

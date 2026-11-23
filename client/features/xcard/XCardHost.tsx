@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useMemo } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
@@ -66,7 +67,7 @@ function XCard(props: { tapCloses: boolean; onDismiss(): void }) {
           <XMark size={36} />
         </span>
         <div style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: theme.font.heading, lineHeight: theme.leading.body }}>Someone tapped the X-card. Edit out what just happened, with no questions asked.</p>
+          <p style={{ margin: 0, fontSize: theme.font.heading, lineHeight: theme.leading.body }}>{pointerWords("Someone tapped the X-card. Edit out what just happened, with no questions asked.")}</p>
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
             <Button variant="primary" onClick={props.onDismiss}>
               Dismiss

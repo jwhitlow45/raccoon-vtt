@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { MapVideo, Scene, SceneMap } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -119,7 +120,7 @@ export function StillPick(props: { pending: PendingStill; busy: boolean; onStill
   return (
     <div style={{ display: "grid", gap: theme.space(2), justifyItems: "start" }}>
       <p role="alert" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, color: theme.color.text, overflowWrap: "anywhere" }}>
-        {pending.problem ?? (pending.lowPower ? LOW_POWER_STOPPED : NO_FIRST_FRAME)}
+        {pending.problem ?? (pending.lowPower ? pointerWords(LOW_POWER_STOPPED) : NO_FIRST_FRAME)}
       </p>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
         <label style={{ ...PICKER, cursor: props.busy ? "default" : "pointer", ...buttonLook("secondary", { disabled: props.busy }) }}>

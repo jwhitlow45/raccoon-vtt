@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useLayoutEffect, useRef, useState } from "react";
 import { clockNow, dateText, fightStarted } from "#shared/calendar.ts";
 import type { RoomClock } from "#shared/model.ts";
@@ -148,7 +149,7 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) 
               actions.dispatch({ t: "clock.stop" });
             }}
           >
-            {stopArmed ? "Tap again to stop the clock" : "Stop the clock"}
+            {stopArmed ? pointerWords("Tap again to stop the clock") : "Stop the clock"}
           </Button>
         </div>
       </Section>
