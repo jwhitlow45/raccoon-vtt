@@ -581,7 +581,7 @@ before an update can be undone after it.
 
 After any update, reload every page left open across it, table displays
 included. A page opened on this release or later reloads itself when the
-update raises the op version, once its edits are saved. A page opened before
+update raises the change format (op version), once its edits are saved. A page opened before
 this release, and any update that changes only the page's code, make no
 version check, so until it is reloaded, a page works by the old rules.
 
