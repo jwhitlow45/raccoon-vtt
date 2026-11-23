@@ -148,7 +148,7 @@ describe("the server's tick (6.4)", () => {
     assert.deepEqual(h.db.stored.at(-1), { t: "sys.sound", from: 5, music: null });
   });
 
-  test("a tick queued behind a commit is worked out when the queue reaches it and dated when it was queued, as every command is", async (t) => {
+  test("a tick due while a commit is held is worked out and dated as it comes, and stored once that commit lands", async (t) => {
     const f = library(playing(run()));
     const h = await load(t, f.state, { pub: T0 });
     const db = h.db as StoredRoomDb;
@@ -163,9 +163,10 @@ describe("the server's tick (6.4)", () => {
     };
     void dm.send({ t: "log.chat", text: "holds the queue" });
     await until(() => (held ? true : undefined), "the commit held");
-    // A socket's coming places the timer afresh, and the tick due now waits in the queue behind the commit.
+    // A socket's coming places the timer afresh, and the tick due now is handled while the commit is held.
     h.actor.attach(new Connection({ readyState: 1, OPEN: 1, CONNECTING: 0, send() {}, close() {}, terminate() {} } as never, { sessionId: uuidv7(), roomId: ROOM, memberId: f.player.id, role: "player", display: true }, "203.0.113.30"));
-    await until(() => (h.actor.queueLength > 0 ? true : undefined), "the tick queued");
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.equal(h.actor.queueLength, 0, "nothing waits behind the held commit");
     h.clock.now = T0 + 35_050;
     release();
     const tick = await until(() => db.rows.find((row) => (row.op as { t?: string }).t === "sys.sound"), "the stored tick");

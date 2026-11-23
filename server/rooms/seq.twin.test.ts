@@ -596,14 +596,12 @@ async function burst(twin: Twin, ops: Array<[Who, Op]>, meanwhile?: (twin: Twin)
   await twin.settle();
 }
 
-/** With the clock past the door twin's track end, a tick queued behind the held commit there, and nothing in the twin of rock. */
+/** With the clock past the door twin's track end, a tick handled while the commit is held there, and nothing in the twin of rock. */
 async function queuedTick(twin: Twin): Promise<void> {
   twin.clock.now = Math.max(twin.clock.now, TRACK_END + 1_000);
-  const queued = twin.actor.queueLength;
   // Attaching a socket again places the tick's timer afresh, which finds it due.
   twin.actor.attach(twin.display.conn);
-  if (twin.name === "door") await until(() => (twin.actor.queueLength > queued ? true : undefined), "the queued tick");
-  else await delay(15);
+  await delay(15);
 }
 
 /** The cleanup's remember of IMAGE queued behind the held commit, where a stamp in P2's memory shows it. */

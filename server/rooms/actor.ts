@@ -94,9 +94,10 @@ import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutc
  * against the staged state, so nothing can interleave between a snapshot
  * and the events after it. Every command belongs to the batch of the 20 ms
  * tick of the number clock it arrived in, which commits in one transaction
- * once that tick has passed. While a commit is in flight the queue waits,
- * so a batch is always built on the committed state before it, and nothing
- * is published or acknowledged until its rows are durable. After the commit, every
+ * once that tick has passed. The queue does not wait for commits: the next
+ * batch builds on the state the last one closed with, and commits run one
+ * at a time in tick order, so nothing is published or acknowledged until
+ * its rows and every earlier batch's are durable. After the commit, every
  * connection gets one `ev` with the batch's changes for its viewer plus
  * that client's acks and refusals, and every snapshot and resent ack the
  * batch's devices asked for is answered then too.
@@ -314,6 +315,9 @@ const ASK_TURN_MS = 8;
  * its tick wait.
  */
 const DRAIN_TURN_MS = 8;
+
+/** How many closed batches may wait for their commits, half a second of ticks, before the drain waits for the oldest to land. */
+export const MAX_PENDING_BATCHES = 25;
 
 /**
  * How far a counted op's number may run ahead of the server's clock and
@@ -612,6 +616,8 @@ export class RoomActor {
   #snapshotTimer: NodeJS.Timeout | null = null;
   #snapshotting: Promise<void> | null = null;
   #batch: Batch | null = null;
+  /** The closed batches whose commits have not landed, in tick order: the first is in flight, and the rest wait their turn. */
+  #pending: Batch[] = [];
   #inFlight: Batch | null = null;
   #inFlightDone: Promise<void> | null = null;
   #queue: Command[] = [];
@@ -907,7 +913,7 @@ export class RoomActor {
       this.#queue.length === 0 &&
       this.#drainTurn === null &&
       this.#batch === null &&
-      this.#inFlight === null &&
+      this.#pending.length === 0 &&
       this.#snapshotting === null &&
       this.#stepRunning === null &&
       this.#parked.length === 0 &&
@@ -1099,15 +1105,16 @@ export class RoomActor {
 
   /**
    * Runs a deletion step on this room's queue (docs/design/design-v1-dm-tools.md
-   * 3.19). A step that finds a batch being staged waits for that batch's own
-   * commit, at its tick, and runs once it lands with no batch open, so the
-   * committed state `run` gets equals the staged one and nothing it relies
-   * on can still be abandoned. Ops queued after it may join that batch
-   * meanwhile. If the room shuts down first, the step is refused once and
-   * runs nothing. While `run` is awaited the queue waits, so no op is
-   * applied meanwhile. The ids it returns as deleted are recorded under a
-   * new deletion generation, and a room that went read-only at its quota
-   * checks its size again at once.
+   * 3.19). A step that finds a batch being staged or a commit not yet landed
+   * waits: the queue goes on with the commands of the step's own tick, which
+   * may join its batch, and holds before the first of a later tick. Once
+   * every batch through the step's tick has landed and none is open, it
+   * runs, so the committed state `run` gets equals the staged one and
+   * nothing it relies on can still be abandoned. If the room shuts down
+   * first, the step is refused once and runs nothing. While `run` is
+   * awaited the queue waits, so no op is applied meanwhile. The ids it
+   * returns as deleted are recorded under a new deletion generation, and a
+   * room that went read-only at its quota checks its size again at once.
    */
   deletionStep<T>(run: DeletionRun<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -1120,8 +1127,8 @@ export class RoomActor {
   }
 
   #runStep(cmd: StepCommand): void {
-    if (this.#batch) {
-      // The batch closes at its own tick, not because of the step (#runParked runs it after the commit).
+    if (this.#batch || this.#pending.length > 0) {
+      // The batch closes at its own tick, not because of the step (#runParked runs it once every commit before it lands).
       this.#parked.push(cmd);
       return;
     }
@@ -1144,14 +1151,13 @@ export class RoomActor {
   }
 
   /**
-   * Runs the first parked step once the commit it waited for has landed and
+   * Runs the first parked step once every commit before it has landed and
    * no batch is open, so the committed state it reads is the staged one
-   * (#runStep). A batch opened meanwhile, as an ask read can open one during
-   * a commit, keeps it parked until that batch commits too. True when one
-   * started, which holds the queue.
+   * (#runStep). A batch of its tick opened meanwhile keeps it parked until
+   * that batch lands too. True when one started, which holds the queue.
    */
   #runParked(): boolean {
-    if (this.#parked.length === 0 || this.#batch || this.#inFlight || this.#stepRunning || this.#reading || this.#closed) return false;
+    if (this.#parked.length === 0 || this.#batch || this.#pending.length > 0 || this.#stepRunning || this.#reading || this.#closed) return false;
     this.#runStep(this.#parked.shift()!);
     return true;
   }
@@ -1355,7 +1361,8 @@ export class RoomActor {
         this.#ids.abandoned(this.#batch.ids);
         this.#batch = null;
       }
-      if (this.#inFlightDone) await this.#inFlightDone;
+      // Every closed batch commits in turn, the one just closed last.
+      while (this.#inFlightDone) await this.#inFlightDone;
       // A deletion statement already sent finishes before the room leaves memory, so a reload never overlaps it.
       if (this.#stepRunning) await this.#stepRunning;
       if (opts.snapshot) {
@@ -1395,17 +1402,22 @@ export class RoomActor {
     this.#draining = true;
     const until = performance.now() + DRAIN_TURN_MS;
     try {
-      while (this.#inFlight === null && this.#stepRunning === null && this.#reading === null && !this.#closed) {
+      // Backpressure: past MAX_PENDING_BATCHES closed batches waiting, handling waits for the oldest to land.
+      while (this.#pending.length < MAX_PENDING_BATCHES && this.#stepRunning === null && this.#reading === null && !this.#closed) {
         if (this.#runParked()) break;
         const cmd = this.#queue[0];
         if (!cmd) break;
         // One reading for the whole command, its fault's refusal included (#moment): the one it was queued with.
         const moment = cmd.moment ?? this.#clocks();
+        const tick = this.#tickOf(moment);
         // A command of a later tick closes the open batch before it is taken, so a batch holds one tick's commands.
-        if (this.#batch && this.#tickOf(moment) > this.#batch.tick) {
+        if (this.#batch && tick > this.#batch.tick) {
           this.#commitNow();
           continue;
         }
+        // A parked deletion step holds the queue at its tick's edge until every batch through that tick has landed.
+        const parked = this.#parked[0];
+        if (parked && tick > this.#tickOf(parked.moment ?? moment)) break;
         if (performance.now() >= until) {
           this.#drainTurn ??= setImmediate(() => {
             this.#drainTurn = null;
@@ -1632,7 +1644,7 @@ export class RoomActor {
     const memberId = conn.memberId;
     const busy = (batch: Batch | null) => batch !== null && batch.ops.some((r) => r.actor !== SERVER_ACTOR && r.actor.memberId === memberId);
     const oldOpen = [...this.#connections].some((c) => c !== conn && !c.closed && c.key === key);
-    if (key === null || !conn.opRate.allow() || busy(this.#batch) || busy(this.#inFlight) || oldOpen) {
+    if (key === null || !conn.opRate.allow() || busy(this.#batch) || this.#pending.some(busy) || oldOpen) {
       pending();
       return;
     }
@@ -1661,7 +1673,7 @@ export class RoomActor {
    */
   #walkNeedsSteps(raw: unknown): boolean {
     const batch = this.#batch;
-    if (!batch || this.#inFlight !== null) return false;
+    if (!batch) return false;
     // A batch with no answer since its steps holds at most the music's tick or a cleanup's remember, neither of which
     // moves the fog, the explored ground or the sight a stop reads, and a mid-batch explore only ever follows an answer.
     if (answeredSinceStep(batch) === 0) return false;
@@ -1693,7 +1705,7 @@ export class RoomActor {
     const n = cmd.n;
     // Ahead of every count it takes, and only for an op the rates below will let through, so one answered `busy` runs no
     // step. The walk's number and time are its arrival's (#moment), read before the steps' work.
-    if (n > wm.committed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
+    if (n > wm.closed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
       if (this.#opts.walkCloses) {
         // The old order, for the tests that compare the two: the walk comes back to the front once the commit lands.
         this.#queue.unshift(cmd);
@@ -1709,12 +1721,14 @@ export class RoomActor {
       conn.close(CLOSE.abuse, "op rate");
       return;
     }
-    if (n <= wm.committed) {
-      // Answered at the batch's close like every read, with the history after it (#answerReads).
+    if (n <= wm.closed) {
+      // An op of a closed batch: answered at the open batch's publish like every read, which comes after the op's own by
+      // tick order, with the history after it (#answerReads).
       this.#ensureBatch().reads.push({ conn, key, resent: n });
       this.#scheduleCommit();
       return;
     }
+    // An op of the open batch: its answer comes with the batch.
     if (n <= wm.staged) return;
     if (n > wm.staged + 1) {
       conn.send({ t: "retry", n, code: "gap" });
@@ -2755,7 +2769,7 @@ export class RoomActor {
       this.#watermarks.set(key, wm);
     }
     const settled = cmd.resumeFrom - 1;
-    if (settled > wm.committed) {
+    if (settled > wm.closed) {
       // The client says every lower n is settled: raise through the batch
       // and answer once that is durable, so the watermark it gets back is
       // one it can rely on.
@@ -2908,9 +2922,8 @@ export class RoomActor {
 
   #ensureBatch(): Batch {
     if (!this.#batch) {
-      // A batch begun while another commits, as an ask read in turns may begin one (MD4-ASTRA-10), starts where that one ends.
-      const after = this.#inFlight;
-      const before = after?.state ?? this.#committed.state;
+      // A batch begins on the staged state, where the newest closed batch ends, whether or not its commit has landed.
+      const before = this.#staged.state;
       this.#batch = {
         tick: this.#tickOf(this.#now()),
         before,
@@ -2938,7 +2951,7 @@ export class RoomActor {
         due: false,
         answered: 0,
         state: before,
-        seq: after?.seq ?? this.#committed.seq,
+        seq: this.#staged.seq,
         pub: 0,
         stored: 0,
       };
@@ -3002,7 +3015,7 @@ export class RoomActor {
 
   #commitNow(): void {
     const batch = this.#batch;
-    if (!batch || this.#inFlight) return;
+    if (!batch) return;
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
@@ -3031,6 +3044,14 @@ export class RoomActor {
       this.#fault("undo summaries failed", err, null);
       batch.history = this.#committedHistory;
     }
+    this.#pending.push(batch);
+    this.#nextCommit();
+  }
+
+  /** Starts the oldest waiting batch's commit, when none is in flight: commits run one at a time, in tick order. */
+  #nextCommit(): void {
+    const batch = this.#pending[0];
+    if (this.#inFlight !== null || batch === undefined) return;
     this.#inFlight = batch;
     this.#inFlightDone = this.#runCommit(batch);
   }
@@ -3367,7 +3388,7 @@ export class RoomActor {
     // Its quota check runs without holding the queue, as a deletion step's does.
     if (write.snapshot) void this.#snapshotStored(write.snapshot.seq, Buffer.byteLength(write.snapshot.json), batch.state).catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
     release?.();
-    // Nothing from here on throws out of the commit: no one awaits it, and the queue waits until its end. The publish is
+    // Nothing from here on throws out of the commit: no one awaits it, and the next commit waits until its end. The publish is
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
     // catches per command (#drain) and whose flush cannot throw (#commitNow).
     try {
@@ -3415,9 +3436,11 @@ export class RoomActor {
     // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.
     this.#armSoundTick();
     if (batch.ops.length > 0) this.#scheduleSnapshot();
-    // The queue waited for this commit and resumes now. The drain's end closes a batch whose tick passed meanwhile.
+    // The next batch's commit starts, and the queue resumes if it held on this one: backpressure, a parked deletion step.
+    this.#pending.shift();
     this.#inFlight = null;
     this.#inFlightDone = null;
+    this.#nextCommit();
     this.#drain();
   }
 
@@ -3529,18 +3552,30 @@ export class RoomActor {
     return pub;
   }
 
-  /** A batch that could not commit while the room was shutting down. Its clients still hold those ops and resend them. */
+  /**
+   * A batch that could not commit while the room was shutting down, and
+   * every batch after it, closed or open, since each was built on it. Their
+   * clients still hold those ops and resend them. The room takes no command
+   * after it, so watermarks stay: the next load reads them from the table.
+   */
   #abandon(batch: Batch, err: unknown): void {
     this.retrying = false;
-    this.#log.error({ err, roomId: this.roomId, ops: batch.ops.length }, "batch abandoned at shutdown");
+    const from = this.#pending.indexOf(batch);
+    const dropped = [...(from < 0 ? [batch] : this.#pending.slice(from)), ...(this.#batch ? [this.#batch] : [])];
+    this.#log.error({ err, roomId: this.roomId, ops: dropped.reduce((sum, b) => sum + b.ops.length, 0), batches: dropped.length }, "batch abandoned at shutdown");
     this.#staged = this.#committed;
     this.#sizes.accept(this.#committed.state);
     // The numbers it handed out stay handed out: only the stored one goes back.
     this.#pub = this.#committedStored;
-    // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
-    this.#receipts.abandoned(batch.receipts, batch.takes);
-    this.#ids.abandoned(batch.ids);
-    for (const s of batch.sys) s.reject(new ActorClosedError(this.roomId));
+    for (const b of dropped) {
+      if (b.timer) clearTimeout(b.timer);
+      // The batch's receipts go with it and give back their slots (docs/design/design-v1-dice.md 1.2). Their clients resend the ops.
+      this.#receipts.abandoned(b.receipts, b.takes);
+      this.#ids.abandoned(b.ids);
+      for (const s of b.sys) s.reject(new ActorClosedError(this.roomId));
+    }
+    this.#pending = [];
+    this.#batch = null;
     this.#inFlight = null;
     this.#inFlightDone = null;
   }
@@ -3684,7 +3719,7 @@ export class RoomActor {
     this.#undo.clear(memberId);
     const empty = this.#undo.summary(memberId, "dm", 0, 0);
     this.#committedHistory.set(memberId, empty);
-    this.#inFlight?.history?.set(memberId, empty);
+    for (const b of this.#pending) b.history?.set(memberId, empty);
     this.#batch?.history?.set(memberId, empty);
     for (const [key, conn] of this.#clients) if (conn.memberId === memberId) {
       this.#groupScopes.delete(key);

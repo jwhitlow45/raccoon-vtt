@@ -281,7 +281,7 @@ describe("a device's reads are answered at a batch's close", () => {
 });
 
 describe("a read behind a commit that is retried", () => {
-  test("a reload while the database is out gets no frame until the commit lands, then its snapshot at the close after", async (t) => {
+  test("a reload while the database is out gets no frame until the commit before its own lands, then its snapshot with its own batch's number", async (t) => {
     const r = await gridRoom(t);
     let out = true;
     let tries = 0;
@@ -299,14 +299,14 @@ describe("a read behind a commit that is retried", () => {
     r.clock.now = T0 + 1_000;
     out = false;
     const snapshot = await until(() => snapshots(again.sent)[0], "the snapshot after the commit");
-    assert.equal(snapshot.seq, T0 + 1_000, "numbered by the close after the commit landed");
+    assert.ok(snapshot.seq < T0 + 1_000, "numbered by its own batch's close, not by when the commit before it landed");
     assert.equal(snapshot.watermark, r.p1.n, "it holds the op the commit stored");
   });
 });
 
-describe("commands queued behind a commit", () => {
+describe("commands handled while a commit is held", () => {
   /**
-   * P1's two chats queued 10 ms apart while a commit holds the queue, with
+   * P1's two chats sent 10 ms apart while a commit is held, with
    * `between` of the DM's renames queued at the milliseconds between them,
    * and the gap between the two chats' numbers once the commit lands.
    */
@@ -330,7 +330,7 @@ describe("commands queued behind a commit", () => {
     }
     r.clock.now = T0 + 1_110;
     chat(r.p1, "second");
-    assert.ok(r.actor.queueLength >= 2 + between, "everything waits behind the commit");
+    assert.equal(r.actor.queueLength, 0, "the queue goes on while the commit is held");
     r.clock.now = T0 + 1_200;
     release();
     const numberOf = async (text: string) => Number((await until(() => r.actor.committed.state.log.find((line) => line.text === text), text)).id.split(":")[0]);
