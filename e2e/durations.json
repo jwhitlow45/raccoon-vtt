@@ -2,6 +2,7 @@
   "defaultSeconds": 60,
   "seconds": {
     "alignment": 562,
+    "alignment-confirms": 58,
     "alignment-followups": 418,
     "alignment-icons": 229,
     "alignment-settings": 453,
