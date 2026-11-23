@@ -116,7 +116,9 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
     pool: db.pool(),
     info: { roomId: ROOM, pinned: false, createdIp: null, readOnly: false },
     log: quiet,
-    budget: new SnapshotBudget(),
+    // The budget reads each hello's moment on the room's clock, which a wait moves past its window: a session's fourth
+    // snapshot inside one waits, so some sockets wait for theirs when a fault comes. Its abuse rule is set past any run.
+    budget: new SnapshotBudget({ sessionCount: 3, abuseMs: 3_600_000 }, () => clock.t),
     gateway: {} as RoomGateway,
     options: {
       batchMs: 1,

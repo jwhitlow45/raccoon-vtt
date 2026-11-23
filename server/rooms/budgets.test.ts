@@ -266,3 +266,43 @@ describe("SocketRegistry", () => {
     assert.equal(r.remoteDevices(isThisComputer), 1);
   });
 });
+
+describe("times given by the caller, as a queued command's arrival", () => {
+  test("a bucket given a time before the last it read refills nothing, and its time stays where it was", () => {
+    const b = new TokenBucket(1, 1, () => 0);
+    assert.equal(b.take(1, 10_000), true);
+    assert.equal(b.take(1, 5_000), false, "an earlier time refills nothing");
+    assert.equal(b.available(10_500), 0.5, "refilled from 10,000, not from 5,000");
+  });
+
+  test("an op rate's window and its sustained streak never move back", () => {
+    const rate = new OpRate(() => 0, { perSec: 1, holdMs: 0 });
+    for (let i = 0; i < 3; i++) assert.equal(rate.count(2_500), false);
+    assert.equal(rate.count(1_500), true, "an earlier second counts in the window already open");
+    const streak = new SustainedViolation(1_000, () => 0, 1_000);
+    assert.equal(streak.over(10_000), false);
+    assert.equal(streak.over(5_000), false);
+    assert.equal(streak.over(10_900), false);
+    assert.equal(streak.over(11_100), true, "the streak still runs from 10,000: its last time stayed there");
+  });
+
+  test("an op rate spends and reads its bucket at the time given", () => {
+    const rate = new OpRate(() => 0, { perSec: 10, burst: 2 });
+    assert.equal(rate.allow(2, 0), true);
+    assert.equal(rate.wouldAllow(1, 50), false);
+    assert.equal(rate.wouldAllow(1, 100), true);
+    assert.equal(rate.allow(1, 100), true);
+    assert.equal(rate.allow(1, 100), false);
+  });
+
+  test("the snapshot budget reads the time given and keeps spends in time order whatever order rooms record them in", () => {
+    const budget = new SnapshotBudget({ sessionCount: 2, windowMs: 60_000 }, () => 0);
+    const keys = budget.keys("s1", "203.0.113.1", false);
+    budget.record(keys, 10, 30_000);
+    budget.record(keys, 10, 10_000);
+    assert.equal(budget.delay(keys, 50_000), 20_000, "the oldest spend leaves the window first");
+    assert.equal(budget.delay(keys, 70_001), 0);
+    assert.equal(budget.request("s1", true, 40_000), false);
+    assert.equal(budget.request("s1", true, 35_000), false, "an earlier request does not move the abuse clock back");
+  });
+});

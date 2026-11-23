@@ -4,7 +4,7 @@ import type { HeldEntry } from "#shared/project.ts";
 import type { Viewer } from "#shared/model.ts";
 import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
 import { inSortedOrder } from "#shared/sortedJson.ts";
-import { FrameBudget, OpRate, TokenBucket, type Clock } from "./budgets.ts";
+import { FrameBudget, OP_RATE, OpRate, TokenBucket, type Clock } from "./budgets.ts";
 
 /** Close codes from design section 7.1. */
 export const CLOSE = {
@@ -123,6 +123,12 @@ export class Connection {
   bytesSent = 0;
   readonly frames: FrameBudget;
   readonly opRate: OpRate;
+  /**
+   * The asset lookups this socket's ops start before they are queued, at
+   * OP_RATE: read and spent as each such op arrives, by its own arrivals
+   * alone, so the check never reads how far the queue has got.
+   */
+  readonly lookupRate: TokenBucket;
   readonly eph: TokenBucket;
   /** The socket's clock, which its budgets read and its previews are timed by. */
   readonly now: Clock;
@@ -165,6 +171,7 @@ export class Connection {
     this.now = now;
     this.frames = new FrameBudget(now);
     this.opRate = new OpRate(now);
+    this.lookupRate = new TokenBucket(OP_RATE.perSec, OP_RATE.burst, now);
     this.eph = new TokenBucket(opts.ephPerSec ?? 40, opts.ephBurst ?? 80, now);
   }
 

@@ -47,10 +47,11 @@ export class TokenBucket {
     return this.#tokens;
   }
 
+  /** A time before the last one read refills nothing and leaves the last one as it was, so the bucket's time never moves back. */
   #refill(now: number): void {
-    const elapsed = Math.max(0, now - this.#last);
+    if (now <= this.#last) return;
+    this.#tokens = Math.min(this.burst, this.#tokens + ((now - this.#last) / 1000) * this.ratePerSec);
     this.#last = now;
-    this.#tokens = Math.min(this.burst, this.#tokens + (elapsed / 1000) * this.ratePerSec);
   }
 }
 
@@ -74,11 +75,10 @@ export class SustainedViolation {
     this.#now = now;
   }
 
-  /** Records a violation. True when the streak has now lasted the whole hold time. */
-  over(): boolean {
-    const now = this.#now();
+  /** Records a violation at `now`, its own clock when absent. True when the streak has now lasted the whole hold time. Its last time never moves back. */
+  over(now = this.#now()): boolean {
     if (this.#since === null || now - this.#last > this.gapMs) this.#since = now;
-    this.#last = now;
+    this.#last = Math.max(this.#last, now);
     return now - this.#since >= this.holdMs;
   }
 
@@ -124,7 +124,10 @@ export const OP_RATE = { perSec: 20, burst: 60 } as const;
  * The op rate of one socket (design 10.4): 20 per second with a burst of 60
  * answers `busy` beyond, and a socket that stays over three times its limit
  * for 10 s is closed. The second rule counts every op message, including
- * duplicates and gaps, because those cost the server work too.
+ * duplicates and gaps, because those cost the server work too. Each method
+ * reads the time it is given, the moment a queued op arrived at, and its own
+ * clock when none is: a time before the last one read counts in the window
+ * already open, never one gone.
  */
 export class OpRate {
   #bucket: TokenBucket;
@@ -143,26 +146,26 @@ export class OpRate {
     this.#second = Math.floor(now() / 1000);
   }
 
-  /** Counts one op message. True when the socket has been abusive for the hold time. */
-  count(): boolean {
-    const second = Math.floor(this.#now() / 1000);
-    if (second !== this.#second) {
+  /** Counts one op message at `at`. True when the socket has been abusive for the hold time. */
+  count(at = this.#now()): boolean {
+    const second = Math.floor(at / 1000);
+    if (second > this.#second) {
       this.#second = second;
       this.#perSecond = 0;
     }
     this.#perSecond++;
-    if (this.#perSecond > this.#abuseAt) return this.#sustained.over();
+    if (this.#perSecond > this.#abuseAt) return this.#sustained.over(at);
     return false;
   }
 
-  /** Whether this op may be processed now, at `n` ops' cost: a builder's ask costs one for each op it reads. */
-  allow(n = 1): boolean {
-    return this.#bucket.take(n);
+  /** Whether this op may be processed at `at`, at `n` ops' cost: a builder's ask costs one for each op it reads. */
+  allow(n = 1, at = this.#now()): boolean {
+    return this.#bucket.take(n, at);
   }
 
-  /** Whether `allow(n)` would say yes now, without spending anything. */
-  wouldAllow(n = 1): boolean {
-    return this.#bucket.tokens >= n;
+  /** Whether `allow(n, at)` would say yes, without spending anything. */
+  wouldAllow(n = 1, at = this.#now()): boolean {
+    return this.#bucket.available(at) >= n;
   }
 }
 
@@ -292,9 +295,8 @@ export class SnapshotBudget {
     ];
   }
 
-  /** Milliseconds until one more snapshot fits under every key, 0 when it fits now. */
-  delay(keys: readonly BudgetKey[]): number {
-    const now = this.#now();
+  /** Milliseconds from `now` until one more snapshot fits under every key, 0 when it fits then. */
+  delay(keys: readonly BudgetKey[], now = this.#now()): number {
     let delay = 0;
     for (const k of keys) {
       const live = this.#live(k.key, now);
@@ -313,12 +315,14 @@ export class SnapshotBudget {
     return Math.ceil(delay);
   }
 
-  record(keys: readonly BudgetKey[], bytes: number): void {
-    const now = this.#now();
+  /** Spends one snapshot of `bytes` at `now`, kept in time order whatever order the rooms record in. */
+  record(keys: readonly BudgetKey[], bytes: number, now = this.#now()): void {
     this.#sweep(now);
     for (const k of keys) {
       const live = this.#live(k.key, now);
-      live.push({ at: now, bytes });
+      let at = live.length;
+      while (at > 0 && live[at - 1]!.at > now) at--;
+      live.splice(at, 0, { at: now, bytes });
       this.#spent.set(k.key, live);
     }
   }
@@ -328,19 +332,18 @@ export class SnapshotBudget {
    * whether the budget delayed it. True when the session has now been making
    * requests over budget for the whole abuse window.
    */
-  request(sessionId: string, delayed: boolean): boolean {
+  request(sessionId: string, delayed: boolean, now = this.#now()): boolean {
     if (!delayed) {
       this.#overSince.delete(sessionId);
       return false;
     }
-    const now = this.#now();
     this.#sweep(now);
     const over = this.#overSince.get(sessionId);
     if (over === undefined) {
       this.#overSince.set(sessionId, { since: now, last: now });
       return false;
     }
-    over.last = now;
+    over.last = Math.max(over.last, now);
     if (now - over.since >= this.limits.abuseMs) {
       this.#overSince.delete(sessionId);
       return true;

@@ -351,7 +351,7 @@ type Lookup = { gen: number; ids: ReadonlySet<string> };
 export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ deleted: readonly string[]; result: T }>;
 
 type Command = (
-  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean }
+  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean; lookupRefused?: true }
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
@@ -366,6 +366,8 @@ type Command = (
 ) & {
   /** The clocks when it was queued (#enqueue), which it is handled with, however long it waited. */
   moment?: Moment;
+  /** A socket's command's arrival on that socket's own clock, which its op rate reads (Connection.now). */
+  socketAt?: number;
 };
 
 type StepCommand = Extract<Command, { t: "step" }>;
@@ -375,10 +377,10 @@ type Moment = { now: number; number: number };
 
 /**
  * A request a batch answers at its close (#answerReads): a snapshot, the
- * hello's or a delayed one's, or the ack of an op resent after its commit
- * with the history after it.
+ * hello's or a delayed one's, with the moment it was asked at, or the ack
+ * of an op resent after its commit with the history after it.
  */
-type Read = { conn: Connection; key: ClientKey; resent?: number };
+type Read = { conn: Connection; key: ClientKey; resent?: number; at?: number };
 
 /**
  * Where a batch's explore and map steps last ran (#stepInPlace): the state
@@ -789,8 +791,10 @@ export class RoomActor {
     for (const sceneId of scenesOverByNumbering(loaded.state, this.#sizes.share, this.#sizes.sceneLimit)) {
       this.#log.warn({ roomId: this.roomId, sceneId }, "a scene is over its size limit once creature numbers are reserved");
     }
-    this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, this.#opts.now);
-    this.#receipts = new ReceiptBook(this.#opts.now, this.#opts.receiptCaps);
+    // Every budget, window and receipt time a queued command meets reads the moment it arrived at (#time).
+    const time = () => this.#time();
+    this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, time);
+    this.#receipts = new ReceiptBook(time, this.#opts.receiptCaps);
     // Who admitted a stored receipt is read from the member's kind now, which the DM grants keep (reconcileKinds).
     this.#receipts.load(
       receipts.map((r) => ({
@@ -806,7 +810,7 @@ export class RoomActor {
         ...(r.ask ? { ask: r.ask } : {}),
       })),
     );
-    this.#ids = new IdGate(this.#opts.now, ids.since, ids.sealedSince ?? null);
+    this.#ids = new IdGate(time, ids.since, ids.sealedSince ?? null);
     this.#idKeys = new RoomIdKeys(this.#opts.idSecret, this.roomId);
     this.#ids.load(ids.rows);
     // A clock set back after this server first started on this build leaves the cutover ahead of it, and every id
@@ -1057,14 +1061,12 @@ export class RoomActor {
     let facts = NO_FACTS;
     let lookup: Lookup | null = null;
     if (ids.length > 0) {
-      // The asset lookup is a database read, so an op over its rate is
-      // turned away before it, not after: a flood of asset ops must not
-      // hold the pool connections this room's commits need. `busy` spends
-      // no op number, so answering it ahead of the sequence checks is safe.
-      // The op still counts toward the abuse rule, as it would in the queue.
-      if (!conn.opRate.wouldAllow() || this.#rateOf(conn).tokens < 1) {
-        if (conn.opRate.count()) conn.close(CLOSE.abuse, "op rate");
-        else conn.send({ t: "retry", n, code: "busy" });
+      // The asset lookup is a database read, so an op over its socket's lookup rate is turned away before it: a flood
+      // of asset ops must not hold the pool connections this room's commits need. The rate is the socket's own, spent
+      // as its asset ops arrive, so the check reads nothing of how far the queue has got. The op turned away still
+      // joins the queue, with no lookup, where it counts toward the abuse rule and is answered `busy` in its turn.
+      if (!conn.lookupRate.take()) {
+        this.#enqueue({ t: "op", conn, n, raw, group, groupScope, facts: NO_FACTS, lookup: null, lookupRefused: true });
         return;
       }
       // Registered with the deletion generation before the read starts, in
@@ -1223,6 +1225,7 @@ export class RoomActor {
 
   /** A DM's `scene` request (design 7.1): counted against the snapshot budget's abuse rule, then answered with `resync`. */
   scene(conn: Connection): void {
+    // Outside the queue, so it reads the clock.
     const delayed = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned)) > 0;
     if (this.#budget.request(conn.sessionId, delayed)) {
       this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
@@ -1384,6 +1387,7 @@ export class RoomActor {
     // and are handled in one millisecond once it ends keep the times and the batch they came at. The music's tick is
     // stamped too: only its step reads the clock as the queue reaches it, since the step is for that moment.
     cmd.moment = this.#clocks();
+    if ("conn" in cmd) cmd.socketAt = cmd.conn.now();
     this.#queue.push(cmd);
     this.#drain();
   }
@@ -1548,7 +1552,7 @@ export class RoomActor {
    * cannot fill the error log faster than it can reconnect.
    */
   #faultsPastLimit(session: string): boolean {
-    const now = this.#opts.now();
+    const now = this.#time();
     const recent = (this.#faultRefusals.get(session) ?? []).filter((at) => now - at < FAULT_REFUSALS_WINDOW_MS);
     recent.push(now);
     this.#faultRefusals.set(session, recent);
@@ -1646,7 +1650,7 @@ export class RoomActor {
     const memberId = conn.memberId;
     const busy = (batch: Batch | null) => batch !== null && batch.ops.some((r) => r.actor !== SERVER_ACTOR && r.actor.memberId === memberId);
     const oldOpen = [...this.#connections].some((c) => c !== conn && !c.closed && c.key === key);
-    if (key === null || !conn.opRate.allow() || busy(this.#batch) || this.#pending.some(busy) || oldOpen) {
+    if (key === null || !conn.opRate.allow(1, cmd.socketAt ?? conn.now()) || busy(this.#batch) || this.#pending.some(busy) || oldOpen) {
       pending();
       return;
     }
@@ -1707,7 +1711,9 @@ export class RoomActor {
     const n = cmd.n;
     // Ahead of every count it takes, and only for an op the rates below will let through, so one answered `busy` runs no
     // step. The walk's number and time are its arrival's (#moment), read before the steps' work.
-    if (n > wm.closed && n === wm.staged + 1 && conn.opRate.wouldAllow() && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
+    // The socket's own rate reads its arrival on the socket's clock, the server's but in tests that give a socket its own.
+    const arrived = cmd.socketAt ?? conn.now();
+    if (n > wm.closed && n === wm.staged + 1 && conn.opRate.wouldAllow(1, arrived) && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
       if (this.#opts.walkCloses) {
         // The old order, for the tests that compare the two: the walk comes back to the front once the commit lands.
         this.#queue.unshift(cmd);
@@ -1719,8 +1725,13 @@ export class RoomActor {
       this.#stepInPlace(this.#batch!);
     }
     // Every op message counts toward the sustained-abuse rule, duplicates and gaps included.
-    if (conn.opRate.count()) {
+    if (conn.opRate.count(arrived)) {
       conn.close(CLOSE.abuse, "op rate");
+      return;
+    }
+    // Turned away at its socket's lookup rate as it arrived (#op): answered in its turn, spending nothing.
+    if (cmd.lookupRefused) {
+      conn.send({ t: "retry", n, code: "busy" });
       return;
     }
     if (n <= wm.closed) {
@@ -1736,7 +1747,7 @@ export class RoomActor {
       conn.send({ t: "retry", n, code: "gap" });
       return;
     }
-    if (!conn.opRate.allow() || !this.#rateOf(conn).take()) {
+    if (!conn.opRate.allow(1, arrived) || !this.#rateOf(conn).take()) {
       conn.send({ t: "retry", n, code: "busy" });
       return;
     }
@@ -1771,12 +1782,12 @@ export class RoomActor {
     if (clientOp.t === "build.ask") {
       // An ask reads each op it carries as the op would apply, so it costs the sender's rate and the room's one op apiece (MD4-ASTRA-7).
       const more = clientOp.ops.length - 1;
-      if (more > 0 && (!conn.opRate.wouldAllow(more) || this.#rateOf(conn).tokens < more)) {
+      if (more > 0 && (!conn.opRate.wouldAllow(more, arrived) || this.#rateOf(conn).tokens < more)) {
         conn.send({ t: "retry", n, code: "busy" });
         return;
       }
       if (more > 0) {
-        conn.opRate.allow(more);
+        conn.opRate.allow(more, arrived);
         this.#rateOf(conn).take(more);
       }
       this.#answerAsk(key, wm, n, clientOp, cmd.group, viewer);
@@ -2166,7 +2177,7 @@ export class RoomActor {
     if (conn.viewer.role !== "player") return this.#roomRate;
     let bucket = this.#memberRates.get(conn.viewer.memberId);
     if (!bucket) {
-      bucket = new TokenBucket(OP_RATE.perSec, OP_RATE.burst, this.#opts.now);
+      bucket = new TokenBucket(OP_RATE.perSec, OP_RATE.burst, () => this.#time());
       this.#memberRates.set(conn.viewer.memberId, bucket);
     }
     return bucket;
@@ -2175,7 +2186,7 @@ export class RoomActor {
   #blockSaveBudget(memberId: string): TokenBucket {
     let bucket = this.#blockSaves.get(memberId);
     if (!bucket) {
-      bucket = new TokenBucket(1000 / LIMITS.companionBlockWriteRefillMs, LIMITS.companionBlockWriteBurst, this.#opts.now);
+      bucket = new TokenBucket(1000 / LIMITS.companionBlockWriteRefillMs, LIMITS.companionBlockWriteBurst, () => this.#time());
       this.#blockSaves.set(memberId, bucket);
     }
     return bucket;
@@ -2187,7 +2198,7 @@ export class RoomActor {
     let bucket = this.#rollBudgets.get(key);
     if (!bucket) {
       const dm = viewer.role === "dm";
-      bucket = new TokenBucket(1000 / (dm ? LIMITS.dmRollRefillMs : LIMITS.playerRollRefillMs), dm ? LIMITS.dmRollBurst : LIMITS.playerRollBurst, this.#opts.now);
+      bucket = new TokenBucket(1000 / (dm ? LIMITS.dmRollRefillMs : LIMITS.playerRollRefillMs), dm ? LIMITS.dmRollBurst : LIMITS.playerRollBurst, () => this.#time());
       this.#rollBudgets.set(key, bucket);
     }
     return bucket;
@@ -2212,7 +2223,7 @@ export class RoomActor {
   }
 
   #stageReceipt(batch: Batch, admitted: Admitted, outcome: Pick<Receipt, "state" | "seq" | "code" | "message">): void {
-    const receipt: Receipt = { memberId: admitted.memberId, tag: admitted.tag, part: admitted.part, player: admitted.player, at: this.#opts.now(), ...outcome };
+    const receipt: Receipt = { memberId: admitted.memberId, tag: admitted.tag, part: admitted.part, player: admitted.player, at: this.#time(), ...outcome };
     this.#receipts.stage(receipt);
     batch.receipts.push(receipt);
   }
@@ -2296,7 +2307,7 @@ export class RoomActor {
    * a chain of another undo group, and every chain past ASK_CHAIN_MS.
    */
   #endAsks(key: ClientKey, group: string | undefined): void {
-    const now = this.#opts.now();
+    const now = this.#time();
     for (const [k, chain] of this.#asking) if ((k === key && chain.group !== group) || now - chain.at > ASK_CHAIN_MS) this.#asking.delete(k);
   }
 
@@ -2326,7 +2337,7 @@ export class RoomActor {
     const known = this.#asking.get(key);
     this.#asking.delete(key);
     let chain: AskChain;
-    if (op.part === 0) chain = { group, next: 0, at: this.#opts.now(), state: this.#staged.state, totals: new Map<string, number>(), over: false };
+    if (op.part === 0) chain = { group, next: 0, at: this.#time(), state: this.#staged.state, totals: new Map<string, number>(), over: false };
     else if (known && known.group === group && known.next === op.part) chain = known;
     else {
       this.#refuse(key, wm, n, "invalid", ASK_LOST);
@@ -2419,7 +2430,7 @@ export class RoomActor {
     // Taken or asked about, the wing's ops come next in this group, the yes or not.
     if (op.clear && this.#clients.has(key)) this.#wingGroups.set(key, { group, sceneId: op.sceneId });
     if (op.more) {
-      if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#opts.now() });
+      if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#time() });
     } else if (chain.over) {
       // Kept only while its socket stays, as a chain is (MD4-ASTRA-12).
       if (this.#clients.has(key)) this.#askRefused.set(key, group);
@@ -2628,6 +2639,11 @@ export class RoomActor {
     return new Date(lead >= 0 && lead <= AT_LEAD_MS ? number : now).toISOString();
   }
 
+  /** The server's clock as the command being handled read it, its arrival's, or the clock now outside a command. */
+  #time(): number {
+    return this.#moment?.now ?? this.#opts.now();
+  }
+
   /** The clocks the command being handled read, or a reading now for work outside a command. */
   #now(): Moment {
     return this.#moment ?? this.#clocks();
@@ -2759,8 +2775,9 @@ export class RoomActor {
       conn.sceneId = asked === null ? null : mainFloorId(state, asked);
     }
     if (cmd.fresh) {
-      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned)) > 0;
-      if (this.#budget.request(conn.sessionId, over)) {
+      const at = this.#time();
+      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned), at) > 0;
+      if (this.#budget.request(conn.sessionId, over, at)) {
         this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
         return;
       }
@@ -2800,8 +2817,9 @@ export class RoomActor {
       this.#delayed.delete(key);
     }
     if (cmd.fresh) {
-      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned)) > 0;
-      if (this.#budget.request(conn.sessionId, over)) {
+      const at = this.#time();
+      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned), at) > 0;
+      if (this.#budget.request(conn.sessionId, over, at)) {
         this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
         return;
       }
@@ -2818,7 +2836,7 @@ export class RoomActor {
    * op does.
    */
   #readSnapshot(conn: Connection, key: ClientKey): void {
-    this.#ensureBatch().reads.push({ conn, key });
+    this.#ensureBatch().reads.push({ conn, key, at: this.#time() });
     this.#scheduleCommit();
   }
 
@@ -2834,13 +2852,17 @@ export class RoomActor {
     return false;
   }
 
-  /** A snapshot of the committed state, sent at the close of the batch `pub` numbers (#answerReads), unless the snapshot budget delays it. */
-  #snapshot(conn: Connection, key: ClientKey, pub: number): void {
+  /**
+   * A snapshot of the committed state, sent at the close of the batch `pub`
+   * numbers (#answerReads), unless the snapshot budget delays it. The budget
+   * reads `at`, the moment it was asked at.
+   */
+  #snapshot(conn: Connection, key: ClientKey, pub: number, at: number): void {
     if (conn.closed) return;
     const budgetKeys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
-    const delay = this.#budget.delay(budgetKeys);
+    const delay = this.#budget.delay(budgetKeys, at);
     if (delay > 0) {
-      this.#delaySnapshot(conn, key, delay);
+      this.#delaySnapshot(conn, key, delay, at);
       return;
     }
     const wm = this.#watermarks.get(key);
@@ -2865,7 +2887,7 @@ export class RoomActor {
     conn.previewsHeld.clear();
     conn.helloPending = false;
     conn.helloAllowed = false;
-    this.#budget.record(budgetKeys, bytes);
+    this.#budget.record(budgetKeys, bytes, at);
     conn.send(this.#presenceFor(conn, this.#online(), this.#displayCount()));
     if (conn.display && !this.#shownDisplays.has(conn)) {
       this.#shownDisplays.add(conn);
@@ -2873,12 +2895,26 @@ export class RoomActor {
     }
   }
 
-  #delaySnapshot(conn: Connection, key: ClientKey, delay: number): void {
-    const due = this.#opts.now() + delay;
+  /**
+   * A snapshot asked for at `at` that the budget delays by `delay`: due at
+   * `at` plus the delay, with a `wait` frame now and one every 2 s after
+   * `at`, each saying what is left of the delay then. Every time reads `at`
+   * and the clock, never when the batch that answered it published.
+   */
+  #delaySnapshot(conn: Connection, key: ClientKey, delay: number, at: number): void {
+    const due = at + delay;
     conn.send({ t: "wait", ms: delay });
-    const interval = conn.every(2000, () => conn.send({ t: "wait", ms: Math.max(0, due - this.#opts.now()) }));
-    const timer = conn.after(delay, () => {
-      conn.cancel(interval);
+    let wait: NodeJS.Timeout | null = null;
+    const nextWait = (k: number) => {
+      if (2000 * k >= delay) return;
+      wait = conn.after(Math.max(0, at + 2000 * k - this.#opts.now()), () => {
+        conn.send({ t: "wait", ms: delay - 2000 * k });
+        nextWait(k + 1);
+      });
+    };
+    nextWait(1);
+    const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
+      if (wait) conn.cancel(wait);
       this.#delayed.delete(key);
       this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due) });
       this.#drain();
@@ -2886,7 +2922,7 @@ export class RoomActor {
     this.#delayed.set(key, {
       conn,
       cancel: () => {
-        conn.cancel(interval);
+        if (wait) conn.cancel(wait);
         conn.cancel(timer);
       },
     });
@@ -3483,7 +3519,7 @@ export class RoomActor {
           conn.send({ t: "ev", seq: this.#handOut(batch.pub), changes: [], acks: [read.resent] });
           this.#sendHistory(conn, batch.pub);
         } else if (this.#snapshotOwed(conn, key) && conn.held === null) {
-          this.#snapshot(conn, key, batch.pub);
+          this.#snapshot(conn, key, batch.pub, read.at ?? this.#opts.now());
         }
       } catch (err) {
         this.#fault("snapshot failed", err, conn, read.resent === undefined ? "hello" : "resend");

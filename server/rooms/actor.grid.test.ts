@@ -214,8 +214,8 @@ describe("a device's reads are answered at a batch's close", () => {
     const wait = again.sent.find((m) => m.t === "wait");
     assert.ok(wait && wait.t === "wait" && wait.ms > 0, JSON.stringify(again.sent));
     assert.deepEqual(snapshots(again.sent), []);
-    // The wait ends between two ticks: the snapshot waits for the next.
-    const ends = T0 + 520 + wait.ms;
+    // The wait counts from the hello at 500 and ends between two ticks: the snapshot waits for the next.
+    const ends = T0 + 500 + wait.ms;
     moveTo(t, r.clock, ends);
     await flush();
     assert.deepEqual(snapshots(again.sent), [], "not at once when the wait ends");

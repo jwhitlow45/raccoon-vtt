@@ -499,7 +499,7 @@ describe("a room whose replay failed", () => {
 });
 
 describe("op admission", () => {
-  test("an op over its rate is turned away before its asset lookup reaches the database", async () => {
+  test("an op over its socket's lookup rate is turned away before its asset lookup reaches the database, and answered busy in its turn", async () => {
     const dm = member("DM", "dm");
     const { state, tokenId } = roomWithGoblin(dm);
     const db = new FakeDb({ state, dmGrants: [dm.id] });
@@ -511,8 +511,8 @@ describe("op admission", () => {
       const image = { assetId: "0192f0aa-0000-4000-8000-000000000001", crop: { cx: 0, cy: 0, zoom: 1 } };
       await actor.op(conn, 1, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
-      // Spend the socket's whole burst, as a flood would.
-      while (conn.opRate.allow()) {
+      // Spend the socket's whole lookup burst, as a flood of asset ops would.
+      while (conn.lookupRate.take()) {
         // spent
       }
       await actor.op(conn, 2, { t: "token.update", tokenId, patch: { image } });
