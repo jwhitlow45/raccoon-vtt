@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { uuidv7 } from "#shared/ids.ts";
+import { isUuidv7, uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { chunkKey } from "#shared/keys.ts";
 import { PLAYER_LIMITS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
@@ -16,9 +16,10 @@ import { restartStored, storedActor, StoredRoomDb } from "./undoScopeTesting.ts"
  * A room from before player limits has every memory layer measured against
  * its cap once (actor.ts). Its first load on this build stores it at
  * today's version as it gives its ids anew (reid.ts), and a later load
- * takes a room at today's version as measured, so that measure runs in the
- * first load, on what it stores: a restart before the room's first batch
- * finds its layers within their caps.
+ * takes a room at today's version as measured, so that measure runs in
+ * every load that gives ids anew, on what it stores: a restart before the
+ * room's first batch finds its layers within their caps. A measure that
+ * fails stores the room below today's version, so the next load measures.
  */
 
 /** A dark room whose party remembers four chunks of ground on its scene, twice what the scene's fixed share holds. */
@@ -78,52 +79,103 @@ test("a room from before player limits has its layers within their caps once its
   assert.ok(charge(again.actor.committed.state, sceneId) <= share, "and after the first batch");
 });
 
-/** The map step, made to throw the first time it measures every layer, as a bug would. */
-function failingOnce(): typeof mapStepOps {
-  let failed = false;
-  return (input) => {
-    if (input.everyLayer && !failed) {
-      failed = true;
-      throw new Error("a measure that fails");
+/** The map step, made to throw the first `times` times it measures every layer (every time with no count), as a bug would, counting the measures that ran. */
+function failing(times = Infinity): typeof mapStepOps & { measures: number } {
+  let failed = 0;
+  const step = ((input) => {
+    if (input.everyLayer) {
+      step.measures++;
+      if (failed < times) {
+        failed++;
+        throw new Error("a measure that fails");
+      }
     }
     return mapStepOps(input);
-  };
+  }) as typeof mapStepOps & { measures: number };
+  step.measures = 0;
+  return step;
 }
 
 const dmOf = (state: RoomState) => Object.values(state.members).find((m) => m.kind === "dm")!;
+const otherScene = (state: RoomState, sceneId: string) => Object.keys(state.scenes).find((id) => id !== sceneId)!;
+const v7Tokens = (state: RoomState) => Object.keys(state.tokens).filter(isUuidv7).sort();
 
-test("a load whose measure fails gives no ids anew and stores nothing at today's version, so a restart before its first batch measures and gives them then", async (t) => {
+test("a load whose measure fails gives the ids anew all the same and stores the room below today's version, so a restart before its first batch measures it", async (t) => {
   const { state, sceneId, share } = overShare();
   const db = new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 });
-  const first = await storedActor(t, db, { idGate: false, mapStep: failingOnce() });
-  assert.equal(db.snapshotWrites, 0, "nothing stored");
-  assert.deepEqual(Object.keys(first.actor.committed.state.tokens).sort(), Object.keys(state.tokens).sort(), "no id given anew");
+  const first = await storedActor(t, db, { idGate: false, mapStep: failing(1) });
+  assert.deepEqual([db.snapshotWrites, db.snapshot.version], [1, SEALED_IDS_SNAPSHOT_VERSION - 1]);
+  assert.notDeepEqual(v7Tokens(first.actor.committed.state), v7Tokens(state), "the goblin's id given anew");
+  assert.ok(charge(db.snapshot.state as RoomState, sceneId) > share, "stored unmeasured");
 
-  const again = await restartStored(t, first, { snapshot: false, flush: false }, { idGate: false });
-  assert.deepEqual([db.snapshotWrites, db.snapshot.version], [1, SNAPSHOT_VERSION], "the restart's load gives the ids and stores the room");
-  assert.notDeepEqual(Object.keys(again.actor.committed.state.tokens).sort(), Object.keys(state.tokens).sort(), "ids given anew");
+  const step = failing(0);
+  const again = await restartStored(t, first, { snapshot: false, flush: false }, { idGate: false, mapStep: step });
+  assert.equal(step.measures, 1, "the restart's load measures");
+  assert.deepEqual([db.snapshotWrites, db.snapshot.version], [2, SNAPSHOT_VERSION]);
   assert.ok(charge(again.actor.committed.state, sceneId) <= share, "measured");
-  const dm = await again.connect(dmOf(again.actor.committed.state));
-  const other = Object.keys(again.actor.committed.state.scenes).find((id) => id !== sceneId)!;
-  assert.equal((await dm.apply({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere" } })).rejects, undefined);
-  assert.ok(charge(again.actor.committed.state, sceneId) <= share, "and so after an edit elsewhere");
+  assert.deepEqual(v7Tokens(again.actor.committed.state), v7Tokens(first.actor.committed.state), "giving the ids again renames none the first load kept");
 });
 
-test("a room whose load's measure failed stores its snapshots below the version of new ids, so its next load gives them", async (t) => {
+test("a room whose measure failed at its load and at its first batch stores itself below today's version, so its next load measures it and the charge falls", async (t) => {
   const { state, sceneId, share } = overShare();
   const db = new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 });
-  const first = await storedActor(t, db, { idGate: false, mapStep: failingOnce() });
+  const twice = failing(2);
+  const first = await storedActor(t, db, { idGate: false, mapStep: twice });
   const dm = await first.connect(dmOf(state));
-  const other = Object.keys(state.scenes).find((id) => id !== sceneId)!;
-  assert.equal((await dm.apply({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere" } })).rejects, undefined);
-  assert.ok(charge(first.actor.committed.state, sceneId) <= share, "the first batch measured every layer");
-  assert.equal(db.snapshot.version, SEALED_IDS_SNAPSHOT_VERSION - 1, "its first commit stored the room below the version");
+  assert.equal((await dm.apply({ t: "scene.update", sceneId: otherScene(first.actor.committed.state, sceneId), patch: { name: "Elsewhere" } })).rejects, undefined);
+  assert.equal(twice.measures, 2, "the load's measure and the first batch's both failed");
+  assert.ok(charge(first.actor.committed.state, sceneId) > share, "still over its share");
 
-  // A deploy's stop writes the snapshot, at that version too, and the next load gives the ids anew.
-  const again = await restartStored(t, first, { snapshot: true }, { idGate: false });
+  // A deploy's stop writes the snapshot below today's version, and the next load measures.
+  const step = failing(0);
+  const again = await restartStored(t, first, { snapshot: true }, { idGate: false, mapStep: step });
+  assert.equal(step.measures, 1);
   assert.equal(db.snapshot.version, SNAPSHOT_VERSION);
-  assert.notDeepEqual(Object.keys(again.actor.committed.state.tokens).sort(), Object.keys(state.tokens).sort(), "ids given anew");
-  assert.ok(charge(again.actor.committed.state, sceneId) <= share);
+  assert.ok(charge(again.actor.committed.state, sceneId) <= share, "the charge falls to its share");
+  assert.ok(charge(db.snapshot.state as RoomState, sceneId) <= share, "and is stored so");
+});
+
+test("a room stored below today's version over its share, whose load's measure fails, has its first batch measure every layer", async (t) => {
+  const { state, sceneId, share } = overShare();
+  // As a room stored at 49 by a session whose measures all failed holds it.
+  const db = new StoredRoomDb(state, { version: SEALED_IDS_SNAPSHOT_VERSION - 1, seq: 9 });
+  const first = await storedActor(t, db, { idGate: false, mapStep: failing(1) });
+  assert.ok(charge(first.actor.committed.state, sceneId) > share);
+  const dm = await first.connect(dmOf(state));
+  assert.equal((await dm.apply({ t: "scene.update", sceneId: otherScene(first.actor.committed.state, sceneId), patch: { name: "Elsewhere" } })).rejects, undefined);
+  assert.ok(charge(first.actor.committed.state, sceneId) <= share, "the first batch measured every layer");
+});
+
+test("a room whose measure fails at every load still has its ids given anew, and stays below today's version", async (t) => {
+  const { state } = overShare();
+  const db = new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 });
+  const first = await storedActor(t, db, { idGate: false, mapStep: failing() });
+  const kept = v7Tokens(first.actor.committed.state);
+  assert.ok(kept.length < v7Tokens(state).length, "the goblin's id given anew");
+  const again = await restartStored(t, first, { snapshot: false, flush: false }, { idGate: false, mapStep: failing() });
+  assert.equal(db.snapshot.version, SEALED_IDS_SNAPSHOT_VERSION - 1);
+  assert.deepEqual(v7Tokens(again.actor.committed.state), kept);
+  assert.deepEqual(Object.keys(again.actor.committed.state.tokens).sort(), Object.keys(first.actor.committed.state.tokens).sort(), "the second load renames nothing");
+});
+
+test("a room this build measured and stored below today's version is unchanged by its load's measure", async (t) => {
+  const { state, sceneId } = overShare();
+  // Measured as a first load leaves it, then stored at each version below today's that a live room can hold.
+  const once = await storedActor(t, new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 }), { idGate: false });
+  const measured = once.actor.committed.state;
+  for (let version = PLAYER_LIMITS_SNAPSHOT_VERSION; version < SNAPSHOT_VERSION; version++) {
+    const db = new StoredRoomDb(structuredClone(measured), { version, seq: 9 });
+    const ops: number[] = [];
+    const step: typeof mapStepOps = (input) => {
+      const out = mapStepOps(input);
+      if (input.everyLayer) ops.push(out.length);
+      return out;
+    };
+    const h = await storedActor(t, db, { idGate: false, mapStep: step });
+    assert.deepEqual(ops, [0], `${version}: the measure forgets nothing`);
+    assert.deepEqual(h.actor.committed.state, measured, `${version}: the room as it was`);
+    assert.deepEqual([db.snapshot.version, charge(db.snapshot.state as RoomState, sceneId)], [SNAPSHOT_VERSION, charge(measured, sceneId)]);
+  }
 });
 
 test("an id players held only in a memory layer the load's measure forgets keeps its id", async (t) => {

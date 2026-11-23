@@ -222,6 +222,11 @@ export class SizeGuard {
     this.#caps = capsKey(state);
   }
 
+  /** A layer may be over its cap, whatever the caps: the next map step measures every layer. */
+  capsUnmeasured(): void {
+    this.#caps = null;
+  }
+
   /**
    * Checks the state an op would produce, given at most how many bytes the
    * op added. On refusal nothing is recorded, because that state is
