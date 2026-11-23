@@ -209,7 +209,7 @@ describe("marks", () => {
 });
 
 describe("writes", () => {
-  test("a failing run warns once, a mark with a write running builds and skips the write, and the rows stored stay until a write lands", async (t) => {
+  test("a failing run warns once, a write held past its deadline fails before the next mark, which writes, and the rows stored stay until a write lands", async (t) => {
     const r = await markRoom(t, { options: { snapshotBackstopRows: 1 } });
     const marks = marksBetween(r.clock.now, T0 + 100_000).slice(0, 6);
     const script: Array<"fail" | "hold" | "land"> = ["fail", "fail", "hold", "land", "fail"];
@@ -227,7 +227,7 @@ describe("writes", () => {
       chat(r.p1, `before mark ${k}`);
       await r.to(m.at - 400);
     };
-    const [m1, m2, m3, m4, m5, m6] = marks as [Mark, Mark, Mark, Mark, Mark, Mark];
+    const [m1, m2, m3, m4, m5] = marks as [Mark, Mark, Mark, Mark, Mark];
     await chatBefore(m1, 1);
     await r.to(m1.at);
     tail.push(r.db.rows.length);
@@ -240,22 +240,20 @@ describe("writes", () => {
     assert.equal(r.logged.filter((l) => l.msg === "snapshot write failed").length, 2, "each failure is logged");
     await chatBefore(m3, 3);
     await r.to(m3.at);
-    const heldSeq = r.actor.committed.seq;
+    // The write's deadline (SNAPSHOT_WRITE_MS, 5 s) passes before the next mark, 10 s on, so no mark meets a write still running.
     await chatBefore(m4, 4);
-    await r.to(m4.at);
     tail.push(r.db.rows.length);
-    assert.deepEqual(r.writes, [m1.at, m2.at, m3.at], "no write while one is running");
-    assert.ok(r.builds.includes(m4.at), "the mark still builds");
+    assert.equal(r.logged.filter((l) => l.msg === "snapshot write failed").length, 3, "the held write fails at its deadline");
+    assert.equal(failing(r.logged).length, 1, "within the same failing run");
     assert.ok(tail[0]! < tail[1]! && tail[1]! < tail[2]!, `the rows stored grow while no write lands: ${tail.join(", ")}`);
-    release();
-    await flush();
-    assert.equal(r.db.snapshot.seq, heldSeq, "the held write lands with the state its mark built");
+    await r.to(m4.at);
+    assert.deepEqual(r.writes, [m1.at, m2.at, m3.at, m4.at], "the next mark writes");
+    assert.ok(r.builds.includes(m4.at), "and builds");
+    assert.equal(r.db.snapshot.seq, r.actor.committed.seq, "its write lands");
     assert.ok(r.db.rows.length < tail[2]!, "and prunes what it covers");
     await chatBefore(m5, 5);
     await r.to(m5.at);
-    assert.equal(r.db.snapshot.seq, r.actor.committed.seq);
-    await chatBefore(m6, 6);
-    await r.to(m6.at);
+    assert.equal(r.logged.filter((l) => l.msg === "snapshot write failed").length, 4);
     assert.equal(failing(r.logged).length, 2, "a new failing run warns again");
   });
 
