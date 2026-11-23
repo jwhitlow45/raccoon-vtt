@@ -253,7 +253,7 @@ describe("time of day light and dawn and dusk", () => {
   test("dl-4. with the clock hidden, Pat's scene still carries the level and no flag, and his copy holds no clock", async () => {
     await ops.send({ t: "clock.update", shown: false });
     await waitFor("no clock in Pat's copy", () => (patSocket.state?.clock == null ? true : null));
-    const leaked = JSON.stringify(patSocket.state).match(/.{60}daylight.{60}/)?.[0];
+    const leaked = JSON.stringify(patSocket.state).match(/.{0,60}"(?:daylight|dawn|dusk)":.{0,60}/)?.[0];
     assert.equal(leaked, undefined, "no dawn or dusk in Pat's copy");
     const frames = patSocket.received.length;
     await ops.send({ t: "clock.set", at: 24 * HOUR + 12 * HOUR });
