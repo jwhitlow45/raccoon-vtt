@@ -95,6 +95,12 @@ export class Connection {
   clientId: string | null = null;
   /** Negotiated by hello so an older client's strict event schema still accepts its acknowledgments. */
   ackDetails = false;
+  /**
+   * The page asked for its member's id key (`hello.sealIds`): its snapshots
+   * carry it, its refusals may name ids, and the id gate reads it as keyed
+   * (createIds.ts). False for an older page's socket.
+   */
+  sealIds = false;
   /** A DM's chosen scene. Players follow the room's player scene and ignore this. */
   sceneId: string | null = null;
   held: Map<EntityKey, HeldEntry> | null = null;

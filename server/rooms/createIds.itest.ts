@@ -210,7 +210,7 @@ describe("the id table's rows", () => {
     const now = Date.now();
     const made = { past: uuidv7(), asked: uuidv7(), live: uuidv7() };
     // Taken 13 hours ago, past its ask time too. Taken two hours ago, its ask time still ahead. Taken just now.
-    const stored = [idRow(made.past, SERVER_MEMBER, now - 13 * 3_600_000, now - 13 * 3_600_000), idRow(made.asked, SERVER_MEMBER, now - 2 * 3_600_000, now - 2 * 3_600_000), idRow(made.live, SERVER_MEMBER, now)];
+    const stored = [idRow(made.past, SERVER_MEMBER, now - 13 * 3_600_000, now - 13 * 3_600_000), idRow(made.asked, SERVER_MEMBER, now - 2 * 3_600_000, now - 2 * 3_600_000), idRow(made.live, SERVER_MEMBER, now, now)];
     for (const roomId of [loaded.roomId, idle]) await recordIds(t.pool, roomId, stored);
     await t.manager.prune();
     for (const roomId of [loaded.roomId, idle]) {

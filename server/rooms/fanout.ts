@@ -18,7 +18,16 @@ import type { ClientKey, Connection } from "./connection.ts";
  * connection's held map. Only differences are sent, in one `ev` per
  * connection together with that client's acks and refusals.
  */
-export type Reject = { n: number; code: RefusalCode; message: string };
+export type Reject = { n: number; code: RefusalCode; message: string; ids?: string[] };
+
+/**
+ * The refusals as `conn` is sent them: the ids a refusal names
+ * (newIdPaths.ts) only to a socket that asked for them with `sealIds`,
+ * since an older page's strict schema drops a frame that carries them.
+ */
+export function rejectsFor(conn: Pick<Connection, "sealIds">, rejects: readonly Reject[]): Reject[] {
+  return conn.sealIds ? [...rejects] : rejects.map((r) => (r.ids === undefined ? r : { n: r.n, code: r.code, message: r.message }));
+}
 /** An undo or redo that applied, and what it took back (design 7.7). */
 export type Restored = { n: number; what: string };
 
@@ -533,7 +542,7 @@ const kept = new WeakMap<Connection, Reject[]>();
 export function takeKeptRejects(conn: Connection): Reject[] {
   const rejects = kept.get(conn) ?? [];
   kept.delete(conn);
-  return rejects;
+  return rejectsFor(conn, rejects);
 }
 
 function keepRejects(conn: Connection, rejects: readonly Reject[]): void {
@@ -633,7 +642,7 @@ export function publishBatch(
     };
     if (acks?.length) msg.acks = acks;
     if (ackDetails?.length) msg.ackDetails = ackDetails;
-    if (rejects?.length) msg.rejects = rejects;
+    if (rejects?.length) msg.rejects = rejectsFor(conn, rejects);
     if (restored?.length) msg.restored = restored;
     if (trapped?.length) msg.trapped = trapped;
     if (stamped?.length) msg.stamped = stamped;
@@ -671,7 +680,7 @@ function heldFor(projected: ProjectedState): Map<EntityKey, HeldEntry> {
   return held;
 }
 
-export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; you: { memberId: string; role: Viewer["role"] | "display"; sceneId: string | null }; watermark: number }; held: Map<EntityKey, HeldEntry> };
+export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; you: { memberId: string; role: Viewer["role"] | "display"; sceneId: string | null; idKey?: string }; watermark: number }; held: Map<EntityKey, HeldEntry> };
 
 /**
  * The full projected snapshot for one connection, and the held map that
@@ -679,8 +688,11 @@ export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; 
  * a room's first snapshot, which also computes sight from nothing, is the
  * longest pause a room load makes (docs/design/design-v1-maps-vision.md 4.3.6).
  * Its `seq` is `pub`, the number the actor hands out with it (counted.ts).
+ * `idKey` is the socket's own member's id key (idKeys.ts), which only a
+ * member's own socket that asked with `sealIds` is sent: never a table
+ * display or a preview.
  */
-export function buildSnapshot(state: RoomState, pub: number, conn: Connection, watermark: number): Snapshot {
+export function buildSnapshot(state: RoomState, pub: number, conn: Connection, watermark: number, idKey: string | null = null): Snapshot {
   const viewed = projectState(state, conn.viewer, { sceneId: conn.sceneId });
   const by = conn.previewBy;
   const projected = by === null ? viewed : { ...viewed, log: viewed.log.filter((line) => !previewOmits(line, by)) };
@@ -691,7 +703,12 @@ export function buildSnapshot(state: RoomState, pub: number, conn: Connection, w
       t: "snapshot",
       seq: pub,
       state: projected,
-      you: { memberId: conn.memberId, role: conn.display ? "display" : conn.role, sceneId: viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId }) },
+      you: {
+        memberId: conn.memberId,
+        role: conn.display ? "display" : conn.role,
+        sceneId: viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId }),
+        ...(idKey !== null && conn.sealIds && !conn.display && conn.previewBy === null ? { idKey } : {}),
+      },
       watermark,
     },
     held,

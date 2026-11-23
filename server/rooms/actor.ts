@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { idTime } from "#shared/ids.ts";
+import { idTime, isSealedShape, type IdKey } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
@@ -13,7 +13,7 @@ import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, MAX_REFUSED_IDS, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -35,7 +35,9 @@ import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
-import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
+import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordedRow, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
+import { RoomIdKeys } from "./idKeys.ts";
+import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
@@ -298,7 +300,7 @@ export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ delete
 
 type Command = (
   | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean }
-  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; stored: number; fresh: boolean }
+  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "read"; run: () => void }
@@ -380,7 +382,12 @@ type Batch = {
 };
 
 /** `number` is the one the op's envelope took (#reduce). */
-type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; walksDropped?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string };
+type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; walksDropped?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string; ids?: readonly string[] };
+
+/** What step 5 of the id gate reads a live op with (newIdPaths.ts): the op as sent, whether its socket holds a key, and what that socket holds. */
+type FreshIds = { clientOp: Op; keyed: boolean; held: ReadonlyMap<EntityKey, unknown> | null };
+
+const NO_ID_TIMES: ReadonlyMap<string, number> = new Map();
 
 /**
  * The DM's ops that ask before players' remembered map is forgotten
@@ -621,6 +628,8 @@ export class RoomActor {
   #receipts: ReceiptBook;
   /** The ids of new things the room still refuses again, and the staged ones (createIds.ts). */
   #ids: IdGate;
+  /** The room's id keys (idKeys.ts): each member's, sent to their keyed sockets and read by the gate, and the server's. */
+  readonly #idKeys: RoomIdKeys;
   #recheckTimer: NodeJS.Timeout | null = null;
   #reconciling: Promise<void> | null = null;
   #visibleCache = new Map<string, { seq: number; ids: Set<string> }>();
@@ -719,6 +728,7 @@ export class RoomActor {
       })),
     );
     this.#ids = new IdGate(this.#opts.now, ids.since);
+    this.#idKeys = new RoomIdKeys(this.#opts.idSecret, this.roomId);
     this.#ids.load(ids.rows);
     // A clock set back after this server first started on this build leaves the cutover ahead of it, and every id
     // dated before the cutover is refused until the clock passes it. The operator is told once, as the room loads.
@@ -910,7 +920,7 @@ export class RoomActor {
 
   // Inbound messages. Each one runs its database reads first, then joins the queue.
 
-  async hello(conn: Connection, msg: { clientId: string; resumeFrom: number; sceneId?: string | undefined; ackDetails?: true | undefined }): Promise<void> {
+  async hello(conn: Connection, msg: { clientId: string; resumeFrom: number; sceneId?: string | undefined; ackDetails?: true | undefined; sealIds?: true | undefined }): Promise<void> {
     const key = clientKey(conn.sessionId, msg.clientId);
     const fresh = conn.helloCount === 0;
     conn.helloCount++;
@@ -928,7 +938,7 @@ export class RoomActor {
       }
     }
     if (conn.closed) return;
-    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, stored, fresh });
+    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, fresh });
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
@@ -1785,12 +1795,25 @@ export class RoomActor {
     // admission, so an op it refuses spends no receipt. An undo or redo brings back ids the room took already.
     const minted = this.#opts.idGate ? mintedIds(clientOp) : [];
     const recorded = this.#opts.idGate ? recordedIds(clientOp) : [];
-    // An op type's ids are minted or recorded (ID_RULES), never both.
-    const verdict = minted.length > 0 ? this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role }) : this.#ids.checkRecorded(recorded);
-    if (!verdict.ok) {
-      this.#refuse(key, wm, n, verdict.code, verdict.message);
-      return;
+    // An op type's ids are minted or recorded (ID_RULES), never both. A minted id is read under the sender's own key, and
+    // its row is held from the time read.
+    let mintedTimes = NO_ID_TIMES;
+    if (minted.length > 0) {
+      const verdict = this.#ids.check(minted, { memberId: viewer.memberId, role: viewer.role }, { keyed: conn.sealIds, key: this.#idKeys.member(viewer.memberId).key });
+      if (!verdict.ok) {
+        this.#refuse(key, wm, n, verdict.code, verdict.message);
+        return;
+      }
+      mintedTimes = verdict.times;
+    } else {
+      const verdict = this.#ids.checkRecorded(recorded, conn.sealIds);
+      if (!verdict.ok) {
+        this.#refuse(key, wm, n, verdict.code, verdict.message);
+        return;
+      }
     }
+    // Step 5 reads the op as the device sent it, before the server turns a dice op into its own.
+    const fresh: FreshIds | null = this.#opts.idGate ? { clientOp, keyed: conn.sealIds, held: conn.held } : null;
     /*
      * Admission (docs/design/design-v1-dice.md 1.2), before any permission check, so an op that permissions refuse later has
      * paid for its receipt: the day's caps must have room for one more, then the member's budget is charged. A refusal
@@ -1882,13 +1905,13 @@ export class RoomActor {
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
     // A step that takes back or brings back a move, an HP change from the log, or a DM's hide, show or lock, is bookkeeping as the
     // change was. Only a DM's restore is read for toggles: it reads stored fields, so a player's work never grows with hidden ones.
-    const reduced = this.#reduce(op, viewer, asks, at, minted, step?.poses !== undefined || fromLog || (viewer.role === "dm" && restoresToggles(op, before)), recorded);
+    const reduced = this.#reduce(op, viewer, asks, at, mintedTimes, step?.poses !== undefined || fromLog || (viewer.role === "dm" && restoresToggles(op, before)), recorded, fresh);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
       const reason = restoredFrom && step && !fromLog ? this.#failedHistory(viewer, restoredFrom, historyScope, step, reduced.code, reduced.message) : reduced.message;
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reason}` : reason;
-      this.#refuse(key, wm, n, reduced.code, message, admitted);
+      this.#refuse(key, wm, n, reduced.code, message, admitted, reduced.ids);
       return;
     }
     wm.staged = n;
@@ -1940,6 +1963,11 @@ export class RoomActor {
     }
     if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
+  }
+
+  /** Every key a recorded id may have been made under: each current member's and the room's server key. */
+  #allIdKeys(): IdKey[] {
+    return [...Object.keys(this.#staged.state.members).map((memberId) => this.#idKeys.member(memberId).key), this.#idKeys.server.key];
   }
 
   #failedHistory(viewer: Viewer, direction: HistoryDirection, scope: HistoryScope, step: UndoEntry, code: RefusalCode, reason: string): string {
@@ -2012,14 +2040,14 @@ export class RoomActor {
    * A refusal. One after admission (`admitted`) writes the op's receipt with
    * the same words, so the same tag sent again is refused again.
    */
-  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null): Batch {
+  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null, ids?: readonly string[]): Batch {
     // Any refusal ends the client's gesture still asking: a later part then finds no chain and is refused, so none is read on a guess.
     this.#asking.delete(key);
     wm.staged = n;
     const batch = this.#ensureBatch();
     this.#countAnswer(batch);
     const words = message.slice(0, 200);
-    push(batch.rejects, key, { n, code, message: words });
+    push(batch.rejects, key, ids && ids.length > 0 ? { n, code, message: words, ids: [...ids.slice(0, MAX_REFUSED_IDS)] } : { n, code, message: words });
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "refused", code, message: words });
     this.#scheduleCommit();
@@ -2265,13 +2293,20 @@ export class RoomActor {
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: readonly string[] = [], restoresBookkeeping = false, recorded: readonly string[] = []): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: ReadonlyMap<string, number> = NO_ID_TIMES, restoresBookkeeping = false, recorded: readonly string[] = [], fresh: FreshIds | null = null): Reduced {
     const counts = counted(op.t, OP_VERSION);
     const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
     const at = given ?? (counts ? this.#atOf(number) : new Date(moment.now).toISOString());
     const result = applyOp(this.#staged.state, op, viewer, counts ? { seq: number, at } : { seq: number, at, uncounted: true });
     if (!result.ok) return result;
+    // Step 5 of the id gate (createIds.ts): a version 7 id of a new thing in a field the clock does not read refuses the
+    // whole op, which leaves no row. A keyed socket is told which ids, so its one retry makes exactly those again.
+    if (fresh) {
+      const found = newV7Ids(fresh.clientOp, this.#staged.state, viewer, fresh.held);
+      const refused = found.length > 0 ? this.#ids.refusesV7(fresh.keyed) : null;
+      if (refused) return fresh.keyed ? { ...refused, ids: found } : refused;
+    }
     // The limits read the op as it would apply with no trap step: what a trap writes is reserved or counted ahead, so a
     // springing never changes whether an op passes (docs/design/design-v1-traps.md 6.7). The room stored is the op's real result.
     const measured = result.withoutTraps ? result.withoutTraps() : result;
@@ -2336,12 +2371,16 @@ export class RoomActor {
     this.#staged = { state: result.state, seq };
     this.#sizes.accept(result.state);
     // Ids recorded without the gate are the server's rows, outside every budget and every device's ask. Only a version 7
-    // id the gate does not hold yet gets one: no other can come back in a live create, and a plan applied again keeps
-    // its first row's time.
-    const rows = [
-      ...minted.map((id) => idRow(id, viewer.memberId, moment.now)),
-      ...recorded.filter((id) => idTime(id) !== null && !this.#ids.taken(id)).map((id) => idRow(id, SERVER_MEMBER, moment.now)),
-    ];
+    // or 8 id the gate does not hold yet gets one: no other can come back in a live create, and a plan applied again keeps
+    // its first row. A version 8 one is held past every time it reads to under any current member's key or the server's
+    // (createIds.ts recordedRow), so whoever's key reads it meets the row before the clock would pass it.
+    const rows = [...minted].map(([id, time]) => idRow(id, viewer.memberId, moment.now, time));
+    for (const id of recorded) {
+      if (this.#ids.taken(id)) continue;
+      const time = idTime(id);
+      if (time !== null) rows.push(idRow(id, SERVER_MEMBER, moment.now, time));
+      else if (isSealedShape(id)) rows.push(recordedRow(id, moment.now, this.#allIdKeys()));
+    }
     if (rows.length > 0) {
       this.#ids.stage(rows);
       batch.ids.push(...rows);
@@ -2533,6 +2572,7 @@ export class RoomActor {
     const conn = cmd.conn;
     if (conn.closed || conn.closing) return;
     conn.ackDetails = cmd.ackDetails;
+    conn.sealIds = cmd.sealIds;
     if (conn.previewBy !== null) {
       this.#previewHello(conn, cmd);
       return;
@@ -2642,7 +2682,9 @@ export class RoomActor {
       return;
     }
     const wm = this.#watermarks.get(key);
-    const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0);
+    // A member's own socket that asked takes their id key with every snapshot, so a changed ROOM_SECRET_KEY reaches it at its next one.
+    const idKey = conn.sealIds && !conn.display && conn.previewBy === null ? this.#idKeys.member(conn.memberId).text : null;
+    const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0, idKey);
     // A DM's alone: by how much the room is past its far line at the last exact reading, absent under it.
     const over = this.#sizes.over;
     const message: ServerMessage = conn.role === "dm" && conn.previewBy === null && over > 0 ? { ...snapshot.message, over: { bytes: over } } : snapshot.message;

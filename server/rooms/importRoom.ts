@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
-import { uuidv7 } from "#shared/ids.ts";
+import { idTime, uuidv7 } from "#shared/ids.ts";
 import { checkLimits, exploredReserve, FAR, farLimits, HARD, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, VIDEO_LIMITS } from "#shared/limits.ts";
 import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
@@ -353,7 +353,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       await withTx(deps.pool, async (tx) => {
         await deps.gateway.createRoom(roomId, state, tx, startSeq);
         const now = Date.now();
-        await recordIds(tx, roomId, minted.map((id) => idRow(id, SERVER_MEMBER, now)));
+        await recordIds(tx, roomId, minted.map((id) => idRow(id, SERVER_MEMBER, now, idTime(id) ?? now)));
         if (archive) await archiveLines(tx, roomId, remapped.log);
         await markDmMembers(tx, roomId, oldDms);
         if (hooks.afterImages) await hooks.afterImages(tx, room);

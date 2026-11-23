@@ -1,5 +1,5 @@
-import { ID_TIME_REFUSED, idTime } from "#shared/ids.ts";
-import { ID_BUDGET, ID_TIME, IDS_TOO_FAST } from "#shared/limits.ts";
+import { ID_TIME_REFUSED, idTime, isUuidv7, sealedTime, type IdKey } from "#shared/ids.ts";
+import { ID_BUDGET, ID_PAGE_OLD, ID_SEAL_GRACE_MS, ID_TIME, IDS_TOO_FAST } from "#shared/limits.ts";
 import type { RefusalCode } from "#shared/protocol.ts";
 import type { Queryable } from "../auth/tx.ts";
 import type { Clock } from "./budgets.ts";
@@ -9,18 +9,27 @@ import type { Clock } from "./budgets.ts";
  * makes for a new thing, row, condition or ask is taken only while it is
  * dated near the server's clock, and only once.
  *
- * 1. A new id is a UUIDv7, so its time can be read. Only a live op is asked
- *    this: stored rows replay as they were taken.
+ * 1. A new id is a version 8 id the room reads under the sender's key
+ *    (idKeys.ts, shared/ids.ts sealedTime), so its time can be read. A
+ *    version 7 id is taken only from a socket that holds no key
+ *    (`hello.sealIds`), and only until `server_facts.sealed_since` plus
+ *    ID_SEAL_GRACE_MS: from then such a socket is sent ID_PAGE_OLD. Only a
+ *    live op is asked this: stored rows replay as they were taken.
  * 2. Its time is at most ID_TIME.aheadMs ahead of the server's clock and at
- *    most ID_TIME.behindMs behind it, and in the window after the cutover
- *    (`server_facts.ids_since`) never before the cutover.
+ *    most ID_TIME.behindMs behind it, and in the window after the gate's
+ *    first cutover (`server_facts.ids_since`) never before it.
  * 3. Every id an applied op brought is recorded in `room_ids` in the
- *    batch's own transaction, with its member and when it was taken. An op
- *    refused after this gate records nothing. The row is read here until
- *    `until`, the last moment step 2 could pass the id again, and answers
- *    the device's own question after a reconnect until `ask_until`.
+ *    batch's own transaction, with its member and when it was taken, held
+ *    from the time step 1 read. An op refused after this gate records
+ *    nothing. The row is read here until `until`, the last moment step 2
+ *    could pass the id again, and answers the device's own question after a
+ *    reconnect until `ask_until`.
  * 4. An id with a row answers `gone`, as an id the room holds does
  *    (permissions.ts), whatever became of its thing since.
+ * 5. After an op applies, a version 7 id in a field that holds a new
+ *    thing's key or an id inside an existing thing (newIdPaths.ts) refuses
+ *    the op, from a keyed socket always and from any socket after the
+ *    cutover's grace.
  *
  * Each member brings at most ID_BUDGET ids in any window, counted over the
  * rows they were given, whatever became of their things since. The
@@ -36,9 +45,34 @@ export const SERVER_MEMBER = "server";
 
 export type IdRow = { id: string; memberId: string; acceptedAt: number; until: number; askUntil: number };
 
-/** The row an id taken at `acceptedAt` gets, `time` being the id's own. */
-export function idRow(id: string, memberId: string, acceptedAt: number, time: number = idTime(id) ?? acceptedAt): IdRow {
-  return { id, memberId, acceptedAt, until: Math.max(time, acceptedAt) + ID_HELD_MS, askUntil: acceptedAt + ID_TIME.askMs };
+/**
+ * The latest `until` a row is written with, 9999-12-31T23:59:59Z: a time read
+ * under a key by a chance tag match lies anywhere in 48 bits, past what a
+ * stored date holds. A row so far out answers as one that never ends.
+ */
+export const LATEST_UNTIL = Date.UTC(9999, 11, 31, 23, 59, 59);
+
+/** The row an id taken at `acceptedAt` gets, `time` being the id's own as step 1 read it. */
+export function idRow(id: string, memberId: string, acceptedAt: number, time: number): IdRow {
+  return { id, memberId, acceptedAt, until: Math.min(Math.max(time, acceptedAt) + ID_HELD_MS, LATEST_UNTIL), askUntil: acceptedAt + ID_TIME.askMs };
+}
+
+/**
+ * The server's row for a version 8 id recorded without the gate
+ * (shared/protocol.ts ID_RULES `recorded`): held until the latest time it
+ * reads under any of `keys`, every current member's and the server's, or
+ * its taking when that is later, plus ID_HELD_MS. So whichever member's
+ * key reads it, step 2 passes it only while its row still answers `gone`.
+ * A key that matches by chance reads a time uniform over 48 bits, which
+ * only holds the row longer.
+ */
+export function recordedRow(id: string, acceptedAt: number, keys: readonly IdKey[]): IdRow {
+  let latest = acceptedAt;
+  for (const key of keys) {
+    const t = sealedTime(key, id);
+    if (t !== null && t > latest) latest = t;
+  }
+  return idRow(id, SERVER_MEMBER, acceptedAt, latest);
 }
 
 /** How often the gate forgets members' ids past the budget's window, beside its own reads of a member's budget. */
@@ -48,6 +82,18 @@ const BUDGET_SWEEP_MS = 60_000;
 export type IdSender = { memberId: string; role: "player" | "dm" } | "server";
 
 export type IdVerdict = { ok: true } | { ok: false; code: RefusalCode; message: string };
+
+/** The gate's answer on minted ids: each one's time as step 1 read it, which its row is held from. */
+export type MintedVerdict = { ok: true; times: ReadonlyMap<string, number> } | { ok: false; code: RefusalCode; message: string };
+
+/**
+ * What the gate reads a sender's ids with: whether their socket holds a key
+ * (`hello.sealIds`), and the key their version 8 ids are read under, the
+ * member's or, for the server's own, the room's server key.
+ */
+export type IdSeal = { keyed: boolean; key: IdKey };
+
+const NO_TIMES: ReadonlyMap<string, number> = new Map();
 
 /**
  * The room's gate rows in memory, loaded with the room, and the rows of
@@ -76,10 +122,33 @@ export class IdGate {
   #sweptAt = -Infinity;
   /** The cutover, or null where it could not be read, as with a test's stand-in pool. */
   readonly since: number | null;
+  /**
+   * When this server first ran a build that makes version 8 ids
+   * (`server_facts.sealed_since`), or null where it could not be read. From
+   * ID_SEAL_GRACE_MS after it, no socket's version 7 id of a new thing is
+   * taken.
+   */
+  readonly sealedSince: number | null;
 
-  constructor(now: Clock, since: number | null = null) {
+  constructor(now: Clock, since: number | null = null, sealedSince: number | null = null) {
     this.#now = now;
     this.since = since;
+    this.sealedSince = sealedSince;
+  }
+
+  /** Whether the cutover's grace has passed, so no version 7 id of a new thing is taken. */
+  sealedOnly(): boolean {
+    return this.sealedSince !== null && this.#now() >= this.sealedSince + ID_SEAL_GRACE_MS;
+  }
+
+  /**
+   * The refusal of a version 7 id of a new thing, or null where it is taken:
+   * a keyed socket's always, in the words its page retries on, and any
+   * other's once the cutover's grace has passed, in ID_PAGE_OLD's.
+   */
+  refusesV7(keyed: boolean): { ok: false; code: RefusalCode; message: string } | null {
+    if (keyed) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
+    return this.sealedOnly() ? { ok: false, code: "invalid", message: ID_PAGE_OLD } : null;
   }
 
   /** The room's gate rows as stored, at load. */
@@ -97,44 +166,56 @@ export class IdGate {
   }
 
   /**
-   * The gate for the ids one op brings: the shape (a live op's only), the
-   * clock, a row, then the budget, each over every id before the next. It
-   * reserves nothing: the actor stages the rows once the op applied.
+   * The gate for the ids one op brings: the shape and the key (a live op's
+   * only), the clock, a row, then the budget, each over every id before the
+   * next. It reserves nothing: the actor stages the rows once the op
+   * applied, each held from the time read here.
    */
-  check(ids: readonly string[], sender: IdSender, live = true): IdVerdict {
-    if (ids.length === 0) return { ok: true };
+  check(ids: readonly string[], sender: IdSender, seal: IdSeal, live = true): MintedVerdict {
+    if (ids.length === 0) return { ok: true, times: NO_TIMES };
     const now = this.#now();
     const behind = now - ID_TIME.behindMs;
     const earliest = this.since !== null && this.since > behind ? this.since : behind;
+    const times = new Map<string, number>();
     for (const id of ids) {
-      const time = idTime(id);
+      let time: number | null;
+      if (isUuidv7(id)) {
+        const refused = live ? this.refusesV7(seal.keyed) : null;
+        if (refused) return refused;
+        time = idTime(id);
+      } else {
+        time = sealedTime(seal.key, id);
+      }
       if (time === null) {
         if (live) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
         continue;
       }
       if (time > now + ID_TIME.aheadMs || time < earliest) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
+      times.set(id, time);
     }
     for (const id of ids) if (this.taken(id)) return { ok: false, code: "gone", message: ID_TAKEN };
-    if (sender === "server") return { ok: true };
-    if (this.spent(sender.memberId) + new Set(ids).size > ID_BUDGET[sender.role]) return { ok: false, code: "quota", message: IDS_TOO_FAST };
-    return { ok: true };
+    if (sender !== "server" && this.spent(sender.memberId) + new Set(ids).size > ID_BUDGET[sender.role]) return { ok: false, code: "quota", message: IDS_TOO_FAST };
+    return { ok: true, times };
   }
 
   /**
    * The clock's one check on ids recorded without the gate (shared/protocol.ts
    * ID_RULES `recorded`): a version 7 id may be dated any time before now,
    * as a group save's plan applied long after it was made, but no further
-   * ahead than a minted id may be. So no row one gets is held past a minted
-   * id's, and only an old room's first load (seedRows) holds rows longer.
-   * Like step 2 it reads no row, since it runs before the sender's
-   * permissions: a plan applied again is answered by its receipt before
-   * the gate.
+   * ahead than a minted id may be, and none is taken once the cutover's
+   * grace has passed. A version 8 id is never refused for a time read
+   * under any key: its row is held past every time it reads to
+   * (recordedRow). Like step 2 it reads no row, since it runs before the
+   * sender's permissions: a plan applied again is answered by its receipt
+   * before the gate.
    */
-  checkRecorded(ids: readonly string[]): IdVerdict {
+  checkRecorded(ids: readonly string[], keyed: boolean): IdVerdict {
     const latest = this.#now() + ID_TIME.aheadMs;
     for (const id of ids) {
       const time = idTime(id);
-      if (time !== null && time > latest) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
+      if (time === null) continue;
+      if (time > latest) return { ok: false, code: "invalid", message: ID_TIME_REFUSED };
+      if (this.sealedOnly()) return { ok: false, code: "invalid", message: keyed ? ID_TIME_REFUSED : ID_PAGE_OLD };
     }
     return { ok: true };
   }
@@ -330,5 +411,5 @@ export function seedRows(state: unknown, now: number): IdRow[] {
 }
 
 function iso(ms: number): string {
-  return new Date(ms).toISOString();
+  return new Date(Math.min(ms, LATEST_UNTIL)).toISOString();
 }
