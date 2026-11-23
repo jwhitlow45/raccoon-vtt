@@ -23,13 +23,32 @@ import {
   type SavedChoice,
 } from "./caster.ts";
 import { draftFromTemplate, draftTemplate, newDraft, withShape, type AreaDraft } from "./placement.ts";
-import { presetDraft } from "./presets.ts";
+import { placementHint, presetDraft } from "./presets.ts";
+import { pointerWords } from "../../lib/pointerWords.ts";
 
 describe("the idle line while From is on (3.5)", () => {
   test("it says what a tap does with the last shape: aim, place, or start it around the caster", () => {
     for (const shape of ["cone", "line", "cube"] as const) assert.equal(idleHint(shape, "Thorn"), "Casting from Thorn. Tap the map or a creature to aim it. Tap an area on the map to pick it.");
     for (const shape of ["sphere", "cylinder"] as const) assert.equal(idleHint(shape, "Thorn"), "Casting from Thorn. Tap the map or a creature to place it. Tap an area on the map to pick it.");
     assert.equal(idleHint("emanation", "Thorn"), "Casting from Thorn. Tap the map to start it around Thorn. Tap an area on the map to pick it.");
+  });
+});
+
+describe("the area lines that hold a creature's name read through pointerWords with the name left alone (LP48FIXB-R2-3)", () => {
+  test("idleHint and placementHint keep each hole whole, so a mouse reads Click and a creature named Tap Room keeps its name", () => {
+    const names = { caster: "Tap Room", target: "Tap" };
+    for (const shape of ["cone", "sphere", "emanation"] as const) {
+      const idle = idleHint(shape, "{caster}");
+      assert.ok(idle.includes("{caster}"), `${shape}: the hole is in the line`);
+      assert.equal(pointerWords(idle, names, true), idle.replaceAll("{caster}", "Tap Room"), `${shape}: touch`);
+      const mouse = pointerWords(idle, names, false);
+      assert.ok(mouse.startsWith("Casting from Tap Room. Click the map"), `${shape}: a mouse, ${mouse}`);
+      assert.ok(!mouse.includes("{"), `${shape}: no hole left over`);
+    }
+    const other = { ...newDraft("a", "cone", "#f38400"), targetsOther: true, targetName: "{target}" };
+    assert.equal(placementHint(other), "Tap the {target}.");
+    assert.equal(pointerWords(placementHint(other), names, true), "Tap the Tap.");
+    assert.equal(pointerWords(placementHint(other), names, false), "Click the Tap.");
   });
 });
 
