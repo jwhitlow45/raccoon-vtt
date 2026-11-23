@@ -1448,12 +1448,15 @@ export function fallLabel(fall: { floor: string | null }): string {
  * (docs/design/design-v1-attach.md 4.2), or the creature that closes the
  * way.
  */
+/** The tail of stopText that says Tap: the server code that shares this file cannot ask a browser for its pointer, so the page words it (pointerTail). */
+export const DOOR_TAP = "A door is in the way. Tap it to open.";
+
 export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower" | "creature">): string {
   if (stop.follower !== undefined) return `${stop.follower} can't follow through there.`;
   if (stop.creature !== undefined) return `${stop.creature} is in the way.`;
   const far = stop.capped ? "Too far to work out a way around. " : "";
   if (stop.blocker === "unknown") return `${far}${SOMETHING_BLOCKS}`;
-  if (stop.door) return `${far}A door is in the way. Tap it to open.`;
+  if (stop.door) return `${far}${DOOR_TAP}`;
   if (!stop.searched) return stop.blocker === "ledge" ? "Ledge in the way. Take the stairs." : "Stopped at a wall. Drop at the corner first, then go on.";
   if (stop.blocker === "ledge") return `${far}Ledge in the way. No stairs you have seen lead there.`;
   return `${far}Stopped at a wall. There is no way around it that you have seen.`;

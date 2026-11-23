@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import type { JournalPage, Member, Pin, RoomState } from "#shared/model.ts";
 import { playersSee } from "#shared/rules/floors.ts";
 import { MAX_NAME, type PinInput } from "#shared/protocol.ts";
@@ -215,7 +216,7 @@ export type PinSaveAnswer = { kind: "closed" } | { kind: "kept"; problem: string
  */
 export function pinSaveAnswer(answer: OpAnswer, refusal?: OpRefusal): PinSaveAnswer {
   if (answer === "taken") return { kind: "closed" };
-  if (answer === "unknown") return { kind: "kept", problem: "The connection dropped before the server answered, so this pin may not be saved. Your changes are still here. Tap Done to save them again." };
+  if (answer === "unknown") return { kind: "kept", problem: "The connection dropped before the server answered, so this pin may not be saved. Your changes are still here. " + pointerWords("Tap Done to save them again.") };
   if (refusal?.code === "gone") return { kind: "kept", problem: "Not saved. The page it links to was deleted while you edited. Pick another page, or none." };
   return { kind: "kept", problem: refusal?.text ?? "Not saved. Your changes are still here." };
 }

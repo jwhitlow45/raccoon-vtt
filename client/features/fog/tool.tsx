@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { Suspense } from "react";
 import type { BuildChunk, FogShape } from "#shared/model.ts";
 import { MAX_FOG_DRAFT_OPS, MAX_POLY_VERTICES } from "#shared/protocol.ts";
@@ -81,14 +82,14 @@ function tapRoom(p: ToolPointer, ctx: ToolContext): void {
   const g = sceneGrid(ctx.scene);
   if (isHex(g)) {
     const shapes = hexRoomShapes(sceneWalls(ctx.scene, view?.buildChunks ?? {}), g, p.world, ctx.scene.bounds);
-    if (shapes.length === 0) ctx.scope.get(fogSlot).store.setState({ note: ROOM_MISSED.hex });
+    if (shapes.length === 0) ctx.scope.get(fogSlot).store.setState({ note: pointerWords(ROOM_MISSED.hex) });
     else submitFog(ctx, shapes);
     return;
   }
   const chunks = Object.values(view?.buildChunks ?? {}).filter((c): c is BuildChunk => !!c && c.sceneId === ctx.scene.id);
   const { shapes } = roomShapes(indexBuild(chunks), p.world, ctx.scene.bounds);
   if (shapes.length === 0) {
-    ctx.scope.get(fogSlot).store.setState({ note: ROOM_MISSED.squares });
+    ctx.scope.get(fogSlot).store.setState({ note: pointerWords(ROOM_MISSED.squares) });
     return;
   }
   submitFog(ctx, shapes);

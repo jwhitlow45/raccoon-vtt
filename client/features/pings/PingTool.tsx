@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
@@ -75,7 +76,7 @@ function PingOptions(props: { role: "dm" | "player" }) {
           id: "lookHere",
           priority: 1,
           control: (
-            <OptButton pressed={lookHere} label="Taps move every player's view to the spot" onClick={() => pingStore.setState({ lookHere: !lookHere })}>
+            <OptButton pressed={lookHere} label={pointerWords("Taps move every player's view to the spot")} onClick={() => pingStore.setState({ lookHere: !lookHere })}>
               Look here
             </OptButton>
           ),

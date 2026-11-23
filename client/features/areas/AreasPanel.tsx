@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useCallback, useMemo } from "react";
 import type { AreaTemplate, RoomState } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -77,7 +78,7 @@ export default function AreasPanel(props: PanelProps) {
   const env = { actions, view, labels, scene, role: you.role, youId: you.memberId, area };
 
   if (list.length === 0) {
-    return <Empty>No areas on this map. Pick the Area tool, then tap a token to cast from it or search a spell.</Empty>;
+    return <Empty>{pointerWords("No areas on this map. Pick the Area tool, then tap a token to cast from it or search a spell.")}</Empty>;
   }
 
   return (

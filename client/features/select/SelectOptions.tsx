@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { barDockSlot } from "../../canvas/barDock.ts";
@@ -34,7 +35,7 @@ export function SelectOptions() {
           flex: theme.layout.options.text,
           control: (
             <StripText>
-              <strong style={{ color: theme.color.text }}>{count} selected.</strong> {SENTENCE}
+              <strong style={{ color: theme.color.text }}>{count} selected.</strong> {pointerWords(SENTENCE)}
             </StripText>
           ),
         },

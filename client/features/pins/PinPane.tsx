@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { JournalPage, Member, Pin } from "#shared/model.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
@@ -289,10 +290,10 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
           icon="delete"
           iconOnly={armedAt === null ? "always" : undefined}
           title="Delete this pin"
-          aria-label={armedAt !== null ? "Tap again to delete" : "Delete this pin"}
+          aria-label={armedAt !== null ? pointerWords("Tap again to delete") : "Delete this pin"}
           onClick={tapDeleteButton}
         >
-          {armedAt !== null ? "Tap again to delete" : "Delete"}
+          {armedAt !== null ? pointerWords("Tap again to delete") : "Delete"}
         </Button>
         <Button size="sm" variant="primary" busy={saving} disabled={commit.kind === "tooLong"} onClick={done}>
           {saving ? "Saving…" : "Done"}

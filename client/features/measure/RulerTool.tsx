@@ -192,8 +192,8 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         : null,
     [walk, view, sceneId, stops, props.role, everything, carried, actor],
   );
-  let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
-  if (stops.length === 1) info = "Tap or drag to the next point.";
+  let info: ReactNode = pointerWords("Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.");
+  if (stops.length === 1) info = pointerWords("Tap or drag to the next point.");
   const walked = useWalkMeasure(walkInput && (stops.length > 1 || carried) ? walkInput : null, true);
   const slow = useDelayed(walked?.searching === true);
   const held = useHeldWalk(walked, heldKey(ruler?.id ?? "", stops));
