@@ -1,5 +1,5 @@
 import { idTime } from "#shared/ids.ts";
-import { SEALED_IDS_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { SEALED_IDS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { FALL_RIDERS_MOST, type LogEntry, type RoomState, type TrapDue, type Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { playersToken } from "#shared/players.ts";
@@ -325,14 +325,14 @@ export type Reid = { loaded: LoadedRoom; renamed: number; rows: number };
 /**
  * Gives a loaded room's ids anew (ReidPlan) and stores the result: the
  * archived rows that name a renamed id, the receipts' asks, and a snapshot
- * at the loaded seq at `version` (today's, or below it where the load's
- * measure of its memory layers failed, actor.ts load) with the room's
- * count, in one transaction. The id gate's rows stay as they are.
+ * at the loaded seq at today's format, marked `capsPending` where the
+ * load's measure of its memory layers failed (actor.ts load), with the
+ * room's count, in one transaction. The id gate's rows stay as they are.
  * `planned` is the room whose ids players held, read before the load
  * changed it (actor.ts layersCapped). Any failure throws and stores
  * nothing, so the next load starts again from the stored room.
  */
-export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, newId: () => string, planned: RoomState = loaded.state, version = SNAPSHOT_VERSION): Promise<Reid> {
+export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, newId: () => string, planned: RoomState = loaded.state, capsPending = false): Promise<Reid> {
   const plan = new ReidPlan(planned, await storedMemberIds(pool, roomId));
   const rowIds = new Map<string, string[]>();
   for (let after = ""; ; ) {
@@ -366,7 +366,7 @@ export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, n
     if (renames.size > 0) {
       await client.query("update roll_receipts r set ask = u.n from unnest($2::text[], $3::text[]) as u(o, n) where r.room_id = $1 and r.ask = u.o", [roomId, [...renames.keys()], [...renames.values()]]);
     }
-    await storeSnapshot(client, roomId, loaded.seq, json, version);
+    await storeSnapshot(client, roomId, loaded.seq, json, capsPending);
     // The count goes with it, as a commit's does, since the snapshot takes the place of the one a first commit carries.
     await client.query("update rooms set pub = $2 where id = $1", [roomId, loaded.pub]);
     await client.query("commit");

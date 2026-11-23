@@ -84,7 +84,9 @@ export type StoredReceipt = { memberId: string; tag: string; part: number; state
  */
 export class StoredRoomDb extends UndoScopeDb {
   rows: StoredRow[] = [];
-  snapshot: { seq: number; state: unknown; version: number };
+  snapshot: { seq: number; state: unknown; version: number; capsPending?: boolean };
+  /** The schema version of every snapshot row written, in order. */
+  readonly versions: number[] = [];
   /** `rooms.pub`: the room count at the last commit that held ops or watermarks, null before any. */
   pub: number | null;
   readonly watermarks = new Map<string, number>();
@@ -94,9 +96,9 @@ export class StoredRoomDb extends UndoScopeDb {
   /** Awaited before a snapshot written on its own (outside a commit) lands, so a test can hold it or make it fail. */
   beforeSnapshot?: () => Promise<void>;
 
-  constructor(state: RoomState, opts: { seq?: number; version?: number; rows?: StoredRow[]; pub?: number | null } = {}) {
+  constructor(state: RoomState, opts: { seq?: number; version?: number; capsPending?: boolean; rows?: StoredRow[]; pub?: number | null } = {}) {
     super(state);
-    this.snapshot = { seq: opts.seq ?? 0, state, version: opts.version ?? SNAPSHOT_VERSION };
+    this.snapshot = { seq: opts.seq ?? 0, state, version: opts.version ?? SNAPSHOT_VERSION, capsPending: opts.capsPending ?? false };
     this.rows = [...(opts.rows ?? [])];
     this.pub = opts.pub ?? null;
     this.durableMax = Math.max(this.snapshot.seq, ...this.rows.map((r) => r.seq));
@@ -141,7 +143,7 @@ export class StoredRoomDb extends UndoScopeDb {
 
   async #read(sql: string, params: unknown[]): Promise<{ rows: unknown[]; rowCount?: number }> {
     if (sql.includes("from room_snapshots")) {
-      return { rows: [{ seq: String(this.snapshot.seq), state: structuredClone(this.snapshot.state), schema_version: this.snapshot.version, imported_seq: null, pub: this.pub === null ? null : String(this.pub) }] };
+      return { rows: [{ seq: String(this.snapshot.seq), state: structuredClone(this.snapshot.state), schema_version: this.snapshot.version, caps_pending: this.snapshot.capsPending ?? false, imported_seq: null, pub: this.pub === null ? null : String(this.pub) }] };
     }
     // The archive holds no line here: its reads find it empty, and the checks before an import's lines find them held.
     if (sql.includes("entry::text")) return { rows: [] };
@@ -202,9 +204,10 @@ export class StoredRoomDb extends UndoScopeDb {
       };
     }
     if (sql.startsWith("insert into room_snapshots")) {
-      const [, seq, json, version] = params as [string, number, string, number];
+      const [, seq, json, version, capsPending] = params as [string, number, string, number, boolean];
       return () => {
-        this.snapshot = { seq, state: JSON.parse(json), version };
+        this.snapshot = { seq, state: JSON.parse(json), version, capsPending };
+        this.versions.push(version);
         this.snapshotWrites++;
       };
     }

@@ -5,7 +5,7 @@ import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
-import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION, SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
+import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION, withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { FallRecord, HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
@@ -347,6 +347,8 @@ type Read = { conn: Connection; key: ClientKey; resent?: number };
 type StepCursor = { before: RoomState; touched: number; doors: number; answered: number };
 
 type Batch = {
+  /** Its map step measured every memory layer, so its commit settles a measure the room owed (#capsPending). */
+  measured?: true;
   history?: Map<string, HistoryMessage>;
   before: RoomState;
   ops: OpRecord[];
@@ -555,11 +557,12 @@ export class RoomActor {
    */
   #countSnapshotDue: boolean;
   /**
-   * The version the room's snapshots are stored at: today's, or below
-   * SEALED_IDS_SNAPSHOT_VERSION where the load's measure of its memory
-   * layers failed, so the next load measures them again (load).
+   * The room owes a measure of every memory layer against its cap: a
+   * load's measure failed, here or at an earlier load (load). Every
+   * snapshot carries it, so a restart measures again, until a commit whose
+   * map step measured every layer (#remember) clears it.
    */
-  #storedVersion = SNAPSHOT_VERSION;
+  #capsPending = false;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -773,20 +776,19 @@ export class RoomActor {
     const ids = await loadIds(deps.pool, roomId, stored, opts.now());
     let loaded = stored;
     const reid = opts.reidAtLoad && reidDue(stored);
-    let measured = true;
+    let capsPending = stored.capsPending === true;
     if (reid) {
       const serverKey = new RoomIdKeys(opts.idSecret, roomId).server.key;
       // The load stores the room at today's version, which a later load takes as having its memory layers within their
-      // caps, so every load that gives ids anew measures them here first, on what it stores, whatever the version: one
-      // from before player limits was never measured, and one stored below today's may have failed to be. Where the
-      // measure fails the ids are given anew all the same, the room is stored below today's version, so the next load
-      // measures again, and its first batch measures every layer. Giving the ids again there renames none a player holds.
+      // caps, so every load that gives ids anew measures them here first, on what it stores. Where the measure fails the
+      // ids are given anew all the same, and the snapshot is marked as owing the measure (caps_pending), so each load's
+      // first batch measures every layer until one commits.
       const capped = layersCapped(stored, opts, deps.log, roomId);
-      measured = capped !== null;
+      capsPending = capped === null;
       // What to keep is read from the room as stored: an id players held only in a layer the measure forgot keeps it.
-      const done = await reidRoom(deps.pool, roomId, capped ?? stored, () => sealedId(serverKey, opts.now()), stored.state, measured ? SNAPSHOT_VERSION : SEALED_IDS_SNAPSHOT_VERSION - 1);
+      const done = await reidRoom(deps.pool, roomId, capped ?? stored, () => sealedId(serverKey, opts.now()), stored.state, capsPending);
       loaded = done.loaded;
-      deps.log.info({ roomId, renamed: done.renamed, rows: done.rows, measured }, "room ids given anew at its load on this build");
+      deps.log.info({ roomId, renamed: done.renamed, rows: done.rows, capsPending }, "room ids given anew at its first load on this build");
     }
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design/design-v1-dice.md 1.2).
     const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
@@ -799,11 +801,11 @@ export class RoomActor {
     const actor = new RoomActor({ ...deps, info }, loaded, receipts, ids);
     actor.#archived = archived;
     // The load stored the room with its count, so no commit needs to carry a snapshot. The rest of what the stored
-    // version decides, as whether the caps were measured, still goes by the version it had, but for a measure that
-    // failed here: the room's snapshots stay below today's version, and its first batch measures every layer.
+    // version decides, as whether the caps were measured, still goes by the version it had, but for a room that owes
+    // its measure: its first batch measures every layer.
     if (reid) actor.#countSnapshotDue = false;
-    if (!measured) {
-      actor.#storedVersion = SEALED_IDS_SNAPSHOT_VERSION - 1;
+    if (capsPending) {
+      actor.#capsPending = true;
       actor.#sizes.capsUnmeasured();
     }
     await actor.reconcileKinds();
@@ -3038,7 +3040,10 @@ export class RoomActor {
         everyLayer: lowered,
       });
       // Answered only once the step ran: a step that throws leaves the next batch's to measure every layer.
-      if (lowered) this.#sizes.capsMeasured(after);
+      if (lowered) {
+        this.#sizes.capsMeasured(after);
+        batch.measured = true;
+      }
     } catch (err) {
       // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
       this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
@@ -3197,6 +3202,7 @@ export class RoomActor {
     // took, which an op staged in the same millisecond takes next. A room whose replay failed applies no op, so its reads
     // stay where its replay stopped while refusals take numbers.
     this.#committed = { state: batch.state, seq: batch.seq, pub: batch.pub, through: this.replayFailed ? this.#committed.through : batch.stored };
+    if (batch.measured) this.#capsPending = false;
     this.#committedStored = batch.stored;
     this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts, batch.takes);
@@ -3325,7 +3331,7 @@ export class RoomActor {
     while (this.#snapshotting) await this.#snapshotting;
     // A snapshot write that landed meanwhile was at today's version.
     if (!this.#countSnapshotDue) return null;
-    write.snapshot = { seq: batch.seq, json, version: this.#storedVersion };
+    write.snapshot = { seq: batch.seq, json, capsPending: this.#capsPending && !batch.measured };
     let done!: () => void;
     const held = new Promise<void>((resolve) => (done = resolve));
     this.#snapshotting = held;
@@ -3427,7 +3433,7 @@ export class RoomActor {
     if (seq <= this.#snapshotSeq) return Promise.resolve();
     this.#snapshotting = (async () => {
       try {
-        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state, this.#storedVersion), state);
+        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state, this.#capsPending), state);
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
       } finally {
@@ -3798,7 +3804,7 @@ function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomI
     const before = state;
     ops = opts.mapStep({ before, after: before, touched: [], cap: (scene, layer) => layerCap(before, scene, layer), everyLayer: true });
   } catch (err) {
-    log.error({ err, roomId }, "map step failed at load, the room is stored below today's version and its first batch and next load measure every layer");
+    log.error({ err, roomId }, "map step failed at load, the room is stored as owing the measure and its first batch measures every layer");
     return null;
   }
   const at = new Date(opts.now()).toISOString();
@@ -3813,7 +3819,7 @@ function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomI
     if (applied(op)) continue;
     const forget = forgetSceneOp(state, op.sceneId);
     if (forget && !applied(forget)) {
-      log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load, the room is stored below today's version");
+      log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load, the room is stored as owing the measure");
       return null;
     }
   }

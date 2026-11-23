@@ -88,6 +88,8 @@ export type LoadedRoom = {
   snapshotSeq: number;
   /** The schema version the snapshot row was stored at, before migration. */
   snapshotVersion: number;
+  /** The snapshot row owes a measure of every memory layer against its cap (`caps_pending`, actor.ts load). */
+  capsPending?: boolean;
   /** Replay stopped at an op that did not validate or apply. The room serves reads only. */
   replayFailed: boolean;
   /** How many ops were replayed on top of the snapshot. */
@@ -148,8 +150,8 @@ export async function loadRoom(
   migrations: MigrationStep[] = opMigrations,
   admitArchive: ArchiveGuard = ARCHIVE_ALWAYS,
 ): Promise<LoadedRoom | null> {
-  const snap = await pool.query<{ seq: string; state: unknown; schema_version: number; imported_seq: string | null; pub?: string | number | null }>(
-    "select s.seq, s.state, s.schema_version, r.imported_seq, r.pub from room_snapshots s left join rooms r on r.id = s.room_id where s.room_id = $1",
+  const snap = await pool.query<{ seq: string; state: unknown; schema_version: number; caps_pending?: boolean; imported_seq: string | null; pub?: string | number | null }>(
+    "select s.seq, s.state, s.schema_version, s.caps_pending, r.imported_seq, r.pub from room_snapshots s left join rooms r on r.id = s.room_id where s.room_id = $1",
     [roomId],
   );
   const row = snap.rows[0];
@@ -239,7 +241,7 @@ export async function loadRoom(
   if (row.schema_version < COUNT_SNAPSHOT_VERSION) pub = Math.max(pub, snapshotSeq);
   for (const r of ops.rows) pub = Math.max(pub, rowNumber(r) ?? 0);
   const through = replayFailed ? replayedThrough(state, lastNumber, snapshotSeq, row.schema_version, ops.rows[0]) : pub;
-  return { state, seq, pub, through, snapshotSeq, snapshotVersion: row.schema_version, replayFailed, replayed, stateBytes: serializedBytes(state) };
+  return { state, seq, pub, through, snapshotSeq, snapshotVersion: row.schema_version, ...(row.caps_pending === true ? { capsPending: true } : {}), replayFailed, replayed, stateBytes: serializedBytes(state) };
 }
 
 /**
@@ -471,8 +473,8 @@ export type BatchWrite = {
    * batch's own transaction. The actor gives one only to a batch that holds
    * ops or watermarks, which batchCommitted can find.
    */
-  /** `version` is the schema version it is stored at, today's where absent (storeSnapshot). */
-  snapshot?: { seq: number; json: string; version?: number };
+  /** `capsPending` marks a state that owes a measure of every memory layer (storeSnapshot). */
+  snapshot?: { seq: number; json: string; capsPending?: boolean };
 };
 
 // One class for every commit whose answer was lost, the room's batches and
@@ -529,7 +531,7 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
     } else if (batch.watermarks.length > 0 && batch.pub !== undefined) {
       await client.query("update rooms set pub = $2 where id = $1", [roomId, batch.pub]);
     }
-    if (batch.snapshot) await storeSnapshot(client, roomId, batch.snapshot.seq, batch.snapshot.json, batch.snapshot.version);
+    if (batch.snapshot) await storeSnapshot(client, roomId, batch.snapshot.seq, batch.snapshot.json, batch.snapshot.capsPending);
     const receipts = batch.receipts ?? [];
     if (receipts.length > 0) {
       // A tag used again after its 24 hours of memory replaces its old row, which keeps the newest outcome.
@@ -623,9 +625,9 @@ export async function readWatermark(pool: Pool, roomId: string, key: WatermarkKe
  * hour. The log archive is never trimmed: it keeps every line for the
  * members who may read it. Returns the serialized size in UTF-8 bytes.
  */
-export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState, version: number = SNAPSHOT_VERSION): Promise<number> {
+export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState, capsPending = false): Promise<number> {
   const json = snapshotJson(state);
-  await storeSnapshot(pool, roomId, seq, json, version);
+  await storeSnapshot(pool, roomId, seq, json, capsPending);
   return Buffer.byteLength(json);
 }
 
@@ -636,15 +638,16 @@ export function snapshotJson(state: RoomState): string {
 }
 
 /**
- * Writes a snapshot row, at today's schema version unless a room still to
- * be given its new ids asks for one below (actor.ts #storedVersion), and
- * prunes the rows it covers that are older than an hour.
+ * Writes a snapshot row, always at today's schema version, so a build from
+ * before it refuses the room, with `capsPending` where the state still owes
+ * a measure of every memory layer (actor.ts load), and prunes the rows it
+ * covers that are older than an hour.
  */
-export async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: string, version: number = SNAPSHOT_VERSION): Promise<void> {
+export async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: string, capsPending = false): Promise<void> {
   await q.query(
-    `insert into room_snapshots (room_id, seq, state, schema_version, written_at) values ($1, $2, $3::jsonb, $4, now())
-     on conflict (room_id) do update set seq = excluded.seq, state = excluded.state, schema_version = excluded.schema_version, written_at = now()`,
-    [roomId, seq, json, version],
+    `insert into room_snapshots (room_id, seq, state, schema_version, caps_pending, written_at) values ($1, $2, $3::jsonb, $4, $5, now())
+     on conflict (room_id) do update set seq = excluded.seq, state = excluded.state, schema_version = excluded.schema_version, caps_pending = excluded.caps_pending, written_at = now()`,
+    [roomId, seq, json, SNAPSHOT_VERSION, capsPending],
   );
   await q.query("delete from room_ops where room_id = $1 and seq <= $2 and at < now() - interval '1 hour'", [roomId, seq]);
 }

@@ -119,6 +119,10 @@ insert into room_dm_members (room_id, member_id)
 -- server/auth/playerSecret.ts). Null for a room whose password was set
 -- before this column existed: its DM changes the password once to get it.
 alter table rooms add column if not exists player_pw_sealed bytea;
+-- A memory measure the stored room still owes (server/rooms/actor.ts load): set
+-- where the measure of every memory layer failed, so each load measures again
+-- until one commit's map step measures every layer.
+alter table room_snapshots add column if not exists caps_pending boolean not null default false;
 -- Scene thumbnails (v1 wave 3) are assets of their own kind. The check on
 -- the kind is replaced here rather than edited above, since an existing
 -- database never re-runs a create. It is replaced only while it lacks the
