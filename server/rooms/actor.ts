@@ -3820,7 +3820,10 @@ export class RoomActor {
       for (const conn of this.#connections) conn.close(1011, "internal error");
     }
     // The batch's view joins the ring, and the frames held for it route against it before the next batch publishes.
-    this.#keepView({ tick: batch.tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
+    // A batch that closed before the clock reached its tick, under a test's standing clock or a clock set back, is
+    // viewed at the tick the clock read then, so a reader after its commit at that reading takes it.
+    const tick = Math.min(batch.tick, this.#readerTick(batch.closeAt));
+    this.#keepView({ tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
     this.#releaseFrames();
     for (const s of batch.sys) s.resolve();
     this.#answerReads(batch);
