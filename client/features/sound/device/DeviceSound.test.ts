@@ -1,3 +1,4 @@
+import { pointerWords } from "../../../lib/pointerWords.ts";
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -29,7 +30,8 @@ function render(role: "dm" | "player", opts: { line: boolean; dmOnly?: boolean; 
   );
 }
 
-const LINES = [words.DM_PLAYS_IT, words.TAP_TO_START, words.ANOTHER_WINDOW, words.CANNOT_PLAY];
+// The tap line reads Click here: this test runs with a mouse for its main pointer.
+const LINES = [words.DM_PLAYS_IT, pointerWords(words.TAP_TO_START), words.ANOTHER_WINDOW, words.CANNOT_PLAY];
 const linesIn = (html: string) => LINES.filter((l) => html.includes(l.replaceAll("'", "&#x27;")));
 
 describe("this device's volume", () => {

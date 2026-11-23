@@ -744,7 +744,7 @@ describe("the sheet's rows beside the keys", () => {
       // The token bar's Place freely, the touch twin of Alt+drag, which drops one drag between squares (docs/design/design-v1-snap-off.md 4).
       // A room's tap in a dungeon's preview or a wing's ghost, and Add a wing's drag and tap, which a map tap never does elsewhere (dungeon generator phase 3, 7).
       // Between floors' drag of an end and of its corner handle, which a map drag never does elsewhere (docs/design/design-v1-floors.md phase 4, 16).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Drag an end of stairs, a ladder or an opening$|Drag the handle at an open end's corner$|Place freely, then drag the token$|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$|Tap or click a room in the preview or the wing's ghost$|Drag in Add a wing$|Tap a wall in Add a wing$)/, b.id);
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Drag an end of stairs, a ladder or an opening$|Drag the handle at an open end's corner$|Place freely, then drag the token$|Tap a standee again$|Double-tap Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$|Tap a room in the preview or the wing's ghost$|Drag in Add a wing$|Tap a wall in Add a wing$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       // And the side panel edge's double-click, which nothing on screen marks, as nothing marks the swipe back (docs/design/design-v1-panel-size.md 6).
@@ -776,12 +776,12 @@ describe("the sheet's rows beside the keys", () => {
       "Drag the rider of a controlled mount",
       "Drag any other carried token",
       "Place freely, then drag the token",
-      "Tap a standee again",
+      "Click a standee again",
       "Hold a roll button",
       "Double-tap and hold a roll button with a screen reader",
-      "Tap, click, hold or right-click an ability box in a stat block",
+      "Click, hold or right-click an ability box in a stat block",
       "Hold or right-click a roll in an ability's rolls",
-      "Double click or tap on Undo or Redo",
+      "Double-click Undo or Redo",
       "Swipe right in a panel",
     ]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
@@ -833,7 +833,7 @@ describe("the sheet's rows beside the keys", () => {
     for (const role of ROLES) {
       for (const device of [DESKTOP, IPHONE, ANDROID]) {
         const pointer = inputs(role, device, POINTER_SECTION);
-        assert.ok(pointer.includes("Tap, click, hold or right-click an ability box in a stat block") && pointer.includes("Hold or right-click a roll in an ability's rolls"), `${role} ${JSON.stringify(device)}: pointer rows`);
+        assert.ok(pointer.includes("Click, hold or right-click an ability box in a stat block") && pointer.includes("Hold or right-click a roll in an ability's rolls"), `${role} ${JSON.stringify(device)}: pointer rows`);
         assert.ok(!inputs(role, device, MOUSE_SECTION).some((i) => /ability/.test(i)), "the right-click is part of the pointer rows, not a mouse row");
         assert.deepEqual(
           section(role, device, "Token and character fields")!.rows.filter((r) => r.id.startsWith("ability")).map((r) => [r.input, r.when]),

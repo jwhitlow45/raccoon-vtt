@@ -1,3 +1,4 @@
+import "../lib/testing/touchDevice.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { RoomScope } from "./scope.ts";

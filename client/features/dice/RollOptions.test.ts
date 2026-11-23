@@ -406,7 +406,7 @@ describe("a row's recharge and X/Day uses, read from the room", () => {
     assert.ok(recharge);
     assert.doesNotMatch(recharge, /aria-haspopup|aria-keyshortcuts/);
     const used = draw(DM, { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } });
-    assert.match(chip(used, "Fire Breath is used. Tap when it recharges") ?? "", /aria-pressed="true"/);
+    assert.match(chip(used, "Fire Breath is used. Click when it recharges") ?? "", /aria-pressed="true"/);
   });
 
   test("an X/Day row counts what is left with its Use, which is off with its reason at 0", () => {
