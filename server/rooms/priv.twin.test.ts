@@ -368,9 +368,11 @@ describe("twin rooms give P1 and the display the same frames, hidden work apart"
       twin.watch("p1#waited", twin.clients.p1.sent);
       await twin.settle();
       const sent = twin.clients.p1.sent;
-      assert.ok(sent.some((m) => m.t === "wait"), `${twin.name}: the reload waited`);
+      const wait = sent.find((m) => m.t === "wait");
+      assert.ok(wait && wait.t === "wait", `${twin.name}: the reload waited`);
+      // The reload's hello came at 7,300, and its wait ends that long after.
       const n = twin.latest("p1#waited", 0);
-      assert.ok(n !== undefined && n >= T0 + 7_400, `${twin.name}: the snapshot's number ${n} is at or after its wait's end`);
+      assert.ok(n !== undefined && n >= T0 + 7_300 + wait.ms, `${twin.name}: the snapshot's number ${n} is at or after its wait's end`);
     });
     same(pair, "a delayed snapshot");
   });

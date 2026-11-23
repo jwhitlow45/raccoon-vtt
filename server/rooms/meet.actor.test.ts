@@ -64,31 +64,27 @@ describe("the meet step in the room actor", () => {
     assert.equal(meetOps(state, state, [], { skip: false }).length, 1);
   });
 
-  test("a meeting that throws as it is applied is logged, and the DM's op is answered and stored alone", async (t) => {
+  test("a meeting that fails as it is applied is logged, and the DM's op is answered and stored alone", async (t) => {
     const f = scopeFixture();
     const errors: string[] = [];
     const log: ActorDeps["log"] = { info() {}, warn() {}, debug() {}, error: (_o: unknown, msg?: string) => void errors.push(msg ?? "") };
-    // The step's op is a real meeting, and the clock its append reads throws once, so the throw comes from applying it.
-    let armed = false;
-    const now = () => {
-      if (!armed) return Date.now();
-      armed = false;
-      throw new Error("scripted meeting fault");
-    };
+    // The step's op lists its creatures out of order, which the check every stored op meets refuses as it is applied.
+    let asked = false;
     const meetStep: NonNullable<ActorDeps["options"]>["meetStep"] = (before, after, touched) => {
       const ops = meetOps(before, after, touched, { skip: false });
-      armed = ops.length > 0;
-      return ops;
+      if (ops.length === 0) return ops;
+      asked = true;
+      return [{ t: "sys.meet", tokenIds: [uuidv7(), uuidv7()].sort().reverse() }];
     };
-    const h = await storedActor(t, new StoredRoomDb(f.state), { meetStep, now }, log);
+    const h = await storedActor(t, new StoredRoomDb(f.state), { meetStep }, log);
     const dm = await h.connect(f.dm);
     const id = uuidv7();
     await dm.apply(second(id, f.sceneId));
     const state = h.actor.committed.state;
     assert.ok(state.tokens[id], "the op committed");
-    assert.equal(armed, false, "the meeting was applied and threw");
+    assert.ok(asked, "the meeting was asked for");
     assert.deepEqual([state.tokens[f.goblin]!.number, state.tokens[id]!.number], [undefined, undefined]);
     assert.deepEqual(h.db.rows.map((r) => (r.op as { t: string }).t), ["token.create"]);
-    assert.ok(errors.some((m) => m.startsWith("meet step failed")));
+    assert.ok(errors.some((m) => m.startsWith("meet step op")), JSON.stringify(errors));
   });
 });

@@ -427,6 +427,8 @@ type Batch = {
   /** The ids its applied ops brought (createIds.ts), recorded with it. */
   ids: IdRow[];
   timer: NodeJS.Timeout | null;
+  /** The close's moment on the server's clock (#closeMoment), which the previews its publish judges are timed by. */
+  closeAt: number;
   /** Its timer has fired: it closes once no command of its tick waits to be handled or read (#closeIfDue). */
   due: boolean;
   /** How many members' ops the batch answered since it opened, taken or refused. */
@@ -2948,6 +2950,7 @@ export class RoomActor {
         takes: [],
         ids: [],
         timer: null,
+        closeAt: 0,
         due: false,
         answered: 0,
         state: before,
@@ -3020,22 +3023,30 @@ export class RoomActor {
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
     this.#lastClosedTick = Math.max(this.#lastClosedTick, batch.tick);
-    // The clock as the batch closes, never the tick it was due at, and read before the steps below, whose work a
-    // number must not carry.
-    const close = this.#numberClock();
-    // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is one
-    // that tail holds, or a gap in it.
-    if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
-    if (!this.replayFailed && (batch.ops.length > 0 || batch.answered > 0)) this.#rideEnd(batch);
-    if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#meet(batch);
-    if (!this.replayFailed) this.#shed(batch);
+    // The close's moment: the batch's tick, or the clock when it reads earlier, as a clock set back does, never how late
+    // the timer or the queue came to it. Read before the steps below, whose work a number must not carry, and the moment
+    // their server ops are dated by.
+    const close = this.#closeMoment(batch);
+    batch.closeAt = close.now;
+    const outer = this.#moment;
+    this.#moment = close;
+    try {
+      // A room whose replay failed keeps its stored tail for a fixed build and writes no row of its own: the next seq is
+      // one that tail holds, or a gap in it.
+      if (!this.replayFailed && (answeredSinceStep(batch) > 0 || batch.doors.length > batch.step.doors)) this.#explore(batch);
+      if (!this.replayFailed && (batch.ops.length > 0 || batch.answered > 0)) this.#rideEnd(batch);
+      if (!this.replayFailed && (batch.answered > 0 || batch.doors.length > 0)) this.#meet(batch);
+      if (!this.replayFailed) this.#shed(batch);
+    } finally {
+      this.#moment = outer;
+    }
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     for (const [key, n] of batch.watermarks) {
       const wm = this.#watermarks.get(key);
       if (wm && wm.closed < n) wm.closed = n;
     }
-    this.#closeNumbers(batch, close);
+    this.#closeNumbers(batch, close.number);
     try {
       batch.history = this.#undo.summaries();
     } catch (err) {
@@ -3048,6 +3059,17 @@ export class RoomActor {
     this.#nextCommit();
   }
 
+  /**
+   * A batch's close moment: its tick on each clock, or the clock where it
+   * reads earlier. Under a test's number clock apart from the server's, the
+   * server's clock is read as it stands.
+   */
+  #closeMoment(batch: Batch): Moment {
+    const now = this.#opts.now();
+    const same = this.#numberClock === this.#opts.now;
+    return { now: same ? Math.min(now, batch.tick) : now, number: Math.min(same ? now : this.#numberClock(), batch.tick) };
+  }
+
   /** Starts the oldest waiting batch's commit, when none is in flight: commits run one at a time, in tick order. */
   #nextCommit(): void {
     const batch = this.#pending[0];
@@ -3057,8 +3079,8 @@ export class RoomActor {
   }
 
   /**
-   * The close's numbers. The batch's frames carry the number clock as it
-   * closed, or the highest number handed out when that is later, so every
+   * The close's numbers. The batch's frames carry its close moment, its
+   * tick, or the highest number handed out when that is later, so every
    * number the batch's answers took is at or below its frames'. A batch
    * that answered a member stores that number and hands it out, whether or
    * not the member is still there to be sent it. One that answered no one
@@ -3287,7 +3309,8 @@ export class RoomActor {
     }
     const state = this.#staged.state;
     const seq = this.#staged.seq + 1;
-    const at = new Date(this.#opts.now()).toISOString();
+    // Dated by the command it runs for, or by the batch's close moment at the close (#commitNow).
+    const at = new Date(this.#now().now).toISOString();
     const result = applyOp(state, checked.op, SERVER_ACTOR, { seq: this.#pub, at, uncounted: true });
     if (!result.ok) {
       this.#log.error({ roomId: this.roomId, message: result.message }, `${what} op refused`);

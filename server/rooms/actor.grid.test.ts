@@ -120,7 +120,7 @@ describe("batches close on the number clock's grid", () => {
     assert.deepEqual(snapshots(again.sent).map((m) => m.seq), [T0 + 60]);
   });
 
-  test("an op that comes after the tick its batch was due at, before the late timer fires, joins the next tick's batch", async (t) => {
+  test("an op that comes after the tick its batch was due at, before the late timer fires, joins the next tick's batch, and the late frame carries its own tick", async (t) => {
     const r = await gridRoom(t);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     r.clock.now = T0 + 5;
@@ -134,15 +134,14 @@ describe("batches close on the number clock's grid", () => {
     const [first] = evs(r.p1.sent, from);
     assert.ok(first, "the batch of the tick at 20 closed as the queue took a command of the next tick");
     assert.deepEqual(first.acks, [r.p1.n - 1]);
-    assert.equal(first.seq, T0 + 22, "numbered by the clock as it closed");
+    assert.equal(first.seq, T0 + 20, "numbered by its tick, not by the clock as it closed");
     moveTo(t, r.clock, T0 + 40);
     await flush();
     const second = evs(r.p1.sent, from)[1];
     assert.ok(second);
     assert.deepEqual([second.seq, second.acks], [T0 + 40, [r.p1.n]], "the late op's batch closes at its own tick");
-    // One past the number the first frame was handed at the same millisecond.
     const late = r.actor.committed.state.log.find((line) => line.text === "late");
-    assert.equal(late?.id, `${T0 + 23}:0`);
+    assert.equal(late?.id, `${T0 + 22}:0`);
     assert.ok(Number(late.id.split(":")[0]) <= second.seq);
   });
 
