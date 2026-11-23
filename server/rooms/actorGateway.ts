@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { Member, MemberId, RoomState } from "#shared/model.ts";
 import { HttpError } from "../auth/http.ts";
 import type { Queryable } from "../auth/tx.ts";
-import { RoomReplayFailed, SysOpRefused } from "./actor.ts";
+import { ActorClosedError, RoomReplayFailed, SysOpRefused, ViewBusyError } from "./actor.ts";
 import { RoomFullError, RoomNotFoundError, rosterOf, SNAPSHOT_SCHEMA_VERSION, type RoomGateway, type RosterEntry, type SocketFilter } from "./gateway.ts";
 import { TooBusyError } from "./errors.ts";
 import type { RoomManager } from "./manager.ts";
@@ -98,9 +98,22 @@ export class ActorGateway implements RoomGateway {
     return members?.[memberId] ?? null;
   }
 
+  /**
+   * The roster as of this call (RoomActor.asOf), its moment read before
+   * anything here waits. A room that closes before it gives its view is
+   * acquired again, as a closed one is.
+   */
   async #members(roomId: string): Promise<RoomState["members"] | null> {
+    const at = this.#manager.serverTime();
     try {
-      return await this.#manager.withRoom(roomId, (actor) => actor.committed.state.members);
+      return await this.#manager.withRoom(roomId, async (actor) => {
+        try {
+          return (await actor.asOf(at)).state.members;
+        } catch (err) {
+          if (err instanceof ViewBusyError && actor.closed) throw new ActorClosedError(roomId);
+          throw err;
+        }
+      });
     } catch (err) {
       if (err instanceof RoomNotFoundError) return null;
       throw busyAsHttp(err);
@@ -108,7 +121,9 @@ export class ActorGateway implements RoomGateway {
   }
 }
 
-/** A room that cannot load right now answers 503 with Retry-After, like every other transient refusal. */
+/** A room that cannot load or give its view right now answers 503 with Retry-After, like every other transient refusal. */
 function busyAsHttp(err: unknown): unknown {
-  return err instanceof TooBusyError ? new HttpError(503, "busy", { retryAfter: 30 }) : err;
+  if (err instanceof TooBusyError) return new HttpError(503, "busy", { retryAfter: 30 });
+  if (err instanceof ViewBusyError) return new HttpError(503, "busy", { retryAfter: err.retryAfter });
+  return err;
 }

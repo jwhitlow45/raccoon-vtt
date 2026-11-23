@@ -10,6 +10,7 @@ import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
 import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
+import { ViewBusyError } from "./actor.ts";
 import { failCommits, numberOf, Socket, startEngine, type Engine } from "./testing.ts";
 import { MAX_PENDING_BATCHES } from "./actor.ts";
 
@@ -877,5 +878,60 @@ describe("websocket: refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => 
     assert.deepEqual(kept?.rejects.map((r) => r.n), Array.from({ length: MAX_KEPT_REFUSALS }, (_, i) => 70 - MAX_KEPT_REFUSALS + 1 + i));
     assert.ok(serverMessageSchema.safeParse(kept).success, "a page reads it whole");
     a.close();
+  });
+});
+
+describe("roster reads as of their moment", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  test("a View as upgrade reads the roster as of its arrival, before its grant read waits, and the gateway as of its call", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Roster moments");
+    const pip = t.client();
+    const pipId = await pip.join(roomId, "Pip");
+    const actor = await t.manager.acquire(roomId);
+    const given = actor.committed;
+    const quin = t.client();
+    const quinId = await quin.join(roomId, "Quin");
+    assert.equal(t.manager.get(roomId)!.committed.state.members[quinId]?.kind, "player", "Quin is on the roster now");
+    const own = actor.asOf.bind(actor);
+    const asked: number[] = [];
+    actor.asOf = (at: number) => {
+      asked.push(at);
+      return Promise.resolve({ tick: t.manager.arrivalTick(at), ...given });
+    };
+    const preview = (memberId: string) =>
+      Socket.open(`${t.url}/ws?room=${roomId}&as=${encodeURIComponent(memberId)}`, { origin: t.config.publicOrigin, cookie: `rvtt=${dm.token}`, "cf-connecting-ip": dm.ip, "user-agent": "roster-itest" });
+    try {
+      const holder = await t.pool.connect();
+      await holder.query("begin");
+      await holder.query("lock table grants in access exclusive mode");
+      const sent = Date.now();
+      const upgrade = preview(quinId).then(
+        (s) => (s.close(), "open"),
+        (err: Error) => err.message,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      const released = Date.now();
+      await holder.query("rollback");
+      holder.release();
+      assert.equal(await upgrade, "upgrade refused: 403", "Quin was no player of the roster the room gave");
+      const at = asked.pop()!;
+      assert.ok(at >= sent && at < released, `the arrival ${at} is before the grant read let go at ${released}`);
+      const called = Date.now();
+      assert.equal(await t.manager.gateway.getMember(roomId, quinId), null);
+      assert.equal((await t.manager.gateway.getMember(roomId, pipId))?.name, "Pip");
+      assert.ok(asked.every((x) => x >= called && x <= Date.now()), "the gateway's moment is its call's");
+      actor.asOf = () => Promise.reject(new ViewBusyError("too old"));
+      await assert.rejects(t.manager.gateway.getMember(roomId, pipId), (err: { status?: number; retryAfter?: number }) => err.status === 503 && err.retryAfter === 1);
+    } finally {
+      actor.asOf = own;
+    }
+    const opened = await preview(quinId);
+    opened.close();
   });
 });

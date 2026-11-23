@@ -12,7 +12,7 @@ import { parseRoomId } from "../auth/roomId.ts";
 import type { GrantContext } from "../auth/types.ts";
 import type { Config } from "../config.ts";
 import { thisComputer } from "../local/guard.ts";
-import type { RoomActor } from "./actor.ts";
+import { ViewBusyError, type RoomActor } from "./actor.ts";
 import { SlidingWindow, SocketRegistry, SustainedViolation, type Clock, type SocketCaps } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
 import { TooBusyError } from "./errors.ts";
@@ -152,16 +152,17 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
   app.decorate("openSockets", () => ({ total: registry.total, remoteDevices: registry.remoteDevices((ip) => thisComputer(ip, app.localNetwork)) }));
 
   /**
-   * Whether the room's roster holds a player with this id now. The room
-   * loads for it, as the socket's attach would, and one that cannot load
-   * gets the answer the attach would close with, before the upgrade.
+   * Whether the room's roster holds a player with this id as of the
+   * request's arrival (RoomActor.asOf). The room loads for it, as the
+   * socket's attach would, and one that cannot load or give that view gets
+   * the answer the attach would close with, before the upgrade.
    */
-  const rosterPlayer = async (roomId: string, memberId: string): Promise<boolean | { status: number; error: ApiErrorCode }> => {
+  const rosterPlayer = async (roomId: string, memberId: string, at: number): Promise<boolean | { status: number; error: ApiErrorCode }> => {
     try {
       const room = await manager.acquire(roomId);
-      return room.committed.state.members[memberId]?.kind === "player";
+      return (await room.asOf(at)).state.members[memberId]?.kind === "player";
     } catch (err) {
-      if (err instanceof TooBusyError) return { status: 503, error: "busy" };
+      if (err instanceof TooBusyError || err instanceof ViewBusyError) return { status: 503, error: "busy" };
       if (err instanceof RoomNotFoundError) return { status: 404, error: "room_not_found" };
       throw err;
     }
@@ -183,7 +184,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
         } else if (query.as !== undefined) {
           const room = await app.auth.grant(req, reply, roomId);
           if (room?.role === "dm" && typeof query.as === "string") {
-            const listed = await rosterPlayer(roomId, query.as);
+            const listed = await rosterPlayer(roomId, query.as, req.arrivedAt);
             if (typeof listed === "object") return reply.code(listed.status).send({ error: listed.error });
             if (listed) grant = { ...room, display: false, previewOf: query.as };
           }
