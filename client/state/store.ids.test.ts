@@ -387,9 +387,10 @@ describe("a page with an id key makes version 8 ids under it", () => {
 
   test("a create queued before the first key, and one made under a key since changed, go under ids sealed under the new key", () => {
     const s = keyedSetup(room());
-    // Before any snapshot the page holds no key, so its ids are version 7.
+    // Before any snapshot the page holds no key, so its ids are version 7, dated by the server's time it read.
+    s.room.receiveClock(new Date(T0).toISOString());
     const early = s.actions.newId();
-    assert.ok(idTime(early) !== null);
+    assert.equal(idTime(early), T0, "in the window: only its version makes it stale");
     const heard = answers();
     s.room.dispatch(made(early), heard.opts);
     s.connect();
