@@ -613,6 +613,11 @@ describe("the store's test hook on ids newId made", () => {
     assert.match(problems[0]!, /^token\.move first brings/);
   });
 
+  test("a store a test makes without a check of its own throws on such an id, so every client test runs the check", () => {
+    const store = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock(), random: () => 0.5, clientId: "c1" });
+    assert.throws(() => store.dispatch({ t: "token.move", tokenId: store.newId(), x: 5, y: 5 }), /^Error: raccoon: token\.move first brings/);
+  });
+
   test("a roll tag and a group save's plan made by newId are fields it allows", () => {
     const problems: string[] = [];
     const s = hooked(problems, room({ tokens: { g1: token("g1", { actor: { inline: actor() } }) } }));

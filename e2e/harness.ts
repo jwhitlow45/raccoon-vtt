@@ -405,6 +405,15 @@ export class ConsoleWatch {
   }
 
   attach(page: Page): void {
+    // The store's new-id check (client/state/store.ts NEW_ID_CHECK_FLAG) on in every page a run reads, from its next
+    // load: an op that first brings an id the page made outside a field of a new thing's id logs an error here.
+    void page.addInitScript(() => {
+      try {
+        localStorage.setItem("raccoon:newIdCheck", "1");
+      } catch {
+        // A page with no storage runs without the check.
+      }
+    });
     page.on("console", (msg) => {
       const type = msg.type();
       if (type !== "error" && type !== "warning") return;

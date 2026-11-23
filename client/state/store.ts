@@ -488,10 +488,35 @@ export type RoomStoreOptions = {
    * Tests only: told of each op that brings an id `newId` made for the
    * first time in a field that holds no new thing's id (newIdsIn), a roll
    * tag's, a group save's plan or page, or a fog op's. Later ops may name
-   * such an id anywhere.
+   * such an id anywhere. Left out, a store under node:test throws on one,
+   * and a page whose storage holds NEW_ID_CHECK_FLAG, as the e2e runs set
+   * it, logs it as an error (defaultNewIdCheck).
    */
   newIdCheck?: (problem: string) => void;
 };
+
+/** The storage key that turns the new-id check on in a page (e2e/harness.ts ConsoleWatch). */
+export const NEW_ID_CHECK_FLAG = "raccoon:newIdCheck";
+
+/**
+ * The new-id check where a store's maker names none: every store a test
+ * makes finds a field the table of new-id fields left out, and so does
+ * every page an e2e run opens. Elsewhere none.
+ */
+function defaultNewIdCheck(): ((problem: string) => void) | undefined {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined>; execArgv?: readonly string[] } }).process;
+  if (proc?.env?.NODE_TEST_CONTEXT !== undefined || proc?.execArgv?.includes("--test")) {
+    return (problem) => {
+      throw new Error(`raccoon: ${problem}`);
+    };
+  }
+  try {
+    if (globalThis.localStorage?.getItem(NEW_ID_CHECK_FLAG) === "1") return (problem) => console.error(`raccoon: ${problem}`);
+  } catch {
+    // Storage the page may not read: no check.
+  }
+  return undefined;
+}
 
 /**
  * Ids an op carries that `newId` may make outside its new-id fields:
@@ -864,7 +889,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   /** The id key the latest snapshot brought (shared/ids.ts), which new ids are sealed under, or null before one brings it. Only the latest is kept. */
   let idKey: IdKey | null = null;
   /** Tests only (RoomStoreOptions.newIdCheck): each id `newId` made, and those an op has brought already. */
-  const made = options.newIdCheck ? new Set<string>() : null;
+  const newIdCheck = options.newIdCheck ?? defaultNewIdCheck();
+  const made = newIdCheck ? new Set<string>() : null;
   const introduced = new Set<string>();
   const newId = (): string => {
     // The room's reckoning holds fractions of a millisecond from the monotonic clock, and an id the whole one under it.
@@ -1414,7 +1440,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     if (carried.length === 0) return;
     const fields = new Set([...newIdsIn(op), ...keptIdsOf(op)]);
     for (const id of carried) {
-      if (!fields.has(id)) options.newIdCheck!(`${op.t} first brings ${id}, made by newId, outside a field of a new thing's id`);
+      if (!fields.has(id)) newIdCheck!(`${op.t} first brings ${id}, made by newId, outside a field of a new thing's id`);
       introduced.add(id);
     }
   }
