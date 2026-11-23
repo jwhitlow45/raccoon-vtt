@@ -1335,9 +1335,10 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     for (const x of [a, b]) {
       const room = await t.manager.acquire(x.roomId);
       const release = await holdQueue(room);
+      // A batch holds one tick's commands: both go together at a tick's start, so they land in the same tick under the
+      // real number clock too.
+      while (Date.now() % 20 > 4) await new Promise((resolve) => setTimeout(resolve, 1));
       const height = x.dmSocket.op({ t: "scene.update", sceneId: x.loft, patch: { floor: { height: 30 } } } as Op);
-      // The second op goes only once the first waits in the queue, so the batch holds both however far apart they land.
-      await queued(room, 1);
       const hide = x.dmSocket.op({ t: "floor.open", sceneId: x.attic, open: false } as Op);
       await queued(room, 2);
       await release();
