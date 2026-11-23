@@ -311,7 +311,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<T
     budget: new SnapshotBudget(),
     gateway: {} as RoomGateway,
     // One op per batch, committed at once: every row is one op's whole trip, with no batching wait.
-    options: { maxBatchOps: 1, batchMs: 1, roomOpsPerSec: 10_000, snapshotOps: 1_000_000, snapshotIdleMs: 3_600_000, grantRecheckMs: 3_600_000 },
+    options: { batchMs: 1, roomOpsPerSec: 10_000, snapshotOps: 1_000_000, snapshotIdleMs: 3_600_000, grantRecheckMs: 3_600_000 },
   };
   const actor = await RoomActor.load(deps);
   if (!actor) throw new Error("the bench room did not load");

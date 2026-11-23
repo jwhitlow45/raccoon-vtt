@@ -310,8 +310,9 @@ describe("the build and the write of that snapshot", () => {
     const asked = dm.send({ t: "build.ask", sceneId, ops, part: 0 }, "g1");
     const [said, answered] = await Promise.all([chat, asked]);
     reading = false;
-    assert.equal(said.acks?.length, 1);
-    assert.ok(answered.acks?.length);
+    // The chat and the ask came in one tick, whose batch stays open while the ask reads, so one frame answers both.
+    assert.equal(said.acks?.length, 2);
+    assert.deepEqual(answered.acks, said.acks);
     const own = began.map((b, i) => {
       const next = began[i + 1] ?? now();
       return { rows: next.rows - b.rows, marks: next.marks - b.marks, snapshot: next.writes > b.writes };

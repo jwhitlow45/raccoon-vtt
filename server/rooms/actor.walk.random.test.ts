@@ -182,21 +182,17 @@ function same(steps: Build, closes: Build, what: string): void {
 describe("a walk's steps in place against a commit before the walk", () => {
   test("random rooms and arrivals store the same rows and leave the same state, and no op waits for another's walk", async (t) => {
     let walksAfterAnswers = 0;
-    let capped = 0;
     for (let seed = 1; seed <= 40; seed++) {
       const r = rng(seed);
       const room = randomRoom(r);
       const rounds = Array.from({ length: int(r, 4, 9) }, (_, i) => Array.from({ length: int(r, 1, 7) }, (_, k) => randomEvent(r, room, i * 10 + k)));
       const holds = new Set<number>(rounds.flatMap((_, i) => (chance(r, 0.2) ? [i] : [])));
-      const cap = seed % 5 === 0;
-      const { steps, closes } = await race(t, room, rounds, holds, cap ? { maxBatchOps: 3 } : {});
+      const { steps, closes } = await race(t, room, rounds, holds, {});
       same(steps, closes, `seed ${seed}`);
-      if (!cap) assert.equal(steps.commitsBeforeTick, 0, `seed ${seed}: no commit came before a round's tick`);
+      assert.equal(steps.commitsBeforeTick, 0, `seed ${seed}: no commit came before a round's tick`);
       if (closes.commitsBeforeTick > 0) walksAfterAnswers++;
-      if (cap) capped++;
     }
     assert.ok(walksAfterAnswers >= 10, `walks that needed the steps: ${walksAfterAnswers}`);
-    assert.ok(capped >= 8);
   });
 
   test("a label remembered as Old and seen as New on a walk into sight and out again, in one tick, ends as the commit before the walk leaves it", async (t) => {

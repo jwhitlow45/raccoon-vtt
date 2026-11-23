@@ -614,9 +614,9 @@ async function queuedRemember(twin: Twin): Promise<void> {
 const renameFamiliar: Op = { t: "token.update", tokenId: FAMILIAR, patch: { name: "Hoot" } };
 
 describe("batches split by answers, whatever the room does on its own", () => {
-  test("C24: a burst behind a held commit, P2's op on a token P1 never sees taken in one twin and refused in the other, splits alike at a cap of 3", async (t) => {
+  test("C24: a burst behind a held commit, P2's op on a token P1 never sees taken in one twin and refused in the other, comes in one batch for its tick in both", async (t) => {
     for (const tick of [false, true]) {
-      const pair = await twins(t, { familiar: true, music: true }, { maxBatchOps: 3, roomSound: true });
+      const pair = await twins(t, { familiar: true, music: true }, { roomSound: true });
       const ops: Array<[Who, Op]> = [
         ["p1", { t: "log.chat", text: "one" }],
         ["p2", renameFamiliar],
@@ -629,15 +629,15 @@ describe("batches split by answers, whatever the room does on its own", () => {
       if (tick) assert.ok(pair[0].bookkeeping().includes("sys.sound") && !pair[1].bookkeeping().includes("sys.sound"), "a tick in the door twin alone");
       const groups = pair.map(ackGroups);
       assert.deepEqual(groups[0], groups[1], `tick ${tick}: P1's acks come in the same groups`);
-      assert.deepEqual(groups[0]!.slice(-2), [[2, 3], [4]], `tick ${tick}: the cap closes the batch at its third answer`);
+      assert.deepEqual(groups[0]!.slice(-1), [[2, 3, 4]], `tick ${tick}: no count of answers splits the tick's batch`);
       same(pair, `C24, tick ${tick}`);
     }
   });
 
-  test("C24: a burst behind a held commit whose area's reminder explores inside the batch in one twin alone splits alike at a cap of 3", async (t) => {
+  test("C24: a burst behind a held commit whose area's reminder explores inside the batch in one twin alone comes in one batch for its tick in both", async (t) => {
     // An area that reminds when it comes onto a creature while a turn runs, away from everyone until the DM moves it.
     const web = (s: RoomState) => void (s.templates.web = template("web", { shape: "sphere", size: 5, origin: { x: 8.5, y: 8.5, z: 0 }, triggers: ["enter"], ownerId: "dm1" }));
-    const pair = await twins(t, {}, { maxBatchOps: 3 }, web);
+    const pair = await twins(t, {}, {}, web);
     await both(pair, async (twin) => {
       await twin.apply("dm", move("b", IN_Q.x, IN_Q.y));
       await twin.apply("dm", { t: "encounter.start", entries: [{ id: "ea", tokenId: "a", value: 10 }] } as Op);
@@ -661,7 +661,7 @@ describe("batches split by answers, whatever the room does on its own", () => {
     for (const twin of pair) assert.ok(twin.actor.committed.state.log.some((line) => line.data?.type === "area"), `${twin.name}: the area reminded`);
     const groups = pair.map(ackGroups);
     assert.deepEqual(groups[0], groups[1], "P1's acks come in the same groups");
-    assert.deepEqual(groups[0]!.slice(-2), [[2], [3]], "the cap closes the batch at its third answer");
+    assert.deepEqual(groups[0]!.slice(-1), [[2, 3]], "no count of answers splits the tick's batch");
     same(pair, "C24, an area's reminder");
   });
 
@@ -706,20 +706,21 @@ describe("batches split by answers, whatever the room does on its own", () => {
         t.mock.timers.tick(0);
         await flush();
         const ticked = twin.actor.queueLength;
-        t.mock.timers.tick(15);
+        // The clock moves first and the timers with it, as the server's do.
         twin.clock.now += 15;
+        t.mock.timers.tick(15);
         chat("at 15");
         await flush();
-        t.mock.timers.tick(10);
         twin.clock.now += 10;
+        t.mock.timers.tick(10);
         chat("at 25");
         await flush();
-        t.mock.timers.tick(14);
         twin.clock.now += 14;
+        t.mock.timers.tick(14);
         await flush();
         assert.deepEqual(acked().map((m) => m.acks), [[p1.n - 1]], `${twin.name}: the first chat at the 20 ms tick, the second not by 39 ms (${ticked} queued)`);
-        t.mock.timers.tick(1);
         twin.clock.now += 1;
+        t.mock.timers.tick(1);
         await flush();
         assert.deepEqual(acked().map((m) => m.acks), [[p1.n - 1], [p1.n]], `${twin.name}: the second chat at the 40 ms tick`);
       } finally {

@@ -3855,6 +3855,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       hold();
       // Ayla's step, which changes what the party sees, whose batch commits a millisecond on and waits at its COMMIT, then an ask read in turns meanwhile.
       await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 89, y: 50 }, "g1");
+      await new Promise((r) => setTimeout(r, 10));
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
       await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g2");
       for (let i = 0; i < 100 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 10));

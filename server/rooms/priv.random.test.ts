@@ -500,7 +500,7 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
     const s = fixture[name];
     s.meta = { ...s.meta, settings: { ...s.meta.settings, revealHiddenOnTurn: false } };
   }
-  const options: Partial<ActorOptions> = seed % 5 === 0 ? { maxBatchOps: 3 } : {};
+  const options: Partial<ActorOptions> = {};
   const pair = [new Twin(t, "door", fixture, options), new Twin(t, "rock", fixture, options)] as const;
   const publics = new Set([...fixture.stampsR, ...fixture.stampsSide]);
   // Each twin draws its hidden events from its own source.
@@ -531,7 +531,7 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
   let dmSnapshots = false;
   let hiddenSince = false;
   for (let i = 0; i < steps; i++) {
-    const where = `seed ${seed} (${JSON.stringify(opts)}${options.maxBatchOps ? ", cap 3" : ""}), step ${i}`;
+    const where = `seed ${seed} (${JSON.stringify(opts)}), step ${i}`;
     const shared = sharedEvent(r, { inSide, encounter: pair[0].actor.committed.state.encounter !== null, publics: [...publics] });
     // The shared event's time, and its tick's start: hidden events of the tick fall in it at least 2 ms before.
     const gap = int(r, 3, 12) * BATCH_MS + (shared.k === "music" ? 61_000 : 0);
@@ -573,7 +573,7 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
         if (!answered) assert.equal(twin.db.pub, before, `${where}: ${twin.name}: the room's own ${e.k} left the stored number as it was`);
       }
       const inTick = events.find((e) => e.tick);
-      if (inTick && sharedAt - tickStart >= 2 && !(options.maxBatchOps && shared.k === "burst")) {
+      if (inTick && sharedAt - tickStart >= 2) {
         twin.clock.now = T0 + tickStart;
         if (await takeHidden(twin, inTick, r2, publics, swept, false)) {
           counts.hidden++;

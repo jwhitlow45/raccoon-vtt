@@ -148,7 +148,7 @@ describe("the server's tick (6.4)", () => {
     assert.deepEqual(h.db.stored.at(-1), { t: "sys.sound", from: 5, music: null });
   });
 
-  test("a tick queued behind a commit is worked out and dated when the queue reaches it, not when it was queued", async (t) => {
+  test("a tick queued behind a commit is worked out when the queue reaches it and dated when it was queued, as every command is", async (t) => {
     const f = library(playing(run()));
     const h = await load(t, f.state, { pub: T0 });
     const db = h.db as StoredRoomDb;
@@ -170,7 +170,7 @@ describe("the server's tick (6.4)", () => {
     release();
     const tick = await until(() => db.rows.find((row) => (row.op as { t?: string }).t === "sys.sound"), "the stored tick");
     assert.deepEqual(tick.op, { t: "sys.sound", from: 4, music: { ...run(), next: { soundId: "b", at: T0 + 55_000 } } });
-    assert.equal(tick.at, new Date(T0 + 35_050).toISOString());
+    assert.equal(tick.at, new Date(T0 + 35_000).toISOString());
   });
 
   test("no tick runs while no socket is open, nor with the switch off", async (t) => {

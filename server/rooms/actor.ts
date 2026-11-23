@@ -89,13 +89,14 @@ import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutc
  * The single writer of one loaded room (design sections 7.2, 7.3, 7.6, 7.7,
  * 10.4 and 16.2).
  *
- * One queue carries ops, `hello`s and room-level commands. Each command is
- * handled synchronously against the staged state, so nothing can interleave
- * between a snapshot and the events after it. Ops accumulate in a batch
- * that commits in one transaction at the next 20 ms tick of the clock or at
- * 50 answers. While a commit is in flight the queue waits, so a batch is
- * always built on the committed state before it, and nothing is published
- * or acknowledged until its rows are durable. After the commit, every
+ * One queue carries ops, `hello`s and room-level commands, in the order of
+ * the moments they arrived at. Each command is handled synchronously
+ * against the staged state, so nothing can interleave between a snapshot
+ * and the events after it. Every command belongs to the batch of the 20 ms
+ * tick of the number clock it arrived in, which commits in one transaction
+ * once that tick has passed. While a commit is in flight the queue waits,
+ * so a batch is always built on the committed state before it, and nothing
+ * is published or acknowledged until its rows are durable. After the commit, every
  * connection gets one `ev` with the batch's changes for its viewer plus
  * that client's acks and refusals, and every snapshot and resent ack the
  * batch's devices asked for is answered then too.
@@ -104,7 +105,6 @@ export type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error" | "debug"
 
 export type ActorOptions = {
   batchMs: number;
-  maxBatchOps: number;
   queueCap: number;
   snapshotOps: number;
   snapshotIdleMs: number;
@@ -177,7 +177,6 @@ export type ActorOptions = {
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   batchMs: 20,
-  maxBatchOps: 50,
   queueCap: 500,
   snapshotOps: 200,
   snapshotIdleMs: 30_000,
@@ -309,6 +308,14 @@ export const ASK_CHAIN_MS = 30_000;
 const ASK_TURN_MS = 8;
 
 /**
+ * How long the drain handles queued commands in one turn of the event loop
+ * before it lets the loop go, as an ask's reading does. The open batch
+ * stays open meanwhile, and its timer does not close it while commands of
+ * its tick wait.
+ */
+const DRAIN_TURN_MS = 8;
+
+/**
  * How far a counted op's number may run ahead of the server's clock and
  * still be its lines' time (#atOf). Answers that share a millisecond run
  * ahead by one each, and a room whose numbers lead by more, after the clock
@@ -346,7 +353,7 @@ type Command = (
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "read"; run: () => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
-  /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
+  /** The server's music tick (docs/design/design-v1-music.md 6.4): its step is worked out when the queue reaches it, never before. */
   | { t: "soundTick" }
   /** A device's ask after a reconnect whether the room recorded its own uncertain creates' ids (#processIds). */
   | { t: "ids"; conn: Connection; k: number; ids: readonly string[] }
@@ -416,6 +423,8 @@ type Batch = {
   /** The ids its applied ops brought (createIds.ts), recorded with it. */
   ids: IdRow[];
   timer: NodeJS.Timeout | null;
+  /** Its timer has fired: it closes once no command of its tick waits to be handled or read (#closeIfDue). */
+  due: boolean;
   /** How many members' ops the batch answered since it opened, taken or refused. */
   answered: number;
   state: RoomState;
@@ -579,6 +588,8 @@ export class RoomActor {
    */
   #handed: number;
   #numberClock: Clock;
+  /** Whether both clocks are the server's own, as on every production room, rather than a test's. */
+  readonly #serverClock: boolean;
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
   /** Deletion steps waiting for the open batch to commit (#runStep), in the order they came. */
@@ -605,6 +616,13 @@ export class RoomActor {
   #inFlightDone: Promise<void> | null = null;
   #queue: Command[] = [];
   #draining = false;
+  /** The drain's next turn, once it let the event loop go with commands still queued (DRAIN_TURN_MS). */
+  #drainTurn: NodeJS.Immediate | null = null;
+  /** The newest moment the drain took a command at, and the newest tick a batch closed at, which a delayed snapshot never goes behind. */
+  #lastTaken: Moment | null = null;
+  #lastClosedTick = Number.NEGATIVE_INFINITY;
+  /** Whether this load has logged a batch closed with the clock short of its tick (#armTimer). */
+  #toldClockBehind = false;
   #closed = false;
   #closing: Promise<void> | null = null;
   #watermarks = new Map<ClientKey, Watermark>();
@@ -737,6 +755,7 @@ export class RoomActor {
     this.#handed = loaded.pub;
     this.#committedStored = loaded.pub;
     this.#numberClock = this.#opts.numberClock ?? this.#opts.now;
+    this.#serverClock = this.#opts.numberClock === null && this.#opts.now === DEFAULT_ACTOR_OPTIONS.now;
     // A clock set back across a restart, or an imported file, leaves numbers ahead of it, and the room counts by one
     // until the clock passes them. The operator is told once, as the room loads.
     const aheadMs = loaded.pub - this.#numberClock();
@@ -886,6 +905,7 @@ export class RoomActor {
     return (
       this.#connections.size === 0 &&
       this.#queue.length === 0 &&
+      this.#drainTurn === null &&
       this.#batch === null &&
       this.#inFlight === null &&
       this.#snapshotting === null &&
@@ -1307,6 +1327,8 @@ export class RoomActor {
   shutdown(opts: { code: number; snapshot: boolean; flush?: boolean }): Promise<void> {
     this.#closing ??= (async () => {
       this.#closed = true;
+      if (this.#drainTurn) clearImmediate(this.#drainTurn);
+      this.#drainTurn = null;
       if (this.#recheckTimer) clearInterval(this.#recheckTimer);
       this.#clearSoundTimer();
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
@@ -1349,27 +1371,54 @@ export class RoomActor {
   // The queue.
 
   #enqueue(cmd: Command): void {
-    // A command's number and times are its arrival's, so commands that waited behind a commit or a deletion step and
-    // are handled in one millisecond once it ends keep the times they came at. The music's tick reads the clock as the
-    // queue reaches it, since the step it works out is for that moment.
-    if (cmd.t !== "soundTick") cmd.moment = this.#clocks();
+    // A command's number, times and tick are its arrival's, so commands that waited behind a commit or a deletion step
+    // and are handled in one millisecond once it ends keep the times and the batch they came at. The music's tick is
+    // stamped too: only its step reads the clock as the queue reaches it, since the step is for that moment.
+    cmd.moment = this.#clocks();
     this.#queue.push(cmd);
     this.#drain();
+  }
+
+  /**
+   * Puts a command among the waiting ones by its moment, after the last
+   * whose moment is at most its own, so the queue stays in the order
+   * commands arrived in.
+   */
+  #insertByMoment(cmd: Command & { moment: Moment }): void {
+    let at = this.#queue.length;
+    while (at > 0 && (this.#queue[at - 1]!.moment?.number ?? Number.NEGATIVE_INFINITY) > cmd.moment.number) at--;
+    this.#queue.splice(at, 0, cmd);
   }
 
   #drain(): void {
     if (this.#draining || this.#closed) return;
     this.#draining = true;
+    const until = performance.now() + DRAIN_TURN_MS;
     try {
       while (this.#inFlight === null && this.#stepRunning === null && this.#reading === null && !this.#closed) {
         if (this.#runParked()) break;
-        const cmd = this.#queue.shift();
+        const cmd = this.#queue[0];
         if (!cmd) break;
+        // One reading for the whole command, its fault's refusal included (#moment): the one it was queued with.
+        const moment = cmd.moment ?? this.#clocks();
+        // A command of a later tick closes the open batch before it is taken, so a batch holds one tick's commands.
+        if (this.#batch && this.#tickOf(moment) > this.#batch.tick) {
+          this.#commitNow();
+          continue;
+        }
+        if (performance.now() >= until) {
+          this.#drainTurn ??= setImmediate(() => {
+            this.#drainTurn = null;
+            this.#drain();
+          });
+          break;
+        }
+        this.#queue.shift();
+        this.#lastTaken = moment;
         // Caught here and not by each caller: a drain also runs from a timer, a turn or a commit's end, where nothing else would catch it.
         const batch = this.#batch;
         const records = batch?.ops.length ?? 0;
-        // One reading for the whole command, its fault's refusal included (#moment): the one it was queued with.
-        this.#moment = cmd.moment ?? this.#clocks();
+        this.#moment = moment;
         try {
           this.#handle(cmd);
         } catch (err) {
@@ -1377,11 +1426,11 @@ export class RoomActor {
         } finally {
           this.#moment = null;
         }
-        if (this.#batch && answeredSinceStep(this.#batch) >= this.#opts.maxBatchOps) this.#commitNow();
       }
     } finally {
       this.#draining = false;
     }
+    this.#closeIfDue();
     this.#maybeIdle();
   }
 
@@ -2815,7 +2864,7 @@ export class RoomActor {
     const timer = conn.after(delay, () => {
       conn.cancel(interval);
       this.#delayed.delete(key);
-      this.#queue.unshift({ t: "snapshot", conn, key });
+      this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due) });
       this.#drain();
     });
     this.#delayed.set(key, {
@@ -2825,6 +2874,19 @@ export class RoomActor {
         conn.cancel(timer);
       },
     });
+  }
+
+  /**
+   * A delayed snapshot's moment as its timer fires: its due time, or the
+   * newest moment the drain took or the newest tick a batch closed at when
+   * either is later, so it joins no closed batch and goes behind no command
+   * taken. A moment equal to a closed tick belongs to the next tick. Under a
+   * number clock of its own, a test's, it is the clocks as the timer fires.
+   */
+  #delayedMoment(due: number): Moment {
+    if (this.#numberClock !== this.#opts.now) return this.#clocks();
+    const at = Math.max(due, this.#lastTaken?.number ?? Number.NEGATIVE_INFINITY, this.#lastClosedTick);
+    return { now: at, number: at };
   }
 
   #resync(conn: Connection, reason: string): void {
@@ -2873,6 +2935,7 @@ export class RoomActor {
         takes: [],
         ids: [],
         timer: null,
+        due: false,
         answered: 0,
         state: before,
         seq: after?.seq ?? this.#committed.seq,
@@ -2883,27 +2946,58 @@ export class RoomActor {
     return this.#batch;
   }
 
-  /**
-   * The batch commits at the next multiple of `batchMs` on the number
-   * clock, whoever opened it and whatever joined it, or at once when it
-   * holds `maxBatchOps` answers since its steps last ran. A batch that could
-   * not close while another committed takes the next tick after that commit
-   * lands (#runCommit).
-   */
+  /** Arms the open batch's timer when it has none (#armTimer): every command that opens a batch or joins one ends here. */
   #scheduleCommit(): void {
     const batch = this.#batch;
-    if (!batch || this.#inFlight) return;
-    if (answeredSinceStep(batch) >= this.#opts.maxBatchOps) {
-      this.#commitNow();
-      return;
-    }
-    if (!batch.timer) {
-      const into = ((this.#numberClock() % this.#opts.batchMs) + this.#opts.batchMs) % this.#opts.batchMs;
-      batch.timer = setTimeout(() => {
-        batch.timer = null;
-        this.#commitNow();
-      }, this.#opts.batchMs - into);
-    }
+    if (batch && batch.timer === null && !batch.due) this.#armTimer(batch, false);
+  }
+
+  /**
+   * The batch's timer, for its tick on the number clock, whoever opened the
+   * batch and however many answers joined it. One that fires with the clock
+   * short of the tick, early or with the clock set back, waits once more, at
+   * most a tick, and then the batch is due whatever the clock reads, which
+   * is logged once a load. A test's clock that stood still since the timer
+   * was armed, as a standing number clock does, makes its batch due a tick
+   * after it opened. The server's own clock always takes the rule above. A
+   * due batch closes once no command of its tick waits (#closeIfDue).
+   */
+  #armTimer(batch: Batch, again: boolean): void {
+    const armedAt = this.#numberClock();
+    const wait = again ? Math.min(this.#opts.batchMs, batch.tick - armedAt) : Math.max(0, batch.tick - armedAt);
+    batch.timer = setTimeout(() => {
+      batch.timer = null;
+      if (this.#batch !== batch || this.#closed) return;
+      const clock = this.#numberClock();
+      const standing = clock === armedAt && !this.#serverClock;
+      if (clock < batch.tick && !standing) {
+        if (!again) {
+          this.#armTimer(batch, true);
+          return;
+        }
+        if (!this.#toldClockBehind) {
+          this.#toldClockBehind = true;
+          this.#log.warn({ roomId: this.roomId, behindMs: batch.tick - clock }, "clock behind the batch tick");
+        }
+      }
+      batch.due = true;
+      this.#closeIfDue();
+      this.#maybeIdle();
+    }, wait);
+  }
+
+  /**
+   * Closes the open batch once its timer has fired and no command of its
+   * tick waits in the queue or is being read: a drain that let the loop go,
+   * an ask read over several turns or a commit the queue waits on holds it
+   * open, and its tick's commands join it once they are handled.
+   */
+  #closeIfDue(): void {
+    const batch = this.#batch;
+    if (!batch?.due || this.#reading !== null) return;
+    const next = this.#queue[0];
+    if (next && this.#tickOf(next.moment ?? this.#clocks()) <= batch.tick) return;
+    this.#commitNow();
   }
 
   #commitNow(): void {
@@ -2912,6 +3006,7 @@ export class RoomActor {
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
+    this.#lastClosedTick = Math.max(this.#lastClosedTick, batch.tick);
     // The clock as the batch closes, never the tick it was due at, and read before the steps below, whose work a
     // number must not carry.
     const close = this.#numberClock();
@@ -3320,12 +3415,10 @@ export class RoomActor {
     // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.
     this.#armSoundTick();
     if (batch.ops.length > 0) this.#scheduleSnapshot();
-    // The queue waited for this commit and resumes now.
+    // The queue waited for this commit and resumes now. The drain's end closes a batch whose tick passed meanwhile.
     this.#inFlight = null;
     this.#inFlightDone = null;
     this.#drain();
-    // A batch begun while it committed, outside the queue, which nothing could schedule then: an ask read meanwhile (MD4-ASTRA-10).
-    this.#scheduleCommit();
   }
 
   /**

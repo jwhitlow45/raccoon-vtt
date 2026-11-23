@@ -389,7 +389,7 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
   const opts: SeqTwinOptions & { swept: boolean } = { music: chance(r, 0.5), stamp: chance(r, 0.5), familiar: chance(r, 0.7), swept: chance(r, 0.5) };
   const swept = tagOf(r);
   // No snapshot on the room's own schedule: I4 reads every row, which one would prune.
-  const options: Partial<ActorOptions> = { snapshotOps: 1_000_000, ...(seed % 5 === 0 ? { maxBatchOps: 3 } : {}) };
+  const options: Partial<ActorOptions> = { snapshotOps: 1_000_000 };
   const w = seqTwins(opts);
   for (const s of [w.door, w.rock]) s.traps = { dart: structuredClone(DART) };
   const pair = [new Twin(t, "door", w.door, options), new Twin(t, "rock", w.rock, options)] as const;
@@ -414,7 +414,7 @@ async function run(t: TestContext, seed: number, steps: number, counts: Counts):
   }
   let comparing = true;
   for (let i = 0; i < steps; i++) {
-    const where = `seed ${seed} (${JSON.stringify(opts)}${options.maxBatchOps ? ", cap 3" : ""}), step ${i}`;
+    const where = `seed ${seed} (${JSON.stringify(opts)}), step ${i}`;
     const step = randomStep(r, pair[0].actor.committed.state, opts);
     const kept = pair.map((twin) => twin.bookkeeping());
     const answers: string[][] = [];

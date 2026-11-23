@@ -100,6 +100,8 @@ describe("a walk that needs its batch's sight", () => {
     send(r.p1, { t: "token.move", tokenId: "a", x: 5, y: 4 });
     await flush();
     assert.ok(clock.now > arrived, "the steps ran before the walk");
+    // The clock passes the walk's tick before the batch's timer fires.
+    clock.now = Math.max(clock.now, Math.ceil((arrived + 1) / 20) * 20);
     t.mock.timers.tick(20);
     await flush();
     const moved = r.db.rows.slice(rows).find((row) => (row.op as { tokenId?: string }).tokenId === "a");

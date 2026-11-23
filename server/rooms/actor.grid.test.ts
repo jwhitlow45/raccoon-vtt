@@ -120,7 +120,7 @@ describe("batches close on the number clock's grid", () => {
     assert.deepEqual(snapshots(again.sent).map((m) => m.seq), [T0 + 60]);
   });
 
-  test("an op that comes after the tick its batch was due at, before the late timer fires, has a number at or below its frame's, which is the clock at the close", async (t) => {
+  test("an op that comes after the tick its batch was due at, before the late timer fires, joins the next tick's batch", async (t) => {
     const r = await gridRoom(t);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     r.clock.now = T0 + 5;
@@ -131,31 +131,36 @@ describe("batches close on the number clock's grid", () => {
     r.clock.now = T0 + 22;
     chat(r.p1, "late");
     await flush();
-    r.clock.now = T0 + 25;
-    t.mock.timers.tick(15);
+    const [first] = evs(r.p1.sent, from);
+    assert.ok(first, "the batch of the tick at 20 closed as the queue took a command of the next tick");
+    assert.deepEqual(first.acks, [r.p1.n - 1]);
+    assert.equal(first.seq, T0 + 22, "numbered by the clock as it closed");
+    moveTo(t, r.clock, T0 + 40);
     await flush();
-    const [ev] = evs(r.p1.sent, from);
-    assert.ok(ev);
-    assert.deepEqual(ev.acks, [r.p1.n - 1, r.p1.n]);
-    assert.equal(ev.seq, T0 + 25, "the frame carries the clock as the batch closed, not the tick it was due at");
+    const second = evs(r.p1.sent, from)[1];
+    assert.ok(second);
+    assert.deepEqual([second.seq, second.acks], [T0 + 40, [r.p1.n]], "the late op's batch closes at its own tick");
+    // One past the number the first frame was handed at the same millisecond.
     const late = r.actor.committed.state.log.find((line) => line.text === "late");
-    assert.equal(late?.id, `${T0 + 22}:0`);
-    assert.ok(Number(late.id.split(":")[0]) <= ev.seq);
+    assert.equal(late?.id, `${T0 + 23}:0`);
+    assert.ok(Number(late.id.split(":")[0]) <= second.seq);
   });
 
-  test("the cap closes a batch at once, off the grid, and its frame carries the highest number its answers took", async (t) => {
-    const r = await gridRoom(t, { options: { maxBatchOps: 3 } });
+  test("a batch closes at its tick however many answers it holds, and its frame carries the tick", async (t) => {
+    const r = await gridRoom(t);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     r.clock.now = T0 + 5;
     const from = r.p1.sent.length;
-    for (const text of ["a", "b", "c"]) chat(r.p1, text);
+    for (let i = 0; i < 55; i++) chat(r.p1, `c${i}`);
     await flush();
-    const [ev] = evs(r.p1.sent, from);
-    assert.ok(ev, "closed before any tick");
-    assert.deepEqual(ev.acks, [r.p1.n - 2, r.p1.n - 1, r.p1.n]);
-    // Three answers in one millisecond run ahead of it by one each.
-    assert.deepEqual(r.actor.committed.state.log.slice(-3).map((line) => line.id), [`${T0 + 5}:0`, `${T0 + 6}:0`, `${T0 + 7}:0`]);
-    assert.equal(ev.seq, T0 + 7);
+    assert.deepEqual(evs(r.p1.sent, from), [], "no count of answers closes it before its tick");
+    moveTo(t, r.clock, T0 + 20);
+    await flush();
+    const frames = evs(r.p1.sent, from);
+    assert.deepEqual(frames.map((m) => m.acks?.length), [55], "every answer in one frame");
+    // Answers in one millisecond run ahead of it by one each, past the tick here.
+    assert.deepEqual(r.actor.committed.state.log.slice(-2).map((line) => line.id), [`${T0 + 58}:0`, `${T0 + 59}:0`]);
+    assert.equal(frames[0]!.seq, T0 + 59);
   });
 });
 

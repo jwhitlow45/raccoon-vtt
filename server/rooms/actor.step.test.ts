@@ -49,10 +49,10 @@ describe("a deletion step behind a batch", () => {
     assert.equal(seen.seq, h.actor.committed.seq);
   });
 
-  test("a batch an ask's reading opens during the commit keeps it waiting for that batch too, and it runs once after", async (t) => {
+  test("a batch an ask's reading holds open keeps it waiting for that batch, and it runs once after", async (t) => {
     const f = scopeFixture();
     const db = new StoredRoomDb(f.state);
-    // Each op an ask reads takes longer than a turn of reading, so the ask reads across the commit below.
+    // Each op an ask reads takes longer than a turn of reading, so the ask reads across several turns.
     const slow: typeof memoryGrowth = (...args) => {
       const until = performance.now() + 10;
       while (performance.now() < until);
@@ -73,16 +73,16 @@ describe("a deletion step behind a batch", () => {
     const ran = h.actor.deletionStep(step.run);
     const ask = ++dm.n;
     void h.actor.op(dm.conn, ask, { t: "build.ask", sceneId, ops, part: 0 }, "g1");
-    // The chat's batch closes and holds at its COMMIT while the ask still reads, which then answers in a batch of its own.
-    await until(() => (commits > 0 && !h.actor.askState.reading ? true : undefined), "the ask read across the held commit");
+    // The chat, the step and the ask came in one tick, whose batch stays open while the ask reads, then holds at its COMMIT.
+    await until(() => (commits > 0 && !h.actor.askState.reading ? true : undefined), "the ask read, then its batch's commit held");
     assert.equal(step.runs.length, 0);
     release();
     assert.equal(await ran, 1);
     assert.equal(step.runs.length, 1, "it ran once");
     const answered = dm.sent.findIndex((m) => m.t === "ev" && (m as Ev).acks?.includes(ask));
     assert.ok(answered >= 0, "the ask was answered");
-    assert.equal(commits, 2, "the ask's batch committed too");
-    assert.equal(step.runs[0]!.seq, h.actor.committed.seq, "after the ask's batch, which stored nothing new");
+    assert.equal(commits, 1, "the ask's answer joined the batch of its tick");
+    assert.equal(step.runs[0]!.seq, h.actor.committed.seq, "after the ask's batch");
   });
 
   test("a shutdown while it waits refuses it once and runs nothing", async (t) => {
