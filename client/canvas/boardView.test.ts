@@ -5,7 +5,7 @@ import { areaLabelSpot, tokenBoxes } from "../features/areas/labelSpot.ts";
 import { pillReach } from "../features/measure/pillPlace.ts";
 import { LiveCamera } from "../state/liveCamera.ts";
 import { RoomScope } from "../state/scope.ts";
-import { boardPillsSlot, boardViewOf, boardViewsOf, pillsExcept, publishPillsEffect, REST_MS, restViewSlot, retractPillsEffect, watchRestView, type PillSpec } from "./boardView.ts";
+import { boardPillsSlot, boardViewOf, boardViewsOf, pillsExcept, publishPillsEffect, REST_MS, restViewSlot, RestViewWatch, retractPillsEffect, type PillSpec } from "./boardView.ts";
 
 test("an area's name keeps off every other layer's pill, never off another area's, so the two never chase each other", () => {
   const marker = { x: 2, y: 3, value: "Moved 20 ft\n10 ft left", size: "screen" as const, small: true, below: true };
@@ -168,7 +168,9 @@ test("the rest view is the clear view at once, then follows the camera only once
   try {
     const first = { x: 0, y: 100, scale: 20 };
     live.write(first);
-    const stop = watchRestView(live, store, size, insets);
+    const watch = new RestViewWatch(live, store);
+    watch.set(size, insets, "s1");
+    const stop = () => watch.stop();
     assert.deepEqual(store.getState().rest, clear(first), "at once");
     // A pan's frames, each under REST_MS after the last.
     for (let i = 1; i <= 5; i++) {
@@ -217,7 +219,9 @@ test("random runs of pans, pinches, drawn notices and waits: the rest view chang
         if (started) changes.push({ quiet: Date.now() - lastMove >= REST_MS, same: b !== null && st.rest !== null && JSON.stringify(b) === JSON.stringify(st.rest) });
         before = st.rest;
       });
-      const stop = watchRestView(live, store, size, insets);
+      const watch = new RestViewWatch(live, store);
+    watch.set(size, insets, "s1");
+    const stop = () => watch.stop();
       started = true;
       assert.deepEqual(store.getState().rest, clear(cam), `run ${runNo}: at once`);
       for (let step = 0; step < 40; step++) {
@@ -246,5 +250,42 @@ test("random runs of pans, pinches, drawn notices and waits: the rest view chang
     } finally {
       mock.timers.reset();
     }
+  }
+});
+
+test("the rest view settles at once on a camera jump that is no gesture, and when the scene, the canvas or the bars change, and not when nothing did (D-261122-220)", () => {
+  const { size, insets, live, store, clear } = restRoom();
+  try {
+    const first = { x: 0, y: 100, scale: 20 };
+    live.write(first);
+    const watch = new RestViewWatch(live, store);
+    watch.set(size, insets, "s1");
+    // Fit map or a token brought into view: the board writes the camera and settles.
+    const fit = { x: -300, y: 40, scale: 8 };
+    live.write(fit);
+    watch.settle();
+    assert.deepEqual(store.getState().rest, clear(fit), "a jump");
+    // Mid-pan, the same scene, canvas and bars: nothing.
+    const panned = { ...fit, x: -250 };
+    live.write(panned);
+    watch.set(size, insets, "s1");
+    assert.deepEqual(store.getState().rest, clear(fit), "the same scene");
+    // Another scene shows, its camera already written: at once.
+    watch.set(size, insets, "s2");
+    assert.deepEqual(store.getState().rest, clear(panned), "a scene switch");
+    const more = { ...fit, x: -200 };
+    live.write(more);
+    watch.set(size, { ...insets, bottom: 200 }, "s2");
+    assert.deepEqual(store.getState().rest, boardViewOf(more, size, { ...insets, bottom: 200 }), "the bars");
+    live.write({ ...more, x: -150 });
+    watch.set({ width: 400, height: 844 }, { ...insets, bottom: 200 }, "s2");
+    assert.deepEqual(store.getState().rest, boardViewOf({ ...more, x: -150 }, { width: 400, height: 844 }, { ...insets, bottom: 200 }), "the canvas");
+    // After a restart the pan's rest still follows.
+    live.write({ ...more, x: -100 });
+    mock.timers.tick(REST_MS);
+    assert.deepEqual(store.getState().rest, boardViewOf({ ...more, x: -100 }, { width: 400, height: 844 }, { ...insets, bottom: 200 }), "at rest");
+    watch.stop();
+  } finally {
+    mock.timers.reset();
   }
 });

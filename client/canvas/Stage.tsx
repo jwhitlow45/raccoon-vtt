@@ -345,12 +345,15 @@ export function MapStage(props: {
     }),
     [liveCam],
   );
+  // The board's clear part once the camera rests, for the holes' pills to judge their slide from without laying out on every pan frame (boardView.ts restViewSlot). A camera set here is no gesture's frame (those go through scheduleCam), so it settles at once.
+  const settleRestView = useWriteRestView(size, insets, scene.id);
   const setCam = useCallback(
     (c: Camera) => {
       liveCam.write(c);
+      settleRestView();
       setCamState(c);
     },
-    [liveCam],
+    [liveCam, settleRestView],
   );
   // The camera the last render took, so a gesture's end sets state once if the applier moved the stages since.
   const renderedCamRef = useRef(cam);
@@ -1827,8 +1830,6 @@ export function MapStage(props: {
   const layerProps: LayerProps = { scene, role, scale: cam?.scale ?? 1, fog, labelBoxes };
   // The scene on screen and the part of it the bars leave clear, in cells (boardView.ts): readouts slide into the clear part, and drawing culls by the whole.
   const boardView = useMemo(() => (cam && size ? boardViewsOf(cam, size, { top, right, bottom, left }) : null), [cam, size, top, right, bottom, left]);
-  // The same clear part once the camera rests, for the holes' pills to judge their slide from without laying out on every pan frame (boardView.ts restViewSlot).
-  useWriteRestView(size, insets);
   const overlay = fog || OVERLAY_LAYERS.length > 0 || UNDER_DECOR_LAYERS.length > 0;
 
   // What the isometric board reads beside what Top-down's tree does (relief/IsoBoard.tsx).

@@ -58,41 +58,71 @@ function sameBox(a: Box | null, b: Box): boolean {
 }
 
 /**
- * Keeps `store` on the clear view of `live`'s camera: at once when it
- * starts, since the size or the bars changed or nothing is held yet, then
- * REST_MS after each camera move with no later one. Returns the stop.
+ * Keeps `store` on the clear view of `live`'s camera. It settles at once
+ * when it starts, when the canvas, the bars or the scene change, and on
+ * `settle`, which the board calls for a camera jump that is no gesture
+ * (Fit map, a token brought into view), so a new scene's or a jump's pills
+ * never lay out against the old view and then move (D-261122-220).
+ * Otherwise it follows REST_MS after a camera move with no later one, so a
+ * pan or a pinch writes nothing until it stops.
  */
-export function watchRestView(live: LiveCamera, store: RestStore, size: Size, insets: Insets): () => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const settle = () => {
-    timer = undefined;
-    const c = live.camera;
-    if (!c) return;
-    const view = boardViewOf(c, size, insets);
-    if (!sameBox(store.getState().rest, view)) store.setState({ rest: view });
+export class RestViewWatch {
+  readonly #live: LiveCamera;
+  readonly #store: RestStore;
+  #at: { size: Size; insets: Insets; key: string } | null = null;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #unsubscribe: (() => void) | null = null;
+
+  constructor(live: LiveCamera, store: RestStore) {
+    this.#live = live;
+    this.#store = store;
+  }
+
+  /** Watches for this canvas, these bars and this scene, starting again at once where any of them changed. */
+  set(size: Size, insets: Insets, sceneId: string): void {
+    const key = `${size.width},${size.height},${insets.top},${insets.right},${insets.bottom},${insets.left},${sceneId}`;
+    if (this.#at?.key === key) return;
+    this.stop();
+    this.#at = { size, insets, key };
+    this.settle();
+    this.#unsubscribe = onCameraMove(this.#live, () => {
+      clearTimeout(this.#timer);
+      this.#timer = setTimeout(this.settle, REST_MS);
+    });
+  }
+
+  /** The clear view of the camera now, written where it differs from the one held. */
+  readonly settle = (): void => {
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+    const c = this.#live.camera;
+    if (!c || !this.#at) return;
+    const view = boardViewOf(c, this.#at.size, this.#at.insets);
+    if (!sameBox(this.#store.getState().rest, view)) this.#store.setState({ rest: view });
   };
-  settle();
-  const stop = onCameraMove(live, () => {
-    clearTimeout(timer);
-    timer = setTimeout(settle, REST_MS);
-  });
-  return () => {
-    stop();
-    clearTimeout(timer);
-  };
+
+  stop(): void {
+    this.#unsubscribe?.();
+    this.#unsubscribe = null;
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+    this.#at = null;
+  }
 }
 
-/** The board's writer of the rest view (canvas/Stage.tsx), from the canvas's size and the bars over it. */
-export function useWriteRestView(size: Size | null, insets: Insets): void {
+/** The board's writer of the rest view (canvas/Stage.tsx), from the canvas's size, the bars over it and the scene shown. Returns the settle a camera jump calls. */
+export function useWriteRestView(size: Size | null, insets: Insets, sceneId: string): () => void {
   const live = useScoped(liveCameraSlot);
   const store = useScoped(restViewSlot);
+  const watch = useMemo(() => new RestViewWatch(live, store), [live, store]);
   const { top, right, bottom, left } = insets;
   const width = size?.width;
   const height = size?.height;
   useLayoutEffect(() => {
-    if (width === undefined || height === undefined) return;
-    return watchRestView(live, store, { width, height }, { top, right, bottom, left });
-  }, [live, store, width, height, top, right, bottom, left]);
+    if (width !== undefined && height !== undefined) watch.set({ width, height }, { top, right, bottom, left }, sceneId);
+  }, [watch, width, height, top, right, bottom, left, sceneId]);
+  useLayoutEffect(() => () => watch.stop(), [watch]);
+  return watch.settle;
 }
 
 const NO_SUBSCRIBE = () => () => {};
