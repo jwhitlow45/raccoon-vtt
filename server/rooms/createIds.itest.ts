@@ -132,7 +132,7 @@ describe("the id record through the room", () => {
     assert.deepEqual(await ask(r.anaId, [landed, lost]), { t: "ids", k: 7, held: [landed], notHeld: [lost], pending: [] }, "final once it is gone");
   });
 
-  test("while a batch holds an op of the member, every id answers pending, and once it commits the id is held", async () => {
+  test("an ask in the batch that holds an op of the member is answered once that batch commits, the id held", async () => {
     const r = await room("Ids staged");
     const actor = t.manager.get(r.roomId)!;
     const sent: ServerMessage[] = [];
@@ -142,14 +142,15 @@ describe("the id record through the room", () => {
     await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
     for (let i = 0; i < 400 && !sent.some((m) => m.t === "snapshot"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
     const id = uuidv7();
-    // The op and the ask share the queue's turn, so the ask finds the op's batch staged and not yet committed.
+    // The op and the ask share the queue's turn, so the ask joins the op's batch and is read as it commits.
     void actor.op(conn, 1, line(id, r.sceneId, r.anaId));
     actor.ids(conn, { k: 1, ids: [id] });
     const reply = async (k: number) => {
       for (let i = 0; i < 400 && !sent.some((m) => m.t === "ids" && m.k === k); i++) await new Promise((resolve) => setTimeout(resolve, 5));
       return sent.find((m) => m.t === "ids" && m.k === k);
     };
-    assert.deepEqual(await reply(1), { t: "ids", k: 1, held: [], notHeld: [], pending: [id] });
+    assert.deepEqual(await reply(1), { t: "ids", k: 1, held: [id], notHeld: [], pending: [] });
+    assert.ok(sent.findIndex((m) => m.t === "ev" && (m.acks ?? []).includes(1)) < sent.findIndex((m) => m.t === "ids" && m.k === 1), "after the op's own frame");
     for (let i = 0; i < 400 && !sent.some((m) => m.t === "ev" && (m.acks ?? []).includes(1)); i++) await new Promise((resolve) => setTimeout(resolve, 5));
     actor.ids(conn, { k: 2, ids: [id] });
     assert.deepEqual(await reply(2), { t: "ids", k: 2, held: [id], notHeld: [], pending: [] });

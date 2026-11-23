@@ -194,7 +194,8 @@ describe("several floors on the server (docs/design/design-v1-floors.md 9)", () 
     await ok(r.dmSocket, { t: "floor.open", sceneId: upper, open: true } as Op);
     // Shown to players, Shade's sight is the party's, so the move below shows them new ground.
     await ok(r.dmSocket, { t: "token.update", tokenId: shade, patch: { visibility: "all" } } as Op);
-    assert.deepEqual(await together(4, 7), ["shade", "explore", "walk"], "once Upper is shown, the ground Shade's move shows is explored before the walk");
+    // The gargoyle walks where players do not see it, so it runs no steps of its own: the close explores what Shade's move shows.
+    assert.deepEqual(await together(4, 7), ["shade", "walk", "explore"], "once Upper is shown, the ground Shade's move shows is explored with the batch");
   });
 
   test("on a floor of the players' scene beside the start floor, what a party member walks back into sight of is live again, in a batch that only moved them", async () => {

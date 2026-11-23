@@ -11,6 +11,7 @@ import { character, companionBlock, customMonster, token } from "#shared/testuti
 import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
 import { failCommits, numberOf, Socket, startEngine, type Engine } from "./testing.ts";
+import { MAX_PENDING_BATCHES } from "./actor.ts";
 
 /**
  * The WebSocket flows of design section 18, against the real server on an
@@ -464,18 +465,24 @@ describe("websocket: commit failures", () => {
     }
   });
 
-  test("the queue cap answers busy while a commit is retrying", async () => {
+  test("the queue cap answers busy once the batches closed behind a retrying commit hold the queue", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Cap");
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
-    const flaky = failCommits(t.pool, ["before", "before", "before"]);
+    const flaky = failCommits(t.pool, Array.from({ length: 10 }, () => "before" as const));
     try {
       const first = s.op({ t: "log.chat", text: "a" });
-      await new Promise((r) => setTimeout(r, 40));
+      // A chat a tick: each tick's batch closes behind the retrying commit, until MAX_PENDING_BATCHES wait and the queue holds.
+      const ticks: number[] = [];
+      for (let i = 0; i < MAX_PENDING_BATCHES + 10; i++) {
+        ticks.push(s.op({ t: "log.chat", text: `tick ${i}` }));
+        await new Promise((r) => setTimeout(r, 25));
+      }
       const ns = [1, 2, 3, 4, 5].map(() => s.op({ t: "log.chat", text: "queued" }));
       const busy = await s.next("retry", (m) => m.code === "busy");
-      assert.ok(ns.includes(busy.n ?? -1));
+      // The first busy goes to an op past the queue cap, once the waiting batches hold the queue.
+      assert.ok([...ticks.slice(MAX_PENDING_BATCHES - 1), ...ns].includes(busy.n ?? -1), `busy for ${busy.n}`);
       await s.next("ev", (m) => m.acks?.includes(first) ?? false);
     } finally {
       flaky.restore();

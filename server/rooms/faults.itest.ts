@@ -217,7 +217,7 @@ describe("a fault in the room engine", () => {
   });
   after(() => t.close());
 
-  test("an op that throws after waiting behind a commit is refused with its socket open, and the ops queued after it apply", async () => {
+  test("an op that throws while an earlier batch's commit retries is refused with its socket open, and the ops after it apply", async () => {
     const r = await room(t, "Behind a commit");
     const other = await room(t, "Elsewhere");
     const actor = t.manager.get(r.roomId)!;
@@ -231,7 +231,8 @@ describe("a fault in the room engine", () => {
       faults.draw = true;
       rolled = r.player.op(roll());
       later = r.dm.op({ t: "log.chat", text: "later" });
-      await until(() => actor.queueLength === 2, "both ops to wait behind the commit");
+      // The queue does not wait for the commit: both are handled while it retries.
+      await until(() => actor.queueLength === 0 && actor.retrying, "both ops handled while the commit retries");
     } finally {
       failing.restore();
     }
@@ -323,7 +324,7 @@ describe("a fault in the room engine", () => {
     await contained(other);
   });
 
-  test("a server command that throws after waiting behind a commit is refused, and the ops queued after it apply", async () => {
+  test("a server command that throws while an earlier batch's commit retries is refused, and the ops after it apply", async () => {
     const r = await room(t, "A server command");
     const other = await room(t, "Elsewhere");
     const actor = t.manager.get(r.roomId)!;
@@ -342,7 +343,7 @@ describe("a fault in the room engine", () => {
       refused = actor.sys(op);
       refused.catch(() => undefined);
       later = r.player.op({ t: "log.chat", text: "later" });
-      await until(() => actor.queueLength === 2, "both to wait behind the commit");
+      await until(() => actor.queueLength === 0 && actor.retrying, "both handled while the commit retries");
     } finally {
       failing.restore();
     }
