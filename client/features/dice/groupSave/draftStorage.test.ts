@@ -101,3 +101,10 @@ test("blocked, full, and unavailable storage report failure and leave the memory
     assert.deepEqual(draft, memory);
   }, options);
 });
+
+test("a trap's page that takes the DM's selection keeps its picks and its springing through a reload", () => withStorage(() => {
+  const draft = fresh();
+  draft.page.source = { kind: "trap", trapId: "pit", due: "20:0", tokenIds: ["g00", "g01"], live: true };
+  assert.equal(writeSaveDraft("room", draft), true);
+  assert.deepEqual(readSaveDraft("room")?.page.source, draft.page.source);
+}));

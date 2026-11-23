@@ -37,7 +37,10 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
  * trap's springing (docs/design/design-v1-traps.md 4.4), whose rows are the
  * creatures it hits, frozen when it went off, and which Apply settles, or
  * a fall card (docs/design/design-v1-floors.md phase 4, 4.4), whose one row
- * is the creature that fell, and which Apply removes.
+ * is the creature that fell, and which Apply removes. A trap's springing
+ * that counts the creatures it hits and names none (`live`), as one past
+ * its list's bound, takes the room's selection as a live selection does,
+ * and Apply still settles it.
  * `tokenIds` of a live source are its last picks (followSelection), kept in
  * the draft, so a reload, which selects nothing, shows the same rows.
  * An area's `floors` are its own and those an opening joins to it, read as
@@ -46,7 +49,7 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
 export type Source =
   | { kind: "selection"; tokenIds: string[]; live?: true; except?: string }
   | { kind: "area"; templateId: string; floors?: string[] }
-  | { kind: "trap"; trapId: string; due: string; tokenIds: string[] }
+  | { kind: "trap"; trapId: string; due: string; tokenIds: string[]; live?: true }
   | { kind: "fall"; fallId: string; tokenIds: string[] };
 
 /** The name players read in what the page sends them (Fill.publicName). */
@@ -62,15 +65,15 @@ function rollName(page: Pick<Page, "fill" | "secret">): string {
 /** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature, or its last picks while nothing is selected. */
 export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
   if (source.kind === "area") return area ? area(source.templateId) : [];
-  if (source.kind === "trap" || source.kind === "fall") return source.tokenIds;
+  if (source.kind === "fall") return source.tokenIds;
   if (!source.live || selected.length === 0) return source.tokenIds;
-  return selected.filter((id) => id !== source.except);
+  return source.kind === "trap" ? [...selected] : selected.filter((id) => id !== source.except);
 }
 
 /** A live page in setup keeps its picks as the selection changes, so the draft holds them (W7B-R2-1). The same page when nothing changed. */
 export function followSelection(page: Page, selected: readonly string[]): Page {
   const source = page.source;
-  if (page.phase !== "setup" || source.kind !== "selection" || !source.live || selected.length === 0) return page;
+  if (page.phase !== "setup" || (source.kind !== "selection" && source.kind !== "trap") || !source.live || selected.length === 0) return page;
   const ids = sourceIds(source, selected);
   if (ids.length === source.tokenIds.length && ids.every((id, i) => id === source.tokenIds[i])) return page;
   return { ...page, source: { ...source, tokenIds: ids } };

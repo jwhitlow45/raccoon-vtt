@@ -39,6 +39,9 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
     assert.deepEqual(whoLines(s, due("1:0"), new Map()), { by: "Thorn set it off.", hits: "It hits Thorn." });
     assert.deepEqual(whoLines(s, s.traps.net!.rig!.due![0]!, new Map()), { by: "You set it off for Thorn, Bree and 2 more.", hits: "It hits no one." });
     assert.equal(hiddenLine(s, due("1:0", { by: ["imp"] }), new Map()), "Imp set it off, out of the players' sight. The trap is still armed for them.");
+    // One that counts its creatures and names none, as one past its lists' bounds.
+    assert.deepEqual(whoLines(s, due("2:0", { by: [], more: 11, hits: [], hitsMore: 51 }), new Map()), { by: "11 creatures set it off.", hits: "It hits 51 creatures." });
+    assert.equal(hiddenLine(s, due("2:0", { by: [], more: 1 }), new Map()), "1 creature set it off, out of the players' sight. The trap is still armed for them.");
     assert.deepEqual(didLines(s.traps.pit!, [{ action: 0, ok: true }, { action: 1, ok: false }, { action: -1, ok: false }], s, new Map()), ["Showed Imp.", "Could not put out a light: it was deleted.", "Could not open the pit: the scene is at its wall limit."]);
     const shrunk = { ...s, scenes: { ...s.scenes, s1: { ...s.scenes.s1!, bounds: { w: 2, h: 2 } } } };
     const wide = { ...s.traps.pit!, zone: { cells: [{ x: 1, y: 1, w: 2, h: 2 }] } };

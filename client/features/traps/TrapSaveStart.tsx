@@ -4,9 +4,13 @@ import { trapFill } from "../dice/groupSave/fills.ts";
 import { ReplaceConfirm } from "../dice/groupSave/ReplaceConfirm.tsx";
 import { useStartGroupSave, type StartInput } from "../dice/groupSave/start.ts";
 
-/** The group save a springing starts (docs/design/design-v1-traps.md 4.4): its rows the creatures it hits, frozen when it went off, and Apply settles it. */
+/**
+ * The group save a springing starts (docs/design/design-v1-traps.md 4.4): its rows the creatures it hits, frozen when it
+ * went off, and Apply settles it. One that counts the creatures it hits and names none takes the DM's selection.
+ */
 export function trapStart(trap: Trap, due: TrapDue): StartInput {
-  return { source: { kind: "trap", trapId: trap.id, due: due.id, tokenIds: [...due.hits] }, ...trapFill(trap), panel: "dice" };
+  const picks = due.hits.length === 0 && (due.hitsMore ?? 0) > 0;
+  return { source: { kind: "trap", trapId: trap.id, due: due.id, tokenIds: [...due.hits], ...(picks ? { live: true as const } : {}) }, ...trapFill(trap), panel: "dice" };
 }
 
 /**

@@ -98,7 +98,7 @@ const source = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("selection"), tokenIds: z.array(id).max(HARD.groupSaveTokens), live: z.literal(true).optional(), except: id.optional() }),
   // An area's page holds the floors an opening joins to its own (docs/design/design-v1-floors.md phase 4, 9.2).
   z.strictObject({ kind: z.literal("area"), templateId: id, floors: z.array(z.string().max(64)).min(2).max(LIMITS.floorsPerScene).optional() }),
-  z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens) }),
+  z.strictObject({ kind: z.literal("trap"), trapId: id, due: id, tokenIds: z.array(id).max(HARD.groupSaveTokens), live: z.literal(true).optional() }),
   // A fall card's page holds the creature that fell and the riders that fell with it (docs/design/design-v1-floors.md
   // phase 4, 4.4, D-261120-007), as the card names them. A character's other tokens it settles are among those, so
   // the bound is the card's own, the same the outcome op checks its settled creatures by.

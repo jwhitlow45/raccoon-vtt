@@ -1,3 +1,4 @@
+import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Trap } from "#shared/model.ts";
@@ -7,10 +8,12 @@ import { SETTLED_MEANWHILE } from "#shared/reducer/traps.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { actor, character, customMonster, DM, env, room, token, trap as trapOf } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { apply, mark, newPage, roll, sourceIds, type Page } from "./chain.ts";
+import { apply, followSelection, mark, newPage, roll, sourceIds, type Page } from "./chain.ts";
 import { trapFill, UNFOUND_TRAP } from "./fills.ts";
 import { buildPlan } from "./plan.ts";
 import { groupRows, type RowBase } from "./rows.ts";
+
+const { trapStart } = await import("../../traps/TrapSaveStart.tsx");
 
 /** The group save from a trap (docs/design/design-v1-traps.md 4.4). */
 
@@ -119,5 +122,42 @@ describe("a trap's group save", () => {
     assert.deepEqual(apply(asked, plan).send.map((c) => (c.kind === "op" ? c.op.t : c.kind)), ["roll.close", "outcome"]);
     const area: Page = { ...rolled, source: { kind: "area", templateId: "a1" } };
     assert.equal(buildPlan(area, dice, null, { plan: "0192f0a8-6c1e-7a4b-9c3d-000000000010", newId: () => "x" }), null, "any other page that changes nothing has no plan");
+  });
+
+  test("a springing that counts the creatures it hits and names none takes the DM's selection, and Apply settles it with them", () => {
+    // As the first load on this build leaves an occurrence of 51 creatures cut at its list's bound (server/rooms/reid.ts withoutCutLists).
+    const ids = Array.from({ length: 51 }, (_, i) => `g${String(i).padStart(2, "0")}`);
+    const t = trapOf("pit", { name: "Spike Pit", rig: { ...presetTrap("hidden-pit").rig!, hits: "zone", due: [{ id: "20:0", at: "", how: "hand", by: [], hits: [], hitsMore: 51, acted: true }] } });
+    const state = world(t);
+    for (const [i, id] of ids.entries()) state.tokens[id] = token(id, { kind: "monster", name: "Goblin", x: i % 10, y: Math.floor(i / 10), actor: { inline: actor({ monsterId: "lurker", hp: { cur: 30, max: 30, temp: 0 } }) } });
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: state, srd: { monsters: [], rolls: {} } };
+    const start = trapStart(t, t.rig!.due![0]!);
+    assert.deepEqual(start.source, { kind: "trap", trapId: "pit", due: "20:0", tokenIds: [], live: true });
+    const filled = trapFill(t);
+    let page = newPage({ id: "p", sceneId: "s1", source: start.source, test: filled.test, dc: filled.dc, secret: true, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: filled.outcome });
+    assert.deepEqual(sourceIds(page.source, []), [], "no row until the DM selects");
+    page = followSelection(page, ids);
+    assert.deepEqual(sourceIds(page.source, ids), ids, "the selection's creatures");
+    assert.deepEqual(sourceIds(page.source, []), ids, "and kept as the page's picks once nothing is selected, as after a reload");
+    const rows = groupRows(dice, sourceIds(page.source, []), filled.test, false, new Map());
+    assert.equal(rows.length, 51);
+    let rolled: Page = { ...page, phase: "rolled", rows };
+    for (const r of rows) rolled = mark(rolled, r.holder, "fail");
+    const plan = buildPlan(rolled, dice, [{ amount: 4 }], { plan: "0192f0a8-6c1e-7a4b-9c3d-000000000011", newId: () => "0192f0a8-6c1e-7a4b-9c3d-000000000012" })!;
+    assert.deepEqual(plan.trap, { trapId: "pit", due: "20:0" });
+    assert.equal(plan.targets.length, 51);
+    const applied = applyOp(state, plan, DM, env(30));
+    assert.ok(applied.ok, applied.ok ? "" : applied.message);
+    assert.equal(applied.state.traps.pit!.rig!.due, undefined, "the occurrence is settled");
+    assert.ok(ids.every((id) => { const a = applied.state.tokens[id]!.actor; return "inline" in a && a.inline.hp.cur === 26; }), "every picked creature takes the damage");
+  });
+
+  test("a springing that names the creatures it hits keeps them whatever is selected, and one that hits no one takes no selection", () => {
+    const named = presetTrap("hidden-pit");
+    const fixed = trapStart(named, named.rig!.due![0]!).source;
+    assert.deepEqual(fixed, { kind: "trap", trapId: named.id, due: "20:0", tokenIds: ["thorn", "gob"] });
+    assert.deepEqual(sourceIds(fixed, ["c"]), ["thorn", "gob"]);
+    const none = trapStart(named, { id: "21:0", at: "", how: "hand", by: [], hits: [] }).source;
+    assert.deepEqual(sourceIds(none, ["c"]), [], "it hits no one");
   });
 });

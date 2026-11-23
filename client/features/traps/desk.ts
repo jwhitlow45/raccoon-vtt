@@ -32,8 +32,9 @@ function nameOf(names: Names, id: string, labels: Labels): string {
   return token ? displayName(token, labels) : "a creature";
 }
 
-/** "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more". */
+/** "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more", and "51 creatures" where it names none. */
 export function nameList(names: Names, ids: readonly string[], labels: Labels, more = 0): string {
+  if (ids.length === 0 && more > 0) return more === 1 ? "1 creature" : `${more} creatures`;
   const parts = ids.map((id) => nameOf(names, id, labels));
   if (more > 0) parts.push(`${more} more`);
   if (parts.length <= 1) return parts[0] ?? "";
