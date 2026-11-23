@@ -1627,9 +1627,8 @@ const ARMED_MS = 4000;
  * In a slot it draws at the width of its armed words, so the first tap
  * never moves what stands beside it (6.2), and a row in a pop-up does the
  * same so the pop-up takes the armed width and the question reads whole.
- * `short` is its compact form's
- * armed words ("Delete?"), and its second press closes the popover it
- * stands in (7.2).
+ * `short` is its compact form's armed words ("Delete?"), and its second
+ * press closes the popover it stands in (7.2).
  *
  * A mouse reads "Click" for the "Tap" in `confirm` and `short`. `worded` says
  * the caller did that with pointerWords(template, names) because the words
