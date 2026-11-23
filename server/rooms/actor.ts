@@ -9,10 +9,10 @@ import { NUMBERING_SNAPSHOT_VERSION, OP_VERSION, PLAYER_LIMITS_SNAPSHOT_VERSION,
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { FallRecord, HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
-import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
+import { carriedGroup, holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, stableStringify, visibleAssetIds } from "#shared/project.ts";
+import { eventReach, gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, seenByNonOwners, stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, MAX_REFUSED_IDS, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
@@ -72,7 +72,7 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { meetOps } from "./meet.ts";
-import { growthBound, layerCap, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, shedOf, SizeGuard, storedBytes, touchedScenes, widestPerPlayerReserve, type FarJudge } from "./sizeGuard.ts";
+import { growthBound, layerCap, measuredFromStored, memoryReserves, scenesOverByNumbering, shareOp, shedOf, SizeGuard, storedBytes, touchedScenes, widestPerPlayerReserve, type FarJudge, type GuardMark } from "./sizeGuard.ts";
 import { climbOf, fallsKept, fallsRestored, keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, withoutFallCards, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf, wingLabel } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -444,7 +444,27 @@ type Batch = {
 };
 
 /** `number` is the one the op's envelope took (#reduce). */
-type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; walksDropped?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string; ids?: readonly string[] };
+type Reduced = { ok: true; number: number; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string>; walksDropped?: ReadonlySet<string>; falls?: FallRecord[] } | { ok: false; code: RefusalCode; message: string; ids?: readonly string[]; unseen?: true };
+
+/** A walk's prepared result, which #reduce shows its judgment before the install. */
+type Prepared = { state: RoomState; touched: readonly EntityKey[]; log: readonly LogEntry[] };
+
+/** Whether a walk run after its steps changed what a player who owns nothing sees (#walkShows). */
+type WalkJudge = (before: RoomState, result: Prepared) => boolean;
+
+/** #reduce's answer for a walk its judgment found changing nothing a player sees: nothing was installed. */
+const UNSEEN: Reduced = { ok: false, code: "invalid", message: "", unseen: true };
+
+/** A viewer no member is, who owns nothing: what every player sees. */
+const NOBODY: Viewer = { memberId: "", role: "player" };
+
+/**
+ * Everything the steps before a walk change (#stepInPlace), taken before
+ * they run, so a walk refused or changing nothing a player sees puts them
+ * back: the staged room, the batch's lengths, its global flag, step cursor
+ * and memory estimate, and the size guard's own fields.
+ */
+type StepsMark = { batch: Batch; staged: { state: RoomState; seq: number }; ops: number; touched: number; doors: number; global: boolean; step: StepCursor; estimate: Map<string, number>; guard: GuardMark };
 
 /** What step 5 of the id gate reads a live op with (newIdPaths.ts): the op as sent, whether its socket holds a key, and what that socket holds. */
 type FreshIds = { clientOp: Op; keyed: boolean; held: ReadonlyMap<EntityKey, unknown> | null };
@@ -600,6 +620,10 @@ export class RoomActor {
   readonly #serverClock: boolean;
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
+  /** The steps before the walk being handled, until it installs (#markSteps): put back if it is refused or throws first. */
+  #walkMark: StepsMark | null = null;
+  /** Whether this load has logged a walk reduced again without its steps that still changed what players see. */
+  #toldWalkMoved = false;
   /** Deletion steps waiting for the open batch to commit (#runStep), in the order they came. */
   #parked: StepCommand[] = [];
   /**
@@ -1593,7 +1617,12 @@ export class RoomActor {
   #handle(cmd: Command): void {
     switch (cmd.t) {
       case "op":
-        return this.#processOp(cmd, this.#settleFacts(cmd.lookup, cmd.facts));
+        try {
+          return this.#processOp(cmd, this.#settleFacts(cmd.lookup, cmd.facts));
+        } finally {
+          // Steps a walk never installed after go, before a throw's refusal settles anything (#commandFailed).
+          this.#restoreSteps();
+        }
       case "hello":
         return this.#processHello(cmd);
       case "snapshot":
@@ -1664,36 +1693,78 @@ export class RoomActor {
   }
 
   /**
-   * Whether a move needs the batch's explore and map steps run first: one
-   * that walks a token on a floor where traps go off (traps.ts trapsLiveOn,
-   * a floor players see now, docs/design/design-v1-floors.md 7.7), with fog
-   * and party vision on there, while the batch holds an answer since its
-   * steps last ran, taken or refused. Its stop reads the party's sight as
-   * the room has it before the move (traps.ts stopGround), so that sight
-   * must be explored and remembered as a commit would leave it. A prep
-   * scene, a blackout and a scene with fog alone need nothing. Every such
-   * walk needs them, with or without a trap armed on its way, since whether
-   * a trap is armed there is not every player's to know. `raw` is the op as
-   * the client sent it, read only for its kind and token ids before it is
-   * parsed.
+   * Whether a walk needs the batch's explore and map steps run first: a
+   * move on a floor where traps go off (traps.ts trapsLiveOn, a floor
+   * players see now, docs/design/design-v1-floors.md 7.7), with fog and
+   * party vision on there, while the batch holds an answer since its steps
+   * last ran, taken or refused, and only where a public member of the walk
+   * leaves where it stands: a token it names, or one that token carries or
+   * drags, that players who own nothing see, whose target or any point of
+   * whose route is off its spot. Its stop reads the party's sight as the
+   * room has it before the move (traps.ts stopGround), so that sight must be
+   * explored and remembered as a commit would leave it. A trap stops only
+   * walkers, each a public member of its group (traps.ts), so a walk with no
+   * public member that moves reads no stop ground. Every such walk needs
+   * them, with or without a trap armed on its way, since whether a trap is
+   * armed there is not every player's to know. `op` is the walk as parsed.
    */
-  #walkNeedsSteps(raw: unknown): boolean {
+  #walkNeedsSteps(op: Op): boolean {
     const batch = this.#batch;
-    if (!batch) return false;
     // A batch with no answer since its steps holds at most the music's tick or a cleanup's remember, neither of which
     // moves the fog, the explored ground or the sight a stop reads, and a mid-batch explore only ever follows an answer.
-    if (answeredSinceStep(batch) === 0) return false;
+    if (!batch || answeredSinceStep(batch) === 0) return false;
+    if (op.t !== "token.move" && op.t !== "token.moveMany") return false;
     const state = this.#staged.state;
-    if (raw === null || typeof raw !== "object") return false;
-    const op = raw as { t?: unknown; tokenId?: unknown; moves?: unknown };
-    const on = (id: unknown) => {
-      const sceneId = typeof id === "string" ? state.tokens[id]?.sceneId : undefined;
-      const scene = sceneId === undefined ? undefined : state.scenes[sceneId];
-      return scene !== undefined && scene.fogEnabled && scene.vision?.on === true && trapsLiveOn(state, scene.id);
-    };
-    if (op.t === "token.move") return on(op.tokenId);
-    if (op.t === "token.moveMany" && Array.isArray(op.moves)) return op.moves.some((m: unknown) => m !== null && typeof m === "object" && on((m as { tokenId?: unknown }).tokenId));
-    return false;
+    const moves: ReadonlyArray<{ tokenId: string; x: number; y: number; elevation?: number | undefined; route?: ReadonlyArray<readonly [number, number, number, number]> | undefined }> = op.t === "token.move" ? [op] : op.moves;
+    const named = new Set(moves.map((m) => m.tokenId));
+    return moves.some((m) => {
+      const token = ownEntry(state.tokens, m.tokenId);
+      const scene = token === undefined ? undefined : state.scenes[token.sceneId];
+      if (!token || !scene || !scene.fogEnabled || scene.vision?.on !== true || !trapsLiveOn(state, scene.id)) return false;
+      const off = (x: number, y: number) => x !== token.x || y !== token.y;
+      const leaves = off(m.x, m.y) || (m.elevation !== undefined && m.elevation !== token.elevation) || (m.route ?? []).some(([x, y]) => off(x, y));
+      if (!leaves) return false;
+      return carriedGroup(state.tokens, m.tokenId, named).some((id) => {
+        const member = ownEntry(state.tokens, id);
+        return member !== undefined && seenByNonOwners(state, member, { opVersion: OP_VERSION });
+      });
+    });
+  }
+
+  /**
+   * Whether a walk's prepared result changes what a player who owns
+   * nothing sees, from the room just before it: an entity it touched as
+   * that player's projection holds it, or a line it wrote that reaches a
+   * player as written.
+   */
+  #walkShows(before: RoomState, result: Prepared): boolean {
+    for (const key of result.touched) {
+      if (acknowledgmentValueHash(key, projectEntity(key, before, NOBODY, { sceneId: null })) !== acknowledgmentValueHash(key, projectEntity(key, result.state, NOBODY, { sceneId: null }))) return true;
+    }
+    return result.log.some((line) => line.data === undefined || reachesPlayers(eventReach(result.state, line.data)));
+  }
+
+  #markSteps(batch: Batch): StepsMark {
+    return { batch, staged: this.#staged, ops: batch.ops.length, touched: batch.touched.length, doors: batch.doors.length, global: batch.global, step: batch.step, estimate: new Map(batch.estimate), guard: this.#sizes.mark() };
+  }
+
+  /** Puts back what the steps before a walk changed (StepsMark), when they ran and the walk has not installed. */
+  #restoreSteps(): void {
+    const mark = this.#walkMark;
+    if (mark === null) return;
+    this.#walkMark = null;
+    const batch = mark.batch;
+    batch.ops.length = mark.ops;
+    batch.touched.length = mark.touched;
+    batch.doors.length = mark.doors;
+    batch.global = mark.global;
+    batch.step = mark.step;
+    batch.estimate.clear();
+    for (const [layer, bytes] of mark.estimate) batch.estimate.set(layer, bytes);
+    this.#staged = mark.staged;
+    this.#sizes.restore(mark.guard, mark.staged.state);
+    // Its entries were read at seqs the walk's own op takes again.
+    this.#stagedVisibleCache.clear();
   }
 
   // The op pipeline of design 7.2, in its order.
@@ -1709,21 +1780,8 @@ export class RoomActor {
       return;
     }
     const n = cmd.n;
-    // Ahead of every count it takes, and only for an op the rates below will let through, so one answered `busy` runs no
-    // step. The walk's number and time are its arrival's (#moment), read before the steps' work.
     // The socket's own rate reads its arrival on the socket's clock, the server's but in tests that give a socket its own.
     const arrived = cmd.socketAt ?? conn.now();
-    if (n > wm.closed && n === wm.staged + 1 && conn.opRate.wouldAllow(1, arrived) && this.#rateOf(conn).tokens >= 1 && this.#walkNeedsSteps(cmd.raw)) {
-      if (this.#opts.walkCloses) {
-        // The old order, for the tests that compare the two: the walk comes back to the front once the commit lands.
-        this.#queue.unshift(cmd);
-        // Marked until it is handled again: a throw from this commit is a fault outside the op (#commandFailed).
-        cmd.requeued = true;
-        this.#commitNow();
-        return;
-      }
-      this.#stepInPlace(this.#batch!);
-    }
     // Every op message counts toward the sustained-abuse rule, duplicates and gaps included.
     if (conn.opRate.count(arrived)) {
       conn.close(CLOSE.abuse, "op rate");
@@ -2016,6 +2074,23 @@ export class RoomActor {
     op = withAssetSizes(op, facts);
     // A player's copy may lack the ground their creatures land on (docs/design/design-v1-map-discovery.md 6), so the real build sets their heights.
     if (viewer.role === "player") op = landedOp(op, this.#staged.state);
+    // The steps before a walk (#walkNeedsSteps) run here, once every check that reads only the op and its sender has
+    // passed and just before its permission check, which reads where they leave the batch's start. The walk's number and
+    // time are its arrival's (#moment), read before their work.
+    let judge: WalkJudge | null = null;
+    if (!restoredFrom && this.#walkNeedsSteps(op)) {
+      if (this.#opts.walkCloses) {
+        // The old order, for the tests that compare the two: the batch closes, its steps run at the close, and the walk
+        // opens the next. Marked while it closes: a throw from the close is a fault outside the op (#commandFailed).
+        cmd.requeued = true;
+        this.#commitNow();
+        cmd.requeued = false;
+      } else {
+        this.#walkMark = this.#markSteps(this.#batch!);
+        this.#stepInPlace(this.#batch!);
+        judge = (before, result) => this.#walkShows(before, result);
+      }
+    }
     const deps = this.#permissionDeps(viewer, facts);
     let decision = canApply(op, viewer, this.#staged.state, deps);
     // The touch rule (docs/design/design-v1-map-discovery.md 6, MD-R9-1): a player's walk the real build stops lands at its last
@@ -2073,7 +2148,20 @@ export class RoomActor {
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
     // A step that takes back or brings back a move, an HP change from the log, or a DM's hide, show or lock, is bookkeeping as the
     // change was. Only a DM's restore is read for toggles: it reads stored fields, so a player's work never grows with hidden ones.
-    const reduced = this.#reduce(op, viewer, asks, at, mintedTimes, step?.poses !== undefined || fromLog || (viewer.role === "dm" && restoresToggles(op, before)), recorded, fresh);
+    const restoresBookkeeping = step?.poses !== undefined || fromLog || (viewer.role === "dm" && restoresToggles(op, before));
+    let reduced = this.#reduce(op, viewer, asks, at, mintedTimes, restoresBookkeeping, recorded, fresh, judge);
+    if (!reduced.ok && reduced.unseen) {
+      // The walk changes nothing a player sees: only its steps go, and it is reduced once without them, as where they
+      // never ran. Their absence changes nothing either (the steps only add explored ground), which is logged if not.
+      this.#restoreSteps();
+      reduced = this.#reduce(op, viewer, asks, at, mintedTimes, restoresBookkeeping, recorded, fresh, (again, result) => {
+        if (this.#walkShows(again, result) && !this.#toldWalkMoved) {
+          this.#toldWalkMoved = true;
+          this.#log.warn({ roomId: this.roomId }, "walk result moved by its steps");
+        }
+        return true;
+      });
+    }
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
@@ -2209,6 +2297,8 @@ export class RoomActor {
    * the same words, so the same tag sent again is refused again.
    */
   #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null, ids?: readonly string[]): Batch {
+    // A refused walk leaves none of the steps it ran first.
+    this.#restoreSteps();
     // Any refusal ends the client's gesture still asking: a later part then finds no chain and is refused, so none is read on a guess.
     this.#asking.delete(key);
     wm.staged = n;
@@ -2461,7 +2551,7 @@ export class RoomActor {
    * after it keeps all of the op, its row once and its keys, whose number
    * #settleStaged settles, and the next op's numbers stay above it.
    */
-  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: ReadonlyMap<string, number> = NO_ID_TIMES, restoresBookkeeping = false, recorded: readonly string[] = [], fresh: FreshIds | null = null): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, given?: string, minted: ReadonlyMap<string, number> = NO_ID_TIMES, restoresBookkeeping = false, recorded: readonly string[] = [], fresh: FreshIds | null = null, judge: WalkJudge | null = null): Reduced {
     const counts = counted(op.t, OP_VERSION);
     const moment = this.#now();
     const number = counts ? this.#nextNumber() : this.#pub;
@@ -2531,6 +2621,10 @@ export class RoomActor {
     // The room stored is the real one, larger only by what a public springing changed, which every viewer sees anyway: the
     // guard counts that too, so its bounds stay bounds of what is stored.
     const springing = measured !== result ? growthBound(measured.state, result.state, [...new Set([...measured.touched, ...result.touched])]) : null;
+    // A walk after its steps is judged on its prepared result, before anything is installed (W).
+    if (judge && !judge(this.#staged.state, result)) return UNSEEN;
+    // From the install on, the steps a walk ran first stay with it.
+    this.#walkMark = null;
     const batch = this.#ensureBatch();
     const seq = this.#staged.seq + 1;
     const record: OpRecord = { seq, pub: number, at, actor: viewer, op, log: result.log };
@@ -2565,7 +2659,8 @@ export class RoomActor {
     if (counts) this.lastOpAt = moment.now;
     // An area's reminder is judged on the sight this op left, not cut to explored ground (pendingGround), so that sight
     // is explored at once: a later op in the batch that looks away must not leave the line resting on ground never held.
-    if (result.log.some((e) => e.data?.type === "area")) this.#exploreNow(batch);
+    // Only for a line some player reads as written: one no player reads rests on nothing anyone holds.
+    if (result.log.some((e) => e.data?.type === "area" && reachesPlayers(eventReach(result.state, e.data)))) this.#exploreNow(batch);
     // Both values are lazy. History reads the inverse, while only an opted-in sender needs semantic acknowledgment hashes.
     return {
       ok: true,
@@ -3932,6 +4027,11 @@ function acknowledgmentValueHash(key: EntityKey, value: unknown): string {
 }
 
 /** The members' ops a batch answered since its steps last ran (StepCursor), which the cap and the steps count, as a new batch's own would. */
+/** Whether a line's readers (eventReach) hold any player. */
+function reachesPlayers(reach: ReturnType<typeof eventReach>): boolean {
+  return reach === "all" || reach.length > 0;
+}
+
 function answeredSinceStep(batch: Batch): number {
   return batch.answered - batch.step.answered;
 }

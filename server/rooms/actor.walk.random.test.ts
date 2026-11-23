@@ -160,6 +160,18 @@ async function race(t: TestContext, room: RoomState, rounds: Event[][], holds: R
   return { steps, closes };
 }
 
+/** The rows of the steps' own kinds, which a walk refused or changing nothing a player sees puts back. */
+const STEP_KINDS = new Set(["sys.explore", "sys.remember"]);
+
+/** The builds differ only by step rows: the comparison build stored them before walks the steps build put them back for. */
+function stepsBack(steps: Build, closes: Build, what: string): void {
+  for (const who of ["dm", "p1", "p2"] as const) assert.deepEqual(answersOf(steps.clients[who]), answersOf(closes.clients[who]), `${what}: ${who} heard the same answers, words and all`);
+  assert.ok(closes.db.rows.length >= steps.db.rows.length, `${what}: the comparison build holds no fewer step rows`);
+  const others = (db: StoredRoomDb) => db.rows.filter((row) => !STEP_KINDS.has((row.op as { t: string }).t)).map(({ seq: _seq, opVersion: _v, ...row }) => row);
+  assert.deepEqual(others(steps.db), others(closes.db), `${what}: every row but the steps' the same`);
+  assert.equal(steps.db.pub, closes.db.pub, `${what}: the same stored number`);
+}
+
 /** Each answer a member's device heard, by its op's number, whatever frame carried it. */
 function answersOf(client: ScopeClient): string[] {
   const out: string[] = [];
@@ -182,17 +194,26 @@ function same(steps: Build, closes: Build, what: string): void {
 describe("a walk's steps in place against a commit before the walk", () => {
   test("random rooms and arrivals store the same rows and leave the same state, and no op waits for another's walk", async (t) => {
     let walksAfterAnswers = 0;
+    let whole = 0;
     for (let seed = 1; seed <= 40; seed++) {
       const r = rng(seed);
       const room = randomRoom(r);
       const rounds = Array.from({ length: int(r, 4, 9) }, (_, i) => Array.from({ length: int(r, 1, 7) }, (_, k) => randomEvent(r, room, i * 10 + k)));
       const holds = new Set<number>(rounds.flatMap((_, i) => (chance(r, 0.2) ? [i] : [])));
       const { steps, closes } = await race(t, room, rounds, holds, {});
-      same(steps, closes, `seed ${seed}`);
+      if (JSON.stringify(rowsOf(steps.db)) === JSON.stringify(rowsOf(closes.db))) {
+        same(steps, closes, `seed ${seed}`);
+        whole++;
+      } else {
+        // A walk refused, or one that changed nothing a player sees, puts its steps back, while a commit before it stored
+        // them: the builds differ only in where steps' rows stand and how many, and every other row and answer is the same.
+        stepsBack(steps, closes, `seed ${seed}`);
+      }
       assert.equal(steps.commitsBeforeTick, 0, `seed ${seed}: no commit came before a round's tick`);
       if (closes.commitsBeforeTick > 0) walksAfterAnswers++;
     }
     assert.ok(walksAfterAnswers >= 10, `walks that needed the steps: ${walksAfterAnswers}`);
+    assert.ok(whole >= 15, `seeds compared row for row: ${whole}`);
   });
 
   test("a label remembered as Old and seen as New on a walk into sight and out again, in one tick, ends as the commit before the walk leaves it", async (t) => {
@@ -248,7 +269,7 @@ describe("a walk's steps in place against a commit before the walk", () => {
     assert.deepEqual(refusals, [], "every edit was taken, the second after the walk as after a commit");
   });
 
-  test("a remembered door the DM puts back at its remembered place, a walk, and the player's redo through it: refused in the same words, a wall is in the way", async (t) => {
+  test("a remembered door the DM puts back at its remembered place, a walk no player sees, and the player's redo through it: refused in the same words in both builds", async (t) => {
     const state = fogRoom({ vision: true, bounds: { w: 24, h: 16 } });
     state.scenes.s1 = { ...state.scenes.s1!, blockMovement: false, autoWalls: "off", vision: { on: true, light: "dark" } };
     const blinded = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 2, passivePerception: 9, senses: "", effects: [{ id: "e1", key: "blinded", name: "Blinded" }], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -275,7 +296,8 @@ describe("a walk's steps in place against a commit before the walk", () => {
     ];
     const { steps, closes } = await race(t, room, rounds, new Set());
     same(steps, closes, "the door and the redo");
-    assert.ok(closes.commitsBeforeTick > 0, "the comparison build committed before the walk");
-    assert.equal(answersOf(steps.clients.p1).at(-1), "3 forbidden: could not redo moving Ayla: a wall is in the way");
+    assert.equal(closes.commitsBeforeTick, 0, "a walk no player sees runs no steps, so neither build closed before it");
+    // The player's map still holds the door where it last saw it, so the way reads as blocked by what it does not see.
+    assert.equal(answersOf(steps.clients.p1).at(-1), "3 forbidden: could not redo moving Ayla: something blocks the way");
   });
 });

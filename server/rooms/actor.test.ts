@@ -2024,18 +2024,20 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, pcId, goblinId } = darkRoom(dm, player);
+    // The Goblin stands where the eye's step in shows it, so its walk is one every player sees leave its spot.
+    state.tokens[goblinId] = { ...state.tokens[goblinId]!, x: 18 };
     const { batches, actor, db } = await sentTogether(state, dm, (actor, conn) => {
       void actor.op(conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
-      void actor.op(conn, 2, { t: "token.move", tokenId: goblinId, x: 6, y: 2 });
+      void actor.op(conn, 2, { t: "token.move", tokenId: goblinId, x: 17, y: 2 });
       void actor.op(conn, 3, { t: "token.move", tokenId: pcId, x: 2, y: 2 });
       return 3;
     });
     try {
-      // One batch, as a commit just before the walk would have stored it: the eye's step in, what it saw, the walk, and the
-      // Goblin the walk brought into the party's sight met at its end.
+      // One batch, as a commit just before the walk would have stored it: the eye's step in, what it saw, the walk, the
+      // step out, and what it sees at the end.
       assert.deepEqual(
         batches.map((batch) => batch.map((op) => op.t)),
-        [["token.move", "sys.explore", "token.move", "token.move", "sys.explore", "sys.meet"]],
+        [["token.move", "sys.explore", "token.move", "token.move", "sys.explore"]],
         "the eye's step in, and what it saw, explored before the walk",
       );
       assert.equal(batchOf(batches, "token.move", goblinId), 0);
@@ -2070,18 +2072,21 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, pcId, goblinId } = darkRoom(dm, player);
+    // The Goblin stands where the eye's step in shows it, so each of its walks is one every player sees leave its spot.
+    state.tokens[goblinId] = { ...state.tokens[goblinId]!, x: 18 };
     // Ops 1 to 5 in one turn of the queue: the walks at 2 and 4 each run the steps of what came before them, in place.
     const { batches, actor, db, sent } = await sentTogether(state, dm, (actor, conn) => {
       void actor.op(conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
-      void actor.op(conn, 2, { t: "token.moveMany", moves: [{ tokenId: goblinId, x: 6, y: 2 }] });
+      void actor.op(conn, 2, { t: "token.moveMany", moves: [{ tokenId: goblinId, x: 17, y: 2 }] });
       void actor.op(conn, 3, { t: "log.chat", text: "one" });
-      void actor.op(conn, 4, { t: "token.move", tokenId: goblinId, x: 7, y: 2 });
+      void actor.op(conn, 4, { t: "token.move", tokenId: goblinId, x: 16, y: 2 });
       void actor.op(conn, 5, { t: "log.chat", text: "two" });
       return 5;
     });
     try {
-      // The rows the commits before each walk stored, in one batch. The goblin's steps change no sight, so later explores add nothing.
-      assert.deepEqual(batches.map((batch) => batch.map((op) => op.t)), [["token.move", "sys.explore", "token.moveMany", "log.chat", "token.move", "log.chat"]]);
+      // The rows the commits before each walk stored, in one batch, and the Goblin the eye holds met at its end. The goblin's
+      // steps change no sight, so later explores add nothing.
+      assert.deepEqual(batches.map((batch) => batch.map((op) => op.t)), [["token.move", "sys.explore", "token.moveMany", "log.chat", "token.move", "log.chat", "sys.meet"]]);
       assert.deepEqual(acksOf(sent), [[1, 2, 3, 4, 5]], "acked with their batch, in the order sent");
       assert.ok(!sent.some((m) => m.t === "retry"), "no op was answered out of turn");
     } finally {
