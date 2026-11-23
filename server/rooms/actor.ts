@@ -377,10 +377,11 @@ type Moment = { now: number; number: number };
 
 /**
  * A request a batch answers at its close (#answerReads): a snapshot, the
- * hello's or a delayed one's, with the moment it was asked at, or the ack
- * of an op resent after its commit with the history after it.
+ * hello's or a delayed one's, with the moment it was asked at, the ack of
+ * an op resent after its commit with the history after it, or a device's
+ * `ids` ask (#processIds).
  */
-type Read = { conn: Connection; key: ClientKey; resent?: number; at?: number };
+type Read = { conn: Connection; key: ClientKey; resent?: number; at?: number; ids?: { k: number; memberId: string; ids: string[] } };
 
 /**
  * Where a batch's explore and map steps last ran (#stepInPlace): the state
@@ -1661,30 +1662,35 @@ export class RoomActor {
   /**
    * Which of a device's own uncertain creates the room recorded
    * (createIds.ts heldIds): `held`, so it landed whatever became of it
-   * since, or `notHeld`, so the device sends it again under a new id. Read
-   * in queue order, after every op the device sent before it, and only
-   * once none of that member's ops is staged or committing and the
-   * device's old socket is closed, since an op from a closed socket is
-   * dropped and one from an open socket may still come. Until then every
-   * id answers `pending` and the device asks again. Only the sender's own
-   * ids are read. An ask spends the socket's op rate, as an op does, and
-   * one over it answers `pending`.
+   * since, or `notHeld`, so the device sends it again under a new id. A
+   * read of the batch it joins, in queue order, after every op the device
+   * sent before it, and read once that batch has committed, so each of
+   * those ops is committed or refused by then. Only the asker's own reasons
+   * answer `pending`, and the device asks again: its socket's op rate, at
+   * the ask's arrival, and the device's old socket still open, since an op
+   * from a closed socket is dropped and one from an open socket may still
+   * come. A failed read answers `pending` too. Only the sender's own ids and
+   * rows are read.
    */
   #processIds(cmd: Extract<Command, { t: "ids" }>): void {
     const conn = cmd.conn;
     if (conn.closed || conn.closing || conn.display || conn.previewBy !== null) return;
     const key = conn.key;
     const ids = [...new Set(cmd.ids)];
-    const pending = () => conn.send({ t: "ids", k: cmd.k, held: [], notHeld: [], pending: ids });
-    const memberId = conn.memberId;
-    const busy = (batch: Batch | null) => batch !== null && batch.ops.some((r) => r.actor !== SERVER_ACTOR && r.actor.memberId === memberId);
     const oldOpen = [...this.#connections].some((c) => c !== conn && !c.closed && c.key === key);
-    if (key === null || !conn.opRate.allow(1, cmd.socketAt ?? conn.now()) || busy(this.#batch) || this.#pending.some(busy) || oldOpen) {
-      pending();
+    if (key === null || !conn.opRate.allow(1, cmd.socketAt ?? conn.now()) || oldOpen) {
+      conn.send({ t: "ids", k: cmd.k, held: [], notHeld: [], pending: ids });
       return;
     }
-    heldIds(this.#pool, this.roomId, memberId, ids).then(
-      (held) => conn.send({ t: "ids", k: cmd.k, held: ids.filter((id) => held.has(id)), notHeld: ids.filter((id) => !held.has(id)), pending: [] }),
+    this.#ensureBatch().reads.push({ conn, key, ids: { k: cmd.k, memberId: conn.memberId, ids } });
+    this.#scheduleCommit();
+  }
+
+  /** An `ids` ask's answer, read once its batch committed (#processIds). */
+  #answerIds(conn: Connection, ask: { k: number; memberId: string; ids: string[] }): void {
+    const pending = () => conn.send({ t: "ids", k: ask.k, held: [], notHeld: [], pending: ask.ids });
+    heldIds(this.#pool, this.roomId, ask.memberId, ask.ids).then(
+      (held) => conn.send({ t: "ids", k: ask.k, held: ask.ids.filter((id) => held.has(id)), notHeld: ask.ids.filter((id) => !held.has(id)), pending: [] }),
       (err: unknown) => {
         this.#log.warn({ err, roomId: this.roomId }, "ids ask failed, answered pending");
         pending();
@@ -3609,7 +3615,9 @@ export class RoomActor {
     for (const read of batch.reads) {
       const { conn, key } = read;
       try {
-        if (read.resent !== undefined) {
+        if (read.ids !== undefined) {
+          if (!conn.closed && !conn.closing) this.#answerIds(conn, read.ids);
+        } else if (read.resent !== undefined) {
           if (conn.closed || conn.closing || conn.held === null) continue;
           conn.send({ t: "ev", seq: this.#handOut(batch.pub), changes: [], acks: [read.resent] });
           this.#sendHistory(conn, batch.pub);

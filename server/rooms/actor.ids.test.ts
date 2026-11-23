@@ -4,7 +4,8 @@ import { sealedId, uuidv7 } from "#shared/ids.ts";
 import type { Op } from "#shared/protocol.ts";
 import { actor, character, room } from "#shared/testutil.ts";
 import { ID_TAKEN } from "./createIds.ts";
-import { scopeActor, type ScopeClient } from "./undoScopeTesting.ts";
+import { Connection } from "./connection.ts";
+import { scopeActor, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /**
  * A group save's conditions are recorded without the gate's clock
@@ -57,5 +58,47 @@ describe("a recorded condition's row", () => {
       r.clock.now = at;
       assert.equal(await code(r.p1, add(id)), "gone", `at ${(at - T0) / 60_000} minutes`);
     }
+  });
+});
+
+type IdsAnswer = { t: "ids"; k: number; held: string[]; notHeld: string[]; pending: string[] };
+
+/** The device's `ids` ask numbered `k`, and its answer once it comes. */
+async function askIds(client: ScopeClient, k: number, ids: readonly string[], conn: Connection = client.conn, sent: readonly unknown[] = client.sent): Promise<IdsAnswer> {
+  client.actor.ids(conn, { k, ids });
+  return until(() => sent.find((m): m is IdsAnswer => (m as { t?: string }).t === "ids" && (m as IdsAnswer).k === k), `ids answer ${k}`);
+}
+
+describe("a device's ids ask", () => {
+  test("an ask behind each of the device's ops joins that op's batch and is answered once it is stored, never pending while the device plays on", async (t) => {
+    const r = await open(t);
+    const id = uuidv7();
+    for (let k = 1; k <= 5; k++) {
+      void r.p1.actor.op(r.p1.conn, ++r.p1.n, { t: "log.chat", text: `chat ${k}` });
+      const answer = await askIds(r.p1, k, [id]);
+      assert.deepEqual([answer.held, answer.notHeld, answer.pending], [[], [id], []], `ask ${k}`);
+      const acked = r.p1.sent.findIndex((m) => m.t === "ev" && m.acks?.includes(r.p1.n));
+      assert.ok(acked >= 0 && acked < r.p1.sent.indexOf(answer as never), `ask ${k} answered after the op before it`);
+    }
+  });
+
+  test("the device's old socket still open, or an ask past its socket's op rate, answers pending", async (t) => {
+    const r = await open(t);
+    const id = uuidv7();
+    // A second socket of P1's device, under the same client: its ask waits while the first is open.
+    const sent: unknown[] = [];
+    const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text)), close() {}, terminate() {} };
+    const again = new Connection(socket as never, { sessionId: r.p1.conn.sessionId, roomId: "UNDOSCOPE", memberId: r.p1.conn.memberId, role: "player" }, "203.0.113.9", { now: () => r.clock.now });
+    r.p1.actor.attach(again);
+    await r.p1.actor.hello(again, { clientId: r.p1.clientId, resumeFrom: r.p1.n + 1 });
+    await until(() => sent.find((m) => (m as { t?: string }).t === "snapshot"), "the second socket's snapshot");
+    assert.deepEqual((await askIds(r.p1, 1, [id], again, sent)).pending, [id], "the old socket is open");
+    r.p1.actor.detach(r.p1.conn);
+    r.p1.conn.close(1000);
+    assert.deepEqual((await askIds(r.p1, 2, [id], again, sent)).notHeld, [id], "read once the old socket is gone");
+    while (again.opRate.allow(1, r.clock.now)) {
+      // the socket's whole burst
+    }
+    assert.deepEqual((await askIds(r.p1, 3, [id], again, sent)).pending, [id], "past the socket's op rate");
   });
 });

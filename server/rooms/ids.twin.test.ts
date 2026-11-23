@@ -349,7 +349,7 @@ describe("an id answers P1 alike whatever became of its thing", () => {
 
 /** Each room's own count of its device's asks, as a device numbers them. */
 describe("an id the room has not stored answers P1 alike", () => {
-  test("C13: an ask while P1's create waits in its batch answers pending, then held once the batch is stored, in both", async (t) => {
+  test("C13: an ask while P1's create waits in its batch joins that batch and answers held once it is stored, in both", async (t) => {
     const pair = await open(t);
     const made = ids(pair);
     const answers: unknown[] = [];
@@ -363,7 +363,7 @@ describe("an id the room has not stored answers P1 alike", () => {
       const second = await askIds(room, [id]);
       answers.push([first, second].map((a) => ({ held: named(a.held), notHeld: named(a.notHeld), pending: named(a.pending) })));
     }
-    assert.deepEqual(answers[0], [{ held: [], notHeld: [], pending: ["the id"] }, { held: ["the id"], notHeld: [], pending: [] }]);
+    assert.deepEqual(answers[0], [{ held: ["the id"], notHeld: [], pending: [] }, { held: ["the id"], notHeld: [], pending: [] }]);
     assert.deepEqual(answers[1], answers[0]);
   });
 
