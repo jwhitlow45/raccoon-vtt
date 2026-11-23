@@ -116,6 +116,9 @@ function sceneFull(): LimitCheck {
 /** The last exact size, and how much the state may have grown since. */
 type Measure = { bytes: number; growth: number };
 
+/** A copy of a guard's own fields (SizeGuard.mark), which `restore` puts back. */
+export type GuardMark = { readonly state: Measure | null; readonly scenes: ReadonlyMap<string, Measure> | null; readonly caps: string | null; readonly refusedScene: string | null; readonly over: number };
+
 /**
  * How an op meets the far line (SizeGuard.check): not at all, with today's
  * reserves, or with per-player vision's at their widest. A DM's op that
@@ -180,6 +183,33 @@ export class SizeGuard {
     storedBytes(state, true);
     numberingAdjust(state, true);
     acceptSeats(state);
+  }
+
+  /**
+   * The guard's own fields as they stand: its measures and their growth,
+   * the caps the map step last measured, the scene the last check refused
+   * and `over`. What it keeps over its accepted state is not copied: its
+   * reads step by the entries that differ from any base (shared/accepted.ts),
+   * so `restore` accepts the marked state again instead.
+   */
+  mark(): GuardMark {
+    return {
+      state: this.#state === null ? null : { ...this.#state },
+      scenes: this.#scenes === null ? null : new Map([...this.#scenes].map(([id, m]) => [id, { ...m }])),
+      caps: this.#caps,
+      refusedScene: this.#refusedScene,
+      over: this.#over,
+    };
+  }
+
+  /** Puts back the fields `mark` copied, as they were then, and accepts `state`, the room that mark stood on. */
+  restore(mark: GuardMark, state: RoomState): void {
+    this.#state = mark.state === null ? null : { ...mark.state };
+    this.#scenes = mark.scenes === null ? null : new Map([...mark.scenes].map(([id, m]) => [id, { ...m }]));
+    this.#caps = mark.caps;
+    this.#refusedScene = mark.refusedScene;
+    this.#over = mark.over;
+    this.accept(state);
   }
 
   /** The room is gone, and what it kept goes with it. */

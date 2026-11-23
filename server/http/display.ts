@@ -236,7 +236,7 @@ export async function registerDisplayRoutes(app: FastifyInstance, kit: AuthKit, 
         if (!row || row.room_id !== roomId || !KINDS[row.kind].playersRead) throw new AssetError(404, "not_found");
         let visible: Set<string>;
         try {
-          visible = (await deps.manager.acquire(roomId)).visibleAssets(grant.memberId);
+          visible = await (await deps.manager.acquire(roomId)).visibleAssets(grant.memberId, Date.now());
         } catch (err) {
           if (err instanceof TooBusyError) throw new AssetError(503, "busy", { retryAfter: 30 });
           if (err instanceof RoomNotFoundError) throw new AssetError(404, "not_found");

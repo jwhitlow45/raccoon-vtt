@@ -507,7 +507,7 @@ describe("listing and serving", () => {
     const player = auth.allow(roomId, "player");
     const handout = (await upload(app, roomId, dm, "handout", await solid(90, 60, "#789").png().toBuffer())).json();
     const previous = app.assets.visibleAssets.bind(app.assets);
-    app.assets.setVisibleAssets(async (r, m) => (r === roomId && m === player.memberId ? new Set([handout.id]) : previous(r, m)));
+    app.assets.setVisibleAssets(async (r, m, at) => (r === roomId && m === player.memberId ? new Set([handout.id]) : previous(r, m, at)));
     try {
       const listed = (await app.inject({ url: `/api/rooms/${roomId}/assets`, headers: player.headers })).json().assets;
       assert.deepEqual(listed.map((a: { id: string }) => a.id), [handout.id]);

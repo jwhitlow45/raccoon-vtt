@@ -30,8 +30,9 @@ import { checkVideo } from "./video/check.ts";
  * room actor exists, the default is the player's own uploads, which is
  * strictly narrower, so nothing leaks in the meantime. Replace it with
  * `setVisibleAssets` (or the route option) once projection is wired up.
+ * `at` is when the request arrived, on the server's clock.
  */
-export type VisibleAssetsFn = (roomId: string, memberId: string) => Promise<Set<string>>;
+export type VisibleAssetsFn = (roomId: string, memberId: string, at: number) => Promise<Set<string>>;
 
 export type RoomInfo = { pinned: boolean; createdAt: Date; readOnly: boolean };
 
@@ -179,8 +180,8 @@ export class AssetService {
     await this.egress.close();
   }
 
-  visibleAssets(roomId: string, memberId: string): Promise<Set<string>> {
-    return this.#visibleAssets(roomId, memberId);
+  visibleAssets(roomId: string, memberId: string, at: number): Promise<Set<string>> {
+    return this.#visibleAssets(roomId, memberId, at);
   }
 
   setVisibleAssets(fn: VisibleAssetsFn): void {

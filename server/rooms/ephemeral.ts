@@ -275,13 +275,13 @@ function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: 
   }
 }
 
-export function routeEphemeral(state: RoomState, sender: Connection, sceneId: string, e: EphEvent, receivers: Iterable<Connection>): void {
+export function routeEphemeral(state: RoomState, sender: Connection, sceneId: string, e: EphEvent, receivers: Iterable<Connection>, at = sender.now()): void {
   if (!state.scenes[sceneId]) return;
   // A player previews only on a floor they hold, or the start floor as before floors, which reaches nobody behind a
   // blackout but the DM. The DM may be anywhere.
   if (sender.role === "player" && startFloor(state) !== sceneId && !holds(state, sender, sceneId)) return;
   const all = [...receivers];
-  expireStale(sender, all);
+  expireStale(sender, all, at);
   const preview = previewOf(e);
   if (preview?.ends) sender.previewsSent.delete(`${preview.kind}:${preview.id}`);
   if (!shared(sender, e)) return;
@@ -312,7 +312,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       receiver.send({ t: "eph", from: sender.memberId, sceneId, e: cancelEvent(preview.kind, preview.id) });
     }
   }
-  if (preview && !preview.ends) keepSent(sender, `${preview.kind}:${preview.id}`, { kind: preview.kind, id: preview.id, sceneId, last: e, at: sender.now() }, all);
+  if (preview && !preview.ends) keepSent(sender, `${preview.kind}:${preview.id}`, { kind: preview.kind, id: preview.id, sceneId, last: e, at }, all);
 }
 
 /** Keeps a preview's last frame while some screen shows this socket's frame of it, and none nobody receives, within the socket's most. */
@@ -327,8 +327,7 @@ function keepSent(sender: Connection, key: string, sent: SentPreview, receivers:
 }
 
 /** Every preview of the socket's with no frame for PREVIEW_STALE_MS goes, with a bare cancel to each screen still holding it. */
-function expireStale(sender: Connection, receivers: readonly Connection[]): void {
-  const now = sender.now();
+function expireStale(sender: Connection, receivers: readonly Connection[], now: number): void {
   for (const [key, sent] of sender.previewsSent) {
     // The map holds them in the order of their last frames.
     if (now - sent.at < PREVIEW_STALE_MS) break;
@@ -388,8 +387,8 @@ export function holdsPreview(connections: Iterable<Connection>): boolean {
 }
 
 /** Whether a kept frame is past PREVIEW_STALE_MS: dead by the clock alone, so only routing or the sender's close ends it. */
-function stale(sender: Connection, sent: SentPreview): boolean {
-  return sender.now() - sent.at >= PREVIEW_STALE_MS;
+function stale(sent: SentPreview, now: number): boolean {
+  return now - sent.at >= PREVIEW_STALE_MS;
 }
 
 /**
@@ -409,11 +408,11 @@ function stale(sender: Connection, sent: SentPreview): boolean {
  * here: the sender's next frame (expireStale) or close (cancelPreviews)
  * ends it, as it would with no batch between.
  */
-export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
+export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>, tick?: number): void {
   const all = [...connections];
   for (const sender of all) {
     for (const [key, sent] of [...sender.previewsSent]) {
-      if (stale(sender, sent)) continue;
+      if (stale(sent, tick ?? sender.now())) continue;
       const { kind, id, sceneId, last } = sent;
       const heldKey = `${sender.memberId}|${kind}:${id}`;
       const judged = state.scenes[sceneId] !== undefined;
@@ -462,7 +461,7 @@ function namedKeys(e: EphEvent): EntityKey[] {
  * batch's judgment of every held preview (rejudgePreviews). Only this
  * screen's previews are read.
  */
-export function cancelLost(receiver: Connection, lost: readonly EntityKey[], connections: Iterable<Connection>): void {
+export function cancelLost(receiver: Connection, lost: readonly EntityKey[], connections: Iterable<Connection>, tick?: number): void {
   if (receiver.closed || receiver.previewsHeld.size === 0 || lost.length === 0) return;
   const gone = new Set(lost);
   const all = [...connections];
@@ -471,7 +470,7 @@ export function cancelLost(receiver: Connection, lost: readonly EntityKey[], con
     const key = heldKey.slice(heldKey.indexOf("|") + 1);
     const sent = sender?.previewsSent.get(key);
     // A stale frame waits for its sender's next frame or close, as in rejudgePreviews.
-    if (!sender || !sent || stale(sender, sent) || !namedKeys(sent.last).some((k) => gone.has(k))) continue;
+    if (!sender || !sent || stale(sent, tick ?? sender.now()) || !namedKeys(sent.last).some((k) => gone.has(k))) continue;
     release(receiver, heldKey, sender);
     receiver.send({ t: "eph", from: sender.memberId, sceneId: sent.sceneId, e: cancelEvent(sent.kind, sent.id) });
     // A preview no screen shows from this socket any more keeps no frame, as rejudgePreviews drops one.

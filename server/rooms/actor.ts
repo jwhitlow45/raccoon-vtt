@@ -249,7 +249,38 @@ export class ActorClosedError extends Error {
   }
 }
 
-type Watermark = { sessionId: string; clientId: string; staged: number; committed: number };
+/**
+ * A client's op numbers: `staged` the highest the room has handled, `closed`
+ * the highest in a batch that has closed, and `committed` the highest in a
+ * batch that has landed.
+ */
+type Watermark = { sessionId: string; clientId: string; staged: number; closed: number; committed: number };
+
+/**
+ * The room as a reader that arrived at a moment answers from (RoomActor.asOf):
+ * the committed state after every batch through `tick`, its storage seq,
+ * the number its frames carried, and `through`, where reads of the log and
+ * receipts stop.
+ */
+export type RoomView = { readonly tick: number; readonly state: RoomState; readonly seq: number; readonly pub: number; readonly through: number };
+
+/** How long published views are kept by their tick, past which a reader that waited answers busy. */
+export const RETAIN_MS = 2_000;
+/** The most readers a room holds waiting for their view, past which one answers busy. */
+export const MAX_WAITING_READERS = 200;
+/** How long after its arrival a waiting reader gives up. */
+export const READER_DEADLINE_MS = 10_000;
+/** The most views the ring keeps: every tick within RETAIN_MS at the 20 ms grid, plus the newest one older. */
+export const MAX_VIEWS = 102;
+
+/** A reader the room cannot answer as of its arrival: too old, past the waiting bound, past its deadline, or the room closed. Answered 503 `busy`. */
+export class ViewBusyError extends Error {
+  readonly retryAfter = 1;
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ViewBusyError";
+  }
+}
 
 /**
  * A client's gesture whose asks are still coming (#answerAsk): its undo
@@ -349,6 +380,8 @@ type StepCursor = { before: RoomState; touched: number; doors: number; answered:
 type Batch = {
   /** Its map step measured every memory layer, so its commit settles a measure the room owed (#capsPending). */
   measured?: true;
+  /** The tick on the number clock whose commands the batch holds (#tickOf). */
+  tick: number;
   history?: Map<string, HistoryMessage>;
   before: RoomState;
   ops: OpRecord[];
@@ -1154,9 +1187,10 @@ export class RoomActor {
     }
   }
 
-  ephemeral(conn: Connection, msg: { sceneId: string; e: Parameters<typeof routeEphemeral>[3] }): void {
+  /** A live frame (design 7.6) that arrived at `at` on the server's clock. */
+  ephemeral(conn: Connection, msg: { sceneId: string; e: Parameters<typeof routeEphemeral>[3] }, at = this.#opts.now()): void {
     if (conn.held === null || !conn.eph.take()) return;
-    routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections);
+    routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
   }
 
   /** A DM's `scene` request (design 7.1): counted against the snapshot budget's abuse rule, then answered with `resync`. */
@@ -1207,12 +1241,25 @@ export class RoomActor {
     });
   }
 
-  /** The assets a player's projection refers to (design 11.2), cached per committed seq. */
-  visibleAssets(memberId: string): Set<string> {
+  /**
+   * The room as of a reader that arrived at `at` on the server's clock: the
+   * newest published view whose tick is at most `at`'s whole ticks, once
+   * every command that arrived before then is handled and every batch
+   * through it has published. Rejects with ViewBusyError when it cannot.
+   */
+  asOf(at: number, opts: { signal?: AbortSignal } = {}): Promise<RoomView> {
+    if (this.#closed) return Promise.reject(new ViewBusyError("room closed"));
+    if (opts.signal?.aborted) return Promise.reject(new ViewBusyError("reader gone"));
+    return Promise.resolve({ tick: Math.floor(at / this.#opts.batchMs) * this.#opts.batchMs, ...this.#committed });
+  }
+
+  /** The assets a player's projection refers to (design 11.2) as of a reader that arrived at `at`, cached per view seq. */
+  async visibleAssets(memberId: string, at: number): Promise<Set<string>> {
+    const view = await this.asOf(at);
     const cached = this.#visibleCache.get(memberId);
-    if (cached && cached.seq === this.#committed.seq) return cached.ids;
-    const ids = visibleAssetIds(this.#committed.state, { memberId, role: "player" }, { sceneId: null });
-    this.#visibleCache.set(memberId, { seq: this.#committed.seq, ids });
+    if (cached && cached.seq === view.seq) return cached.ids;
+    const ids = visibleAssetIds(view.state, { memberId, role: "player" }, { sceneId: null });
+    this.#visibleCache.set(memberId, { seq: view.seq, ids });
     return ids;
   }
 
@@ -2532,6 +2579,11 @@ export class RoomActor {
    * taken op answered without one, as #reduce gives one to an op it
    * installs. `lastOpAt`, which eviction reads, moves with it.
    */
+  /** The tick a moment's commands belong to: the first multiple of `batchMs` on the number clock after it. */
+  #tickOf(moment: Moment): number {
+    return (Math.floor(moment.number / this.#opts.batchMs) + 1) * this.#opts.batchMs;
+  }
+
   #countAnswer(batch: Batch): void {
     const number = this.#nextNumber();
     this.#pub = this.#handed = number;
@@ -2650,7 +2702,7 @@ export class RoomActor {
     }
     let wm = this.#watermarks.get(key);
     if (!wm) {
-      wm = { sessionId: conn.sessionId, clientId: cmd.clientId, staged: cmd.stored, committed: cmd.stored };
+      wm = { sessionId: conn.sessionId, clientId: cmd.clientId, staged: cmd.stored, closed: cmd.stored, committed: cmd.stored };
       this.#watermarks.set(key, wm);
     }
     const settled = cmd.resumeFrom - 1;
@@ -2798,6 +2850,7 @@ export class RoomActor {
       const after = this.#inFlight;
       const before = after?.state ?? this.#committed.state;
       this.#batch = {
+        tick: this.#tickOf(this.#now()),
         before,
         ops: [],
         touched: [],
@@ -2870,6 +2923,10 @@ export class RoomActor {
     if (!this.replayFailed) this.#shed(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
+    for (const [key, n] of batch.watermarks) {
+      const wm = this.#watermarks.get(key);
+      if (wm && wm.closed < n) wm.closed = n;
+    }
     this.#closeNumbers(batch, close);
     try {
       batch.history = this.#undo.summaries();

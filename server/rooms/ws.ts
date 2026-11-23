@@ -295,7 +295,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             chain(() => room.ids(conn, msg));
             return;
           case "eph":
-            room.ephemeral(conn, msg);
+            // The frame's moment is read as it arrives, before anything waits, and the room routes it as of then.
+            room.ephemeral(conn, msg, room.serverTime());
             return;
           case "scene":
             if (conn.role !== "dm") {

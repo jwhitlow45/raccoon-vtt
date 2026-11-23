@@ -29,21 +29,25 @@ export class TokenBucket {
     this.#last = now();
   }
 
-  /** Takes `n` tokens when the bucket holds them. */
-  take(n = 1): boolean {
-    this.#refill();
+  /** Takes `n` tokens when the bucket holds them at `at`, the bucket's own clock when absent. */
+  take(n = 1, at = this.#now()): boolean {
+    this.#refill(at);
     if (this.#tokens < n) return false;
     this.#tokens -= n;
     return true;
   }
 
   get tokens(): number {
-    this.#refill();
+    return this.available();
+  }
+
+  /** The tokens the bucket holds at `at`, the bucket's own clock when absent. */
+  available(at = this.#now()): number {
+    this.#refill(at);
     return this.#tokens;
   }
 
-  #refill(): void {
-    const now = this.#now();
+  #refill(now: number): void {
     const elapsed = Math.max(0, now - this.#last);
     this.#last = now;
     this.#tokens = Math.min(this.burst, this.#tokens + (elapsed / 1000) * this.ratePerSec);
