@@ -336,8 +336,8 @@ export function benchAnswer(messages: readonly string[], n: number): OpAnswer | 
 
 type SitDownTimes = { load: number[]; first: number[]; later: number[] };
 
-/** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. */
-export async function sitDown(state: RoomState, times?: SitDownTimes, options?: ActorDeps["options"]): Promise<Table> {
+/** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. `loaded` runs between the two. */
+export async function sitDown(state: RoomState, times?: SitDownTimes, options?: ActorDeps["options"], loaded?: () => void): Promise<Table> {
   const t0 = performance.now();
   const db: Span = { commitAt: 0, drawn: 0, read: 0 };
   live = db;
@@ -355,6 +355,7 @@ export async function sitDown(state: RoomState, times?: SitDownTimes, options?: 
   const actor = await RoomActor.load(deps);
   if (!actor) throw new Error("the bench room did not load");
   times?.load.push(performance.now() - t0);
+  loaded?.();
   const sent: Table["sent"] = { last: 0, sender: null, senderMessages: [], onFrame: null };
   const snapshotted = new Set<Connection>();
   const open = (memberId: string, role: "dm" | "player"): Connection => {
@@ -1409,7 +1410,11 @@ type Sustained = {
   backlogMs: number;
   spans: number;
   retries: number;
+  /** Ops a device did not send while it waited to send again from one turned away. */
+  held: number;
   heapPeak: number;
+  /** The heap once collected after the input, while the room still holds what the input left: NaN without --expose-gc. */
+  heapKept: number;
   activeMsPerSec: number;
   loopMaxMs: number;
   publishMs: number[];
@@ -1435,7 +1440,31 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
   const sentAt = new Map<string, number>();
   const latency: number[] = [];
   const frames: number[] = [];
-  let [firstAck, lastAck, spans, retries, heapPeak] = [Number.NaN, 0, 0, 0, 0];
+  let [firstAck, lastAck, spans, retries, heapPeak, held] = [Number.NaN, 0, 0, 0, 0, 0];
+  /*
+   * A device whose op was turned away (busy, or a gap behind such an op)
+   * holds its new ops until every op it sent has its answer, then sends
+   * again from the op turned away, as a client resends. One that counted
+   * on would meet only gaps from then on.
+   */
+  const unanswered = new Map<Connection, Set<number>>();
+  const resendFrom = new Map<Connection, number>();
+  /** The number for a device's next op, or null while it waits to send again. */
+  const nextN = (conn: Connection): number | null => {
+    const from = resendFrom.get(conn);
+    if (from !== undefined) {
+      if ((unanswered.get(conn)?.size ?? 0) > 0) {
+        held++;
+        return null;
+      }
+      resendFrom.delete(conn);
+      table.n.set(conn, from - 1);
+    }
+    const n = (table.n.get(conn) ?? 0) + 1;
+    table.n.set(conn, n);
+    unanswered.set(conn, (unanswered.get(conn) ?? new Set()).add(n));
+    return n;
+  };
   for (const conn of [table.dm, ...table.players]) {
     const send = conn.send.bind(conn);
     (conn as { send: unknown }).send = (m: ServerMessage) => {
@@ -1445,8 +1474,18 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
       if (m.t === "retry") {
         retries++;
         sentAt.delete(`${conn.memberId}:${m.n}`);
+        if (m.n !== undefined) {
+          unanswered.get(conn)?.delete(m.n);
+          if (m.n < (resendFrom.get(conn) ?? Number.POSITIVE_INFINITY)) resendFrom.set(conn, m.n);
+        }
       }
-      if (m.t === "ev") for (const r of m.rejects ?? []) sentAt.delete(`${conn.memberId}:${r.n}`);
+      if (m.t === "ev") {
+        for (const r of m.rejects ?? []) {
+          sentAt.delete(`${conn.memberId}:${r.n}`);
+          unanswered.get(conn)?.delete(r.n);
+        }
+        for (const n of m.acks ?? []) unanswered.get(conn)?.delete(n);
+      }
       if (m.t === "ev" && m.acks && m.acks.length > 0) {
         const ticks = new Set<number>();
         for (const n of m.acks) {
@@ -1485,8 +1524,8 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
           if (ids.length === 0) return;
           const id = ids[(k + j) % ids.length]!;
           const tok = state().tokens[id]!;
-          const n = (table.n.get(p) ?? 0) + 1;
-          table.n.set(p, n);
+          const n = nextN(p);
+          if (n === null) return;
           const op = (j === 1 ? { t: "log.chat", text: `tick ${k}` } : { t: "token.move", tokenId: id, x: tok.x + (k % 2 === 0 ? 1 : -1), y: tok.y }) as Op;
           sentAt.set(`${p.memberId}:${n}`, performance.now());
           sentTick.set(`${p.memberId}:${n}`, Date.now());
@@ -1496,8 +1535,8 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
     }
     for (let j = 0; j < (load.dmPerTick ?? 0); j++) {
       setTimeout(() => {
-        const n = (table.n.get(table.dm) ?? 0) + 1;
-        table.n.set(table.dm, n);
+        const n = nextN(table.dm);
+        if (n === null) return;
         void table.actor.op(table.dm, n, { t: "log.chat", text: `dm ${k} ${j}` } as Op);
       }, Math.max(0, due + 2 - performance.now()));
     }
@@ -1510,6 +1549,10 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
   const used = performance.eventLoopUtilization(elu);
   loop.disable();
   heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
+  // The peak counts garbage not yet collected, which grows with what is kept, so what is kept is read too.
+  const gc = (globalThis as { gc?: () => void }).gc;
+  gc?.();
+  const heapKept = gc ? process.memoryUsage().heapUsed : Number.NaN;
   // Each publish: from its commit to the last frame before the next commit.
   const publishMs: number[] = [];
   const commits = queueDb.commits;
@@ -1524,14 +1567,14 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
   }
   await table.actor.shutdown({ code: 1012, snapshot: false });
   const seconds = (performance.now() - start) / 1000;
-  return { latency, firstAck, lastAck, backlogMs, spans, retries, heapPeak, activeMsPerSec: (used.active / seconds), loopMaxMs: loop.max / 1e6, publishMs };
+  return { latency, firstAck, lastAck, backlogMs, spans, retries, held, heapPeak, heapKept, activeMsPerSec: (used.active / seconds), loopMaxMs: loop.max / 1e6, publishMs };
 }
 
 function report(row: string, what: string, m: Sustained): string {
   return [
     `${row} ${what}`,
-    `  send to ack ms ${spread(m.latency)}, first ${m.firstAck.toFixed(1)}, last ${m.lastAck.toFixed(1)} | frames answering two ticks ${m.spans} | retries ${m.retries}`,
-    `  backlog cleared ${m.backlogMs.toFixed(0)} ms after the input | loop busy ${m.activeMsPerSec.toFixed(0)} ms a second | longest loop task ${m.loopMaxMs.toFixed(1)} ms | heap peak ${mib(m.heapPeak)} | publish ms ${spread(m.publishMs)}`,
+    `  send to ack ms ${spread(m.latency)}, first ${m.firstAck.toFixed(1)}, last ${m.lastAck.toFixed(1)} | frames answering two ticks ${m.spans} | retries ${m.retries} | ops held to send again ${m.held}`,
+    `  backlog cleared ${m.backlogMs.toFixed(0)} ms after the input | loop busy ${m.activeMsPerSec.toFixed(0)} ms a second | longest loop task ${m.loopMaxMs.toFixed(1)} ms | heap peak ${mib(m.heapPeak)}, kept ${Number.isNaN(m.heapKept) ? "unread (run with --expose-gc)" : mib(m.heapKept)} | publish ms ${spread(m.publishMs)}`,
   ].join("\n");
 }
 
@@ -1593,13 +1636,19 @@ async function qb3(): Promise<string> {
   }
 }
 
-async function qb8(): Promise<string> {
+/*
+ * QB-8 as the design writes it, the DM at 120 a tick (6,000 answers a
+ * second), and at section 9's rate: the DM at 17 a tick, which with the
+ * six players' 180 a second is about the 1,040 answers a second its bound
+ * on the stored rows assumes.
+ */
+async function qb8(dmPerTick: number, what: string): Promise<string> {
   clearVisionCache();
   queueDb.capture = [];
   queueDb.holdSnapshotMs = 4_900;
   let flood: Sustained;
   try {
-    flood = await sustained({ state: remembering(true, true), seconds: 30, every: 0, dmPerTick: 120 }, { ...QUEUE_OPTIONS, queueCap: 500 });
+    flood = await sustained({ state: remembering(true, true), seconds: 30, every: 0, dmPerTick }, { ...QUEUE_OPTIONS, queueCap: 500 });
   } finally {
     queueDb.holdSnapshotMs = 0;
   }
@@ -1609,14 +1658,19 @@ async function qb8(): Promise<string> {
   const loop = monitorEventLoopDelay({ resolution: 1 });
   loop.enable();
   const t0 = performance.now();
-  const table = await sitDown(remembering(true, true), undefined, QUEUE_OPTIONS);
+  let [loadMs, loadLoopMs] = [0, 0];
+  const table = await sitDown(remembering(true, true), undefined, QUEUE_OPTIONS, () => {
+    loadMs = performance.now() - t0;
+    loadLoopMs = loop.max / 1e6;
+    loop.reset();
+  });
   const replayMs = performance.now() - t0;
   loop.disable();
   queueDb.serve = [];
   await table.actor.shutdown({ code: 1012, snapshot: false });
   return [
-    report("QB-8", "a 30 s flood at the bounds, six holders, the DM at 120 a tick, the snapshot write held 4.9 s, then a crash", flood),
-    `  stored rows ${rows.length} (bound 25,860 at W = 5 s) | replayed in ${replayMs.toFixed(0)} ms with the room's load | longest loop task in the replay ${(loop.max / 1e6).toFixed(1)} ms`,
+    report("QB-8", `a 30 s flood, six holders, ${what}, the snapshot write held 4.9 s, then a crash`, flood),
+    `  stored rows ${rows.length} (bound 25,860 at W = 5 s) | the load with its replay ${loadMs.toFixed(0)} ms, longest loop task ${loadLoopMs.toFixed(1)} ms | with the table's first snapshots ${replayMs.toFixed(0)} ms, longest loop task after the load ${(loop.max / 1e6).toFixed(1)} ms`,
   ].join("\n");
 }
 
@@ -1725,7 +1779,10 @@ export async function runQueueBench(only: string | null): Promise<string[]> {
       queueDb.commitMs = 0;
     }
   }
-  if (want("QB-8")) out.push(await qb8());
+  if (want("QB-8")) {
+    out.push(await qb8(120, "the DM at 120 a tick"));
+    out.push(await qb8(17, "the DM at 17 a tick, section 9's rate"));
+  }
   if (want("QB-9")) out.push(qb9());
   if (want("QB-10")) out.push(await qb10());
   if (want("QB-11")) out.push(await qb11());
