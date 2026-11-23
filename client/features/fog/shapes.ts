@@ -144,14 +144,15 @@ export function fogOps(shapes: readonly FogShape[], mode: FogMode, newId: () => 
 }
 
 /**
- * An op id as fogOps names a gesture's ops: a UUIDv7 gesture id (the
- * client's newId), a dot and the op's place, at most 499, since a draft
- * holds at most 500 ops. Fog op ids were never checked for form, so an
- * older or imported draft can hold ids such as `draft.1` and `draft.2` for
- * separate edits. Only this exact form is read as a gesture, and any other
- * id is an edit of its own.
+ * An op id as fogOps names a gesture's ops: a gesture id the client's
+ * newId made, version 8 sealed under its key or version 7 from a page
+ * without one, a dot and the op's place, at most 499, since a draft holds
+ * at most 500 ops. Fog op ids were never checked for form, so an older or
+ * imported draft can hold ids such as `draft.1` and `draft.2` for separate
+ * edits. Only this exact form is read as a gesture, and any other id is an
+ * edit of its own.
  */
-const GESTURE_OP = /^([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(0|[1-9][0-9]?|[1-4][0-9]{2})$/;
+const GESTURE_OP = /^([0-9a-f]{8}-[0-9a-f]{4}-[78][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(0|[1-9][0-9]?|[1-4][0-9]{2})$/;
 
 /**
  * The gesture an op id names by its form (GESTURE_OP), or the id itself.

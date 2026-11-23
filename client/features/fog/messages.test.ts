@@ -1,6 +1,7 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { idKeyOf, sealedId } from "#shared/ids.ts";
 import { serializedBytes } from "#shared/limits.ts";
 import type { BuildChunk, FogOp, FogShape, TerrainId } from "#shared/model.ts";
 import { clientMessageSchema, MAX_FOG_DRAFT_OPS } from "#shared/protocol.ts";
@@ -152,6 +153,16 @@ describe("a fog gesture in the draft is one edit", () => {
     assert.ok(clientMessageSchema.safeParse({ t: "op", n: 1, op: fogMessages(SCENE_ID, room, false)[0] }).success);
     const [one] = fogOps([rect(1)], "reveal", newId);
     assert.equal(fogEditOf(one!.id), one!.id);
+  });
+
+  test("a gesture of several shapes with a version 8 id, as a page with a key makes it, is one edit too, which one Undo takes", () => {
+    const key = idKeyOf(new Uint8Array(32).fill(3));
+    const room = fogOps(largestHexRoom(ROWS), "reveal", () => sealedId(key, 1_700_000_000_000));
+    assert.ok(room.length > 1);
+    assert.equal(new Set(room.map((o) => fogEditOf(o.id))).size, 1, "all of one edit");
+    assert.equal(draftEdits(room).length, 1);
+    assert.deepEqual(lastEditIds(room).sort(), room.map((o) => o.id).sort(), "Undo takes the whole gesture");
+    assert.ok(clientMessageSchema.safeParse({ t: "op", n: 1, op: fogMessages(SCENE_ID, room, false)[0] }).success);
   });
 
   test("an id is read as a gesture's only in the form fogOps makes, so an older draft's dotted ids stay edits of their own", () => {
