@@ -610,6 +610,15 @@ async function touchDrag(page: Page, cdp: import("playwright-core").CDPSession, 
   return { during, after: await parentOf(page, id) };
 }
 
+/** The texts the map shows on any of its stages, visible ones only. */
+function boardTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { text(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages.flatMap((st) => st.find("Text")).filter((t) => t.isVisible()).map((t) => t.text());
+  });
+}
+
 describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -3042,6 +3051,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const viewport = pat.viewportSize()!;
     const onScreen = (p: { x: number; y: number }) => p.x > 4 && p.y > 4 && p.x < viewport.width - 4 && p.y < viewport.height - 4;
     const cdp = await patContext.newCDPSession(pat);
+    let patOps: OpSocket | null = null;
     try {
       // Isometric, by touch: down past the map's near corner, as far as the screen holds.
       await goTo(squares.id);
@@ -3070,6 +3080,36 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       assert.ok(up!.x >= 0 && up!.x <= squares.bounds.w - 1, `Top-down touch: Bree on ${up!.x}, ${up!.y}`);
       await shots.take(pat, "dropmap-1-top-down-touch");
 
+      // A group by mouse keeps its shape against the top edge, and its label reads the 25 ft it lands by, not the 40 ft of the spot under the pointer.
+      const fenn = uuidv7();
+      const dara = uuidv7();
+      await ops.send(tokenOp(fenn, { sceneId: squares.id, kind: "npc", name: "Fenn", x: 3, y: 5, ownerIds: [patId], disposition: "ally" }));
+      await ops.send(tokenOp(dara, { sceneId: squares.id, kind: "npc", name: "Dara", x: 5, y: 5, ownerIds: [patId], disposition: "ally" }));
+      await waitFor("Fenn and Dara on Pat's page", () => (patSocket.state?.tokens[fenn] && patSocket.state.tokens[dara] ? true : null));
+      await pat.waitForTimeout(300);
+      const fennAt = await pagePoint(pat, squares.bounds, { x: 3.5, y: 5.5 });
+      const daraAt = await pagePoint(pat, squares.bounds, { x: 5.5, y: 5.5 });
+      const groupTo = await pagePoint(pat, squares.bounds, { x: 3.5, y: -2.5 });
+      await pat.mouse.click(fennAt.x, fennAt.y);
+      await pat.keyboard.down("Shift");
+      await pat.mouse.click(daraAt.x, daraAt.y);
+      await pat.keyboard.up("Shift");
+      await pat.mouse.move(fennAt.x, fennAt.y);
+      await pat.mouse.down();
+      await pat.mouse.move(fennAt.x, (fennAt.y + groupTo.y) / 2, { steps: 6 });
+      await pat.mouse.move(groupTo.x, groupTo.y, { steps: 6 });
+      try {
+        await waitFor("the group's label reading what it lands by", async () => ((await boardTexts(pat)).some((t) => /^25 ft/.test(t)) ? true : null));
+      } finally {
+        await pat.mouse.up();
+      }
+      await waitFor("the group on the top row, in its shape", () => {
+        const f = standsAt(fenn);
+        const d = standsAt(dara);
+        return f && d && f.y === 0 && d.y === 0 && f.x === 3 && d.x === 5 ? true : null;
+      });
+      await shots.take(pat, "dropmap-1-group-mouse");
+
       // Hex columns, Top-down, by mouse: far above the top row, where row -10 was.
       await goTo(hexes.id);
       await topDown();
@@ -3087,7 +3127,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
       // A changed page: Pat's own socket sends the move the board never would, and the server refuses it.
       const cookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
-      const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+      patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
       await assert.rejects(patOps.send({ t: "token.move", tokenId: hexes.grum, x: grumAt.x, y: -10 }), /a move ends inside the map/);
       await goTo(squares.id);
       await assert.rejects(patOps.send({ t: "token.move", tokenId: squares.bree, x: -3, y: 4 }), /a move ends inside the map/);
@@ -3097,6 +3137,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await patOps.send({ t: "token.move", tokenId: squares.bree, x: 5, y: 3 });
       await waitFor("Bree's move inside the map taken", () => (standsAt(squares.bree)?.x === 5 && standsAt(squares.bree)?.y === 3 ? true : null));
     } finally {
+      patOps?.close();
       await cdp.detach();
       await goTo(before);
       await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string | null): void } }).__rvttIsoHook.pick("follow"));
