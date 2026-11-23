@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { uuidv7 } from "#shared/ids.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { MAX_HELD_BYTES, MAX_HELD_FRAMES, MAX_VIEWS, MAX_WAITING_READERS, READER_DEADLINE_MS, RETAIN_MS, RoomActor, ViewBusyError, type ActorDeps, type RoomView } from "./actor.ts";
@@ -235,7 +237,48 @@ describe("the ring of views", () => {
     assert.ok(r.actor.viewCount <= 2, `${r.actor.viewCount} views kept`);
     assert.equal((await r.actor.asOf(T + 3_000)).tick, T + 200);
   });
+
+  test("a published state goes once later batches publish, and its tick still reads the same room", async (t) => {
+    const r = await room(t);
+    r.db.beforeCommit = undefined;
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const T = T0 + 1_000;
+    let published: { ref: WeakRef<object>; read: string } | null = null;
+    for (let k = 0; k < 4; k++) {
+      moveTo(t, r.clock, T + 20 * k + 5);
+      chat(r.p1, `tick ${k}`);
+      await flush();
+      moveTo(t, r.clock, T + 20 * (k + 1));
+      await flush();
+      published ??= await newestView(r.actor, T + 30);
+    }
+    assert.ok(await collected(published!.ref), "nothing holds the state the room published at T + 20");
+    const later = await r.actor.asOf(T + 30);
+    assert.equal(later.tick, T + 20);
+    assert.equal(JSON.stringify(later.state), published!.read);
+  });
 });
+
+/**
+ * The newest view, read as its batch publishes: the state the room published then, held weakly. Read in a
+ * function of its own, since a suspended test function keeps its locals.
+ */
+async function newestView(actor: RoomActor, at: number): Promise<{ ref: WeakRef<object>; read: string }> {
+  const view = await actor.asOf(at);
+  assert.equal(view.state, actor.committed.state);
+  return { ref: new WeakRef(view.state), read: JSON.stringify(view.state) };
+}
+
+/** Whether `ref`'s object is collected, with the loop let go before each collection: a WeakRef read in a turn holds its object until the turn ends. */
+async function collected(ref: WeakRef<object>): Promise<boolean> {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  for (let i = 0; i < 5 && ref.deref() !== undefined; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    gc();
+  }
+  return ref.deref() === undefined;
+}
 
 describe("live frames held for their tick", () => {
   /** A socket of P1's with a burst large enough to send past the held bound in one go. */

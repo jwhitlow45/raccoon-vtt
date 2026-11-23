@@ -1491,6 +1491,12 @@ export class RoomActor {
    * older, the load's counting as the oldest, and never more than MAX_VIEWS.
    */
   #keepView(view: RoomView): void {
+    // Each published state keeps alive what was worked out for it, such as each scene's sight (shared/rules/vision.ts
+    // keys its results by the state), outside those caches' byte caps. Readers and frames nearly always take the newest
+    // view, so a view a newer one follows keeps a copy of its state's fields: the same room to read, while the published
+    // state and what was worked out for it go once nothing else holds them.
+    const newest = this.#views.at(-1);
+    if (newest) this.#views[this.#views.length - 1] = { ...newest, view: { ...newest.view, state: { ...newest.view.state } } };
     this.#views.push({ view, load: false });
     const floor = this.#numberClock() - RETAIN_MS;
     let first = this.#views.findIndex((entry) => !entry.load && entry.view.tick >= floor);
