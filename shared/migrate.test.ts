@@ -53,6 +53,7 @@ import {
   opensOps,
   WALK_TRIM_OP_VERSION,
   WALK_TRIM_SNAPSHOT_VERSION,
+  SEALED_IDS_SNAPSHOT_VERSION,
   walksEndWithTurn,
   classChangesWriteLines,
   companionByCopy,
@@ -2178,6 +2179,18 @@ describe("op version 64 and snapshot 48, openings between floors (docs/design/de
   });
 });
 
+describe("snapshot 50, version 8 ids", () => {
+  test("a v49 room is a v50 room as it is, and a build at 49 refuses a v50 snapshot", () => {
+    assert.equal(SEALED_IDS_SNAPSHOT_VERSION, 50);
+    assert.equal(SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION);
+    assert.equal(OP_VERSION, WALK_TRIM_OP_VERSION, "no op changes shape");
+    const state = room();
+    assert.equal(runMigrations(state, 49, 50, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 49), state);
+    assert.throws(() => runMigrations(state, 50, 49, snapshotMigrations), /down/);
+  });
+});
+
 describe("op version 65 and snapshot 49, walks that end with their turn", () => {
   const shown = { kind: "stairs", rect: { x: 1, y: 1, w: 2, h: 2 }, pairRect: { x: 1, y: 1, w: 2, h: 2 } };
   const climb = { tokenId: "thorn", linkId: "l1", rev: 3, made: 12, from: "s1", to: "s2" };
@@ -2189,7 +2202,7 @@ describe("op version 65 and snapshot 49, walks that end with their turn", () => 
     assert.equal(WALK_TRIM_OP_VERSION, 65);
     assert.equal(WALK_TRIM_SNAPSHOT_VERSION, 49);
     assert.equal(OP_VERSION, WALK_TRIM_OP_VERSION);
-    assert.equal(SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= WALK_TRIM_SNAPSHOT_VERSION);
     const old = restore({ climb, falls: [fall] });
     assert.equal(runMigrations(old, 64, 65, opMigrations), old);
     assert.equal(migrateOp(old, 64), old);

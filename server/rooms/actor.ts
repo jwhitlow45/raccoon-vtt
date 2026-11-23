@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { idTime, isSealedShape, type IdKey } from "#shared/ids.ts";
+import { idTime, isSealedShape, sealedId, type IdKey } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
@@ -37,6 +37,7 @@ import { counted } from "./counted.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
 import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordedRow, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
 import { RoomIdKeys } from "./idKeys.ts";
+import { reidDue, reidRoom } from "./reid.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
@@ -164,6 +165,13 @@ export type ActorOptions = {
   idGate: boolean;
   /** The ROOM_SECRET_KEY the room's id keys derive from (idKeys.ts). Tests run with the development key. */
   idSecret: Buffer;
+  /**
+   * Whether a room stored below SEALED_IDS_SNAPSHOT_VERSION gives its ids
+   * anew as it loads (reid.ts), which stores it at today's version. Off
+   * only in tests of an older format's first commit, which that snapshot
+   * takes the place of.
+   */
+  reidAtLoad: boolean;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -192,6 +200,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   roomSound: false,
   idGate: true,
   idSecret: DEVELOPMENT_ROOM_SECRET_KEY,
+  reidAtLoad: true,
 };
 
 export type ActorDeps = {
@@ -742,7 +751,7 @@ export class RoomActor {
   static async load(deps: ActorDeps): Promise<RoomActor | null> {
     const roomId = deps.info.roomId;
     const opts = { ...DEFAULT_ACTOR_OPTIONS, ...deps.options };
-    const loaded = await loadRoom(
+    const stored = await loadRoom(
       deps.pool,
       roomId,
       (seq, reason) => {
@@ -751,10 +760,20 @@ export class RoomActor {
       undefined,
       () => admitArchive(opts.archiveGuard, deps.log, roomId, opts.now),
     );
-    if (!loaded) return null;
+    if (!stored) return null;
+    // The gate's rows first, from the ids the room held as stored, then the room's first load on this build gives its
+    // ids anew (reid.ts), sealed under the server's key, before anything reads the receipts it rewrites.
+    const ids = await loadIds(deps.pool, roomId, stored, opts.now());
+    let loaded = stored;
+    const reid = opts.reidAtLoad && reidDue(stored);
+    if (reid) {
+      const serverKey = new RoomIdKeys(opts.idSecret, roomId).server.key;
+      const done = await reidRoom(deps.pool, roomId, stored, () => sealedId(serverKey, opts.now()));
+      loaded = done.loaded;
+      deps.log.info({ roomId, renamed: done.renamed, rows: done.rows }, "room ids given anew at its first load on this build");
+    }
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design/design-v1-dice.md 1.2).
     const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
-    const ids = await loadIds(deps.pool, roomId, loaded, opts.now());
     const info = await recheckQuotaOnLoad(deps, opts.quotaBytes);
     const archived = await archivedLines(deps.pool, roomId, loaded.state.log).catch((err: unknown) => {
       // Knowing of no line sheds none, which only leaves the room fuller.
@@ -763,6 +782,9 @@ export class RoomActor {
     });
     const actor = new RoomActor({ ...deps, info }, loaded, receipts, ids);
     actor.#archived = archived;
+    // The load stored the room at today's version, with its count, so no commit needs to carry a snapshot. The rest
+    // of what the stored version decides, as whether the caps were measured, still goes by the version it had.
+    if (reid) actor.#countSnapshotDue = false;
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off

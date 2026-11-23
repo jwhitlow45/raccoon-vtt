@@ -4004,7 +4004,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       state,
       dm,
       async (actor, send) => {
-        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
+        // The Goblin, which no player sees, has a new id from the room's first load on this build (reid.ts).
+        const goblin = Object.keys(actor.committed.state.tokens).filter((id) => state.tokens[id] === undefined);
+        assert.equal(goblin.length, 1, `the Goblin alone is renamed, from ${goblinId}`);
+        const goblinNow = goblin[0]!;
+        assert.equal(await send({ t: "token.update", tokenId: goblinNow, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
         const now = actor.committed.state;
         const charge = layerCharge(now, now.scenes[sceneId]!, null);
         assert.ok(charge <= share, `${charge} within ${share}`);
@@ -4013,7 +4017,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
         assert.ok(forgotten.length > 0, "a whole tile was forgotten");
         for (const tx of forgotten) assert.equal(now.memory?.[chunkKey(sceneId, tx, 0)], undefined, `tile ${tx},0 took its memory with it`);
         // A growing edit moves no share.
-        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "m".repeat(4_000) } }), null);
+        assert.equal(await send({ t: "token.update", tokenId: goblinNow, patch: { notes: "m".repeat(4_000) } }), null);
         assert.equal(actor.committed.state.memoryShared?.[sceneId]?.share, share);
       },
       { sizeLimits: { stateLimit: stateLimit + held } },

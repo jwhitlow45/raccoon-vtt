@@ -143,6 +143,8 @@ export class StoredRoomDb extends UndoScopeDb {
     if (sql.includes("from room_snapshots")) {
       return { rows: [{ seq: String(this.snapshot.seq), state: structuredClone(this.snapshot.state), schema_version: this.snapshot.version, imported_seq: null, pub: this.pub === null ? null : String(this.pub) }] };
     }
+    // The archive holds no line here: its reads find it empty, and the checks before an import's lines find them held.
+    if (sql.includes("entry::text")) return { rows: [] };
     if (sql.includes("from room_log")) return { rows: [{ held: true, incomplete: false }] };
     if (sql.includes("max(seq)")) return { rows: [{ max: String(this.durableMax) }] };
     if (sql.includes("from room_ops")) {

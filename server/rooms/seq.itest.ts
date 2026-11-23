@@ -361,6 +361,12 @@ describe("twin rooms on the database give their devices the same frames", () => 
           // A room's first commit at an older format saves it at today's, so C1's first move did. Each room stops as a
           // crash does, its saved room goes back to the format below the count's, which the steps up to today's leave as
           // it is, and it loads again, so the faulted op's commit is its first after a load at that format.
+          // A load that gives a room's ids anew (reid.ts) would store it at today's format itself: off for these loads,
+          // so the faulted op's commit is the first at the older one.
+          t.manager.options.actor.reidAtLoad = false;
+          tc.after(() => {
+            t.manager.options.actor.reidAtLoad = true;
+          });
           for (const twin of pair) {
             await t.manager.unload(twin.roomId, undefined, false);
             await t.pool.query("update room_snapshots set schema_version = $2 where room_id = $1", [twin.roomId, old]);

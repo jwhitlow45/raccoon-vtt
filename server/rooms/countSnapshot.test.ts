@@ -12,7 +12,7 @@ import { captureView } from "./logHistory.ts";
 import { ScanBusyError } from "./logScanBudget.ts";
 import { loadRoom, snapshotJson } from "./persistence.ts";
 import { memoryGrowth } from "./remember.ts";
-import { restartStored, ScopeClient, scopeFixture, storedActor, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
+import { restartStored as restartStoredAt, ScopeClient, scopeFixture, storedActor as storedActorAt, StoredRoomDb, until, type StoredRow } from "./undoScopeTesting.ts";
 
 /**
  * The snapshot a room saved before the room count writes again here
@@ -26,6 +26,11 @@ import { restartStored, ScopeClient, scopeFixture, storedActor, StoredRoomDb, un
  */
 
 const OLD = COUNT_SNAPSHOT_VERSION - 1;
+
+// A load that gives a room's ids anew (reid.ts) stores it at today's version itself, which takes the first commit's
+// snapshot's place. Off here, so each test reads the first commit at an older format.
+const storedActor = (t: Parameters<typeof storedActorAt>[0], db: StoredRoomDb, options: ActorDeps["options"] = {}, log?: ActorDeps["log"]) => storedActorAt(t, db, { reidAtLoad: false, ...options }, log);
+const restartStored = (t: Parameters<typeof restartStoredAt>[0], old: Parameters<typeof restartStoredAt>[1], opts: Parameters<typeof restartStoredAt>[2]) => restartStoredAt(t, old, opts, { reidAtLoad: false });
 
 /** Whether a build from before the count, which migrates nothing down, refuses the stored snapshot. */
 function olderRefuses(db: StoredRoomDb): boolean {

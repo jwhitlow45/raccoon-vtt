@@ -635,7 +635,7 @@ export function snapshotJson(state: RoomState): string {
 }
 
 /** Writes a snapshot row at today's schema version and prunes the rows it covers that are older than an hour. */
-async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: string): Promise<void> {
+export async function storeSnapshot(q: Queryable, roomId: string, seq: number, json: string): Promise<void> {
   await q.query(
     `insert into room_snapshots (room_id, seq, state, schema_version, written_at) values ($1, $2, $3::jsonb, $4, now())
      on conflict (room_id) do update set seq = excluded.seq, state = excluded.state, schema_version = excluded.schema_version, written_at = now()`,

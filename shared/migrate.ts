@@ -11,7 +11,7 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 49;
+export const SNAPSHOT_VERSION = 50;
 export const OP_VERSION = 65;
 
 export type MigrationStep = {
@@ -306,6 +306,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // of them, and it would keep a walk on its creature past its turn. The room's first commit at change format 65
   // carries this snapshot (server/rooms/actor.ts #countSnapshotDue).
   { from: 48, to: 49, apply: (state) => state },
+  // Version 8 ids (SEALED_IDS_SNAPSHOT_VERSION): no field changes shape, so a v49 room is a v50 room as it is. A room's
+  // first load on this build gives a version 8 id to each version 7 one no player's copy or readable line names
+  // (server/rooms/reid.ts), after its stored ops replay, and stores the room at this version with it, so that runs
+  // once. The number moves so that an older build refuses a v50 snapshot instead of loading it.
+  { from: 49, to: 50, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -2268,6 +2273,13 @@ export function dragsEndClear(opVersion: number | undefined): boolean {
  */
 export const WALK_TRIM_OP_VERSION = 65;
 export const WALK_TRIM_SNAPSHOT_VERSION = 49;
+
+/**
+ * The first snapshot version of version 8 ids (shared/ids.ts sealedId):
+ * a room stored below it gives its ids anew at its first load on this
+ * build (server/rooms/reid.ts).
+ */
+export const SEALED_IDS_SNAPSHOT_VERSION = 50;
 
 /**
  * Whether a creature's walk ends with its turn (D-261120-100): Next, a

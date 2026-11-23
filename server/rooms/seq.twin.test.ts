@@ -461,7 +461,10 @@ describe("an op that faults before its install or after it", () => {
     for (const barrier of [false, true]) {
       test(`C23: a fault ${when} the install, ${barrier ? "after the room's first save at today's format" : "in the first commit after a load at the format below the count's, which saves the room at today's"}, across a restart`, async (t) => {
         const w = seqTwins();
-        const pair: Pair = [await Twin.open(t, "door", w.door, {}, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, {}, COUNT_SNAPSHOT_VERSION - 1)];
+        // A load that gives the rooms' ids anew (reid.ts) would store them at today's format itself: off, so the faulted op's
+        // commit is the first at the older one.
+        const older = { reidAtLoad: false };
+        const pair: Pair = [await Twin.open(t, "door", w.door, older, COUNT_SNAPSHOT_VERSION - 1), await Twin.open(t, "rock", w.rock, older, COUNT_SNAPSHOT_VERSION - 1)];
         if (barrier) {
           await both(pair, (twin) => twin.apply("p1", { t: "log.chat", text: "ready" }));
           for (const twin of pair) assert.equal(twin.db.snapshot.version, SNAPSHOT_VERSION, `${twin.name}: the first commit saved the room at today's format`);

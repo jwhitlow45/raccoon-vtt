@@ -105,7 +105,13 @@ describe("creature numbers over a stored room", () => {
     return Number(rows[0]!.seq);
   }
 
-  test("K12, K43: an old room keeps the numbers players see, its first commit stores today's snapshot with its rows, and a build that fails holds the commit until one succeeds", async () => {
+  test("K12, K43: an old room keeps the numbers players see, its first commit stores today's snapshot with its rows, and a build that fails holds the commit until one succeeds", async (tc) => {
+    // A load that gives the room's ids anew (reid.ts) would store it at today's version itself: off, so the first commit
+    // at the older one is what this reads.
+    t.manager.options.actor.reidAtLoad = false;
+    tc.after(() => {
+      t.manager.options.actor.reidAtLoad = true;
+    });
     const { roomId, dm, mat, player, owner } = await opened("Old numbers");
     dm.close();
     await dm.waitClosed();

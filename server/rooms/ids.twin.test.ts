@@ -265,7 +265,9 @@ describe("an id answers P1 alike whatever became of its thing", () => {
     hidden(b);
     // The server first started on this build an hour before the room's first load here.
     const pair = await openTwins(t, a, b, {}, {}, { version: old, since: T0 - 60 * MINUTE });
-    await each(pair, (room) => room.apply("dm", { t: "template.delete", templateId: made }));
+    // The area, which no player holds, has a new id from that load (reid.ts): the DM deletes it by the one they hold.
+    for (const room of pair) assert.deepEqual(Object.keys(room.state.templates).filter((id) => id === made), [], `${room.name}: the area is renamed`);
+    await each(pair, (room) => room.apply("dm", { t: "template.delete", templateId: Object.keys(room.state.templates)[0]! }));
     assert.deepEqual(await bothAnswer(pair, "p1", areaOp(made), "the old id"), GONE);
     same(pair, "the old id");
   });
