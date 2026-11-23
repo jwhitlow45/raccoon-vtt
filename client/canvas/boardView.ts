@@ -110,6 +110,16 @@ export class RestViewWatch {
   }
 }
 
+/**
+ * A camera set that is no gesture's frame (Fit map, a token brought into view, a scene's own camera): written, the rest view settled so the
+ * pills lay out against the new view at once, then shown. Stage.tsx's setCam is this, and its unit test reads the call.
+ */
+export function jumpCamera(live: LiveCamera, settle: () => void, show: (camera: Camera) => void, camera: Camera): void {
+  live.write(camera);
+  settle();
+  show(camera);
+}
+
 /** The board's writer of the rest view (canvas/Stage.tsx), from the canvas's size, the bars over it and the scene shown. Returns the settle a camera jump calls. */
 export function useWriteRestView(size: Size | null, insets: Insets, sceneId: string): () => void {
   const live = useScoped(liveCameraSlot);

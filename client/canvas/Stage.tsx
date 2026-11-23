@@ -62,7 +62,7 @@ import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../l
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, dragAim, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { BoardViewContext, boardViewsOf, useBoardPills, useWriteRestView } from "./boardView.ts";
+import { BoardViewContext, boardViewsOf, jumpCamera, useBoardPills, useWriteRestView } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
@@ -349,11 +349,7 @@ export function MapStage(props: {
   // The board's clear part once the camera rests, for the holes' pills to judge their slide from without laying out on every pan frame (boardView.ts restViewSlot). A camera set here is no gesture's frame (those go through scheduleCam), so it settles at once.
   const settleRestView = useWriteRestView(size, insets, scene.id);
   const setCam = useCallback(
-    (c: Camera) => {
-      liveCam.write(c);
-      settleRestView();
-      setCamState(c);
-    },
+    (c: Camera) => jumpCamera(liveCam, settleRestView, setCamState, c),
     [liveCam, settleRestView],
   );
   // The camera the last render took, so a gesture's end sets state once if the applier moved the stages since.
