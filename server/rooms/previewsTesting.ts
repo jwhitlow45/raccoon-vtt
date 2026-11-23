@@ -41,7 +41,8 @@ export type PreviewTwin = {
 export async function previewTwin(t: TestContext, f: PreviewFixture): Promise<PreviewTwin> {
   const clock = { now: 1_000_000 };
   const now = () => clock.now;
-  const h = await scopeActor(t, structuredClone(f.state));
+  // The room reads the sockets' clock too, so a batch's close moment, which judges a held preview's age, is on it.
+  const h = await scopeActor(t, structuredClone(f.state), { now });
   const dm = await h.connect(f.dm, "dm", now);
   const p1 = await h.connect(f.player, "player", now);
   const bree = await h.connect(f.unrelated, "player", now);

@@ -273,6 +273,23 @@ export const READER_DEADLINE_MS = 10_000;
 /** The most views the ring keeps: every tick within RETAIN_MS at the 20 ms grid, plus the newest one older. */
 export const MAX_VIEWS = 102;
 
+/** The most live frames, and bytes of them, a socket's queue holds while their tick is not yet covered (RoomActor.ephemeral). */
+export const MAX_HELD_FRAMES = 80;
+export const MAX_HELD_BYTES = 256 * 1024;
+
+/** A reader waiting for its tick to be covered (RoomActor.asOf): its tick, its answer, its deadline, and the end of its abort's watch. */
+type Waiter = { a: number; resolve: (view: RoomView) => void; reject: (err: Error) => void; timer: NodeJS.Timeout; stop: () => void };
+
+/** A live frame as a socket sent it. */
+type EphMessage = { sceneId: string; e: Parameters<typeof routeEphemeral>[3] };
+
+/**
+ * A live frame held until its tick is covered: its arrival on the room's
+ * clock and the tick it is routed as of, its arrival on its socket's clock,
+ * which its preview is timed by, and its size.
+ */
+type HeldFrame = { msg: EphMessage; arrived: number; a: number; at: number; bytes: number };
+
 /** A reader the room cannot answer as of its arrival: too old, past the waiting bound, past its deadline, or the room closed. Answered 503 `busy`. */
 export class ViewBusyError extends Error {
   readonly retryAfter = 1;
@@ -355,7 +372,7 @@ type Command = (
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
-  | { t: "read"; run: () => void }
+  | { t: "read"; at: number; run: (view: RoomView) => void; fail: (err: Error) => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
   /** The server's music tick (docs/design/design-v1-music.md 6.4): its step is worked out when the queue reaches it, never before. */
   | { t: "soundTick" }
@@ -621,6 +638,12 @@ export class RoomActor {
   readonly #serverClock: boolean;
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
+  /** The published views readers answer from (#keepView), oldest first, the load's first until it ages out. */
+  #views: Array<{ view: RoomView; load: boolean }>;
+  /** Readers waiting for their tick to be covered (asOf), at most MAX_WAITING_READERS. */
+  #waiting = new Set<Waiter>();
+  /** Each socket's live frames held until their ticks are covered, in arrival order (ephemeral). */
+  #held = new Map<Connection, { list: HeldFrame[]; bytes: number }>();
   /** The steps before the walk being handled, until it installs (#markSteps): put back if it is refused or throws first. */
   #walkMark: StepsMark | null = null;
   /** Whether this load has logged a walk reduced again without its steps that still changed what players see. */
@@ -790,6 +813,8 @@ export class RoomActor {
     this.#handed = loaded.pub;
     this.#committedStored = loaded.pub;
     this.#numberClock = this.#opts.numberClock ?? this.#opts.now;
+    // The load's view answers every reader that arrived before it, since nothing changed while the room was unloaded.
+    this.#views = [{ view: { tick: this.#readerTick(this.loadedAt), ...this.#committed }, load: true }];
     this.#serverClock = this.#opts.numberClock === null && this.#opts.now === DEFAULT_ACTOR_OPTIONS.now;
     // A clock set back across a restart, or an imported file, leaves numbers ahead of it, and the room counts by one
     // until the clock passes them. The operator is told once, as the room loads.
@@ -999,6 +1024,7 @@ export class RoomActor {
       }
     }
     cancelPreviews(conn, this.#connections);
+    this.#held.delete(conn);
     this.#broadcastPresence();
     // The members rule counts from the last member socket's close (6.4), and no tick runs in a room nobody is in.
     if (!conn.display) this.#lastMemberAt = this.#opts.now();
@@ -1242,10 +1268,27 @@ export class RoomActor {
     }
   }
 
-  /** A live frame (design 7.6) that arrived at `at` on the server's clock, its socket's when not given. */
-  ephemeral(conn: Connection, msg: { sceneId: string; e: Parameters<typeof routeEphemeral>[3] }, at = conn.now()): void {
+  /**
+   * A live frame (design 7.6) as it arrives, `at` on its socket's clock,
+   * which is the server's: a test may give a socket its own.
+   */
+  ephemeral(conn: Connection, msg: EphMessage, at = conn.now()): void {
     if (conn.held === null || !conn.eph.take()) return;
-    routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
+    // Routed against the room as of its arrival, once that is covered (asOf), after the socket's frames before it. Until
+    // then it waits in its socket's bounded queue, and past the bound it drops, as an empty bucket drops it.
+    const arrived = this.#opts.now();
+    const frame: HeldFrame = { msg, arrived, a: this.#readerTick(arrived), at, bytes: 0 };
+    let frames = this.#held.get(conn);
+    if (frames === undefined && this.#covered(frame.a)) {
+      this.#routeFrame(conn, frame);
+      return;
+    }
+    frame.bytes = Buffer.byteLength(JSON.stringify(msg));
+    frames ??= { list: [], bytes: 0 };
+    if (frames.list.length >= MAX_HELD_FRAMES || frames.bytes + frame.bytes > MAX_HELD_BYTES) return;
+    frames.list.push(frame);
+    frames.bytes += frame.bytes;
+    this.#held.set(conn, frames);
   }
 
   /** A DM's `scene` request (design 7.1): counted against the snapshot budget's abuse rule, then answered with `resync`. */
@@ -1277,8 +1320,12 @@ export class RoomActor {
     });
   }
 
-  /** Runs `fn` on the committed state and its room count in queue order, for copies that must not interleave with a snapshot. */
-  read<T>(fn: (state: RoomState, pub: number) => T): Promise<T> {
+  /**
+   * Runs `fn` on the room and its count as of `at`, when the reader
+   * arrived (asOf), in queue order, for copies that must not interleave
+   * with a snapshot.
+   */
+  read<T>(fn: (state: RoomState, pub: number) => T, at = this.#opts.now()): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (this.#closed) {
         reject(new ActorClosedError(this.roomId));
@@ -1286,13 +1333,15 @@ export class RoomActor {
       }
       this.#enqueue({
         t: "read",
-        run: () => {
+        at,
+        run: (view) => {
           try {
-            resolve(fn(this.#committed.state, this.#committed.pub));
+            resolve(fn(view.state, view.pub));
           } catch (err) {
             reject(err as Error);
           }
         },
+        fail: reject,
       });
     });
   }
@@ -1304,9 +1353,128 @@ export class RoomActor {
    * through it has published. Rejects with ViewBusyError when it cannot.
    */
   asOf(at: number, opts: { signal?: AbortSignal } = {}): Promise<RoomView> {
-    if (this.#closed) return Promise.reject(new ViewBusyError("room closed"));
-    if (opts.signal?.aborted) return Promise.reject(new ViewBusyError("reader gone"));
-    return Promise.resolve({ tick: Math.floor(at / this.#opts.batchMs) * this.#opts.batchMs, ...this.#committed });
+    if (this.#closed) return Promise.reject(new ViewBusyError("the room is closing"));
+    const signal = opts.signal;
+    if (signal?.aborted) return Promise.reject(new ViewBusyError("the reader is gone"));
+    const a = this.#readerTick(at);
+    if (this.#covered(a)) return this.#viewFor(a);
+    if (this.#waiting.size >= MAX_WAITING_READERS) return Promise.reject(new ViewBusyError("too many readers wait"));
+    return new Promise<RoomView>((resolve, reject) => {
+      const waiter: Waiter = {
+        a,
+        resolve,
+        reject,
+        timer: setTimeout(() => this.#endWaiter(waiter, new ViewBusyError("the reader waited past its deadline")), Math.max(0, at + READER_DEADLINE_MS - this.#opts.now())),
+        stop: () => undefined,
+      };
+      waiter.timer.unref?.();
+      if (signal) {
+        const gone = () => this.#endWaiter(waiter, new ViewBusyError("the reader is gone"));
+        signal.addEventListener("abort", gone, { once: true });
+        waiter.stop = () => signal.removeEventListener("abort", gone);
+      }
+      this.#waiting.add(waiter);
+    });
+  }
+
+  /** The whole ticks of a reader's arrival: the newest tick at or before it, whose batch holds only commands that came before it. */
+  #readerTick(at: number): number {
+    return Math.floor(at / this.#opts.batchMs) * this.#opts.batchMs;
+  }
+
+  /**
+   * Whether every command that arrived before `a` is handled and every
+   * batch through `a` has published: none waits in the queue or is being
+   * read, and no batch of a tick at or before it is open or committing.
+   */
+  #covered(a: number): boolean {
+    if (this.#reading !== null && this.#reading.moment.number < a) return false;
+    const head = this.#queue[0];
+    if (head !== undefined && (head.moment?.number ?? Number.NEGATIVE_INFINITY) < a) return false;
+    if (this.#batch !== null && this.#batch.tick <= a) return false;
+    const oldest = this.#pending[0];
+    return oldest === undefined || oldest.tick > a;
+  }
+
+  /**
+   * The newest published view at or before tick `a`, once it is covered:
+   * busy when `a` is older than RETAIN_MS, or the load's view, which
+   * answers every reader before the load, is older than that from the
+   * load's end.
+   */
+  #viewFor(a: number): Promise<RoomView> {
+    const view = this.#viewAt(a);
+    return view === null ? Promise.reject(new ViewBusyError("the reader's view is past its retention")) : Promise.resolve(view);
+  }
+
+  #viewAt(a: number): RoomView | null {
+    for (let i = this.#views.length - 1; i >= 0; i--) {
+      const entry = this.#views[i]!;
+      if (!entry.load && entry.view.tick > a) continue;
+      const age = entry.load ? this.#opts.now() - this.loadedAt : this.#opts.now() - a;
+      return age > RETAIN_MS ? null : entry.view;
+    }
+    return null;
+  }
+
+  #endWaiter(waiter: Waiter, err: ViewBusyError | null): void {
+    if (!this.#waiting.delete(waiter)) return;
+    clearTimeout(waiter.timer);
+    waiter.stop();
+    if (err) waiter.reject(err);
+    else this.#viewFor(waiter.a).then(waiter.resolve, waiter.reject);
+  }
+
+  /** The committed room as a view, which a read at shutdown answers from. */
+  #committedView(): RoomView {
+    return { tick: this.#readerTick(this.#opts.now()), ...this.#committed };
+  }
+
+  /**
+   * A batch's view joins the ring as it publishes. The ring keeps every
+   * view whose tick is within RETAIN_MS of the clock and the newest one
+   * older, the load's counting as the oldest, and never more than MAX_VIEWS.
+   */
+  #keepView(view: RoomView): void {
+    this.#views.push({ view, load: false });
+    const floor = this.#numberClock() - RETAIN_MS;
+    let first = this.#views.findIndex((entry) => !entry.load && entry.view.tick >= floor);
+    if (first < 0) first = this.#views.length;
+    const drop = Math.max(first - 1, this.#views.length - MAX_VIEWS, 0);
+    if (drop > 0) this.#views.splice(0, drop);
+  }
+
+  /** Answers the readers and routes the held frames whose ticks are covered now, after a publish or a turn of the queue. */
+  #serveCovered(): void {
+    for (const waiter of [...this.#waiting]) if (this.#covered(waiter.a)) this.#endWaiter(waiter, null);
+    this.#releaseFrames();
+  }
+
+  /** Routes each socket's held frames, in order, whose ticks are covered, dropping those past RETAIN_MS. */
+  #releaseFrames(): void {
+    if (this.#held.size === 0) return;
+    const now = this.#opts.now();
+    for (const [conn, frames] of this.#held) {
+      while (frames.list.length > 0) {
+        const frame = frames.list[0]!;
+        if (conn.closed || conn.held === null || now - frame.arrived > RETAIN_MS) {
+          frames.list.shift();
+          frames.bytes -= frame.bytes;
+          continue;
+        }
+        if (!this.#covered(frame.a)) break;
+        frames.list.shift();
+        frames.bytes -= frame.bytes;
+        this.#routeFrame(conn, frame);
+      }
+      if (frames.list.length === 0) this.#held.delete(conn);
+    }
+  }
+
+  /** A live frame routed against the view of its tick: the newest published one, since it routes before the next publish. */
+  #routeFrame(conn: Connection, frame: HeldFrame): void {
+    const view = this.#viewAt(frame.a);
+    if (view !== null) routeEphemeral(view.state, conn, frame.msg.sceneId, frame.msg.e, this.#connections, frame.at);
   }
 
   /** The assets a player's projection refers to (design 11.2) as of a reader that arrived at `at`, cached per view seq. */
@@ -1372,12 +1540,15 @@ export class RoomActor {
       this.#delayed.clear();
       // An ask being read goes unanswered, as queued work does: its client asks again after it reconnects.
       this.#reading = null;
+      // Readers waiting for their view answer busy, and held frames go with the sockets.
+      for (const waiter of [...this.#waiting]) this.#endWaiter(waiter, new ViewBusyError("the room is closing"));
+      this.#held.clear();
       for (const conn of this.#connections) conn.close(opts.code);
       const queued = this.#queue;
       this.#queue = [];
       for (const cmd of queued) {
         if (cmd.t === "sys" || cmd.t === "step") cmd.reject(new ActorClosedError(this.roomId));
-        if (cmd.t === "read") cmd.run();
+        if (cmd.t === "read") cmd.run(this.#committedView());
         if (cmd.t === "op" && cmd.lookup) this.#endLookup(cmd.lookup);
       }
       // A step waiting for the batch below never runs: the room it would delete from is going.
@@ -1474,6 +1645,7 @@ export class RoomActor {
       this.#draining = false;
     }
     this.#closeIfDue();
+    this.#serveCovered();
     this.#maybeIdle();
   }
 
@@ -1632,7 +1804,7 @@ export class RoomActor {
       case "sys":
         return this.#processSys(cmd);
       case "read":
-        return cmd.run();
+        return void this.asOf(cmd.at).then(cmd.run, cmd.fail);
       case "step":
         return this.#runStep(cmd);
       case "soundTick":
@@ -3575,18 +3747,21 @@ export class RoomActor {
         (key) => this.#clients.get(key),
         (conn, delivered) => this.#sendHistory(conn, batch.pub, delivered),
         // A preview over a creature or stairs the batch took from a screen's copy ends there now (docs/design/design-v1-floors.md phase 3, 4.4).
-        (conn, lost) => cancelLost(conn, lost, this.#connections),
+        (conn, lost) => cancelLost(conn, lost, this.#connections, batch.closeAt),
       );
       // Every batch judges the held drags and live rulers again, whatever it changed: a lock, a Hide, a move to another
       // floor or a re-projection can each take away what one showed (docs/design/design-v1-per-player-vision.md 7.2,
-      // docs/design/design-v1-floors.md 8.1).
-      if (holdsPreview(this.#connections)) rejudgePreviews(batch.state, this.#connections);
+      // docs/design/design-v1-floors.md 8.1). A preview's age is read at the batch's close moment, its tick.
+      if (holdsPreview(this.#connections)) rejudgePreviews(batch.state, this.#connections, batch.closeAt);
       for (const conn of this.#connections) this.#previewStands(conn, batch.state);
     } catch (err) {
       // The batch is stored, but which sockets it reached is unknown: each one takes the committed room afresh as it reconnects.
       this.#fault("batch publish failed, closing the room's sockets", err, null);
       for (const conn of this.#connections) conn.close(1011, "internal error");
     }
+    // The batch's view joins the ring, and the frames held for it route against it before the next batch publishes.
+    this.#keepView({ tick: batch.tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
+    this.#releaseFrames();
     for (const s of batch.sys) s.resolve();
     this.#answerReads(batch);
     // After the batch and any snapshot it owed them, so each of these sockets was sent its last refusal (#closeOnPublish).
