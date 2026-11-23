@@ -4,14 +4,14 @@ import { createStore } from "zustand/vanilla";
 import type { RollRequest, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { uuidv7 } from "#shared/ids.ts";
+import { idKeyOf, idKeyText, sealedTime, uuidv7 } from "#shared/ids.ts";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
 import { DM, room as testRoom, scene, token } from "#shared/testutil.ts";
 import { createRoomStore } from "../../../state/store.ts";
 import type { RoomView } from "../../../state/types.ts";
 import { FakeClock } from "../../../state/testing.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
-import { askAnswered, newPage, type Page } from "./chain.ts";
+import { askAnswered, newPage, planResealed, type Page } from "./chain.ts";
 import { askAgain } from "./reroll.ts";
 import { authorityOf, bindSaveLifecycle, knownSaveHistory, serverTime } from "./lifecycle.ts";
 import { captureChoices, noticeWords, OUTCOME_APPLIED, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE, prepareSave, resumeSaveEdits, SAVE_MEMORY_ONLY, sessionOfDraft, type SaveSession } from "./reopen.ts";
@@ -531,4 +531,31 @@ test("the notice never flips back to Undo while a room op's history message is s
   assert.equal(noticeWords(reopen, knownSaveHistory(gap, summary("e2", 2))), OUTCOME_RESTORED);
   // With nothing known yet the notice stands as it is.
   assert.equal(knownSaveHistory(undefined, null), undefined);
+});
+
+test("a plan with conditions made before the page held a key goes with them sealed, and the saved draft keeps the plan as it went", () => {
+  const f = fixture(null, {});
+  const keyBytes = new Uint8Array(32).fill(7);
+  f.room.applySnapshot({ t: "snapshot", seq: 11, watermark: 0, state: { ...projectState(f.game, DM, { sceneId: "s1" }), saveOutcomes: {} }, you: { ...DM, sceneId: "s1", idKey: idKeyText(keyBytes) } });
+  const stop = bindSaveLifecycle(f.options);
+  // Made by the page before the deploy: the plan, its page and its condition are all version 7.
+  const condition = uuidv7(Date.now() - 3 * 3_600_000);
+  const plan = { t: "actor.outcome" as const, plan: PLAN, page: { id: PLAN, expectRevision: 0 }, label: "Hold Person", targets: [{ target: { tokenId: "g1" }, effects: [{ id: condition, key: "paralyzed" as const }] }] };
+  f.store.setState({ page: { ...page(), phase: "applying", apply: "sending", plan } });
+  f.room.dispatch(plan, {
+    quiet: true,
+    onRemint: (ids) => {
+      const active = f.store.getState().page;
+      if (active) f.store.setState({ page: planResealed(active, PLAN, ids) });
+    },
+  });
+  const saved = f.writes.at(-1)!.page.plan!;
+  assert.equal(saved.plan, PLAN, "the plan's id stays, so its receipt answers an Apply again");
+  assert.equal(saved.page?.id, PLAN);
+  const resealed = saved.targets[0]!.effects![0]!.id;
+  assert.notEqual(resealed, condition);
+  assert.ok(sealedTime(idKeyOf(keyBytes), resealed) !== null);
+  const sent = f.room.store.getState().pending.at(-1)!.op as typeof plan;
+  assert.equal(sent.targets[0]!.effects![0]!.id, resealed, "the draft holds what went");
+  stop();
 });

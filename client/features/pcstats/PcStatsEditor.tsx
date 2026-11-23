@@ -231,7 +231,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     setRefusal(null);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
     const op = { t: "character.update" as const, characterId: props.characterId, patch, ...(expect ? { expect } : {}) };
-    if (actions.dispatch(op, { onAnswer, quiet: true }) === null) send({ t: "saved", answer: "refused" });
+    if (actions.dispatch(op, { onAnswer, quiet: true, onRemint: (ids) => send({ t: "remint", ids }) }) === null) send({ t: "saved", answer: "refused" });
   };
 
   const setDraft = (update: (d: PcDraft) => PcDraft) => send({ t: "edit", update });

@@ -621,7 +621,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     const sceneId = role() === "dm" ? (wantedScene ?? current ?? undefined) : undefined;
     requestedScene = sceneId ?? null;
     if (sceneId && sceneId !== current) room.trackScene({ t: "request", sceneId });
-    const msg: ClientMessage = { t: "hello", clientId, resumeFrom, ackDetails: true, opVersion: OP_VERSION, ...(sceneId ? { sceneId } : {}) };
+    // Every page of this build asks for its member's id key (store.ts newId), so the room reads it as keyed.
+    const msg: ClientMessage = { t: "hello", clientId, resumeFrom, ackDetails: true, sealIds: true, opVersion: OP_VERSION, ...(sceneId ? { sceneId } : {}) };
     if (!sendRaw(msg)) return;
     const wasOpen = phase === "open";
     phase = "hello";

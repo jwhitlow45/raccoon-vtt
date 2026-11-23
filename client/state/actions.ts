@@ -1,4 +1,3 @@
-import { uuidv7 } from "#shared/ids.ts";
 import { clientMessageSchema, outboundEph, type ClientOp, type EphEvent } from "#shared/protocol.ts";
 import { moveOps } from "../lib/group.ts";
 import type { RoomSocket } from "./socket.ts";
@@ -66,8 +65,9 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
     holdBuild: (cancel) => room.holdBuild(cancel),
     // Redo while a gesture waits does nothing: the store refuses it, since the step it brings back may be a builder one.
     redo: (options) => { if (!room.activateHistory("redo", options)) options?.onAnswer?.("unknown", undefined, "snapshot"); },
-    // Dated by the server's clock as the room reckons it, which the room's id gate reads (docs/design/design-v1-player-limits.md 3.4).
-    newId: () => uuidv7(room.serverNow()),
+    // Sealed under the member's key and dated by the server's clock as the room reckons it, which the room's id gate reads
+    // (docs/design/design-v1-player-limits.md 3.4).
+    newId: () => room.newId(),
     moveToken: (tokenId, x, y) => void room.dispatch({ t: "token.move", tokenId, x, y }),
     moveTokens(moves) {
       dispatchGesture(actions, moveOps(moves));

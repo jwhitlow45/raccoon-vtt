@@ -233,6 +233,25 @@ export function hash12(text: string): string {
   return hash128(text).slice(0, 12);
 }
 
+/**
+ * A sync record with each roll's and class resource's entry, keyed by the
+ * hash of its id, moved to the hash of the id `renames` gives it: what a
+ * device that makes a roll's or resource's id again does to the record
+ * that names it (client/state/store.ts). Unchanged parts are kept.
+ */
+export function rekeySync<T extends { rolls?: Record<string, { k: string; h: string }> | undefined; res?: Record<string, { k: string; h: string }> | undefined }>(record: T, renames: ReadonlyMap<string, string>): T {
+  if (renames.size === 0) return record;
+  const hashes = new Map([...renames].map(([from, to]) => [hash12(from), hash12(to)]));
+  const moved = (entries: Record<string, { k: string; h: string }> | undefined) => {
+    if (!entries || !Object.keys(entries).some((k) => hashes.has(k))) return entries;
+    return Object.fromEntries(Object.entries(entries).map(([k, v]) => [hashes.get(k) ?? k, v]));
+  };
+  const rolls = moved(record.rolls);
+  const res = moved(record.res);
+  if (rolls === record.rolls && res === record.res) return record;
+  return { ...record, ...(rolls !== undefined ? { rolls } : {}), ...(res !== undefined ? { res } : {}) };
+}
+
 const KIND_LETTER: Record<PcRoll["kind"], "w" | "s" | "o"> = { weapon: "w", spell: "s", other: "o" };
 const LETTER_KIND = { w: "weapon", s: "spell", o: "other" } as const;
 

@@ -3,8 +3,8 @@ import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type 
 import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot } from "./scope.ts";
-import { uuidv7 } from "#shared/ids.ts";
-import { parseKey } from "#shared/keys.ts";
+import { idKeyFromText, isUuidv7, sealedId, uuidv7, type IdKey } from "#shared/ids.ts";
+import { parseKey, readEntity } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { ID_RETRY_FAILED, overNotice } from "#shared/limits.ts";
 import { NO_TYPED_TOTALS } from "#shared/permissions.ts";
@@ -18,6 +18,7 @@ import {
   clientOpSchema,
   FORGET_ASK,
   MAX_IDS_ASKED,
+  nestedIdsIn,
   type ClientMessage,
   type ClientOp,
   type EphEvent,
@@ -29,7 +30,8 @@ import { holdsTurn, opReads, reads, satisfies } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import { pointerWords } from "../lib/pointerWords.ts";
-import { freshIds, idTimeRefused, mintedOf, renamed, sentIdDead, unsentIdStale } from "./ids.ts";
+import { freshIds, idTimeRefused, mintedOf, newIdsIn, newIdsOfOp, ownIdTime, renamed, sentIdDead, unsentIdStale } from "./ids.ts";
+import { rekeySync } from "#shared/rules/pcSync.ts";
 import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, nextFloorExpiry, NO_FLOOR_EPHEMERAL, onEveryFloor, onFloor, sweepEph, type FloorEphemeral } from "./ephemeral.ts";
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { floorViewOf } from "./floorView.ts";
@@ -455,6 +457,15 @@ export type RoomStore = {
   receiveIds(msg: Extract<ServerMessage, { t: "ids" }>): void;
   /** The server's time as this page reckons it (RoomView.serverOffset), never ahead of it, or the device's own clock before any reading. New ids are dated by it. */
   serverNow(): number;
+  /**
+   * A new thing's id, made now by the server's time as this page reckons
+   * it: version 8, sealed under the id key of the page's latest snapshot
+   * (shared/ids.ts sealedId), or version 7 while the page holds no key, as
+   * before its first snapshot.
+   */
+  newId(): string;
+  /** When this page made one of its own ids, read under its key (ids.ts ownIdTime), or null for any it cannot read. */
+  ownIdTime(id: string): number | null;
   /** The socket lost its snapshot (it closed, or the server asked for a resync): hold ops until the next snapshot. */
   suspend(): void;
   setConnection(state: ConnectionState): void;
@@ -473,7 +484,50 @@ export type RoomStoreOptions = {
   clock?: Clock;
   random?: () => number;
   clientId?: string;
+  /**
+   * Tests only: told of each op that brings an id `newId` made for the
+   * first time in a field that holds no new thing's id (newIdsIn), a roll
+   * tag's, a group save's plan or page, or a fog op's. Later ops may name
+   * such an id anywhere.
+   */
+  newIdCheck?: (problem: string) => void;
 };
+
+/**
+ * Ids an op carries that `newId` may make outside its new-id fields:
+ * roll tags (kept version 7 or sealed, they reach only their roller or a
+ * target's players with a line that states the time), a group save's plan
+ * and page, and fog op ids, which only DMs hold.
+ */
+function keptIdsOf(op: ClientOp | HistoryCommand): Set<string> {
+  const kept = new Set<string>();
+  const walk = (v: unknown, field: string | null): void => {
+    if (typeof v === "string") {
+      if (field === "tag") kept.add(v);
+      return;
+    }
+    if (Array.isArray(v)) for (const x of v) walk(x, field);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(op, null);
+  if (op.t === "actor.outcome") {
+    kept.add(op.plan);
+    if (op.page) kept.add(op.page.id);
+  }
+  if (op.t === "fog.draft") for (const f of op.add ?? []) kept.add(f.id);
+  return kept;
+}
+
+/** Every string an op carries, each once: what the test hook looks for `newId`'s ids among. */
+function stringsOf(value: unknown, out = new Set<string>()): Set<string> {
+  if (typeof value === "string") out.add(value);
+  else if (Array.isArray(value)) for (const x of value) stringsOf(x, out);
+  else if (value && typeof value === "object") for (const [k, x] of Object.entries(value)) {
+    out.add(k);
+    stringsOf(x, out);
+  }
+  return out;
+}
 
 /**
  * Whether a refusal is the normal result of two people acting at once,
@@ -777,6 +831,18 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const serverNow = () => {
     const offset = get().serverOffset;
     return offset === undefined ? clock.now() : clock.elapsed() + offset;
+  };
+
+  /** The id key the latest snapshot brought (shared/ids.ts), which new ids are sealed under, or null before one brings it. Only the latest is kept. */
+  let idKey: IdKey | null = null;
+  /** Tests only (RoomStoreOptions.newIdCheck): each id `newId` made, and those an op has brought already. */
+  const made = options.newIdCheck ? new Set<string>() : null;
+  const introduced = new Set<string>();
+  const newId = (): string => {
+    const at = serverNow();
+    const id = idKey === null ? uuidv7(at) : sealedId(idKey, at);
+    made?.add(id);
+    return id;
   };
 
   const retainedNotices = new Map<string, string>();
@@ -1095,14 +1161,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     for (const p of list) {
       const ids = pick(p);
       if (ids.length === 0) continue;
-      const fresh = freshIds(ids, now);
+      const fresh = freshIds(ids, now, idKey);
       for (const [from, to] of fresh) renames.set(from, to);
       own.add(p);
       if (p.onRemint) owners.push({ onRemint: p.onRemint, ids: fresh });
     }
     if (renames.size === 0) return { list, told: () => {} };
     const out = list.map((p) => {
-      const op = renamed(p.op, renames);
+      const op = renamedOp(p.op, renames);
       if (op === p.op) return p;
       const next: PendingOp = { ...p, op };
       if (wrote.has(p) && !own.has(p)) wrote.add(next);
@@ -1118,28 +1184,73 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     return { list: out, told };
   }
 
-  /** `p` once it no longer waits on the server's time. */
+  /** `p` once it no longer waits on the server's time, and with no ids named for its retry. */
   function unwaited(p: PendingOp): PendingOp {
     if (!p.waitClock) return p;
-    const { waitClock: _waited, ...rest } = p;
+    const { waitClock: _waited, named: _named, ...rest } = p;
     return rest;
   }
 
   /**
-   * The op again after the room refused its ids for their time or version
-   * (ids.ts idTimeRefused): once, at the end of the queue, waiting unsent
-   * for a reading of the server's time before it takes fresh ids
-   * (clockCame). Null once its one retry is spent, or for an op with no
-   * new things, which is refused as it stands.
+   * `op` with the renamed ids swapped, and its sync record's entries for a
+   * renamed roll or class resource moved to the new id's hash
+   * (shared/rules/pcSync.ts rekeySync), which no plain rename reaches.
    */
-  function retryOf(p: PendingOp): PendingOp | null {
-    if (p.retried || mintedOf(p.op).length === 0) return null;
-    return { ...p, n: nextN++, retried: true, waitClock: true };
+  function renamedOp(op: ClientOp, renames: ReadonlyMap<string, string>): ClientOp {
+    const next = renamed(op, renames);
+    if (next === op || next.t !== "character.update" || !next.patch.ddbSync) return next;
+    const ddbSync = rekeySync(next.patch.ddbSync, renames);
+    return ddbSync === next.patch.ddbSync ? next : { ...next, patch: { ...next.patch, ddbSync } };
+  }
+
+  /**
+   * The ids of an unsent op that go under fresh ids before it leaves
+   * (docs/design/design-v1-player-limits.md 3.4), by the fields that hold a
+   * new thing's id (shared/protocol.ts newIdsOf): a minted one this page's
+   * key cannot read or the room would refuse by its time, at dispatch a
+   * version 7 one only, a recorded version 7 one, and a version 7 one in a
+   * nested field that the server's own frames (`confirmed`, never the view
+   * with pending changes) show the entity lacks. A keys field's id is never
+   * judged here: an upsert's key may be an old thing the page does not
+   * hold, so only the room's refusal names which are new (retryOf).
+   */
+  function unsentRemints(op: ClientOp, now: number, atDispatch: boolean, confirmed: RoomState | null): string[] {
+    if (atDispatch && idKey === null) return [];
+    const n = newIdsOfOp(op);
+    const out = atDispatch ? n.minted.filter(isUuidv7) : n.minted.filter((id) => unsentIdStale(id, now, idKey));
+    if (idKey !== null) {
+      out.push(...n.recorded.filter(isUuidv7));
+      for (const at of n.nested) {
+        if (!isUuidv7(at.id)) continue;
+        if (!nestedIdsIn(at.key, confirmed ? readEntity(confirmed, at.key) : null).has(at.id)) out.push(at.id);
+      }
+    }
+    return [...new Set(out)];
+  }
+
+  /** The ids an op's one retry makes again: every minted one, every recorded version 7 one, and those the room's refusal named. */
+  function retryRemints(p: PendingOp): string[] {
+    const n = newIdsOfOp(p.op);
+    const carried = new Set(newIdsIn(p.op));
+    return [...new Set([...n.minted, ...n.recorded.filter(isUuidv7), ...(p.named ?? []).filter((id) => carried.has(id))])];
+  }
+
+  /**
+   * The op again after the room refused its ids for their time, version or
+   * key (ids.ts idTimeRefused): once, at the end of the queue, waiting
+   * unsent for a reading of the server's time before it takes fresh ids
+   * (clockCame), with the ids the refusal named kept until then
+   * (retryRemints). Null once its one retry is spent, or for an op with no
+   * field of a new thing's id, which is refused as it stands.
+   */
+  function retryOf(p: PendingOp, named: readonly string[] | undefined): PendingOp | null {
+    if (p.retried || newIdsIn(p.op).length === 0) return null;
+    return { ...p, n: nextN++, retried: true, waitClock: true, ...(named && named.length > 0 ? { named } : {}) };
   }
 
   /** What a refusal of `p` reads as: one for its ids' time, once its retry is spent, in ID_RETRY_FAILED's words. */
   function asTold(p: PendingOp | undefined, r: Reject): Reject {
-    return p && idTimeRefused(r) && mintedOf(p.op).length > 0 ? { ...r, message: ID_RETRY_FAILED } : r;
+    return p && idTimeRefused(r) && newIdsIn(p.op).length > 0 ? { ...r, message: ID_RETRY_FAILED } : r;
   }
 
   /** Asks for a reading of the server's time, for the ops waiting on one. Without an answer they go anyway once CLOCK_WAIT_MS has passed. */
@@ -1153,7 +1264,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     clockTimer.clear();
     const s = get();
     if (!s.pending.some((p) => p.waitClock)) return;
-    const { list, told } = reminted(s.pending, (p) => (p.waitClock ? mintedOf(p.op) : []));
+    const { list, told } = reminted(s.pending, (p) => (p.waitClock ? retryRemints(p) : []));
     commit({ pending: list.map(unwaited) });
     told();
     flush();
@@ -1205,8 +1316,13 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
-  /** An op as `dispatch` queues it, numbered, or null where it refuses it at input with its toast. */
-  function queued(op: ClientOp | HistoryCommand, opts: DispatchOptions | undefined): PendingOp | null {
+  /**
+   * An op as `dispatch` queues it, numbered, or null where it refuses it at
+   * input with its toast. Its new things' version 7 ids go under ids sealed
+   * now (unsentRemints), and `tells` gets the call that tells its sender,
+   * to make once it is queued.
+   */
+  function queued(op: ClientOp | HistoryCommand, opts: DispatchOptions | undefined, tells: (() => void)[]): PendingOp | null {
     // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
     if (held.length > 0 && overtakes(op)) return null;
     if (opts?.groupScope && (!opts.group || get().you?.role !== "dm")) {
@@ -1215,14 +1331,25 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     }
     // Hiding or editing the automatic Unconscious makes it an ordinary condition under a fresh id, which the room asks of
     // the device (docs/design/design-v1-player-limits.md 6.1). One rule here covers every control that edits a condition.
-    if (op.t === "actor.effect.update" && op.effectId === ZERO_HP_UNCONSCIOUS_ID && op.as === undefined) op = { ...op, as: uuidv7(serverNow()) };
+    if (op.t === "actor.effect.update" && op.effectId === ZERO_HP_UNCONSCIOUS_ID && op.as === undefined) op = { ...op, as: newId() };
     const parsed = op.t === "undo" || op.t === "redo" ? historyCommandSchema.safeParse(op) : clientOpSchema.safeParse(op);
     if (!parsed.success) {
       console.error("raccoon: refusing to send a malformed op", op, parsed.error);
       pushToast("That change could not be sent.");
       return null;
     }
-    const pendingOp: PendingOp = { n: nextN++, op: parsed.data, at: clock.now() };
+    if (made) checkIntroduced(parsed.data);
+    let sent = parsed.data;
+    if (sent.t !== "undo" && sent.t !== "redo") {
+      const stale = unsentRemints(sent, serverNow(), true, get().confirmed as unknown as RoomState | null);
+      if (stale.length > 0) {
+        const fresh = freshIds(stale, serverNow(), idKey);
+        sent = renamedOp(sent, fresh);
+        const onRemint = opts?.onRemint;
+        if (onRemint) tells.push(() => onRemint(fresh));
+      }
+    }
+    const pendingOp: PendingOp = { n: nextN++, op: sent, at: clock.now() };
     if (opts?.group !== undefined) pendingOp.group = opts.group;
     if (opts?.groupScope !== undefined) pendingOp.groupScope = opts.groupScope;
     if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
@@ -1230,6 +1357,23 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
     if (opts?.onRemint !== undefined) pendingOp.onRemint = opts.onRemint;
     return pendingOp;
+  }
+
+  /**
+   * The test hook (RoomStoreOptions.newIdCheck): the first op that brings an
+   * id `newId` made must bring it in a field that holds a new thing's id
+   * (newIdsIn), a roll tag, a group save's plan or page, or a fog op. That
+   * finds a field the table of those fields left out. Later ops name it
+   * anywhere, as a move or delete of a token made earlier does.
+   */
+  function checkIntroduced(op: ClientOp | HistoryCommand): void {
+    const carried = [...stringsOf(op)].filter((x) => made!.has(x) && !introduced.has(x));
+    if (carried.length === 0) return;
+    const fields = new Set([...newIdsIn(op), ...keptIdsOf(op)]);
+    for (const id of carried) {
+      if (!fields.has(id)) options.newIdCheck!(`${op.t} first brings ${id}, made by newId, outside a field of a new thing's id`);
+      introduced.add(id);
+    }
   }
 
   // ------------------------------------------------------------ the store object
@@ -1391,9 +1535,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     historyConnection: () => history.generation,
 
     dispatch(op, opts) {
-      const pendingOp = queued(op, opts);
+      const tells: (() => void)[] = [];
+      const pendingOp = queued(op, opts, tells);
       if (!pendingOp) return null;
       commit({ pending: [...get().pending, pendingOp] });
+      for (const tell of tells) tell();
       flush();
       return pendingOp.n;
     },
@@ -1402,13 +1548,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     // time cost the square of the count in one task (dungeon generator phase 2, D-261107-263).
     dispatchMany(entries) {
       const added: PendingOp[] = [];
+      const tells: (() => void)[] = [];
       const ns = entries.map(({ op, opts }) => {
-        const pendingOp = queued(op, opts);
+        const pendingOp = queued(op, opts, tells);
         if (pendingOp) added.push(pendingOp);
         return pendingOp?.n ?? null;
       });
       if (added.length === 0) return ns;
       commit({ pending: [...get().pending, ...added] });
+      for (const tell of tells) tell();
       flush();
       return ns;
     },
@@ -1521,7 +1669,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const refusedNow = s.pending.filter((p) => {
         const r = p.n <= msg.watermark ? kept.get(p.n) : undefined;
         if (!r) return false;
-        const again = idTimeRefused(r) ? retryOf(p) : null;
+        const again = idTimeRefused(r) ? retryOf(p, r.ids) : null;
         if (again) retries.push(again);
         else reasons.set(p.n, asTold(p, r));
         return again === null;
@@ -1536,9 +1684,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // The clock frame just ahead of every snapshot is a fresh reading of the server's time. An unsent op whose ids
       // it would refuse, or nearly, takes fresh ones in place, so offline work goes as it was made, and so does one
       // sent under ids that can never be taken. An uncertain send that could still land keeps its ids.
+      // The key is this snapshot's alone: one made under a changed ROOM_SECRET_KEY reads nothing under it, so those ids go again too.
+      idKey = msg.you.idKey === undefined ? null : idKeyFromText(msg.you.idKey);
       const now = serverNow();
       const fresh = reminted([...s.pending.filter((p) => p.n > msg.watermark), ...retries], (p) =>
-        p.waitClock ? mintedOf(p.op) : mintedOf(p.op).filter((id) => (wrote.has(p) ? sentIdDead(id, now) : unsentIdStale(id, now))),
+        p.waitClock ? retryRemints(p) : wrote.has(p) ? mintedOf(p.op).filter((id) => sentIdDead(id, now, idKey)) : unsentRemints(p.op, now, false, msg.state as unknown as RoomState),
       );
       const pending = fresh.list.map(unwaited);
       sentAt.clear();
@@ -1614,7 +1764,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const retried = new Set<number>();
       const rejects = (msg.rejects ?? []).flatMap((r) => {
         const sent = s.pending.find((p) => p.n === r.n);
-        const again = sent && idTimeRefused(r) ? retryOf(sent) : null;
+        const again = sent && idTimeRefused(r) ? retryOf(sent, r.ids) : null;
         if (!again) return [asTold(sent, r)];
         retries.push(again);
         retried.add(r.n);
@@ -1810,6 +1960,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     },
 
     serverNow,
+
+    newId,
+
+    ownIdTime: (id) => ownIdTime(id, idKey),
 
     suspend() {
       ready = false;

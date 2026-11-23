@@ -542,3 +542,31 @@ describe("the editor's class resources", () => {
     assert.deepEqual(onlyGoneDropped(result, saved, { ...pending, gone: [marker(0)] }), [], "within 40, nothing drops");
   });
 });
+
+describe("a Save's new roll the store makes again (OnRemint)", () => {
+  test("the draft and its sync record take the new id, and a later sync finds every record", () => {
+    const AT = "2026-11-23T19:00:00.000Z";
+    const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15 }) };
+    const sling = { name: "Sling", kind: "weapon" as const, attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4" }], ddb: true as const };
+    const read = (id: string): PcFill => ({ source: "ddb", stats: { rolls: [{ ...sling, id }] }, level: 5, name: "Bree", actor: { ac: 15 }, warnings: [], read: { weapon: true, spell: true, other: true } });
+    const opened = openDraft(bare);
+    const made = uuidv7(Date.parse(AT) - 3_600_000);
+    let state = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
+    const first = editorSyncPlan(read(made), state, opened, bare, () => uuidv7());
+    state = run(state, { t: "read", fill: read(made), lines: [], ticks: defaultTicks(first) }, { t: "use", sync: editorSyncUse(syncResult(first, defaultTicks(first)), bare, { fill: read(made), ticks: defaultTicks(first) }) }).state;
+    const before = state.draft.stats.rolls[0]!.id;
+    assert.ok(state.record?.rolls?.[hash12(before)], "the record names the roll by its id's hash");
+    const fresh = uuidv7(Date.parse(AT));
+    state = run(state, { t: "remint", ids: new Map([[before, fresh]]) }).state;
+    assert.deepEqual(state.draft.stats.rolls.map((r) => r.id), [fresh]);
+    assert.deepEqual(Object.keys(state.record!.rolls ?? {}), [hash12(fresh)], "the record moved with it");
+    // Saved as the store sent it, then synced again from a read whose ids are new: the roll is found by its record.
+    const patch = { stats: state.draft.stats, ddbSync: state.record! };
+    const saved = afterSync(bare, patch, AT);
+    const again = planSync({ mode: "resync", stats: saved.stats, level: 5, character: saved, fill: read(uuidv7()), newId: () => uuidv7() });
+    assert.equal(again.source, "same");
+    const result = syncResult(again, defaultTicks(again));
+    assert.deepEqual(result.stats.rolls.map((r) => r.id), [fresh], "the same roll, linked, nothing added");
+    assert.deepEqual(result.goneDropped, [], "and no removed marker");
+  });
+});

@@ -207,7 +207,8 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
       send(what === "apply" ? { t: "applied", ...sorted, ...(stamped ? { at: stamped } : {}) } : { t: "undid", ...sorted });
     };
     // In "view as a player" nothing is sent: the preview says so, and the review stays.
-    if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch: sync.patch, expect: sync.expect }, { onAnswer, quiet: true }) === null) {
+    const onRemint = what === "apply" ? (ids: ReadonlyMap<string, string>) => send({ t: "remint", ids }) : undefined;
+    if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch: sync.patch, expect: sync.expect }, { onAnswer, quiet: true, ...(onRemint ? { onRemint } : {}) }) === null) {
       send(what === "apply" ? { t: "applied", answer: "refused" } : { t: "undid", answer: "refused" });
     }
   };

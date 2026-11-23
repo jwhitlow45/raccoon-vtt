@@ -224,6 +224,8 @@ export type PendingOp = {
   retried?: true;
   /** Waits, unsent, for a reading of the server's time, then takes fresh ids and goes. Nothing after it goes first. */
   waitClock?: true;
+  /** The ids of new things the room's refusal named (`ids`), which the retry makes again with the minted ones. Kept until it goes. */
+  named?: readonly string[];
 };
 
 /**

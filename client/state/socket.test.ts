@@ -206,7 +206,7 @@ describe("states", () => {
     assert.equal(s.conn(), "connecting");
     s.last().open();
     const [hello] = s.last().take("hello");
-    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1, ackDetails: true, opVersion: OP_VERSION });
+    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1, ackDetails: true, sealIds: true, opVersion: OP_VERSION });
     assert.equal(s.conn(), "connecting", "an open socket without its snapshot is not connected");
     s.last().emit(s.snapshot());
     assert.equal(s.conn(), "open");

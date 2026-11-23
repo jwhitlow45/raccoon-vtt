@@ -1,9 +1,8 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { uuidv7 } from "#shared/ids.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { api } from "../../../lib/api.ts";
 import { useScoped } from "../../../state/scope.ts";
-import { useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { castReceiptsSlot, castSendsSlot, closedText, readCastDraft, restoreSends, writeCastDraft, type CastEnv } from "./cast.ts";
 
 /*
@@ -41,6 +40,7 @@ export function useCastAlerts(): void {
   const store = useScoped(castSendsSlot);
   const tracker = useBoundTracker();
   const room = useRoomStore();
+  const actions = useRoomActions();
   const ui = useRoomUi();
   const restored = useRef(false);
   const read = useRef<string | null | undefined>(undefined);
@@ -53,13 +53,13 @@ export function useCastAlerts(): void {
       connected: () => room.getState().connection === "open",
       dispatch: () => null,
       rollDamage: () => null,
-      newId: uuidv7,
+      newId: actions.newId,
       view: () => room.getState().view,
       save: (sends) => writeCastDraft(roomId, sends),
       notify: (text) => ui.notify(text, "info"),
     };
     restoreSends(env, readCastDraft(roomId));
-  }, [player, loaded, roomId, store, tracker, room, ui]);
+  }, [player, loaded, roomId, store, tracker, room, actions, ui]);
   useEffect(() => {
     if (!player || !log) return;
     const latest = log.at(-1)?.id ?? null;

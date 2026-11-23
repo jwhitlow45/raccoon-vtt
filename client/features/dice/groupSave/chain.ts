@@ -9,6 +9,7 @@ import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
 import { holderOf } from "../targets.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
+import { renamed } from "../../../state/ids.ts";
 import type { SaveOutcomeFields, SavePageAskFields, SavePageCloseFields } from "#shared/saveOutcomeContract.ts";
 import { settleAskAgain } from "./reroll.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
@@ -551,6 +552,19 @@ export function apply(page: Page, plan: OpOf<"actor.outcome"> & SaveOutcomeField
   if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open, reason: "savePage" } });
   send.push({ kind: "outcome", op });
   return { page: { ...page, phase: "applying", plan: op, apply: "sending", requests: page.requests.map((r) => (open.includes(r.rollId) ? { ...r, state: "closed" } : r)) }, send };
+}
+
+/**
+ * The page once the store sent its plan with version 7 conditions under
+ * fresh sealed ids (client/state/store.ts OnRemint), as a plan made before
+ * the page held a key is: the plan keeps them, so a saved draft
+ * (lifecycle.ts) and an Apply again send what went. The plan's own id and
+ * its page's never change, so the receipt still answers an Apply again.
+ */
+export function planResealed(page: Page, plan: string, ids: ReadonlyMap<string, string>): Page {
+  if (!page.plan || page.plan.plan !== plan) return page;
+  const next = renamed(page.plan, ids);
+  return next === page.plan ? page : { ...page, plan: next };
 }
 
 export function applySettled(page: Page, settled: { state: "committed" } | { state: "refused"; says: string } | { state: "unknown" }): Page {

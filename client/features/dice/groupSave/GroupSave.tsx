@@ -46,6 +46,7 @@ import { readRecentDcs, recentDcChips, rememberSaveDc } from "../../rolls/logic.
 import { RecentDcs } from "../../rolls/RecentDcs.tsx";
 import {
   newPage,
+  planResealed,
   applyAgain,
   castEndOf,
   castSeen,
@@ -406,7 +407,15 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   // The outcome is tagged by its plan (doc 1 1.2): its receipt settles it, and only the DM's Apply again sends it again.
   const sendOutcome = (op: NonNullable<Page["plan"]>) => {
     sender.receipts.sending(op.plan, 0);
-    const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal, cause) => sender.receipts.answer(op.plan, 0, answer, refusal, cause) });
+    const n = actions.dispatch(op, {
+      quiet: true,
+      onAnswer: (answer, refusal, cause) => sender.receipts.answer(op.plan, 0, answer, refusal, cause),
+      // Conditions made before this page held a key go under sealed ids, which the page's plan and its draft keep.
+      onRemint: (ids) => {
+        const active = groupStore.getState().page;
+        if (active) update(planResealed(active, op.plan, ids));
+      },
+    });
     if (n === null) sender.receipts.answer(op.plan, 0, "refused", { code: "invalid", message: "Not sent.", text: "Not sent." });
   };
 

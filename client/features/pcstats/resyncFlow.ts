@@ -1,4 +1,6 @@
 import type { CharacterExpect, CharacterPatch } from "#shared/protocol.ts";
+import { rekeySync } from "#shared/rules/pcSync.ts";
+import { renamed } from "../../state/ids.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
 
 /**
@@ -78,6 +80,8 @@ export type ResyncEvent =
   | { t: "undid"; answer: SyncAnswer; message?: string }
   /** The save budget refilled. */
   | { t: "refilled" }
+  /** The store sent Apply's new rolls or class resources under fresh ids (OnRemint): what it sent, which Undo reads, takes them. */
+  | { t: "remint"; ids: ReadonlyMap<string, string> }
   | { t: "close" };
 
 export type ResyncEffect = { kind: "fetch"; id: number } | { kind: "abort"; id: number } | { kind: "send"; what: "apply" | "undo"; op: SyncOp } | { kind: "close" };
@@ -164,6 +168,12 @@ export function stepResync(state: ResyncState, event: ResyncEvent): { state: Res
       return { state: { ...state, undoing: false, undoStale: event.answer === "stale", refused: { of: "undo", answer: event.answer, ...(event.message ? { message: event.message } : {}) } }, effects: NONE };
     case "refilled":
       return { state: { ...state, waiting: false }, effects: NONE };
+    case "remint": {
+      if (!state.applying) return { state, effects: NONE };
+      const patch = renamed(state.applying.patch, event.ids);
+      const ddbSync = patch.ddbSync ? rekeySync(patch.ddbSync, event.ids) : patch.ddbSync;
+      return { state: { ...state, applying: { ...state.applying, patch: ddbSync === patch.ddbSync ? patch : { ...patch, ddbSync } } }, effects: NONE };
+    }
     case "close": {
       const dropped = dropGet(state);
       return { state: { ...dropped.state, closed: true }, effects: [...dropped.effects, { kind: "close" }] };

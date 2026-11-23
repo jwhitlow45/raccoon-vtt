@@ -5,7 +5,8 @@ import { MAX_PC_ROLLS, type CharacterPatch, type DdbSyncPatch } from "#shared/pr
 import { resourcesAfter, type ResourceSent } from "#shared/rules/classResources.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
 import { mergeFill } from "#shared/rules/pcFill.ts";
-import { planSync, sameRecord, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import { planSync, rekeySync, sameRecord, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import { renamed } from "../../state/ids.ts";
 import { resourcePart, sameButLevels } from "#shared/rules/resourceSync.ts";
 import { draftDirty, type PcDraft } from "./draft.ts";
 import { alsoSet, pendingCharacter, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
@@ -247,7 +248,9 @@ export type FlowEvent =
   | { t: "close" }
   | { t: "get" }
   /** A D&D Beyond request's answer: its fill and lines, or why it read nothing. */
-  | { t: "got"; id: number; result: { fill: PcFill; lines: AlsoLine[]; ticks?: ReadonlySet<string> } | { error: string } };
+  | { t: "got"; id: number; result: { fill: PcFill; lines: AlsoLine[]; ticks?: ReadonlySet<string> } | { error: string } }
+  /** The store sent the Save's new rolls or class resources under fresh ids (OnRemint): the draft, the record and the resources take them. */
+  | { t: "remint"; ids: ReadonlyMap<string, string> };
 
 export type FlowEffect = { kind: "send" } | { kind: "close" } | { kind: "fetch"; id: number } | { kind: "abort"; id: number };
 
@@ -347,6 +350,10 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
       }
       // A refusal, or a lost answer, leaves the draft as it was, for the player to act on.
       return { state: { ...state, saving: false }, effects: NONE };
+    case "remint": {
+      const record = state.record === null ? null : rekeySync(renamed(state.record, event.ids), event.ids);
+      return { state: { ...state, draft: renamed(state.draft, event.ids), record, resources: renamed(state.resources, event.ids) }, effects: NONE };
+    }
     case "close": {
       const dropped = dropGet(state);
       return { state: { ...dropped.state, closed: true }, effects: [...dropped.effects, { kind: "close" }] };
