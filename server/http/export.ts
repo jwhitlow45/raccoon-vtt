@@ -99,7 +99,7 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
       try {
         const actor = await deps.manager.acquire(roomId);
         // The state is immutable, so the copy on the queue is a reference and the manifest query is the only wait.
-        const copied = await actor.read((state, seq) => ({ state: exportableState(state, { memberId: grant.memberId, role: "dm" }, choice), seq }));
+        const copied = await actor.read((state, seq) => ({ state: exportableState(state, { memberId: grant.memberId, role: "dm" }, choice), seq }), req.arrivedAt);
         // Read after the copy: a member marked later got its DM grant after
         // the copy too, so the copied log holds nothing it had as DM.
         const dmMemberIds = await formerDmsOfLiveRoom(kit.pool, roomId);

@@ -73,7 +73,7 @@ export async function registerPlayerViewRoutes(app: FastifyInstance, kit: AuthKi
       if (!sceneId.success) throw new HttpError(404, "not_found");
       // Taken on the queue, so it is a committed state, and projected off it, so the room keeps playing:
       // a committed state is never changed.
-      const state = await committedState(deps.manager, roomId);
+      const state = await committedState(deps.manager, roomId, req.arrivedAt);
       const view = playerView(state, sceneId.data);
       if (!view) throw new HttpError(404, "not_found");
       reply.header("cache-control", "no-store");
@@ -82,10 +82,10 @@ export async function registerPlayerViewRoutes(app: FastifyInstance, kit: AuthKi
   });
 }
 
-async function committedState(manager: RoomManager, roomId: string): Promise<RoomState> {
+async function committedState(manager: RoomManager, roomId: string, arrivedAt: number): Promise<RoomState> {
   try {
     const actor = await manager.acquire(roomId);
-    return await actor.read((state) => state);
+    return await actor.read((state) => state, arrivedAt);
   } catch (err) {
     if (err instanceof TooBusyError || err instanceof ActorClosedError) throw new HttpError(503, "busy", { retryAfter: err instanceof TooBusyError ? 30 : 2 });
     // The room could not give the state as of the request (RoomActor.read): busy, as any reader it turns away.

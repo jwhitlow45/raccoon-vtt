@@ -58,7 +58,7 @@ import {
   readWatermark,
   setReadOnly,
   snapshotJson,
-  storeSnapshot,
+  writeSnapshotJson,
   type ArchiveGuard,
   type AssetFact,
   type BatchWrite,
@@ -4076,7 +4076,7 @@ export class RoomActor {
     let write!: Promise<void>;
     write = (async () => {
       try {
-        await storeSnapshot(this.#pool, this.roomId, seq, json, capsPending);
+        await writeSnapshotJson(this.#pool, this.roomId, seq, json, capsPending);
         landed = true;
         this.#writesFailing = false;
         this.#snapshotStored(seq);
