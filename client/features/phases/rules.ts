@@ -127,6 +127,19 @@ export function removeConfirmText(phases: readonly MapPhase[], phaseId: string, 
 }
 
 /**
+ * The props of a phase row's Remove button. The armed words hold a phase's name, so they are worded here and the button takes them as `worded`, which a test reads directly.
+ */
+export function removeButtonProps(phases: readonly MapPhase[], phase: MapPhase, showing: boolean, touch?: boolean) {
+  return {
+    label: "Remove",
+    confirm: removeConfirmText(phases, phase.id, showing, touch),
+    worded: true as const,
+    title: showing ? `Remove ${phase.name}. The map shows the first phase left.` : `Remove ${phase.name}`,
+    shrink: true as const,
+  };
+}
+
+/**
  * The list without one phase, or null when it is the last one: removing
  * the map's only image is removing the map, which the map image's own
  * Remove does. The server shows the first phase left when the one showing

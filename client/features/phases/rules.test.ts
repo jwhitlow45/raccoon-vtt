@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { MapPhase, Scene } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
@@ -16,6 +15,7 @@ import {
   phaseProblem,
   phasesOf,
   referenceGrid,
+  removeButtonProps,
   removeConfirmText,
   removePhase,
   renamePhase,
@@ -174,11 +174,12 @@ describe("editing the list", () => {
   });
 
   test("the Remove button takes those words as worded, so the central pass never reads a phase's name (FW-3)", () => {
-    // The row is not exported and its armed words show only after a tap, so this reads the one place that passes them.
-    const source = readFileSync(new URL("./PhasesSection.tsx", import.meta.url), "utf8");
-    const button = source.match(/<ConfirmButton\b[^>]*confirm=\{props\.removeConfirm\}[^>]*>/s);
-    assert.ok(button, "the Remove button passes removeConfirm");
-    assert.match(button[0], /\bworded\b/);
+    const list = [DAY, { ...NIGHT, name: "Tap" }, FIRE];
+    const props = removeButtonProps(list, DAY, true, false);
+    assert.equal(props.worded, true);
+    assert.equal(props.confirm, "Click again: the map switches to Tap");
+    assert.equal(props.label, "Remove");
+    assert.equal(removeButtonProps(list, FIRE, false, true).title, `Remove ${FIRE.name}`);
   });
 
   test("a mouse reads Click in those words, and a phase named Tap keeps its name", () => {

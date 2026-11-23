@@ -20,7 +20,7 @@ import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.t
 import { nameFromFile, type MapAsset } from "../scenes/create.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { UvttAddPhase } from "../uvtt/UvttImport.tsx";
-import { activePhaseId, addPhase, canAddPhase, movePhase, phasesOf, removeConfirmText, removePhase, renamePhase } from "./rules.ts";
+import { activePhaseId, addPhase, canAddPhase, movePhase, phasesOf, removeButtonProps, removePhase, renamePhase } from "./rules.ts";
 
 /**
  * A map's phases in the scene's settings (docs/design/design-v1-maps-vision.md
@@ -144,7 +144,7 @@ export function PhasesSection(props: { scene: Scene }) {
             first={i === 0}
             last={i === phases.length - 1}
             canRemove={phases.length > 1}
-            removeConfirm={removeConfirmText(phases, phase.id, phase.id === active)}
+            remove={removeButtonProps(phases, phase, phase.id === active)}
             onRename={(name) => send(renamePhase(scene, phase.id, name, actions.newId))}
             onMove={(delta) => send(movePhase(scene, phase.id, delta))}
             onRemove={() => {
@@ -208,7 +208,7 @@ function PhaseRow(props: {
   first: boolean;
   last: boolean;
   canRemove: boolean;
-  removeConfirm: string;
+  remove: ReturnType<typeof removeButtonProps>;
   onEdit(): void;
   onRename(name: string): void;
   onMove(delta: -1 | 1): void;
@@ -250,14 +250,7 @@ function PhaseRow(props: {
             <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move ${phase.name} down`} disabled={props.last} onClick={() => props.onMove(1)} />
           </div>
           {props.canRemove ? (
-            <ConfirmButton
-              label="Remove"
-              confirm={props.removeConfirm}
-              worded
-              title={props.showing ? `Remove ${phase.name}. The map shows the first phase left.` : `Remove ${phase.name}`}
-              shrink
-              onConfirm={props.onRemove}
-            />
+            <ConfirmButton {...props.remove} onConfirm={props.onRemove} />
           ) : null}
         </div>
       ) : null}
