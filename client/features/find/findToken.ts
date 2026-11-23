@@ -23,8 +23,8 @@ const KIND_ORDER: Record<Token["kind"], number> = { pc: 0, npc: 1, monster: 1, o
 /**
  * The token a press finds: the next one this member owns on the scene after
  * the one found last, wrapping round. Player characters come first, then
- * other creatures, then objects, each in the order they were made (token
- * ids are UUIDv7). Ownership counts through a character, as on the server.
+ * other creatures, then objects, each by id. Ownership counts through a
+ * character, as on the server.
  * With floors, the next one on any floor the player holds (D-261107-222),
  * and the caller shows the floor the token stands on. Null when they own
  * none there.

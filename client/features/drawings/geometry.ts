@@ -247,3 +247,19 @@ export function eraseTarget<D extends Pick<Drawing, "id" | "kind" | "points" | "
 export function fillFor(stroke: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(stroke) ? `${stroke}55` : stroke;
 }
+
+/** A drawing's place in its layer's order: a filled shape first, then strokes and outlines, then text. */
+function drawingRank(d: Pick<Drawing, "kind" | "style">): number {
+  if (d.kind === "text") return 2;
+  return d.style.fill !== undefined ? 0 : 1;
+}
+
+/**
+ * The order a scene's drawings draw in, bottom first: filled shapes, then
+ * strokes (free, line, arrow, an unfilled rectangle, ellipse or polygon),
+ * then text, each by id, so a fill never covers a line or words drawn over
+ * it.
+ */
+export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style">, b: Pick<Drawing, "id" | "kind" | "style">): number {
+  return drawingRank(a) - drawingRank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}

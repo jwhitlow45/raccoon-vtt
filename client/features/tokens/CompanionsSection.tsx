@@ -192,6 +192,7 @@ export function CompanionForm(props: {
   const { character } = props;
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
+  const selectedIds = useRoomView((s) => s.local.selectedIds);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const actions = useRoomActions();
   const room = useRoomStore();
@@ -281,7 +282,7 @@ export function CompanionForm(props: {
   const center = live
     ? groundAtMiddle(live)
     : { x: (scene?.bounds.w ?? 0) / 2, y: (scene?.bounds.h ?? 0) / 2 };
-  const placement = !view ? null : dm ? dmPlacement(view, character, { size: draft.size }, { sceneId, center }) : playerPlacement(view, character, { size: draft.size }, sceneId);
+  const placement = !view ? null : dm ? dmPlacement(view, character, { size: draft.size }, { sceneId, center }, selectedIds) : playerPlacement(view, character, { size: draft.size }, sceneId, selectedIds);
   const choices = turnChoices(name, draft.what);
   const chosen = choices.find((c) => c.value === draft.turn) ?? choices[0]!;
   const besideHere = dm && sceneId !== null && Object.values(view?.tokens ?? {}).some((t) => t?.sceneId === sceneId && "ref" in t.actor && t.actor.ref === character.id);

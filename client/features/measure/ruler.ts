@@ -366,6 +366,11 @@ export function keepPlan(
   return drawing ? { create: drawing } : { leave: ruler };
 }
 
+/** Kept rulers by their first stop, top to bottom, then left to right, then by id. */
+export function keptRulerOrder(a: Pick<Drawing, "id" | "points">, b: Pick<Drawing, "id" | "points">): number {
+  return (a.points[1] ?? 0) - (b.points[1] ?? 0) || (a.points[0] ?? 0) - (b.points[0] ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 /** A kept ruler's stops, measured and drawn the same way as a live ruler's. One kept before stops stood on the ground has no `z`, and reads at 0 as it did. */
 export function keptStops(d: Pick<Drawing, "points" | "anchors" | "z">): RulerStop[] {
   const stops: RulerStop[] = [];

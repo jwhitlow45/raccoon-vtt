@@ -252,11 +252,16 @@ export function companionSpot(view: PlaceView, beside: Token, draft: Pick<TokenI
   return firstFreeSpot({ grid: sceneGrid(scene), center: { x: beside.x + near.w / 2, y: beside.y + near.h / 2 }, footprint: fp, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), beside.sceneId), accept });
 }
 
-/** The character's tokens on a scene, by id, the first the one a companion goes beside. */
-export function characterTokensOn(view: Pick<RoomState, "tokens">, characterId: string, sceneId: string): Token[] {
+/**
+ * The character's tokens on a scene, the first the one a companion goes
+ * beside: one this device has selected, then the topmost, then the
+ * leftmost, then by id.
+ */
+export function characterTokensOn(view: Pick<RoomState, "tokens">, characterId: string, sceneId: string, selected: readonly string[] = []): Token[] {
+  const chosen = new Set(selected);
   return Object.values(view.tokens)
     .filter((t): t is Token => !!t && t.sceneId === sceneId && "ref" in t.actor && t.actor.ref === characterId)
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
+    .sort((a, b) => Number(chosen.has(b.id)) - Number(chosen.has(a.id)) || a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 export type Placement = { ok: true; sceneId: string; x: number; y: number; elevation: number } | { ok: false; reason: string };
@@ -266,13 +271,13 @@ export type Placement = { ok: true; sceneId: string; x: number; y: number; eleva
  * next to the character's token on the players' scene (on the floor shown, else its lowest floor with one). Each way it cannot
  * is the reason the form shows under its disabled button.
  */
-export function playerPlacement(view: PlaceView, character: Pick<Character, "id" | "name">, draft: Pick<TokenInput, "size" | "w" | "h">, shown: string | null = null): Placement {
+export function playerPlacement(view: PlaceView, character: Pick<Character, "id" | "name">, draft: Pick<TokenInput, "size" | "w" | "h">, shown: string | null = null, selected: readonly string[] = []): Placement {
   const start = view.meta.playerSceneId;
   if (start === null || view.meta.view.blackout || !view.scenes[start]) return { ok: false, reason: "No map to place it on yet." };
   // The floor shown if the character has a token there, else the lowest floor it stands on (floors design 7.3's order).
   const floors = [...(shown !== null && sameScene(view, start, shown) ? [shown] : []), ...floorsOf(view, start).map((f) => f.id)];
   const sceneId = floors.find((id) => characterTokensOn(view, character.id, id).length > 0) ?? start;
-  const own = characterTokensOn(view, character.id, sceneId);
+  const own = characterTokensOn(view, character.id, sceneId, selected);
   if (own.length === 0) return { ok: false, reason: `${character.name} has no token on the map.` };
   for (const beside of own) {
     const spot = companionSpot(view, beside, draft);
@@ -286,10 +291,10 @@ export function playerPlacement(view: PlaceView, character: Pick<Character, "id"
  * character's token when it stands there, else around the middle of the
  * DM's view. The DM's placement has no reach rule.
  */
-export function dmPlacement(view: PlaceView, character: Pick<Character, "id">, draft: Pick<TokenInput, "size" | "w" | "h">, at: { sceneId: string | null; center: Point }): Placement {
+export function dmPlacement(view: PlaceView, character: Pick<Character, "id">, draft: Pick<TokenInput, "size" | "w" | "h">, at: { sceneId: string | null; center: Point }, selected: readonly string[] = []): Placement {
   const scene = at.sceneId !== null ? view.scenes[at.sceneId] : undefined;
   if (!scene) return { ok: false, reason: "No map to place it on yet." };
-  const beside = characterTokensOn(view, character.id, scene.id)[0];
+  const beside = characterTokensOn(view, character.id, scene.id, selected)[0];
   const fp = sizeFootprint(draft.size, draft.w !== undefined && draft.h !== undefined ? { w: draft.w, h: draft.h } : undefined);
   const center = beside ? { x: beside.x + footprint(beside).w / 2, y: beside.y + footprint(beside).h / 2 } : at.center;
   const [spot] = spreadPositions({ grid: sceneGrid(scene), center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });

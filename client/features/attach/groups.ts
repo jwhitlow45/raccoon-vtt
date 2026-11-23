@@ -1,7 +1,7 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { Token } from "#shared/model.ts";
 import { carriedGroup, carriedIndex, fullRect, holderOf, publicMembers, type SeenByAll } from "#shared/rules/attach.ts";
-import type { PlacedToken } from "#shared/rules/footprint.ts";
+import { footprintSize, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { displayName, drawnAt } from "../../lib/scene.ts";
 import { linkTag } from "./tags.ts";
@@ -158,6 +158,21 @@ export function boxesAround(w: number, h: number, hole: CellBox): CellBox[] {
   add(0, hole.y, hole.x, hole.h);
   add(hole.x + hole.w, hole.y, w - hole.x - hole.w, hole.h);
   return out;
+}
+
+/**
+ * The order a scene's tokens draw in, bottom first, before drawOrder puts
+ * each carried token right after its holder: objects (doors, chests,
+ * markers) under creatures, a larger footprint under a smaller one, then by
+ * id.
+ */
+export function tokenDrawOrder(a: Pick<Token, "id" | "layer" | "size" | "w" | "h">, b: Pick<Token, "id" | "layer" | "size" | "w" | "h">): number {
+  if (a.layer !== b.layer) return a.layer === "object" ? -1 : 1;
+  const area = (t: Pick<Token, "size" | "w" | "h">) => {
+    const { w, h } = footprintSize(t as PlacedToken);
+    return w * h;
+  };
+  return area(b) - area(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /**

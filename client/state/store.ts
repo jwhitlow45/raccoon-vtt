@@ -518,6 +518,34 @@ function keptIdsOf(op: ClientOp | HistoryCommand): Set<string> {
   return kept;
 }
 
+/** Top-level fields of a room that are one record, not a collection by id. */
+const SINGLE_RECORDS: ReadonlySet<string> = new Set(["meta", "encounter", "clock", "playing", "numbering"]);
+
+/**
+ * `next` with each collection that changed since `prev` and lists its keys
+ * out of code-unit order rebuilt in that order, so every list drawn in a
+ * collection's order reads the same after a live change as after a reload,
+ * whose snapshot comes sorted. A live change adds its key at the end, and a
+ * pending create replayed into the view does too. Collections in order, and
+ * those `prev` holds as they are, are kept as they are.
+ */
+export function inIdOrder<T extends object>(next: T, prev: T | null): T {
+  let out: Record<string, unknown> | null = null;
+  const before = prev as Record<string, unknown> | null;
+  for (const [field, value] of Object.entries(next)) {
+    if (SINGLE_RECORDS.has(field) || value === null || typeof value !== "object" || Array.isArray(value)) continue;
+    if (before && before[field] === value) continue;
+    const keys = Object.keys(value);
+    let ordered = true;
+    for (let i = 1; i < keys.length && ordered; i++) ordered = keys[i - 1]! < keys[i]!;
+    if (ordered) continue;
+    const record = value as Record<string, unknown>;
+    out ??= { ...(next as Record<string, unknown>) };
+    out[field] = Object.fromEntries(keys.sort().map((id) => [id, record[id]]));
+  }
+  return (out ?? next) as T;
+}
+
 /** Every string an op carries, each once: what the test hook looks for `newId`'s ids among. */
 function stringsOf(value: unknown, out = new Set<string>()): Set<string> {
   if (typeof value === "string") out.add(value);
@@ -908,7 +936,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       state = replay.state;
       if (replay.waiting.length > 0) busy = shareRecord(prev.busy, Object.fromEntries(replay.waiting.map((k) => [k, true as const])));
     }
-    return { view: shareState(prev.view, state), busy };
+    return { view: shareState(prev.view, inIdOrder(state, next.confirmed as unknown as RoomState)), busy };
   }
 
   /** A player's pick of floor, or a Look here's (follow.ts FloorPick). A DM's pick is the floor shown itself. */
@@ -1719,7 +1747,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         };
       }
       commit({
-        confirmed: msg.state as ProjectedState,
+        confirmed: inIdOrder(msg.state as ProjectedState, null),
         confirmedReady: true,
         seq: msg.seq,
         pending,
@@ -1755,7 +1783,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     applyEv(msg) {
       const s = get();
       if (!s.confirmed) return;
-      const confirmed = applyChanges(s.confirmed, msg.changes);
+      const confirmed = inIdOrder(applyChanges(s.confirmed, msg.changes), s.confirmed);
       const settled = new Set<number>(msg.acks ?? []);
       for (const r of msg.rejects ?? []) settled.add(r.n);
       for (const n of settled) terminal = Math.max(terminal, n);

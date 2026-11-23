@@ -5,7 +5,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, ValueChip } from "./controls.tsx";
 import { gridOfShape } from "#shared/rules/grid.ts";
-import { formatFeet, keptStops, measureStops } from "./ruler.ts";
+import { formatFeet, keptRulerOrder, keptStops, measureStops } from "./ruler.ts";
 
 /**
  * The kept rulers this member may remove (features section 4): their own,
@@ -25,7 +25,7 @@ const EMPTY: RoomState["drawings"] = {};
 
 export type KeptRuler = { id: string; text: string };
 
-/** The kept rulers on this scene this member may remove, oldest first, each described as its button says it. */
+/** The kept rulers on this scene this member may remove, by where each starts (keptRulerOrder), each described as its button says it. */
 export function useKeptRulers(role: "dm" | "player"): KeptRuler[] {
   const drawings = useRoomView((s) => s.floorView?.drawings ?? EMPTY);
   const sceneId = useRoomView((s) => s.sceneId);
@@ -39,7 +39,7 @@ export function useKeptRulers(role: "dm" | "player"): KeptRuler[] {
     const grid = gridOfShape(gridShape);
     const kept = Object.values(drawings)
       .filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === sceneId && (role === "dm" || d.ownerId === youId))
-      .sort((a, b) => (a.id < b.id ? -1 : 1));
+      .sort(keptRulerOrder);
     const describe = (d: Drawing) => {
       const total = formatFeet(measureStops(grid, keptStops(d), tokens, settings).totalFt);
       const owner = d.ownerId === youId ? null : (members?.[d.ownerId]?.name ?? "Someone");

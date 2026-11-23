@@ -43,7 +43,7 @@ function creature(token: Token): boolean {
   return token.kind !== "object";
 }
 
-/** Floor shown first, then lowest first, then player characters before other creatures, then creation order. */
+/** Floor shown first, then lowest first, then player characters before other creatures, then by id. */
 function byPlace(held: readonly Scene[], shown: SceneId | null): (a: Token, b: Token) => number {
   const level = new Map(held.map((s, i) => [s.id, s.id === shown ? -1 : i]));
   const kind = (t: Token) => (t.kind === "pc" ? 0 : 1);

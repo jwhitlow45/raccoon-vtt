@@ -10,7 +10,7 @@ import { useScoped } from "../../state/scope.ts";
 import { Clipped } from "../areas/TemplateLayer.tsx";
 import type { LayerProps } from "../layers.ts";
 import { drawSlot, type DrawToolState } from "./store.ts";
-import { bounds, fillFor, strokeCells, textCells } from "./geometry.ts";
+import { bounds, drawingOrder, fillFor, strokeCells, textCells } from "./geometry.ts";
 import { textDrawingBox, type MeasureEm } from "./textBox.ts";
 
 /**
@@ -47,7 +47,7 @@ export const DrawingLayer = memo(function DrawingLayer(props: LayerProps) {
   const memberColor = useTreeShownView((s) => (s.you ? s.floorView?.members[s.you.memberId]?.color : undefined)) ?? boardTheme.color.crest;
   const iso = useIsoGround();
   // Kept rulers are drawings in the state, drawn and measured by the ruler layer (features/measure).
-  const list = Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === props.scene.id && d.kind !== "ruler");
+  const list = Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === props.scene.id && d.kind !== "ruler").sort(drawingOrder);
   const drawing = tool === "draw";
   if (list.length === 0 && !(drawing && (draft || textAt))) return null;
   const stroke = color ?? memberColor;

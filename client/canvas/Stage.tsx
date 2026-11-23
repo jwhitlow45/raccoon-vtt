@@ -73,7 +73,7 @@ import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, P
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
-import { carriesText, GET_OFF_TAP, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
+import { carriesText, GET_OFF_TAP, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, tokenDrawOrder, type CellBox } from "../features/attach/groups.ts";
 import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
@@ -677,8 +677,8 @@ export function MapStage(props: {
 
   const tokens = useMemo(() => {
     const list = Object.values(allTokens).filter((t): t is ViewToken => !!t && t.sceneId === scene.id);
-    // Objects (doors, chests, markers) under creatures. Creation order otherwise.
-    list.sort((a, b) => (a.layer === b.layer ? (a.id < b.id ? -1 : 1) : a.layer === "object" ? -1 : 1));
+    // Objects (doors, chests, markers) under creatures, a larger token under a smaller one, then by id (tokenDrawOrder).
+    list.sort(tokenDrawOrder);
     // A carried token draws right after its holder, whatever its layer, so a torch shows on the hand holding it (docs/design/design-v1-attach.md 4.4).
     return drawOrder(list, allTokens);
   }, [allTokens, scene.id]);
