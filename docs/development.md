@@ -242,7 +242,8 @@ These jobs run on Ubuntu:
   (`E2E_BROWSERS=chromium,webkit`), on a postgres container of its own, once
   the build has said the push is not docs only. It covers the desktop app's
   web side over plain HTTP, where WebKit differs from Chrome.
-- **unit**: `pnpm test`, which needs no database.
+- **unit**, 3 shards at once: `pnpm test --test-shard=<i>/3`, Node's own split of the
+  files `pnpm test` runs, so each file runs in one shard. It needs no database.
 - **e2e**, 14 shards at once: each shard installs, downloads the build,
   gets a postgres service container of its own and runs its share of
   `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
@@ -290,7 +291,7 @@ lands, rewrite the list from a few green runs with
 `node scripts/e2e-durations.ts <run id> ...`, which reads those times
 through `gh`. The list holds CI seconds, the largest of the runs given, and
 the longest of the 14 shards plans about 16 minutes. A 15th shard would save
-about one minute of that, so the count stays. A run is 20 jobs and peaks at 18
+about one minute of that, so the count stays. A run is 22 jobs and peaks at 20
 at once, of the account's 20 Linux jobs, so a second run that overlaps it
 queues part of its shards.
 

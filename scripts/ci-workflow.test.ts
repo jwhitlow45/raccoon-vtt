@@ -167,6 +167,21 @@ describe("ci.yml's jobs", () => {
   });
 });
 
+describe("the unit job", () => {
+  test("runs Node's own shards of the files pnpm test runs, one per matrix entry, under a limit below the old 30 minutes", () => {
+    const block = jobBlock("unit");
+    const shards = /\n {8}shard: \[(.+)\]\n/.exec(block)?.[1]?.split(", ");
+    assert.deepEqual(shards, ["1", "2", "3"]);
+    assert.ok(block.includes("run: pnpm -s test --test-shard=${{ matrix.shard }}/${{ strategy.job-total }}\n"), block);
+    assert.match(block, /\n {4}strategy:\n {6}fail-fast: false\n/);
+    assert.ok(Number(/timeout-minutes: (\d+)/.exec(block)?.[1]) <= 20, "a real limit, not a raised one");
+  });
+
+  test("CI passed reads the one result that every shard feeds", () => {
+    assert.ok(jobBlock("ci-passed").includes("UNIT: ${{ needs.unit.result }}"));
+  });
+});
+
 describe("the lan-webkit job", () => {
   /** A step's `run:` script within one job, as GitHub hands it to bash. */
   function stepIn(job: string, name: string): string {
