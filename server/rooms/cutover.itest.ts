@@ -128,6 +128,22 @@ describe("the change over to version 8 ids", () => {
     await t.manager.unload(roomId, undefined, false);
   });
 
+  test("a server's first room load on this build writes the cutover once, beside the older one, and a later load keeps it", async () => {
+    await t.pool.query("update server_facts set sealed_since = null");
+    const owner = t.client();
+    const before = Date.now();
+    const { roomId } = await owner.createRoom("First load");
+    await (await t.connect(roomId, owner)).snapshot("dm");
+    const read = async () => (await t.pool.query<{ ids_since: Date; sealed_since: Date | null }>("select ids_since, sealed_since from server_facts")).rows;
+    const [first] = await read();
+    assert.ok(first?.sealed_since && first.sealed_since.getTime() >= before - 1_000 && first.sealed_since.getTime() <= Date.now(), "written at the load");
+    await t.manager.unload(roomId);
+    await (await t.connect(roomId, owner)).snapshot("dm-again");
+    assert.deepEqual(await read(), [first], "written once");
+    await t.manager.unload(roomId);
+    await t.pool.query("update server_facts set sealed_since = $1", [FAR_SEALED_SINCE]);
+  });
+
   test("C16: a row whose read time is near 2^48 is stored with its end capped at 9999-12-31", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Far ahead");
