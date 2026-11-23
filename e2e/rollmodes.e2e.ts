@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -1530,7 +1531,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await turnTo(fight.thorn);
       const deathCard = pat.getByRole("group", { name: "Death save for Thorn" }).filter({ visible: true }).first();
       if (!(await deathCard.isVisible().catch(() => false))) {
-        const summary = pat.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
+        const summary = pat.getByRole("button", { name: new RegExp(`${await pointerText(pat, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) }).first();
         if (await summary.isVisible()) await summary.tap();
       }
       await deathCard.waitFor();
@@ -1786,7 +1787,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
             const card = async (name: string | RegExp) => {
               const found = page.getByRole("group", { name }).filter({ visible: true }).first();
               if (!(await found.isVisible().catch(() => false))) {
-                const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
+                const summary = page.getByRole("button", { name: new RegExp(`${await pointerText(page, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) }).first();
                 if (await summary.isVisible().catch(() => false)) await summary.tap();
               }
               await found.waitFor();
@@ -1935,7 +1936,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           // The dragon's own card, by name: another creature's pending save would stand first.
           const ends = page.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).filter({ has: page.getByText("Dragon ended its turn Frightened.", { exact: true }) }).first();
           if (!(await ends.isVisible().catch(() => false))) {
-            const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
+            const summary = page.getByRole("button", { name: new RegExp(`${await pointerText(page, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) }).first();
             await summary.waitFor({ timeout: 5_000 }).catch(() => undefined);
             if (await summary.isVisible().catch(() => false)) await summary.tap();
           }

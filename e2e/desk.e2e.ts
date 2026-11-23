@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
@@ -395,7 +396,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await dm.keyboard.press("Enter");
     await waitFor("the X-card's words focused", async () => {
       const f = await focused(dm);
-      return f.tag === "p" && f.name.startsWith("Tap the X");
+      return f.tag === "p" && f.name.startsWith(await pointerText(dm, "Tap the X"));
     });
     await panel.getByRole("button", { name: "Cancel", exact: true }).click();
     await waitFor("the X-card button focused again", async () => (await focused(dm)).name.startsWith("X-card"));

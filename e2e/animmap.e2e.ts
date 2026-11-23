@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -790,7 +791,7 @@ describe("animated maps", { concurrency: false }, () => {
       // Low Power Mode refuses play(): Try again is a tap, which may start it.
       await amd.probeRefuses(dm, "NotAllowedError");
       await add.setInputFiles({ name: "crypt_flood.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
-      await group.getByText(LOW_POWER_STOPPED, { exact: true }).waitFor({ timeout: 30_000 });
+      await group.getByText(await pointerText(group, LOW_POWER_STOPPED), { exact: true }).waitFor({ timeout: 30_000 });
       await shots.take(dm, "am-10-low-power");
       await amd.probeRefuses(dm, null);
       await group.getByRole("button", { name: "Try again", exact: true }).click();
@@ -1020,14 +1021,15 @@ describe("animated maps", { concurrency: false }, () => {
     await row.getByRole("button", { name: "Remove map image", exact: true }).scrollIntoViewIfNeeded();
     const before = await controlsOf(row);
     await row.getByRole("button", { name: "Remove map image", exact: true }).click();
-    const armed = row.getByRole("button", { name: /^Tap again to remove/ });
+    const armed = row.getByRole("button", { name: new RegExp(`^${await pointerText(row, "Tap again to remove")}`) });
     await armed.waitFor();
     const after = await controlsOf(row);
     await shots.take(page, `pe1-1-remove-armed-${at.replace(/[^a-z0-9]+/gi, "-")}`);
     // Left alone, it disarms after 4 s (scenes/controls.tsx ConfirmButton), so the next step starts unarmed.
     await row.getByRole("button", { name: "Remove map image", exact: true }).waitFor({ timeout: 8_000 });
     const out: string[] = [];
-    const remove = after.find((c) => c.words.startsWith("Tap again to remove"));
+    const removeWords = await pointerText(row, "Tap again to remove");
+    const remove = after.find((c) => c.words.startsWith(removeWords));
     const was = before.find((c) => c.words === "Remove map image");
     if (!remove || !was || before.length !== after.length) return [`${at}: armed, the row reads ${JSON.stringify(after.map((c) => c.words))}`];
     for (const [i, c] of before.entries()) {

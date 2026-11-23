@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
@@ -540,7 +541,7 @@ export const STATES: State[] = [
       const place = p.getByRole("tabpanel").getByRole("button", { name: "Place a token" });
       if (!(await place.isVisible())) await p.getByRole("tabpanel").getByRole("button", { name: /^Thorn/ }).first().click();
       await place.click();
-      await options(p).getByText("Tap the map to place").first().waitFor();
+      await options(p).getByText(await pointerText(options(p), "Tap the map to place")).first().waitFor();
     },
     async leave(p) {
       await key(p, "v");
@@ -556,7 +557,7 @@ export const STATES: State[] = [
       await openSideTab(p, "Journal");
       await p.getByRole("button", { name: /^Lore/ }).first().click();
       await p.getByRole("button", { name: "Pin to the map" }).click();
-      await options(p).getByText("Tap the map to place the pin for Lore.").first().waitFor();
+      await options(p).getByText(await pointerText(options(p), "Tap the map to place the pin for Lore.")).first().waitFor();
     },
     async leave(p) {
       await key(p, "v");

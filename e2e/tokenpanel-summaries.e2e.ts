@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
@@ -104,7 +105,7 @@ panelFile("life, conditions, fight buttons and quick numbers", () => {
           const panel = await panelOf(dm, at, name);
           off.push(...(await afterPpLines(panel.locator("[data-quick-numbers]"), `${size.label}, ${name}'s panel header`)));
           await shots.take(dm, `fu31-after-pp-${size.width}-${name.split(" ")[0]!.toLowerCase()}`);
-          for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText("Tap a token to see it here.").count()) === 0; i++) await dm.keyboard.press("Escape");
+          for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText(await pointerText(panel, "Tap a token to see it here.")).count()) === 0; i++) await dm.keyboard.press("Escape");
         }
         await dm.keyboard.press("Escape");
         await tapToken(dm, scout.at);

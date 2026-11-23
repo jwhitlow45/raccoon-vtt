@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -547,9 +548,9 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await thornAt({ x: 3, y: 9 });
     // The door is in sight, on the side of the square Thorn stops in, so the note names it though no light shows the
     // party the square past it (D-261027-04): the landing shows where the stop is, and the player sees the door.
-    await stopNote("A door is in the way. Tap it to open.").waitFor();
+    await stopNote(await pointerText(player, "A door is in the way. Tap it to open.")).waitFor();
     await shots.take(player, "vision-player-stopped-at-door");
-    await closeNote("A door is in the way. Tap it to open.");
+    await closeNote(await pointerText(player, "A door is in the way. Tap it to open."));
 
     // The door's tap zone, just past Thorn's edge so the token does not take the tap.
     const p = await pagePoint(player, BOUNDS, { x: 3.5, y: 10.25 });

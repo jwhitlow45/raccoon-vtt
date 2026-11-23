@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -361,7 +362,7 @@ describe("raccoon-vtt several floors: the DM's building side", { timeout: 900_00
     const remove = page.getByRole("button", { name: "Remove floor" });
     await remove.click();
     assert.equal(floorsOf("Tower").length, 4, "one tap removes nothing");
-    await page.getByRole("button", { name: "Tap again to remove" }).click();
+    await page.getByRole("button", { name: await pointerText(page, "Tap again to remove") }).click();
     await waitFor("three floors", () => (floorsOf("Tower").length === 3 ? true : null));
     // Removing a floor is setup, so Setup history takes it back. The top bar's Undo takes back play.
     await undoSetup(dm);

@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -276,7 +277,7 @@ describe("the room clock's Time panel", () => {
     const stop = panel.getByRole("button", { name: "Stop the clock", exact: true });
     await stop.click();
     assert.notEqual(dmSocket.state?.clock ?? null, null, "one tap only arms it");
-    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).click();
+    await panel.getByRole("button", { name: await pointerText(panel, "Tap again to stop the clock"), exact: true }).click();
     await waitFor("no clock in the DM's copy", () => (dmSocket.state?.clock == null ? true : null));
     await waitFor("no clock in Pat's copy", () => (patSocket.state?.clock == null ? true : null));
 
@@ -353,7 +354,7 @@ describe("the room clock's Time panel", () => {
     const t = dmSocket.state!.clock!.t;
     const id = dmSocket.state!.clock!.id;
     await panel.getByRole("button", { name: "Stop the clock", exact: true }).click();
-    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).click();
+    await panel.getByRole("button", { name: await pointerText(panel, "Tap again to stop the clock"), exact: true }).click();
     await waitFor("no clock", () => (dmSocket.state?.clock == null ? true : null));
     await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
     await waitFor("no clock in Pat's copy", () => (patSocket.state?.clock == null ? true : null));
@@ -574,24 +575,24 @@ describe("the room clock's Time panel", () => {
     const panel = await timePanel();
     const stop = panel.getByRole("button", { name: "Stop the clock", exact: true });
     await stop.click();
-    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).waitFor();
+    await panel.getByRole("button", { name: await pointerText(panel, "Tap again to stop the clock"), exact: true }).waitFor();
     await ops.send({ t: "clock.stop" });
     await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
     await ops.send({ t: "clock.start", id: uuidv7(), at: 8 * HOUR, shown: true, calendar: { kind: "days" } });
     await stop.waitFor();
-    assert.equal(await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).count(), 0, "a new clock's Stop is not armed");
+    assert.equal(await panel.getByRole("button", { name: await pointerText(panel, "Tap again to stop the clock"), exact: true }).count(), 0, "a new clock's Stop is not armed");
 
     // Stop armed, then another device stops the clock and Undo setup brings the same clock back.
     const id = dmSocket.state!.clock!.id;
     await stop.click();
-    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).waitFor();
+    await panel.getByRole("button", { name: await pointerText(panel, "Tap again to stop the clock"), exact: true }).waitFor();
     await ops.send({ t: "clock.stop" });
     await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
     await undoSetup(dm);
     await waitFor("the clock back", () => (dmSocket.state?.clock?.id === id ? true : null));
     const again = await timePanel();
     await again.getByRole("button", { name: "Stop the clock", exact: true }).waitFor();
-    assert.equal(await again.getByRole("button", { name: "Tap again to stop the clock", exact: true }).count(), 0, "the clock Undo brought back finds Stop unarmed");
+    assert.equal(await again.getByRole("button", { name: await pointerText(again, "Tap again to stop the clock"), exact: true }).count(), 0, "the clock Undo brought back finds Stop unarmed");
 
     // A dialog open when another device stops the clock goes with it, and never opens again on the clock that comes back.
     await again.getByRole("button", { name: "Set the date and time…", exact: true }).click();

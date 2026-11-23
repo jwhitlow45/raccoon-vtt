@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -724,7 +725,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const menu = await openMenu("Del off");
     await shots.take(dm, "sd-a-menu-rest");
     await menu.getByRole("button", { name: /^Delete/ }).click();
-    const armed = menu.getByRole("button", { name: /^Tap again to delete/ });
+    const armed = menu.getByRole("button", { name: /^Click again to delete/ });
     await armed.waitFor();
     assert.ok(sceneOf(dmSocket.state, off), "one tap deleted the scene");
     await shots.take(dm, "sd-a-menu-armed");
@@ -740,14 +741,14 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     // One tap, then a tap elsewhere in the sheet: the row is back at rest and the scene stays.
     let menu = await openMenu("Del shown");
     await menu.getByRole("button", { name: /^Delete/ }).click();
-    await menu.getByRole("button", { name: /^Tap again to delete/ }).waitFor();
+    await menu.getByRole("button", { name: /^Click again to delete/ }).waitFor();
     await menu.getByRole("heading", { name: "Del shown" }).click();
     await menu.getByRole("button", { name: /^Delete/ }).waitFor();
-    assert.equal(await menu.getByRole("button", { name: /^Tap again to delete/ }).count(), 0);
+    assert.equal(await menu.getByRole("button", { name: /^Click again to delete/ }).count(), 0);
     assert.ok(sceneOf(dmSocket.state, shown), "a tap elsewhere deleted the scene");
     // The scene on screen: the DM lands on another scene.
     await menu.getByRole("button", { name: /^Delete/ }).click();
-    await menu.getByRole("button", { name: /^Tap again to delete/ }).click();
+    await menu.getByRole("button", { name: /^Click again to delete/ }).click();
     await waitFor("the scene gone", () => (sceneOf(dmSocket.state, shown) ? null : true));
     await waitFor("the DM on another scene", () => (dmSocket.you?.sceneId && dmSocket.you.sceneId !== shown ? true : null));
     await menu.waitFor({ state: "detached" });
@@ -767,8 +768,8 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       const before = await row.boundingBox();
       await shots.take(dm, "sd-d-phone-menu-rest");
       await row.click();
-      await menu.getByRole("button", { name: /^Tap again to delete/ }).waitFor();
-      const after = await menu.getByRole("button", { name: /^Tap again to delete/ }).boundingBox();
+      await menu.getByRole("button", { name: /^Click again to delete/ }).waitFor();
+      const after = await menu.getByRole("button", { name: /^Click again to delete/ }).boundingBox();
       assert.deepEqual(after, before, "arming moved or resized the row");
       await shots.take(dm, "sd-d-phone-menu-armed");
       await dm.keyboard.press("Escape");
@@ -950,7 +951,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       const target = Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && s.id !== dmSocket.you?.sceneId)!;
       const menu = await openMenu(target.name);
       await menu.getByRole("button", { name: /^Delete/ }).click();
-      await menu.getByRole("button", { name: /^Tap again to delete/ }).click();
+      await menu.getByRole("button", { name: /^Click again to delete/ }).click();
       await waitFor("a scene gone", () => (Object.keys(dmSocket.state?.scenes ?? {}).length < count ? true : null));
       await menu.waitFor({ state: "detached" });
     }

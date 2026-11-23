@@ -1097,7 +1097,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const wireNote = dmSocket.state?.traps?.[run.traps.wire]?.rig?.note ?? null;
   const tallNote = Array.from({ length: 60 }, (_, i) => `Reset step ${i + 1}`).join("\n");
   await ops.send({ t: "trap.update", trapId: run.traps.wire, patch: { rig: { note: tallNote } } });
-  const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
+  const summary = page.getByRole("button", { name: new RegExp(`${await pointerText(page, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) });
   try {
     if (await shows(summary.first())) {
       await sweep.measure(page, "alerts-summary", summary.first());
@@ -2374,7 +2374,7 @@ async function closeSheets(page: Page): Promise<void> {
  */
 async function alertCard(page: Page, name: string | RegExp, opts: { optional?: boolean } = {}): Promise<Locator | null> {
   const inColumn = page.getByRole("group", { name, exact: true }).filter({ visible: true }).first();
-  const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).filter({ visible: true }).first();
+  const summary = page.getByRole("button", { name: new RegExp(`${await pointerText(page, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) }).filter({ visible: true }).first();
   // A card that may have gone is probed briefly. One the sweep must reach is waited for, in whichever place the page draws it first.
   const appears = (l: Locator) => (opts.optional ? showsWithin(l, 3_000) : shows(l));
   if (!(await appears(inColumn.or(summary).first()))) return null;
@@ -2869,7 +2869,7 @@ async function openTrapSave(page: Page, trap: string): Promise<Locator | string>
   // The card in the column, or over the screen where the column's summary row stands in for its cards.
   const findCard = async (): Promise<Locator | null> => {
     const inColumn = page.getByRole("group", { name }).filter({ visible: true }).first();
-    const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).filter({ visible: true }).first();
+    const summary = page.getByRole("button", { name: new RegExp(`${await pointerText(page, "Tap")} to answer\\.$|to see them\\.$|to see it\\.$`) }).filter({ visible: true }).first();
     if (!(await shows(inColumn.or(summary).first()))) return null;
     if (await visible(inColumn)) return inColumn;
     await summary.click();
@@ -9015,7 +9015,7 @@ export function md4Tests(): void {
         await page.getByRole("toolbar", { name: "Map builder options" }).getByRole("button", { name: "More options" }).click();
         const more = page.getByRole("dialog", { name: "More Map builder options" });
         await more.getByRole("button", { name: "Clear build", exact: true }).click();
-        await more.getByRole("button", { name: "Tap again to clear" }).click();
+        await more.getByRole("button", { name: await pointerText(more, "Tap again to clear") }).click();
         if (await more.isVisible()) await page.keyboard.press("Escape");
         const ask = page.getByRole("dialog", { name: "Remembered map" });
         if (await shows(ask)) {

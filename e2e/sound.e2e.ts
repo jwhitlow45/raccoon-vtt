@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -793,7 +794,7 @@ describe("synced music and sound", { concurrency: false }, () => {
 
           await sized(waiting.tv, size, "rvtt.displayUiScale", scale);
           const tapCard = waiting.tv.locator("[data-display-sound-card]");
-          await tapCard.filter({ hasText: "Tap or press a key for sound." }).waitFor({ timeout: 10_000 });
+          await tapCard.filter({ hasText: await pointerText(waiting.tv, "Tap or press a key for sound.") }).waitFor({ timeout: 10_000 });
           lines.push(...alignmentLines(await measureAlignment(tapCard), `the display's tap card ${where}`));
           if (size.name === "1440x900" && scale === 1) await shots.take(waiting.tv, "sn-9-display-tap-card");
           // The tap that opens the menu unlocks the sound, and the card goes.

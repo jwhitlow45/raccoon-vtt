@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";

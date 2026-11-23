@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -270,7 +271,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const pointer = await inputs(sheet, "Mouse and touch");
     for (const row of ["Hold a roll button", "Double-tap and hold a roll button with a screen reader"]) assert.ok(pointer.includes(row), `${row} in ${pointer.join(", ")}`);
     // sbr: the stat block's ability boxes and their rolls (docs/design/design-v1-stat-block-rolls.md 13).
-    for (const row of ["Tap, click, hold or right-click an ability box in a stat block", "Hold or right-click a roll in an ability's rolls"]) assert.ok(pointer.includes(row), `sbr-sheet: ${row} in ${pointer.join(", ")}`);
+    for (const row of [await pointerText(sheet, "Tap, hold or right-click an ability box in a stat block"), "Hold or right-click a roll in an ability's rolls"]) assert.ok(pointer.includes(row), `sbr-sheet: ${row} in ${pointer.join(", ")}`);
     const fields = await inputs(sheet, "Token and character fields");
     assert.deepEqual(fields.slice(2, 7), ["Enter, Space, Down, ContextMenu, Shift+F10", "Up", "ContextMenu, Shift+F10", "Escape", "Up, Down, Home, End"], `sbr-sheet: the ability keys follow the field keys: ${fields.join(" | ")}`);
     assert.deepEqual((await inputs(sheet, "Dice")).slice(-2), ["ContextMenu, Shift+F10", "Up, Down, Home, End"]);
@@ -522,7 +523,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     // Reset all keys asks for a second tap, then every key is its default again.
     sheet = await openSheet();
     await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
-    await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
+    await sheet.locator("footer").getByRole("button", { name: await pointerText(sheet.locator("footer"), "Tap again to reset all keys"), exact: true }).click();
     await waitFor("the defaults", async () => ((await keyOf(sheet, "Fog")) === "F" && (await keyOf(sheet, "Ruler")) === "R" ? true : null));
     assert.equal(await sheet.getByRole("button", { name: /^Reset the key for/ }).count(), 0, "nothing left to reset");
     assert.equal(await stored(), '{"v":1,"keys":{}}');
@@ -650,7 +651,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
         await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
 
         await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
-        await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
+        await sheet.locator("footer").getByRole("button", { name: await pointerText(sheet.locator("footer"), "Tap again to reset all keys"), exact: true }).click();
         await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor({ state: "detached" });
         await dm.keyboard.press("Escape");
         await sheet.waitFor({ state: "detached" });

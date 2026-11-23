@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, dismissRedoToasts, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { uuidv7 } from "#shared/ids.ts";
@@ -166,7 +167,7 @@ async function rowStandsForOpenCard(page: Page): Promise<void> {
   await alerts.waitFor();
   await alerts.getByRole("button", { name: "Close", exact: true }).click();
   await alerts.waitFor({ state: "detached" });
-  await page.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+  await page.getByRole("button", { name: new RegExp(`went off.*${await pointerText(page, "Tap")} to answer\\.$`) }).waitFor();
 }
 
 /** Opens a card that must start folded: only the tap that opens it asks to show the cards over the screen. */
@@ -578,7 +579,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     for (let i = 0; i < 2; i++) await ops.send({ t: "trap.spring", trapId: run.trapId, tokenIds: [run.thorn] });
     await waitFor("two springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 2 ? true : null));
     // The first card does not fit between the top bar and the toolbar, so the column's row stands for the cards, and its tap shows them over the screen.
-    const row = dm.getByRole("button", { name: /went off.*Tap to answer\.$/ });
+    const row = dm.getByRole("button", { name: new RegExp(`went off.*${await pointerText(dm, "Tap")} to answer\\.$`) });
     await row.click();
     const alerts = dm.getByRole("dialog", { name: "Alerts" });
     await alerts.waitFor();
@@ -781,7 +782,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
         const row = dm.getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
         const card = dm.getByRole("group", { name: "Corner Darts went off" });
         // Or the column's own row, where the screen is too short for its first card whatever the pane does.
-        const roomRow = dm.getByRole("button", { name: /went off.*Tap to answer\.$/ });
+        const roomRow = dm.getByRole("button", { name: new RegExp(`went off.*${await pointerText(dm, "Tap")} to answer\\.$`) });
         await waitFor(`the card or a row, ${label}`, async () => ((await row.count()) > 0 || (await roomRow.count()) > 0 || (await card.isVisible()) ? true : null));
         await dm.waitForTimeout(400);
         const mode = (await row.count()) > 0 ? "summary" : "beside";

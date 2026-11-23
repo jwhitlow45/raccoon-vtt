@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
@@ -460,7 +461,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     run.firstXcardAt = Date.now();
     await player.getByRole("button", { name: "Send the X-card" }).tap();
     const text = "Someone tapped the X-card. Edit out what just happened, with no questions asked.";
-    for (const page of [dm, player, tv]) await page.getByRole("dialog", { name: "X-card" }).getByText(text).waitFor();
+    for (const page of [dm, player, tv]) await page.getByRole("dialog", { name: "X-card" }).getByText(await pointerText(page, text)).waitFor();
     await shots.take(tv, "tools-xcard-display");
     await shots.take(player, "tools-xcard-player");
     await dm.getByRole("dialog", { name: "X-card" }).getByRole("button", { name: "Pause the game" }).waitFor();

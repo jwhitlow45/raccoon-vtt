@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -369,7 +370,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     assert.equal(await description(patCdp, "Delete Bree"), WARNING, "Delete's description");
     await shots.take(pat, "characters-player-delete-warning");
     await remove.tap();
-    await sheet.getByRole("button", { name: "Tap again to delete", exact: true }).waitFor();
+    await sheet.getByRole("button", { name: await pointerText(sheet, "Tap again to delete"), exact: true }).waitFor();
     assert.equal(await description(patCdp, "Tap again to delete"), WARNING, "the armed button's description");
     // Left alone, the button disarms after four seconds.
     await sheet.getByRole("button", { name: "Delete Bree", exact: true }).waitFor({ timeout: 8_000 });
@@ -409,7 +410,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     const sheet = await openCharacters(pat);
     await openCard(sheet, run.bree);
     await sheet.getByRole("button", { name: "Delete Bree", exact: true }).tap();
-    const confirm = sheet.getByRole("button", { name: "Tap again to delete", exact: true });
+    const confirm = sheet.getByRole("button", { name: await pointerText(sheet, "Tap again to delete"), exact: true });
     await confirm.waitFor();
     await shots.take(pat, "characters-player-delete-armed");
 
@@ -435,7 +436,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
       [namedId("e-cyra"), namedId("e-gob")],
     );
     assert.equal(state.encounter?.activeEntryId, namedId("e-cyra"), "the turn passed on");
-    await panel.getByText("Tap a token to see it here.").waitFor();
+    await panel.getByText(await pointerText(panel, "Tap a token to see it here.")).waitFor();
     // Bree's page went with Bree, back to the list. Pat's list in order: Bree, the unbroken long name, Cyra, ... So the next row is the long name's.
     await focusLands(pat, run.unbroken, "focus on the next row after the late answer");
     assert.equal(await pat.getByRole("button", { name: "Back to Characters" }).count(), 0, "the page went with Bree");
@@ -458,7 +459,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     patConsole.expectSocketFailures = true;
     await patContext.setOffline(true);
     await sheet.getByRole("button", { name: "Delete Wren", exact: true }).tap();
-    await sheet.getByRole("button", { name: "Tap again to delete", exact: true }).tap();
+    await sheet.getByRole("button", { name: await pointerText(sheet, "Tap again to delete"), exact: true }).tap();
     await sheet.getByRole("button", { name: "Deleting…", exact: true }).waitFor();
     await ops.send({ t: "character.update", characterId: run.wren, patch: { ownerIds: [run.patId, run.quinId] } });
     await patContext.setOffline(false);
@@ -476,7 +477,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     patConsole.expectSocketFailures = true;
     await patContext.setOffline(true);
     await sheet.getByRole("button", { name: "Delete Zed", exact: true }).tap();
-    await sheet.getByRole("button", { name: "Tap again to delete", exact: true }).tap();
+    await sheet.getByRole("button", { name: await pointerText(sheet, "Tap again to delete"), exact: true }).tap();
     await sheet.getByRole("button", { name: "Deleting…", exact: true }).waitFor();
     // Zed's row is the last, so the hand-off would go to the one before, Wren's. The tool bar's Panels is outside the sheet.
     const panels = pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });

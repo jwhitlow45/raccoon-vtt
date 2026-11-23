@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
@@ -287,7 +288,7 @@ panelFile(null, () => {
     assert.ok(await panel.getByRole("heading", { name: "Goblin 4" }).isVisible(), "the panel let go of the goblin");
     assert.deepEqual(await focused(dm).then((f) => [f.name, f.role]), ["Token", "tab"]);
     await dm.keyboard.press("Escape");
-    await panel.getByText("Tap a token to see it here.").waitFor();
+    await panel.getByText(await pointerText(panel, "Tap a token to see it here.")).waitFor();
     assert.equal(await storedFolds(dm), before);
   });
 
@@ -335,7 +336,7 @@ panelFile(null, () => {
     await shots.take(dm, "tokenpanel-dm-hp-pair");
     await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-dm-range-rings");
-    const purpose = "Another image this token can wear, for Wild Shape or a disguise. A tap on it here or in the token's bar puts it on.";
+    const purpose = await pointerText(dm, "Another image this token can wear, for Wild Shape or a disguise. A tap on it here or in the token's bar puts it on.");
     const describedBy = await another.getAttribute("aria-describedby");
     assert.ok(describedBy);
     assert.equal((await dm.locator(`[id="${describedBy}"]`).textContent())?.trim(), purpose);
@@ -573,7 +574,7 @@ panelFile(null, () => {
           if (folded) await fold.click();
         }
         // Let go, and on a phone close the sheet first.
-        for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText("Tap a token to see it here.").count()) === 0; i++) await dm.keyboard.press("Escape");
+        for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText(await pointerText(panel, "Tap a token to see it here.")).count()) === 0; i++) await dm.keyboard.press("Escape");
         await dm.keyboard.press("Escape");
         await dm.waitForTimeout(200);
       }

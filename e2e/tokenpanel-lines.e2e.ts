@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { test } from "node:test";
@@ -20,8 +21,8 @@ panelFile("focus and group lines", () => {
       await dm.keyboard.press("Enter");
       await dm.keyboard.press("Enter");
       await waitFor("the wolf deleted", () => (dmSocket.state?.tokens[doomed.id] ? null : true));
-      await panel.getByText("Tap a token to see it here.").waitFor();
-      await waitFor("focus on the empty line", async () => ((await focusedText(dm)).includes("Tap a token to see it here.") ? true : null), 5_000).catch(async () => assert.fail(`after Delete focus is on ${await focusedText(dm)}`));
+      await panel.getByText(await pointerText(panel, "Tap a token to see it here.")).waitFor();
+      await waitFor("focus on the empty line", async () => ((await focusedText(dm)).includes(await pointerText(dm, "Tap a token to see it here.")) ? true : null), 5_000).catch(async () => assert.fail(`after Delete focus is on ${await focusedText(dm)}`));
     } finally {
       if (dmSocket.state?.tokens[doomed.id]) await ops.send({ t: "token.delete", tokenId: doomed.id });
     }

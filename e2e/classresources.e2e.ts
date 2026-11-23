@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -541,7 +542,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
 
     await row(page, "Superiority Dice").getByRole("button", { name: "Edit Superiority Dice" }).tap();
     await edit.getByRole("button", { name: "Remove Superiority Dice" }).tap();
-    await edit.getByRole("button", { name: "Tap again to remove" }).tap();
+    await edit.getByRole("button", { name: await pointerText(edit, "Tap again to remove") }).tap();
     await edit.waitFor({ state: "detached" });
     await row(page, "Superiority Dice").waitFor({ state: "detached" });
     await storedReads("what is left in the DM's copy", (list) => list.map((x) => x.name), ["Rage", "Lay on Hands"]);
@@ -779,7 +780,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await edit.waitFor();
     await edit.getByRole("button", { name: "Remove Lucky Knack" }).focus();
     await pat.keyboard.press("Enter");
-    await edit.getByRole("button", { name: "Tap again to remove" }).focus();
+    await edit.getByRole("button", { name: await pointerText(edit, "Tap again to remove") }).focus();
     await pat.keyboard.press("Enter");
     await edit.waitFor({ state: "detached" });
     await row(panel, "Lucky Knack").waitFor({ state: "detached" });

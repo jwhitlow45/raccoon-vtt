@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -393,7 +394,7 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     // The offer's choices are card rows, each named by its title and described by its line (docs/design/design-v1-look-pass-2.md 2.5), under the file's name at 16 px.
     const rows = await offerRows(sheet);
     assert.deepEqual(rows.map((r) => r.title), ["New scene", "Stamp", "Handout"]);
-    assert.deepEqual(rows.map((r) => r.detail), ["Make a scene with it as the map.", "Then tap the map to place it.", "Then choose who sees it."]);
+    assert.deepEqual(rows.map((r) => r.detail), ["Make a scene with it as the map.", await pointerText(sheet, "Then tap the map to place it."), "Then choose who sees it."]);
     assert.equal(await sheet.locator("strong").first().evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { fontSize: string } }).getComputedStyle(el).fontSize), "16px");
     await shots.take(dm, "paste-room-offer");
     const handouts = dmUploads.handout ?? 0;

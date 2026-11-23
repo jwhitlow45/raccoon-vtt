@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -719,7 +720,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await ana.getByRole("button", { name: /^Stat blocks \(2\)$/ }).click();
     await ana.getByRole("button", { name: /^Moth Spirit/ }).click();
     await ana.getByRole("button", { name: "Delete", exact: true }).click();
-    await ana.getByRole("button", { name: "Tap again to delete" }).click();
+    await ana.getByRole("button", { name: await pointerText(ana, "Tap again to delete") }).click();
     await waitFor("the block gone", () => (Object.values(dmSocket.state?.companionBlocks ?? {}).some((b) => b?.name === "Moth Spirit") ? null : true));
     await ana.getByRole("button", { name: "Back to Bree" }).click();
     await ana.getByText("Stat block deleted · On Bree's turn, listed").waitFor();
@@ -1472,7 +1473,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).press("Enter");
       await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).press("Enter");
       await waitFor("Wisp dismissed", () => (dmSocket.state?.tokens[wisp] ? null : true));
-      await lands("span Tap a token to see it here.", "a taken dismissal");
+      await lands(`span ${await pointerText(ana, "Tap a token to see it here.")}`, "a taken dismissal");
       await shots.take(ana, "s2-co-dismissed-focus");
 
       // Taken with the Decoy selected too, the Wisp last: the map lets go of the Wisp, the panel shows the Decoy, and focus goes to its name.

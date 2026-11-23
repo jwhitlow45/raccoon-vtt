@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -839,7 +840,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
     // Delete playlist, on a second tap, from the maker, which closes.
     win = await editPlaylist(panel, "Harbor at night");
     await win.getByRole("button", { name: "Delete playlist", exact: true }).click();
-    await win.getByRole("button", { name: "Tap again to delete", exact: true }).click();
+    await win.getByRole("button", { name: await pointerText(win, "Tap again to delete"), exact: true }).click();
     await win.waitFor({ state: "detached" });
     await waitFor("Harbor at night deleted", () => (dmSocket.state?.playlists?.[id] ? null : true));
     delete run.playlists["Harbor nights"];

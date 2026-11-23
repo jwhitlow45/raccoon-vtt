@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -719,7 +720,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     assert.equal(await dm.evaluate(() => localStorage.getItem("rvtt.roomSound")), "off");
     assert.equal(await panel.getByText("This device is muted.").count(), 1, "once in the panel");
     const device = panel.locator("[data-device-sound]");
-    for (const other of ["Tap anywhere to start the sound.", "Another window on this device plays the sound.", "This browser can't play the room's sound."]) assert.equal(await panel.getByText(other).count(), 0, other);
+    for (const other of [await pointerText(panel, "Tap anywhere to start the sound."), "Another window on this device plays the sound.", "This browser can't play the room's sound."]) assert.equal(await panel.getByText(other).count(), 0, other);
     assert.equal(await device.getByRole("button", { name: "Mute", exact: true }).getAttribute("aria-pressed"), "true", "the toggle shows it below");
     await player.scrollIntoViewIfNeeded();
     assert.deepEqual(alignmentLines(await measureAlignment(player), "Now playing on a muted device, 1440x900"), []);
@@ -877,7 +878,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       assert.equal(await device.getByRole("slider").count(), 2, "Volume and Effects");
       assert.deepEqual(await device.locator("label").allTextContents(), ["Effects"]);
       // With no Now playing above, the controls draw their own line, and a page that plays has none to draw.
-      assert.equal(await panel.getByText(/^(Tap anywhere to start the sound|Another window on this device plays the sound|This browser can't play the room's sound)\.$/).count(), 0);
+      assert.equal(await panel.getByText(new RegExp(`^(${await pointerText(panel, "Tap")} anywhere to start the sound|Another window on this device plays the sound|This browser can't play the room's sound)\\.$`)).count(), 0);
       const table = panel.getByRole("heading", { name: "Table sound", exact: true }).locator("xpath=ancestor::section[1]");
       assert.equal(await table.getByRole("switch").count(), 1, "the one switch");
       const dmOnly = table.getByRole("switch", { name: "Only DM devices play" });

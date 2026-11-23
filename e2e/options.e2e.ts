@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
@@ -156,7 +157,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     const clearBuild = dm.getByRole("dialog", { name: "More Map builder options" }).getByRole("button", { name: "Clear build" });
     const clearBuildAt = await clearBuild.boundingBox();
     await clearBuild.tap();
-    const armed = dm.getByRole("dialog", { name: "More Map builder options" }).getByRole("button", { name: /Tap again to clear/ });
+    const armed = dm.getByRole("dialog", { name: "More Map builder options" }).getByRole("button", { name: new RegExp(`${await pointerText(dm.getByRole("dialog", { name: "More Map builder options" }), "Tap again to clear")}`) });
     assert.deepEqual(await armed.boundingBox(), clearBuildAt, "the armed Clear build keeps its box");
     await closePopover(dm);
     await pick(dm, "Map builder", "Builder mode", "Brush");

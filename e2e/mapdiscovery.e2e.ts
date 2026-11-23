@@ -265,7 +265,7 @@ async function clearBuild(page: Page): Promise<void> {
   await page.getByRole("toolbar", { name: "Map builder options" }).getByRole("button", { name: "More options" }).click();
   const more = page.getByRole("dialog", { name: "More Map builder options" });
   await more.getByRole("button", { name: "Clear build", exact: true }).click();
-  await more.getByRole("button", { name: "Tap again to clear" }).click();
+  await more.getByRole("button", { name: await pointerText(more, "Tap again to clear") }).click();
   if (await more.isVisible()) await page.keyboard.press("Escape");
 }
 
@@ -613,7 +613,7 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
       scope = dm.getByRole("dialog", { name: "More Fog options" });
     }
     await scope.getByRole("button", { name: "Fog all", exact: true }).click();
-    await scope.getByRole("button", { name: "Tap again: fog all" }).click();
+    await scope.getByRole("button", { name: await pointerText(scope, "Tap again: fog all") }).click();
     await waitFor("the corridor forgotten on Ben's map", () => (corridor(sockets.ben.state) ? null : true));
     assert.equal(holdsAlong(sockets.ben.state, run.halls, HALLS.hallWall), true, "the hall Bree stands in is still live");
     await shots.take(ben, "mapdiscovery-ben-after-fog-all");

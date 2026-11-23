@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { uuidv7 } from "#shared/ids.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -589,7 +590,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await actions.waitFor();
     // At 1280 x 800 with Actions shown, the whole sentence shows, uncut, and the row stays one row (docs/design/design-v1-tool-options.md 9.1).
     // The row's own words, not the hidden description that repeats them or the copy the row measures.
-    const words = selectOptions(dm).getByText("Tap tokens to add or remove them, or drag a box on the map.").filter({ visible: true }).first();
+    const words = selectOptions(dm).getByText(await pointerText(selectOptions(dm), "Tap tokens to add or remove them, or drag a box on the map.")).filter({ visible: true }).first();
     await words.waitFor();
     assert.equal(await words.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth + 1), true, "the sentence is cut");
     const row = await rectOf(selectOptions(dm));

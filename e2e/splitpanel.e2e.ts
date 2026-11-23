@@ -1,3 +1,4 @@
+import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
@@ -343,7 +344,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     assert.ok(Math.abs(at130.top / 1.3 - expected) <= 1 && at130.top / 1.3 >= 192.5, `Initiative's pane at 130%: ${JSON.stringify(at130)}, expected ${expected} own px`);
     assert.equal(await topPane(dm, "Initiative").locator("[data-round-header]").getAttribute("data-form"), "full", "Initiative's round header is full and stuck");
     // A pane's panel draws after its first load, so a picture waits for it (W6B-P-7).
-    await bottomPane(dm, "Token").getByText("Tap a token to see it here.").waitFor();
+    await bottomPane(dm, "Token").getByText(await pointerText(bottomPane(dm, "Token"), "Tap a token to see it here.")).waitFor();
     await shots.take(dm, "splitpanel-dm-1280x800-130-default");
 
     await reloadAt(dm, 1, true);
@@ -365,7 +366,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     const split = await roomOf(dm);
     assert.ok(split.top >= 133 && (split.below ?? 0) >= 133, `each pane at least 133 px: ${JSON.stringify(split)}`);
     assert.equal(await described(tab(dm, "Token")), "Shown below");
-    await bottomPane(dm, "Token").getByText("Tap a token to see it here.").waitFor();
+    await bottomPane(dm, "Token").getByText(await pointerText(bottomPane(dm, "Token"), "Tap a token to see it here.")).waitFor();
     await shots.take(dm, "splitpanel-dm-initiative-over-token");
 
     // Each pane scrolls on its own.
