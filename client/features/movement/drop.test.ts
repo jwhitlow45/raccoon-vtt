@@ -203,7 +203,7 @@ describe("a group drag", () => {
       if (move.elevation !== undefined && move.elevation !== lead.elevation) climbed++;
       const cost = recordedCost(view, moveOpsOf(plan.moves)[0]!, "lead");
       const to = { x: lead.x + dx, y: lead.y + dy };
-      const read = dragReading({ grid: SQUARES, token: walkerOf(seenRoom(view), lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
+      const read = dragReading({ grid: SQUARES, token: walkerOf(seenRoom(view), lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, { x: move.x, y: move.y }) });
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
       // The DM's device reads the frames the drag sends of it, which carry the leg's cost, so it reads the height the move lands at, its band too (review MV-O-29).
       const sent = groupDragOf(copyFor(view, P1), "player", ["lead", "mate"], to);

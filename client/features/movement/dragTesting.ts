@@ -6,7 +6,7 @@ import { findRouteOn, routeWorld } from "#shared/rules/hexWalk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 import type { DragRead } from "../measure/movement.ts";
 import { RoomScope } from "../../state/scope.ts";
-import { dropGrid, dropView, keptOnScene, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
+import { dropGrid, dropView, groupOffsetOnScene, keptOnScene, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
 import { worldFor } from "./press.ts";
 import { groupReading } from "./preview.ts";
 import { RouteDrag, type RouteAnswer, type Settled } from "./routeDrag.ts";
@@ -137,8 +137,12 @@ export function groupDragOf(copy: RoomState, role: Role, tokenIds: readonly stri
   const group = tokenIds.map((id) => copy.tokens[id]!);
   const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
   const lead = group[0]!;
-  const label = groupReading(dropView(copy, role), lead, keptOnScene(copy, lead, snapPosition(dropGrid(copy, lead), raw.x, raw.y, footprintSize(lead))), role);
-  const frame = stops.groupFields(lead, raw);
+  // The board lands the group by one offset, cut back at a player's edge (Stage.tsx dragMove), and reads its label and frames there.
+  const view = dropView(copy, role);
+  const by = groupOffsetOnScene(view, group, raw.x - lead.x, raw.y - lead.y);
+  const lands = { x: lead.x + by.dx, y: lead.y + by.dy };
+  const label = groupReading(view, lead, keptOnScene(view, lead, snapPosition(dropGrid(copy, lead), lands.x, lands.y, footprintSize(lead))), role);
+  const frame = stops.groupFields(lead, lands);
   frames.frame();
   stops.start(lead.id);
   let plan: DropPlan | null = null;

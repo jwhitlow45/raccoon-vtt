@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import { opSchema } from "#shared/protocol.ts";
 import { standsInScene } from "#shared/rules/sceneEdge.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { hexCenter, type HexGrid } from "#shared/rules/hex.ts";
 import { DM, P1, int, pick, rng, room, scene, token } from "#shared/testutil.ts";
-import { keptOnScene, moveOpsOf, planGroup, planOne, type DropPlan } from "./drop.ts";
+import { heldShortOfCreature, keptOnScene, moveOpsOf, pressedAim, planGroup, planOne, type DropPlan } from "./drop.ts";
 import { groupDragOf } from "./dragTesting.ts";
 import { line, seenRoom, thorn, world } from "./testing.ts";
 
 /**
- * A drop ends inside the scene, whoever drops it and whatever the scene's
- * walls stop (DROP-OFF-MAP, D-261122-160): a plain drop far past the edge
- * lands on its nearest spot there, a group keeps its shape against the
- * edge, and what the device sends is what the server takes.
+ * A player's drop ends inside the scene, whatever the scene's walls stop
+ * (DROP-OFF-MAP, D-261122-160): a plain drop far past the edge lands on its
+ * nearest spot there, a group keeps its shape against the edge by one cut
+ * back offset (D-261122-179), and what the device sends is what the server
+ * takes. The DM's drops are left where they are aimed (D-261122-178).
  */
 
 const COLUMNS: HexGrid = { shape: "hex", orient: "columns" };
@@ -41,33 +42,137 @@ function allInside(state: RoomState, plan: DropPlan, where: string): void {
 }
 
 for (const mode of ["free", "walk"] as const) {
-  for (const role of ["player", "dm"] as const) {
-    describe(`a ${role}'s drop, ${mode === "walk" ? "walls stopping moves" : "free"}`, () => {
-      const state = square(mode === "walk", [pc("a"), pc("big", { size: "large", x: 10, y: 10 })]);
-      const view = seenRoom(state, role);
-      const aim = (x: number, y: number) => ({ x, y });
+  describe(`a player's drop, ${mode === "walk" ? "walls stopping moves" : "free"}`, () => {
+    const state = square(mode === "walk", [pc("a"), pc("big", { size: "large", x: 10, y: 10 })]);
+    const view = seenRoom(state, "player");
+    const aim = (x: number, y: number) => ({ x, y });
 
-      test("a drop past any edge lands on the nearest spot inside, each axis on its own", () => {
-        const a = state.tokens.a!;
-        assert.deepEqual(planOne(view, a, aim(-10, 5), mode).moves, [{ tokenId: "a", x: 0, y: 5 }]);
-        assert.deepEqual(planOne(view, a, aim(9, -10), mode).moves, [{ tokenId: "a", x: 9, y: 0 }]);
-        assert.deepEqual(planOne(view, a, aim(80, 5), mode).moves, [{ tokenId: "a", x: 29, y: 5 }]);
-        assert.deepEqual(planOne(view, a, aim(9, 80), mode).moves, [{ tokenId: "a", x: 9, y: 19 }]);
-        assert.deepEqual(planOne(view, a, aim(-5, -5), mode).moves, [{ tokenId: "a", x: 0, y: 0 }]);
-      });
-
-      test("a Large creature's whole box is held inside", () => {
-        assert.deepEqual(planOne(view, state.tokens.big!, aim(80, 80), mode).moves, [{ tokenId: "big", x: 28, y: 18 }]);
-      });
-
-      test("a drop on the edge, and one that pulls back to where the token stands, are as they were", () => {
-        const a = state.tokens.a!;
-        assert.deepEqual(planOne(view, a, aim(29, 19), mode).moves, [{ tokenId: "a", x: 29, y: 19 }]);
-        assert.deepEqual(planOne(view, { ...a, x: 0 }, aim(-4, 5), mode).moves, []);
-      });
+    test("a drop past any edge lands on the nearest spot inside, each axis on its own", () => {
+      const a = state.tokens.a!;
+      assert.deepEqual(planOne(view, a, aim(-10, 5), mode).moves, [{ tokenId: "a", x: 0, y: 5 }]);
+      assert.deepEqual(planOne(view, a, aim(9, -10), mode).moves, [{ tokenId: "a", x: 9, y: 0 }]);
+      assert.deepEqual(planOne(view, a, aim(80, 5), mode).moves, [{ tokenId: "a", x: 29, y: 5 }]);
+      assert.deepEqual(planOne(view, a, aim(9, 80), mode).moves, [{ tokenId: "a", x: 9, y: 19 }]);
+      assert.deepEqual(planOne(view, a, aim(-5, -5), mode).moves, [{ tokenId: "a", x: 0, y: 0 }]);
     });
-  }
+
+    test("a Large creature's whole box is held inside", () => {
+      assert.deepEqual(planOne(view, state.tokens.big!, aim(80, 80), mode).moves, [{ tokenId: "big", x: 28, y: 18 }]);
+    });
+
+    test("a drop on the edge, and one that pulls back to where the token stands, are as they were", () => {
+      const a = state.tokens.a!;
+      assert.deepEqual(planOne(view, a, aim(29, 19), mode).moves, [{ tokenId: "a", x: 29, y: 19 }]);
+      assert.deepEqual(planOne(view, { ...a, x: 0 }, aim(-4, 5), mode).moves, []);
+    });
+  });
 }
+
+describe("the DM's drop", () => {
+  test("is left where it is aimed, past the edge or not, so a DM can still park a token off the map (D-261122-178)", () => {
+    for (const blocking of [false, true]) {
+      const state = square(blocking, [pc("a"), pc("b", { x: 7, y: 5 })]);
+      const view = seenRoom(state, "dm");
+      assert.deepEqual(planOne(view, state.tokens.a!, { x: -10, y: -10 }, "free").moves, [{ tokenId: "a", x: -10, y: -10 }]);
+      assert.deepEqual(planGroup(view, [state.tokens.a!, state.tokens.b!], -20, 0, "free").moves, [{ tokenId: "a", x: -15, y: 5 }, { tokenId: "b", x: -13, y: 5 }]);
+      const board = groupDragOf(state, "dm", ["a", "b"], { x: -5, y: 5 });
+      assert.deepEqual(board.plan.moves.find((m) => m.tokenId === "a"), { tokenId: "a", x: -5, y: 5 });
+    }
+  });
+});
+
+describe("a parked token walked back in", () => {
+  test("held outside by a wall on the edge line is no move, and the stop's note stays (DROPMAP-OPUS-1)", () => {
+    const parked = pc("a", { x: -3, y: 5 });
+    const state = world({ edges: line("w", 0, 0, 30), tokens: [parked] });
+    const plan = planOne(seenRoom(state, "player"), parked, { x: 5, y: 5 }, "walk");
+    assert.deepEqual(plan.moves, []);
+    assert.ok(plan.stop, "the note says what stopped it");
+    // The DM may be held there and moved, as before.
+    assert.ok(planOne(seenRoom(state, "dm"), parked, { x: 5, y: 5 }, "free").moves.length === 1);
+  });
+});
+
+describe("a parked token held short of a creature", () => {
+  test("is held outside no more than walked there: no move is planned (DROPMAP-OPUS-1)", () => {
+    const parked = pc("a", { x: -3, y: 5 });
+    const state = world({ tokens: [parked], blockMovement: true });
+    const view = seenRoom(state, "player");
+    const plan: DropPlan = { moves: [{ tokenId: "a", x: 5, y: 5 }], stop: { tokenId: "a", sceneId: "s1", blocker: "wall", door: null, ghost: { x: 5, y: 5 }, aim: { x: 5, y: 5 }, at: { x: 5, y: 5 } }, held: [] };
+    // A creature's space begins at x = -1, so the walk is held on -2, still past the edge.
+    const held = heldShortOfCreature(view, parked, plan, { x: 5, y: 5 }, (at) => at.x >= -1);
+    assert.deepEqual(held.moves, []);
+    assert.ok(held.stop);
+  });
+});
+
+describe("a drop on hexes", () => {
+  test("row -10 on hex columns lands on the nearest hex of the scene", () => {
+    const c = hexCenter(COLUMNS, { col: 6, row: -10 });
+    const state = hexes([pc("a", { x: 3, y: 3 })]);
+    const plan = planOne(seenRoom(state, "player"), state.tokens.a!, { x: c.x - 0.5, y: c.y - 0.5 }, "free");
+    assert.equal(plan.moves.length, 1);
+    allInside(state, plan, "hex columns");
+    assert.ok(plan.moves[0]!.y < 2, "at the top of the scene, not far from where it was aimed");
+  });
+
+  test("a group dragged past an edge keeps its shape", () => {
+    const on = (col: number, row: number) => ({ x: hexCenter(COLUMNS, { col, row }).x - 0.5, y: hexCenter(COLUMNS, { col, row }).y - 0.5 });
+    const state = hexes([pc("a", on(3, 4)), pc("b", on(4, 4))]);
+    const view = seenRoom(state, "player");
+    const group = [state.tokens.a!, state.tokens.b!];
+    const plan = planGroup(view, group, 0, -30, "free");
+    allInside(state, plan, "hex group");
+    assert.equal(plan.moves.length, 2);
+    // Both slid up by the same cells, the way a shape does, and neither stands on the other.
+    assert.equal(plan.moves[0]!.y - group[0]!.y, plan.moves[1]!.y - group[1]!.y);
+    assert.equal(plan.moves[1]!.x - plan.moves[0]!.x, group[1]!.x - group[0]!.x);
+  });
+});
+
+describe("a group's drop", () => {
+  const state = square(false, [pc("a", { x: 10, y: 5 }), pc("b", { x: 11, y: 5 }), pc("c", { x: 10, y: 7 })]);
+  const group = (s: RoomState) => ["a", "b", "c"].map((id) => s.tokens[id]!);
+  const ends = (plan: DropPlan) => plan.moves.map((m) => [m.tokenId, m.x, m.y]);
+
+  test("keeps its shape against the edge it is dragged into, and slides along it (D-261122-179)", () => {
+    const view = seenRoom(state, "player");
+    assert.deepEqual(ends(planGroup(view, group(state), 0, -9, "free")), [["a", 10, 0], ["b", 11, 0], ["c", 10, 2]]);
+    assert.deepEqual(ends(planGroup(view, group(state), -40, -40, "free")), [["a", 0, 0], ["b", 1, 0], ["c", 0, 2]]);
+    assert.deepEqual(ends(planGroup(view, group(state), 8, -40, "free")), [["a", 18, 0], ["b", 19, 0], ["c", 18, 2]]);
+    assert.deepEqual(ends(planGroup(view, group(state), 40, 40, "free")), [["a", 28, 17], ["b", 29, 17], ["c", 28, 19]]);
+  });
+
+  test("a move that stays inside is the move asked for", () => {
+    const plan = planGroup(seenRoom(state, "player"), group(state), 4, 3, "free");
+    assert.deepEqual(ends(plan), [["a", 14, 8], ["b", 15, 8], ["c", 14, 10]]);
+  });
+
+  test("a squeezed member is held to the footprint a group move stores, full size", () => {
+    const ogre = pc("o", { size: "large", x: -0.5, y: 7, squeeze: true });
+    const s = square(false, [ogre, pc("p", { x: 6, y: 7 })]);
+    const plan = planGroup(seenRoom(s, "player"), [s.tokens.o!, s.tokens.p!], 3, 0, "free");
+    allInside(s, plan, "squeezed member");
+  });
+
+  test("a member that stood past the edge is pulled in on its own, and the rest keep their place", () => {
+    const parked = square(false, [pc("a", { x: 10, y: 5 }), pc("far", { x: -4, y: 5 })]);
+    const plan = planGroup(seenRoom(parked, "player"), [parked.tokens.a!, parked.tokens.far!], 3, 0, "free");
+    assert.deepEqual(ends(plan), [["a", 13, 5], ["far", 0, 5]]);
+  });
+
+  test("the lead's frame and label read the spot the drop lands on", () => {
+    const board = groupDragOf(state, "player", ["a", "b", "c"], { x: 10, y: -30 });
+    assert.deepEqual(board.plan.moves.find((m) => m.tokenId === "a"), { tokenId: "a", x: 10, y: 0 });
+    // From 10, 5 to 10, 0 is 25 ft, not the 175 ft of the spot under the finger.
+    assert.equal(board.label.dragFt, 25);
+    assert.equal(board.frame.ft, 25);
+    // The member that sets the cut, and one that does not: each reads its own leg inside the group's offset.
+    const slide = groupDragOf(state, "player", ["c", "a", "b"], { x: 10, y: -30 });
+    assert.deepEqual(slide.plan.moves.find((m) => m.tokenId === "c"), { tokenId: "c", x: 10, y: 2 });
+    assert.equal(slide.label.dragFt, 25);
+  });
+});
 
 describe("a squeeze at the edge", () => {
   test("a Large creature squeezes into a corridor one column wide along the scene's west edge, standing half a cell past it with its squeezed box inside", () => {
@@ -82,70 +187,59 @@ describe("a squeeze at the edge", () => {
   });
 });
 
-describe("a drop on hexes", () => {
-  test("row -10 on hex columns lands on the nearest hex of the scene", () => {
-    const c = hexCenter(COLUMNS, { col: 6, row: -10 });
-    const state = hexes([pc("a", { x: 3, y: 3 })]);
-    const plan = planOne(seenRoom(state), state.tokens.a!, { x: c.x - 0.5, y: c.y - 0.5 }, "free");
-    assert.equal(plan.moves.length, 1);
-    allInside(state, plan, "hex columns");
-    assert.ok(plan.moves[0]!.y < 2, "at the top of the scene, not far from where it was aimed");
-  });
-});
-
-describe("a group's drop", () => {
-  const state = square(false, [pc("a", { x: 10, y: 5 }), pc("b", { x: 11, y: 5 }), pc("c", { x: 10, y: 7 })]);
-  const group = (s: RoomState) => ["a", "b", "c"].map((id) => s.tokens[id]!);
-
-  test("each token that would end past an edge stands along it, the rest where the move puts them", () => {
-    const north = planGroup(seenRoom(state), group(state), 0, -9, "free");
-    assert.deepEqual(north.moves.map((m) => [m.tokenId, m.x, m.y]), [["a", 10, 0], ["b", 11, 0], ["c", 10, 0]]);
-    const corner = planGroup(seenRoom(state), group(state), -40, -40, "free");
-    assert.deepEqual(corner.moves.map((m) => [m.tokenId, m.x, m.y]), [["a", 0, 0], ["b", 0, 0], ["c", 0, 0]]);
-    const some = planGroup(seenRoom(state), group(state), 0, -6, "free");
-    assert.deepEqual(some.moves.map((m) => [m.tokenId, m.x, m.y]), [["a", 10, 0], ["b", 11, 0], ["c", 10, 1]]);
-  });
-
-  test("a move that stays inside is the move asked for", () => {
-    const plan = planGroup(seenRoom(state), group(state), 4, 3, "free");
-    assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y]), [["a", 14, 8], ["b", 15, 8], ["c", 14, 10]]);
-  });
-
-  test("the lead's frame and label read the spot the drop lands on", () => {
-    const board = groupDragOf(state, "player", ["a", "b", "c"], { x: 10, y: -30 });
-    assert.deepEqual(board.plan.moves.find((m) => m.tokenId === "a"), { tokenId: "a", x: 10, y: 0 });
-    // From 10, 5 to 10, 0 is 25 ft, not the 175 ft of the spot under the finger.
-    assert.equal(board.label.dragFt, 25);
-    assert.equal(board.frame.ft, 25);
-  });
-});
-
 describe("what the device sends the server takes", () => {
-  test("over random scenes, sizes, aims and group drags, every move a drop plans is one canApply takes, for a player and the DM", () => {
+  /** Random edge walls: runs inside the scene and on its edge lines, which is where a held spot can fall outside (DROPMAP-OPUS-1). */
+  function randomEdges(r: () => number, w: number, h: number): Record<string, EdgeFeature> {
+    const edges: Record<string, EdgeFeature> = {};
+    const lines = int(r, 0, 5);
+    for (let k = 0; k < lines; k++) {
+      const vertical = r() < 0.5;
+      const at = pick(r, vertical ? [0, 1, 6, w - 1, w] : [0, 1, 5, h - 1, h]);
+      const from = int(r, 0, 8);
+      const to = from + int(r, 3, 12);
+      for (let v = from; v < to; v++) edges[vertical ? `${at},${v},w` : `${v},${at},n`] = { kind: "wall" };
+    }
+    return edges;
+  }
+
+  test("over random scenes with walls, sizes, parked tokens, riders, aims and group drags, every move a drop plans ends inside and is one canApply takes", () => {
     const r = rng(0xd0a9);
-    for (let i = 0; i < 400; i++) {
+    let moves = 0;
+    for (let i = 0; i < 600; i++) {
       const hex = r() < 0.4;
       const sizes = ["tiny", "small", "medium", "large", "huge"] as const;
-      const tokens = Array.from({ length: int(r, 1, 4) }, (_, k) => pc(`t${k}`, { size: pick(r, sizes), x: int(r, 2, 14), y: int(r, 2, 10) }));
+      const tokens = Array.from({ length: int(r, 1, 4) }, (_, k) => pc(`t${k}`, { size: pick(r, sizes), x: r() < 0.25 ? int(r, -4, 0) : int(r, 2, 14), y: r() < 0.25 ? int(r, -4, 0) : int(r, 0, 10) }));
+      // A Large mount of the player's with a rider sitting on it.
+      const mount = pc("mount", { size: "large", x: int(r, 0, 8), y: int(r, 0, 6) });
+      const rider = pc("rider", { x: mount.x + 1, y: mount.y, attached: { to: "mount", kind: "ride" } });
+      const all = hex ? tokens : [...tokens, mount, rider];
       const mode = r() < 0.5 ? "walk" : "free";
-      const base = hex ? hexes(tokens) : square(mode === "walk", tokens);
+      const base = hex ? hexes(all) : world({ edges: randomEdges(r, 30, 30), tokens: all, blockMovement: mode === "walk" });
       const state: RoomState = hex ? { ...base, scenes: { s1: { ...base.scenes.s1!, blockMovement: mode === "walk" } } } : base;
       // Tokens of a hex room stand on a hex's anchor, so they are placed by the rule that places them.
-      if (hex) for (const t of tokens) Object.assign(state.tokens[t.id]!, { ...keptOnScene(state, t, { x: t.x, y: t.y }) });
+      if (hex) for (const t of tokens) Object.assign(state.tokens[t.id]!, { ...keptOnScene(seenRoom(state, "player"), t, { x: t.x, y: t.y }) });
       const view = seenRoom(state, "player");
-      const aim = { x: r() * 70 - 25, y: r() * 60 - 25 };
+      const bounds = state.scenes.s1!.bounds;
+      const aim = { x: r() * (bounds.w + 40) - 20, y: r() * (bounds.h + 40) - 20 };
       const lead = state.tokens.t0!;
       const plans = [planOne(view, lead, aim, mode)];
       if (tokens.length > 1) plans.push(planGroup(view, tokens.map((t) => state.tokens[t.id]!), aim.x - lead.x, aim.y - lead.y, mode));
+      if (!hex) plans.push(planOne(view, state.tokens.mount!, pressedAim(view, state.tokens.mount!, state.tokens.rider!, aim), mode));
       for (const plan of plans) {
-        allInside(state, plan, `run ${i}`);
+        for (const m of plan.moves) {
+          const t = state.tokens[m.tokenId]!;
+          const sc = state.scenes.s1!;
+          const stays = m.x === t.x && m.y === t.y;
+          assert.ok(stays || standsInScene(sceneGrid(sc), sc.bounds, { ...t, x: m.x, y: m.y, ...(m.squeeze ? { squeeze: true as const } : {}) }), `run ${i}: ${m.tokenId} on ${m.x},${m.y}`);
+        }
         for (const op of moveOpsOf(plan.moves)) {
+          moves++;
           const d = canApply(opSchema.parse(op), P1, state, deps);
           // A wall or a squeeze may stop a move, but never the edge rule.
           assert.ok(d.ok || !d.message.includes("inside the map"), `run ${i}: ${JSON.stringify(op)} ${d.ok ? "" : d.message}`);
-          assert.equal(canApply(opSchema.parse(op), DM, state, deps).ok, true);
         }
       }
     }
+    assert.ok(moves > 300, `${moves} moves planned`);
   });
 });

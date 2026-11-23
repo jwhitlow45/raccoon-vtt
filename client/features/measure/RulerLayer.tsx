@@ -13,7 +13,8 @@ import { dragLineSlot } from "../../state/store.ts";
 import type { DragPreview } from "../../state/types.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
-import { dropView, type DropView, type Role } from "../movement/drop.ts";
+import { dropView, keptOnScene, type DropView, type Role } from "../movement/drop.ts";
+import { localDragSlot } from "../../state/localDrags.ts";
 import { groupReading } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
@@ -96,6 +97,8 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   // Only this device's own drag reads the room, for where its token lands: by its holder while it sits on one every player sees.
   const dragRoom = useTreeShownView((s) => (localDrag ? s.floorView : null));
   const dropRoom = useMemo(() => (dragRoom ? dropView(dragRoom, role) : undefined), [dragRoom, role]);
+  // A group lands by one offset, cut back at a player's edge, which the board writes as each member's spot (Stage.tsx dragMove): the label reads that spot.
+  const groupLands = useTreeShownStore(useScoped(localDragSlot), (s) => (localDrag && Object.keys(s.spots).length > 1 ? s.spots[localDrag.tokenId] : undefined));
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
@@ -160,7 +163,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
           // The node is where the token is drawn, and a group drag lands each in the box under its rules spot (docs/design/design-v1-snap-off.md 6.3).
-          to={((t, at) => snapPosition(grid, at.x, at.y, footprint(t)))(tokens[localDrag.tokenId]!, rulesSpot(tokens[localDrag.tokenId]!, localDrag))}
+          to={groupLands ?? ((t, at) => landedAt(dropRoom, grid, t, at))(tokens[localDrag.tokenId]!, rulesSpot(tokens[localDrag.tokenId]!, localDrag))}
           group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
@@ -375,6 +378,12 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) 
       />
     </>
   );
+}
+
+/** The box a lone drop of the token at `at` lands in: snapped by its own footprint, and a player's inside the scene as every landing is (drop.ts keptOnScene). */
+function landedAt(room: DropView | undefined, grid: Grid, token: Token, at: Point): Point {
+  const snapped = snapPosition(grid, at.x, at.y, footprint(token));
+  return room ? keptOnScene(room, token, snapped) : snapped;
 }
 
 /**

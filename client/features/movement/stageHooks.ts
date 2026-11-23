@@ -16,7 +16,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, heldShortOfCreature, keptOnScene, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, groupOffsetOnScene, heldShortOfCreature, keptOnScene, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
@@ -73,6 +73,11 @@ export type DragStops = {
   frameFields(tokenId: string): { x?: number; y?: number; path?: number[]; ft?: number };
   /** What a group drag's frame of one of its named tokens at `at` sends besides where it is: the leg's cost, as its label reads it (review AT-ASTRA-15). */
   groupFields(token: DropToken, at: Point): { ft?: number };
+  /**
+   * The offset a group drag lands by when its pressed node is `dx`, `dy` off where it was drawn: a player's cut back so that every
+   * member stands inside the scene (drop.ts groupOffsetOnScene), so the board's spots and labels read the spot the drop lands on.
+   */
+  groupOffset(named: readonly DropToken[], dx: number, dy: number): { dx: number; dy: number };
   /**
    * An arrow key's press: where it puts the token, and the rest of its
    * group, by the rules, a step of one square, never searched round a wall,
@@ -508,6 +513,10 @@ export function dragStops(deps: DragDeps): DragStops {
       if (!view || !full) return {};
       const spot = rulesSpot(full, at);
       return { ft: groupReading(view, full, keptOnScene(view, full, snapPosition(dropGrid(view, full), spot.x, spot.y, footprintSize(full))), role).dragFt };
+    },
+    groupOffset(named, dx, dy) {
+      const view = seenView(store.getState().floorView);
+      return view ? groupOffsetOnScene(view, named.map((t) => view.tokens[t.id] ?? t), dx, dy) : { dx, dy };
     },
     press(node, drawn, drawnGroup) {
       const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : rulesSpot(drawn, { x: node.x(), y: node.y() });

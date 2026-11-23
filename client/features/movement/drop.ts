@@ -57,14 +57,28 @@ export function dropGrid(state: Pick<BuildState, "scenes">, token: Pick<DropToke
 
 /**
  * `to` moved the least to put the token's whole footprint inside its scene
- * (shared/rules/sceneEdge.ts), whoever drops it and whatever the scene's
+ * (shared/rules/sceneEdge.ts), for a player's drops whatever the scene's
  * walls: every landing ends on the scene as a teleport and a placement do,
  * and the server refuses a player's move that does not (DROP-OFF-MAP,
- * D-261122-160).
+ * D-261122-160). The DM's drops are left where they are aimed, so the DM
+ * can still park a token off the map (D-261122-178).
  */
-export function keptOnScene(state: Pick<BuildState, "scenes">, token: DropToken, to: Point): Point {
+export function keptOnScene(state: Pick<DropView, "scenes" | "role">, token: DropToken, to: Point): Point {
   const scene = state.scenes[token.sceneId];
-  return scene ? pulledInside(sceneGrid(scene), scene.bounds, token, to) : to;
+  return scene && state.role !== "dm" ? pulledInside(sceneGrid(scene), scene.bounds, token, to) : to;
+}
+
+/**
+ * Whether a player's held spot lies past the scene's edge where the token
+ * does not stand: a parked token walked in against a wall on the edge line
+ * is held outside, a spot the server refuses (DROPMAP-OPUS-1), so no move
+ * is planned and the stop's note stays.
+ */
+function heldOffScene(state: Pick<DropView, "scenes" | "role">, token: DropToken, at: Point & { squeeze: boolean }): boolean {
+  const scene = state.scenes[token.sceneId];
+  if (!scene || state.role === "dm" || (at.x === token.x && at.y === token.y)) return false;
+  const { squeeze: _was, ...full } = token;
+  return !standsInScene(sceneGrid(scene), scene.bounds, { ...full, x: at.x, y: at.y, ...(at.squeeze ? { squeeze: true as const } : {}) });
 }
 
 /** The token fields a drop reads, and where it is drawn in its box (free.ts). */
@@ -293,7 +307,7 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
   const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
   // A squeeze past the scene's edge is no opening: the drop lands full size inside it (keptOnScene).
   const scene = state.scenes[token.sceneId];
-  if (scene && !standsInScene(g, scene.bounds, { ...token, x: spot.x, y: spot.y, squeeze: true })) return null;
+  if (scene && state.role !== "dm" && !standsInScene(g, scene.bounds, { ...token, x: spot.x, y: spot.y, squeeze: true })) return null;
   const land = landing(state, walkerOf(state, token), { ...spot, elevation: dropLanding(state, token, spot) }, mode);
   return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
 }
@@ -590,7 +604,7 @@ export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclu
   const walker = walkerOf(state, token);
   const land = landing(state, walker, { x: to.x, y: to.y, elevation }, mode);
   const at = land.stopped ? standingBack(state, walker, { x: to.x, y: to.y, elevation }, land) : { x: land.x, y: land.y, squeeze: land.squeeze };
-  const moves = moved(token, at) ? [seated(state, token, raw, landed(state, token, at), at)] : [];
+  const moves = moved(token, at) && !heldOffScene(state, token, at) ? [seated(state, token, raw, landed(state, token, at), at)] : [];
   const named = land.stopped ? heardStop(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, land.stopped) : null;
   const stop: Stop | null = named ? { tokenId: token.id, sceneId: token.sceneId, ...named, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: at.x, y: at.y } } : null;
   return { moves, stop, held: [] };
@@ -947,7 +961,7 @@ export function heldShortOfCreature(state: DropView, token: DropToken, plan: Dro
   const land = landing(state, walker, to, "walk");
   const at = land.stopped ? standingBack(state, walker, to, land) : { x: land.x, y: land.y, squeeze: land.squeeze };
   const stop: Stop = { tokenId: token.id, sceneId: token.sceneId, blocker: plan.stop?.blocker ?? "wall", door: null, ghost: target, aim: plan.stop?.aim ?? { x: raw.x, y: raw.y }, at: { x: at.x, y: at.y } };
-  return { ...plan, moves: moved(token, at) ? [landed(state, token, at)] : [], stop };
+  return { ...plan, moves: moved(token, at) && !heldOffScene(state, token, at) ? [landed(state, token, at)] : [], stop };
 }
 
 /**
@@ -961,12 +975,15 @@ export function heldShortOfCreature(state: DropView, token: DropToken, plan: Dro
  * (docs/design/design-v1-attach.md 4.2), each tested on the token's leg offset by
  * its place: a token one of them could not follow stays where it was.
  */
-export function planGroup(state: DropView, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
+export function planGroup(state: DropView, tokens: readonly DropToken[], aimedX: number, aimedY: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
   const moves: Landed[] = [];
   const held: DropPlan["held"] = [];
+  const kept = groupOffsetOnScene(state, tokens, aimedX, aimedY);
+  const dx = kept.dx;
+  const dy = kept.dy;
   for (const token of tokens) {
     const g = dropGrid(state, token);
-    // Each token on its own, so a group dropped past an edge stands along it, and its label reads this same spot (stageHooks.ts groupFields).
+    // A member that stood past the edge before is the one pulled on its own: the group's offset cannot bring it in.
     const to = keptOnScene(state, token, snapPosition(g, token.x + dx, token.y + dy, footprintSize(token)));
     if (to.x === token.x && to.y === token.y) continue;
     const elevation = dropLanding(state, token, to);
@@ -981,6 +998,55 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
     else moves.push(landed(state, token, { ...to, squeeze: false }));
   }
   return { moves, stop: null, held };
+}
+
+/**
+ * Whether a player's group moved by (dx, dy) ends every member that stands
+ * on the scene now on it: where a group move ends it, snapped by its own
+ * footprint and full size, as `token.moveMany` stores it (squeezes drop). A
+ * member that ends where it stands is as it was, and one that stands past
+ * the edge already is no one's to hold back.
+ */
+function groupStays(state: Pick<DropView, "scenes">, tokens: readonly DropToken[], dx: number, dy: number): boolean {
+  return tokens.every((token) => {
+    const scene = state.scenes[token.sceneId];
+    if (!scene) return true;
+    const g = sceneGrid(scene);
+    if (!standsInScene(g, scene.bounds, token)) return true;
+    const to = snapPosition(g, token.x + dx, token.y + dy, footprintSize(token));
+    const { squeeze: _was, ...full } = token;
+    return (to.x === token.x && to.y === token.y) || standsInScene(g, scene.bounds, { ...full, ...to });
+  });
+}
+
+/** How many halvings find the edge: a group's move is about a hundred cells at most, so this is well under a hundredth of a cell. */
+const EDGE_HALVINGS = 14;
+
+/**
+ * The offset a player's group moves by, cut back where it would take a
+ * member that stands on the scene past its edge (D-261122-179,
+ * DROP-OFF-MAP): each axis on its own, x first, so a group dragged into a
+ * corner along an edge slides along it, and the members keep their places
+ * in relation to one another. Cut back by halving, since on hexes where a
+ * member ends depends on both axes. The DM's offset is left as aimed
+ * (D-261122-178).
+ */
+export function groupOffsetOnScene(state: Pick<DropView, "scenes" | "role">, tokens: readonly DropToken[], dx: number, dy: number): { dx: number; dy: number } {
+  if (state.role === "dm" || groupStays(state, tokens, dx, dy)) return { dx, dy };
+  const cut = (along: (t: number) => { dx: number; dy: number }): number => {
+    let ok = 0;
+    let bad = 1;
+    for (let i = 0; i < EDGE_HALVINGS; i++) {
+      const mid = (ok + bad) / 2;
+      const at = along(mid);
+      if (groupStays(state, tokens, at.dx, at.dy)) ok = mid;
+      else bad = mid;
+    }
+    return ok;
+  };
+  const tx = groupStays(state, tokens, dx, 0) ? 1 : cut((t) => ({ dx: dx * t, dy: 0 }));
+  const ty = groupStays(state, tokens, dx * tx, dy) ? 1 : cut((t) => ({ dx: dx * tx, dy: dy * t }));
+  return { dx: dx * tx, dy: dy * ty };
 }
 
 /**

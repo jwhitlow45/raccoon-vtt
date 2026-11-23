@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { int, pick, rng } from "../testutil.ts";
-import { occupiedHexes, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { occupiedHexes, placedOnHex, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import { SQUARES } from "./grid.ts";
 import { hexCenter, hexInScene, sceneHexes, type HexGrid } from "./hex.ts";
 import { pulledInside, standsInScene } from "./sceneEdge.ts";
@@ -109,4 +109,40 @@ describe("pulledInside on hexes", () => {
       }
     });
   }
+});
+
+describe("pulledInside on hexes against the scan of every hex (DROPMAP-OPUS-2)", () => {
+  /** The nearest spot of the scene's hexes whose footprint stands inside: what the ring search must match in distance. */
+  function scanned(g: HexGrid, bounds: { w: number; h: number }, token: PlacedToken, to: { x: number; y: number }): number | null {
+    let best: number | null = null;
+    for (const hex of sceneHexes(g, bounds)) {
+      const p = placedOnHex(g, token, hex);
+      if (!standsInScene(g, bounds, { ...token, x: p.x, y: p.y })) continue;
+      const d = (p.x - to.x) ** 2 + (p.y - to.y) ** 2;
+      if (best === null || d < best) best = d;
+    }
+    return best;
+  }
+
+  test("the nearest spot by distance, on scenes of random sizes and aims far and near, both orientations and every size", () => {
+    const r = rng(0x51de);
+    for (let i = 0; i < 600; i++) {
+      const g = pick(r, [ROWS, COLUMNS] as const);
+      const bounds = { w: int(r, 2, 40), h: int(r, 2, 40) };
+      const token = sized(pick(r, ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const), 0, 0);
+      const to = { x: r() * (bounds.w + 60) - 30, y: r() * (bounds.h + 60) - 30 };
+      const at = pulledInside(g, bounds, token, to);
+      const want = scanned(g, bounds, token, to);
+      if (want === null) continue;
+      assert.equal(standsInScene(g, bounds, { ...token, ...at }), true, JSON.stringify({ bounds, token, to, at }));
+      if (!standsInScene(g, bounds, { ...token, ...to })) assert.ok(Math.abs((at.x - to.x) ** 2 + (at.y - to.y) ** 2 - want) < 1e-6, `run ${i}: ${JSON.stringify({ g, bounds, token, to, at, want })}`);
+    }
+  });
+
+  test("a drop far past the edge of the largest scene reads a few dozen hexes, not all 40,000", () => {
+    const bounds = { w: 200, h: 200 };
+    const started = performance.now();
+    for (let i = 0; i < 200; i++) pulledInside(COLUMNS, bounds, sized("gargantuan", 0, 0), { x: -50 + i, y: 700 });
+    assert.ok(performance.now() - started < 200, "200 calls under 200 ms, where the full scan took 4 ms a call");
+  });
 });

@@ -1,7 +1,7 @@
 import type { Point } from "./geom.ts";
 import { footprintSize, isSqueezed, occupiedHexes, placedOnHex, squeezedRect, type PlacedToken } from "./footprint.ts";
 import { isHex, type Grid } from "./grid.ts";
-import { hexInScene, sceneHexes } from "./hex.ts";
+import { hexAt, hexInScene, hexKey, hexNeighbors, type Hex } from "./hex.ts";
 
 /**
  * Where a token's move may end relative to the scene's edge
@@ -15,6 +15,10 @@ import { hexInScene, sceneHexes } from "./hex.ts";
  */
 
 const EPS = 1e-9;
+
+/** How far the ring search goes, and how many rings past the first fit it still reads. */
+const MAX_RINGS = 24;
+const EXTRA_RINGS = 3;
 
 /**
  * Whether the footprint a token takes at its stored spot lies inside the
@@ -55,16 +59,37 @@ export function pulledInside(g: Grid, bounds: { w: number; h: number }, token: P
   }
   if (standsInScene(g, bounds, full)) return to;
   const away = (p: Point) => (p.x - to.x) ** 2 + (p.y - to.y) ** 2;
-  let best: Point | null = null;
+  let best = null as Point | null;
   let bestAway = Infinity;
-  for (const hex of sceneHexes(g, bounds)) {
+  const consider = (hex: Hex) => {
     const p = placedOnHex(g, full, hex);
     const d = away(p);
     // Only a nearer spot is worth the footprint test, so a far drop costs one test per improvement.
-    if (d >= bestAway - EPS) continue;
-    if (!standsInScene(g, bounds, { ...full, x: p.x, y: p.y })) continue;
+    if (d >= bestAway - EPS || !standsInScene(g, bounds, { ...full, x: p.x, y: p.y })) return false;
     best = p;
     bestAway = d;
+    return true;
+  };
+  // Rings of hexes round where `to` lands once clamped into the scene's box, so a far drop on a 200 by 200 scene costs a few dozen
+  // hexes and not all of them (DROPMAP-OPUS-2). The nearest spot lies within a few rings of the first one that fits.
+  const { w, h } = footprintSize(full);
+  const clamped = { x: pulled(to.x, w, bounds.w, 1), y: pulled(to.y, h, bounds.h, 1) };
+  const start = hexAt(g, { x: clamped.x + w / 2, y: clamped.y + h / 2 });
+  const seen = new Set<string>([hexKey(start)]);
+  let ring: Hex[] = [start];
+  let foundAt = -1;
+  for (let r = 0; r <= MAX_RINGS && ring.length > 0 && (foundAt < 0 || r <= foundAt + EXTRA_RINGS); r++) {
+    for (const hex of ring) if (consider(hex) && foundAt < 0) foundAt = r;
+    const next: Hex[] = [];
+    for (const hex of ring) {
+      for (const n of hexNeighbors(g, hex)) {
+        if (seen.has(hexKey(n))) continue;
+        seen.add(hexKey(n));
+        next.push(n);
+      }
+    }
+    ring = next;
   }
+  // A scene too small for the footprint at all has no spot to pull to, and the drop stays where it was aimed.
   return best ?? to;
 }

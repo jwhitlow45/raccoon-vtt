@@ -1715,20 +1715,26 @@ export function MapStage(props: {
         // their own leg's cost, as the group's label reads it (review AT-ASTRA-15).
         const leadFields = lone ? dragStopsRef.current.frameFields(drag.lead.id) : {};
         const named = lone ? null : new Set(drag.named.map((t) => t.id));
-        const fieldsOf = (t: ViewToken, x: number, y: number) => (lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x, y }) : {});
+        // A group lands by one offset, cut back where a player's members would cross the scene's edge (drop.ts groupOffsetOnScene), so
+        // its label and its spots read where it lands. The frames still carry where each node is drawn.
+        const gridNow = sceneGrid(sceneRef.current);
+        const drawnFrom = drawnSpot(gridNow, token);
+        const asked = { dx: node.x() - drawnFrom.x, dy: node.y() - drawnFrom.y };
+        const landsBy = lone ? asked : dragStopsRef.current.groupOffset(drag.named, asked.dx, asked.dy);
+        const fieldsOf = (t: ViewToken, x: number, y: number) =>
+          lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x: x + landsBy.dx - asked.dx, y: y + landsBy.dy - asked.dy }) : {};
         // A free drag's frames say so, so every device reads the box the drop counts it in as this one does (SNAPBUILD-ASTRA-02).
         actions.sendEph(moveFrame(token.id, { x: node.x(), y: node.y() }, free, fieldsOf(token, node.x(), node.y())));
         // What follows a token reads the box it counts in: under where it is drawn for a free drag, else back in rules coordinates.
         // A lone drag's lead lands where its plan does, squeezed or not, which the drag's stops write as its line ends (SNAPBUILD-ASTRA-04).
         const planned = lone ? drag.lead.id : null;
         const here = dragAim(token, { x: node.x(), y: node.y() }, free);
-        if (token.id !== planned) setSpot(token, here.x, here.y);
+        if (token.id !== planned) setSpot(token, here.x + landsBy.dx - asked.dx, here.y + landsBy.dy - asked.dy);
         if (drag.followers.length === 0) return;
         // Every follower moves by the pressed node's offset from where it was drawn, each from where it is drawn itself.
         const grid = sceneGrid(sceneRef.current);
-        const from = drawnSpot(grid, token);
-        const dx = node.x() - from.x;
-        const dy = node.y() - from.y;
+        const dx = asked.dx;
+        const dy = asked.dy;
         const layers = new Set<Konva.Layer>();
         for (const f of drag.followers) {
           const was = drawnSpot(grid, f.token);
@@ -1738,7 +1744,7 @@ export function MapStage(props: {
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
           actions.sendEph(moveFrame(f.token.id, { x, y }, false, fieldsOf(f.token, x, y)));
-          if (f.token.id !== planned) setSpot(f.token, f.token.x + dx, f.token.y + dy);
+          if (f.token.id !== planned) setSpot(f.token, f.token.x + landsBy.dx, f.token.y + landsBy.dy);
         }
         for (const layer of layers) layer.batchDraw();
       },
