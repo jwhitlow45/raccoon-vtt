@@ -25,3 +25,11 @@ export function pointerWords(template: string, names: Readonly<Record<string, st
 export function passWords(words: string, worded?: true, touch: boolean = isCoarsePointer()): string {
   return worded === true ? words : pointerWords(words, {}, touch);
 }
+
+/**
+ * `text` with its closing `fixed` words, which say "Tap", worded for the pointer, and the rest left
+ * as it is: the rest may hold a name, and a creature named "Tap" keeps it.
+ */
+export function pointerTail(text: string, fixed: string, touch: boolean = isCoarsePointer()): string {
+  return text.endsWith(fixed) ? text.slice(0, text.length - fixed.length) + pointerWords(fixed, {}, touch) : text;
+}
