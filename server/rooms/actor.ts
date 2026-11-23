@@ -58,7 +58,7 @@ import {
   readWatermark,
   setReadOnly,
   snapshotJson,
-  writeSnapshot,
+  storeSnapshot,
   type ArchiveGuard,
   type AssetFact,
   type BatchWrite,
@@ -107,8 +107,19 @@ export type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error" | "debug"
 export type ActorOptions = {
   batchMs: number;
   queueCap: number;
-  snapshotOps: number;
-  snapshotIdleMs: number;
+  /**
+   * The snapshot's mark (#mark): every this many ms on the server clock,
+   * offset per room by a hash of its id, the room builds its snapshot, and
+   * every third mark writes it. Tests that want no mark pass a non-finite
+   * one.
+   */
+  snapshotEveryMs: number;
+  /** The rows stored since the last written snapshot past which any mark writes (SNAPSHOT_BACKSTOP_ROWS), lowered only by tests. */
+  snapshotBackstopRows: number;
+  /** Tests only: a write once this many ops were stored since the last one. Absent, or not finite, it is off. */
+  snapshotOps?: number;
+  /** Tests only: a write this long after the first batch with ops since the last one. Absent, or not finite, it is off. */
+  snapshotIdleMs?: number;
   grantRecheckMs: number;
   roomOpsPerSec: number;
   /** The room storage quota. 0 disables the read-only switch. */
@@ -176,11 +187,30 @@ export type ActorOptions = {
   reidAtLoad: boolean;
 };
 
+/** How often a loaded room builds its snapshot (#mark), whatever changed. */
+export const SNAPSHOT_EVERY_MS = 10_000;
+
+/** How many rows stored since the last written snapshot make any mark write, not only every third. */
+export const SNAPSHOT_BACKSTOP_ROWS = 2_000;
+
+/**
+ * Where a room's marks fall in their period: a fixed hash of its id
+ * (32-bit FNV-1a), so rooms loaded together build at different times.
+ */
+export function markOffset(roomId: string, every: number): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < roomId.length; i++) {
+    hash ^= roomId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % every;
+}
+
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   batchMs: 20,
   queueCap: 500,
-  snapshotOps: 200,
-  snapshotIdleMs: 30_000,
+  snapshotEveryMs: SNAPSHOT_EVERY_MS,
+  snapshotBackstopRows: SNAPSHOT_BACKSTOP_ROWS,
   grantRecheckMs: 60_000,
   roomOpsPerSec: 60,
   quotaBytes: 0,
@@ -666,6 +696,14 @@ export class RoomActor {
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
+  /** The next mark's timer (#armMark), and the index on the room's grid of the last mark handled, null until the first is placed. */
+  #markTimer: NodeJS.Timeout | null = null;
+  #lastMark: number | null = null;
+  /** The quota check after a stored snapshot (#recheckQuota), and whether another was asked for while it ran. */
+  #quotaCheck: Promise<void> | null = null;
+  #quotaAgain = false;
+  /** Whether the last snapshot write failed, so a run of failures warns once. */
+  #writesFailing = false;
   #snapshotting: Promise<void> | null = null;
   #batch: Batch | null = null;
   /** The closed batches whose commits have not landed, in tick order: the first is in flight, and the rest wait their turn. */
@@ -923,7 +961,8 @@ export class RoomActor {
       actor.#sizes.capsUnmeasured();
     }
     await actor.reconcileKinds();
-    if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
+    if (actor.#countedWrites()) actor.#scheduleCountedWrite();
+    else actor.#armMark();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
     // nothing that names a file plays (docs/design/design-v1-music.md 6.4). Its tick runs once now, sockets or none.
     if (!actor.replayFailed && soundOf(actor.#staged.state) !== null) actor.#enqueue({ t: "soundTick" });
@@ -971,10 +1010,16 @@ export class RoomActor {
       this.#batch === null &&
       this.#pending.length === 0 &&
       this.#snapshotting === null &&
+      this.#quotaCheck === null &&
       this.#stepRunning === null &&
       this.#parked.length === 0 &&
       this.#reading === null
     );
+  }
+
+  /** How many views the ring keeps (asOf), for its tests. */
+  get viewCount(): number {
+    return this.#views.length;
   }
 
   /** How many deleted asset ids the barrier keeps for outstanding lookups, for its tests. */
@@ -1536,6 +1581,7 @@ export class RoomActor {
       if (this.#recheckTimer) clearInterval(this.#recheckTimer);
       this.#clearSoundTimer();
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
+      if (this.#markTimer) clearTimeout(this.#markTimer);
       for (const d of this.#delayed.values()) d.cancel();
       this.#delayed.clear();
       // An ask being read goes unanswered, as queued work does: its client asks again after it reconnects.
@@ -1570,7 +1616,7 @@ export class RoomActor {
         // A periodic snapshot already being written holds an older commit, which a stop must not leave as the room's last:
         // once it ends, the newest is written if the stored one is still behind (LP44-OPS-1).
         if (this.#snapshotting) await this.#snapshotting;
-        await this.#writeSnapshot();
+        await this.#writeNow();
       }
     })().finally(() => this.#sizes.release());
     return this.#closing;
@@ -3414,11 +3460,13 @@ export class RoomActor {
    * leave. The walk is then handled in the same pass, so it keeps its place
    * among the ops and nothing waits on it. What a new batch would start
    * afresh starts afresh here too: the memory estimate, the state the
-   * permission checks read as the batch's start, and the answers the cap
-   * counts. The rows stored and the state left are those of a commit just
-   * before the walk, in one transaction, but for its meeting: the meet
-   * step runs only at the close, on what the batch publishes (#meet),
-   * since the party may hold a creature here that no frame shows.
+   * permission checks read as the batch's start, and the count of answers
+   * since the steps last ran (#walkNeedsSteps). The rows stored and the
+   * state left are those of a commit just before the walk, in one
+   * transaction, but for its meeting: the meet step runs only at the close,
+   * on what the batch publishes (#meet), since the party may hold a
+   * creature here that no frame shows. A walk that is refused, throws, or
+   * changes nothing shared puts the steps back (#restoreSteps).
    */
   #stepInPlace(batch: Batch): void {
     // As #commitNow skips its own: the tail a failed replay left holds the next seq.
@@ -3721,7 +3769,10 @@ export class RoomActor {
     }
     if (batch.ops.length > 0) this.#opsSinceSnapshot += batch.ops.length;
     // Its quota check runs without holding the queue, as a deletion step's does.
-    if (write.snapshot) void this.#snapshotStored(write.snapshot.seq, Buffer.byteLength(write.snapshot.json), batch.state).catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
+    if (write.snapshot) {
+      this.#snapshotStored(write.snapshot.seq);
+      void this.#recheckQuota();
+    }
     release?.();
     // Nothing from here on throws out of the commit: no one awaits it, and the next commit waits until its end. The publish is
     // caught here, each owed snapshot and resync on its own socket, and the rest sets timers or drains the queue, which
@@ -3773,7 +3824,7 @@ export class RoomActor {
     this.#resyncOrphanedDms();
     // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.
     this.#armSoundTick();
-    if (batch.ops.length > 0) this.#scheduleSnapshot();
+    if (batch.ops.length > 0 && this.#countedWrites()) this.#scheduleCountedWrite();
     // The next batch's commit starts, and the queue resumes if it held on this one: backpressure, a parked deletion step.
     this.#pending.shift();
     this.#inFlight = null;
@@ -3855,21 +3906,6 @@ export class RoomActor {
   }
 
   /**
-   * What a stored snapshot of `bytes` changes in the room, written by
-   * #writeSnapshot or with a commit: it is at today's version, so no commit
-   * needs to carry one (#countSnapshot), and the room's size and quota are
-   * measured again. It returns the quota check, which only #writeSnapshot
-   * waits for.
-   */
-  #snapshotStored(seq: number, bytes: number, state: RoomState): Promise<void> {
-    this.#countSnapshotDue = false;
-    this.#snapshotSeq = seq;
-    this.#opsSinceSnapshot = this.#committed.seq - seq;
-    this.#sizes.stateMeasured(measuredFromStored(bytes, state), state);
-    return this.#checkQuota();
-  }
-
-  /**
    * Histories are frozen with the commit, so a delayed snapshot never pairs
    * an old view with staged heads. `pub` is the number of the batch whose
    * close sends it, the one the frame just before it carries.
@@ -3937,38 +3973,154 @@ export class RoomActor {
 
   // Snapshots (design 16.2).
 
-  #scheduleSnapshot(): void {
-    if (this.replayFailed || this.#closed) return;
-    if (this.#opsSinceSnapshot >= this.#opts.snapshotOps) {
-      void this.#writeSnapshot();
+  /**
+   * Places the next mark: the first time after the last mark handled that is
+   * a whole number of periods past the room's offset (markOffset). A test
+   * that sets snapshotOps or snapshotIdleMs keeps that schedule instead.
+   */
+  #armMark(): void {
+    const every = this.#opts.snapshotEveryMs;
+    if (this.#closed || this.replayFailed || this.#countedWrites() || !Number.isFinite(every) || every <= 0) return;
+    const offset = markOffset(this.roomId, every);
+    this.#lastMark ??= Math.floor((this.#opts.now() - offset) / every);
+    const at = offset + (this.#lastMark + 1) * every;
+    this.#markTimer = setTimeout(() => {
+      this.#markTimer = null;
+      this.#mark();
+    }, Math.max(0, at - this.#opts.now()));
+    this.#markTimer.unref();
+  }
+
+  /**
+   * A mark builds the snapshot of the committed state whatever changed, and
+   * writes that build at every third mark, counted on the room's grid, when
+   * rows were stored since the last write that landed, or at any mark once
+   * those rows reach snapshotBackstopRows. A write still running skips the
+   * write, never the build.
+   */
+  #mark(): void {
+    if (this.#closed || this.#lastMark === null) return;
+    const every = this.#opts.snapshotEveryMs;
+    const index = Math.floor((this.#opts.now() - markOffset(this.roomId, every)) / every);
+    // A timer that fired before its mark waits for it. A clock set back counts the marks from where it reads now.
+    if (index === this.#lastMark) return this.#armMark();
+    const third = index < this.#lastMark || Math.floor(index / 3) > Math.floor(this.#lastMark / 3);
+    this.#lastMark = index;
+    this.#armMark();
+    const { state, seq } = this.#committed;
+    const capsPending = this.#capsPending;
+    let json: string;
+    try {
+      json = this.#opts.snapshotJson(state);
+    } catch (err) {
+      this.#log.error({ err, roomId: this.roomId, seq }, "snapshot build failed");
       return;
     }
-    if (this.#opsSinceSnapshot > 0 && !this.#snapshotTimer) {
+    const rows = seq - this.#snapshotSeq;
+    if (this.#snapshotting || rows <= 0) return;
+    if (third || rows >= this.#opts.snapshotBackstopRows) void this.#write(seq, json, capsPending);
+  }
+
+  /** Whether a test asked for writes by its count or its wait (snapshotOps, snapshotIdleMs) in place of the marks. */
+  #countedWrites(): boolean {
+    return Number.isFinite(this.#opts.snapshotOps) || Number.isFinite(this.#opts.snapshotIdleMs);
+  }
+
+  /** Tests only: a write once snapshotOps ops were stored since the last one, or snapshotIdleMs after the first of them. */
+  #scheduleCountedWrite(): void {
+    if (this.replayFailed || this.#closed) return;
+    const { snapshotOps, snapshotIdleMs } = this.#opts;
+    if (snapshotOps !== undefined && Number.isFinite(snapshotOps) && this.#opsSinceSnapshot >= snapshotOps) {
+      void this.#writeNow();
+      return;
+    }
+    if (snapshotIdleMs !== undefined && Number.isFinite(snapshotIdleMs) && this.#opsSinceSnapshot > 0 && !this.#snapshotTimer) {
       this.#snapshotTimer = setTimeout(() => {
         this.#snapshotTimer = null;
-        void this.#writeSnapshot();
-      }, this.#opts.snapshotIdleMs);
+        void this.#writeNow();
+      }, snapshotIdleMs);
     }
   }
 
-  #writeSnapshot(): Promise<void> {
+  /** A write of the committed state as it stands, at a stop or by a test's count, unless one is running or the stored one is current. */
+  #writeNow(): Promise<void> {
     if (this.#snapshotting) return this.#snapshotting;
     if (this.replayFailed) return Promise.resolve();
     const { state, seq } = this.#committed;
     if (seq <= this.#snapshotSeq) return Promise.resolve();
-    this.#snapshotting = (async () => {
+    let json: string;
+    try {
+      json = snapshotJson(state);
+    } catch (err) {
+      this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
+      return Promise.resolve();
+    }
+    return this.#write(seq, json, this.#capsPending);
+  }
+
+  /**
+   * Stores `json`, the committed state at `seq`, as the room's snapshot,
+   * with the owed measure (#capsPending) as it stood when `json` was built.
+   * `#snapshotting` holds until the statements end, and the quota check
+   * runs after it lets go, so a slow check never holds back the next write.
+   * A failed write is logged, and the first of a failing run warns too.
+   */
+  #write(seq: number, json: string, capsPending: boolean): Promise<void> {
+    let landed = false;
+    let write!: Promise<void>;
+    write = (async () => {
       try {
-        await this.#snapshotStored(seq, await writeSnapshot(this.#pool, this.roomId, seq, state, this.#capsPending), state);
+        await storeSnapshot(this.#pool, this.roomId, seq, json, capsPending);
+        landed = true;
+        this.#writesFailing = false;
+        this.#snapshotStored(seq);
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
+        if (!this.#writesFailing) {
+          this.#writesFailing = true;
+          this.#log.warn({ roomId: this.roomId, rows: this.#committed.seq - this.#snapshotSeq }, "snapshot writes are failing: the replay tail grows");
+        }
       } finally {
-        this.#snapshotting = null;
+        if (this.#snapshotting === write) this.#snapshotting = null;
       }
     })();
-    return this.#snapshotting.then(() => {
-      if (!this.#closed && this.#opsSinceSnapshot >= this.#opts.snapshotOps) this.#scheduleSnapshot();
-      this.#maybeIdle();
-    });
+    this.#snapshotting = write;
+    // A test's count places its next write first, before a commit waiting on this one takes the hold (#countSnapshot).
+    return write
+      .then(() => {
+        if (!this.#closed && this.#countedWrites()) this.#scheduleCountedWrite();
+        return landed ? this.#recheckQuota() : undefined;
+      })
+      .then(() => this.#maybeIdle());
+  }
+
+  /**
+   * What a stored snapshot changes in the room, written by #write or with a
+   * commit: it is at today's version, so no commit needs to carry one
+   * (#countSnapshot), and the rows to replay start after it. The size guard
+   * is not told: it measures the staged state at each close (#shed).
+   */
+  #snapshotStored(seq: number): void {
+    this.#countSnapshotDue = false;
+    this.#snapshotSeq = seq;
+    this.#opsSinceSnapshot = this.#committed.seq - seq;
+  }
+
+  /** The quota check after a stored snapshot, one at a time: one asked for while it runs runs once more after it. */
+  #recheckQuota(): Promise<void> {
+    if (this.#quotaCheck) {
+      this.#quotaAgain = true;
+      return this.#quotaCheck;
+    }
+    const check = (async () => {
+      do {
+        this.#quotaAgain = false;
+        await this.#checkQuota().catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
+      } while (this.#quotaAgain);
+      this.#quotaCheck = null;
+    })();
+    this.#quotaCheck = check;
+    return check;
   }
 
   /**
@@ -4142,14 +4294,15 @@ export class RoomActor {
   }
 
   /**
-   * The tick, as the queue reaches it (D-261102-466): computed from the
-   * staged state and the clock now, so a Play, Skip or Stop queued before it
-   * always wins and replay never recomputes, and stored as the `sys.sound`
-   * it worked out, with the rev it read as `from`. It stops the music, the
-   * loops and the effects 15 minutes after the last member socket closed,
-   * and anything that names a file while the server's switch is off. A
-   * refused step logs once a run and waits for a commit to `playing` or a
-   * minute (MUS-OPUS-42).
+   * The tick, as the queue reaches it (D-261102-466): it joins the batch of
+   * the moment its timer queued it, and is computed from the staged state
+   * and the clock as the queue reaches it, so a Play, Skip or Stop queued
+   * before it always wins and replay never recomputes, and stored as the
+   * `sys.sound` it worked out, with the rev it read as `from`. It stops the
+   * music, the loops and the effects 15 minutes after the last member
+   * socket closed, and anything that names a file while the server's switch
+   * is off. A refused step logs once a run and waits for a commit to
+   * `playing` or a minute (MUS-OPUS-42).
    */
   #processSoundTick(): void {
     if (this.#closed || this.replayFailed) return;
