@@ -12,14 +12,15 @@ const ID = (n: number) => `${String(9 - n).repeat(8)}-0000-8000-8000-00000000000
 
 test("a fill draws first, then strokes and unfilled shapes, then text, each by id", () => {
   const style = { stroke: "#ffffff", width: 2, opacity: 1 };
+  // The text holds the lowest id and the fills the highest, so id order alone would draw them the other way up.
   const list: Drawing[] = [
-    drawing(ID(0), { kind: "text", text: "Here", style }),
-    drawing(ID(1), { kind: "rect", style }),
+    drawing(ID(4), { kind: "text", text: "Here", style }),
+    drawing(ID(3), { kind: "rect", style }),
     drawing(ID(2), { kind: "free", style }),
-    drawing(ID(3), { kind: "ellipse", style: { ...style, fill: "#ff000055" } }),
-    drawing(ID(4), { kind: "rect", style: { ...style, fill: "#ff000055" } }),
+    drawing(ID(1), { kind: "ellipse", style: { ...style, fill: "#ff000055" } }),
+    drawing(ID(0), { kind: "rect", style: { ...style, fill: "#ff000055" } }),
   ];
-  assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(4), ID(3), ID(2), ID(1), ID(0)]);
+  assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(1), ID(0), ID(3), ID(2), ID(4)]);
 });
 
 test("objects draw under creatures, a larger one under a smaller one, then by id", () => {
