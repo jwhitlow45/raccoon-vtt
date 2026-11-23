@@ -1187,8 +1187,8 @@ export class RoomActor {
     }
   }
 
-  /** A live frame (design 7.6) that arrived at `at` on the server's clock. */
-  ephemeral(conn: Connection, msg: { sceneId: string; e: Parameters<typeof routeEphemeral>[3] }, at = this.#opts.now()): void {
+  /** A live frame (design 7.6) that arrived at `at` on the server's clock, its socket's when not given. */
+  ephemeral(conn: Connection, msg: { sceneId: string; e: Parameters<typeof routeEphemeral>[3] }, at = conn.now()): void {
     if (conn.held === null || !conn.eph.take()) return;
     routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
   }
