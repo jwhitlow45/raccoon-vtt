@@ -1440,6 +1440,9 @@ export function fallLabel(fall: { floor: string | null }): string {
   return fall.floor === null ? "Falls through the opening" : `Falls to ${fall.floor}`;
 }
 
+/** The tail of stopText that says Tap: stopText is plain text, so the page words that tail for the pointer (pointerTail). */
+export const DOOR_TAP = "A door is in the way. Tap it to open.";
+
 /**
  * The note after a stopped drop: what stopped it, and how to go on. A walk
  * whose search found no way says so (docs/design/design-v1-movement.md 3.1),
@@ -1448,9 +1451,6 @@ export function fallLabel(fall: { floor: string | null }): string {
  * (docs/design/design-v1-attach.md 4.2), or the creature that closes the
  * way.
  */
-/** The tail of stopText that says Tap: the server code that shares this file cannot ask a browser for its pointer, so the page words it (pointerTail). */
-export const DOOR_TAP = "A door is in the way. Tap it to open.";
-
 export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower" | "creature">): string {
   if (stop.follower !== undefined) return `${stop.follower} can't follow through there.`;
   if (stop.creature !== undefined) return `${stop.creature} is in the way.`;
