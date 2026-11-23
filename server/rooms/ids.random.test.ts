@@ -3,31 +3,41 @@ import { createHash, randomBytes } from "node:crypto";
 import { describe, test, type TestContext } from "node:test";
 import { ID_TIME_REFUSED, idKeyOf, isUuidv7, sealedId, sealedTime, type IdKey } from "#shared/ids.ts";
 import { ID_PAGE_OLD, ID_SEAL_GRACE_MS, ID_TIME } from "#shared/limits.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
+import type { RoomState } from "#shared/model.ts";
+import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
-import { rng, template } from "#shared/testutil.ts";
+import { derivedId } from "#shared/reducer/duplicate.ts";
+import { character, rng, template } from "#shared/testutil.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
 import type { ActorOptions } from "./actor.ts";
 import { IdTable } from "./limitsTwinTesting.ts";
+import { remapState } from "./remap.ts";
 import { each, inF, inR, make, move, numberingRoom, patch, Room, T0 } from "./numberingTesting.ts";
 import { ScopeClient, STANDING_CLOCK } from "./undoScopeTesting.ts";
 
 /**
- * Seeded runs of creates, hides, reveals, deletes, undo, group saves,
- * reloads, restarts, clock steps, a change of ROOM_SECRET_KEY, pages
- * without a key and the change over, in twin rooms whose DM makes every
- * thing at its own random time in each (9.2):
+ * Seeded runs in twin rooms whose DM makes every thing at its own random
+ * time in each (9.2): creates in every shape, hides, reveals, moves,
+ * deletes and the DM's undo and redo of them, a scene's duplicate, a group
+ * save's outcome with its conditions, P1's resync of their character's
+ * class resources, P1's areas, page reloads, restarts, clock steps, a
+ * change of ROOM_SECRET_KEY, pages without a key and the change over, and
+ * after each run an import of each room:
  *
  * - I1: every id a keyed page made for a new thing that the room took is
  *   version 8 and reads under the sender's key to the time it was made.
  * - I2: no id the DM made reads, under P1's key or no one's, within 31
  *   minutes of when it was made.
  * - I3: P1's and the display's frames are the same in both twins, each id
- *   as its label.
+ *   as its label, and so is P1's copy of each twin's import.
  * - I4: every create is answered as the gate's model says: the shape and
  *   the key, the window, a row, the change over.
  * - I5: a create lands exactly when it is taken, once.
  * - C17: a create made before a key change goes after it with at most one
- *   refusal, as a page's one retry sends it again.
+ *   refusal, as a page's one retry sends it again. A page's own store
+ *   across a key change, its create queued, written or unanswered, is
+ *   client/state/ids.actor.test.ts.
  */
 
 const MINUTE = 60_000;
@@ -68,7 +78,9 @@ async function openKeyed(tw: Twin): Promise<void> {
 async function openTwin(t: TestContext, name: string, seed: number): Promise<Twin> {
   // One options object per twin, so a key change reaches its next load.
   const opts: Partial<ActorOptions> = { idGate: true, numberClock: STANDING_CLOCK, idSecret: DEVELOPMENT_ROOM_SECRET_KEY };
-  const room = new Room(t, name, numberingRoom(), opts);
+  const state = numberingRoom();
+  state.characters.c1 = character("c1", { name: "Ayla", ownerIds: ["p1"], resources: [] });
+  const room = new Room(t, name, state, opts);
   const table = new IdTable().attach(room);
   table.since = T0 - 120 * MINUTE;
   await room.load();
@@ -100,12 +112,30 @@ function framesOf(tw: Twin): string[] {
   });
 }
 
+/**
+ * P1's copy of the room as an import makes it (remap.ts), every id but the
+ * members' made anew in the order the import asks, sealed under one key at
+ * one time, so twins whose ids differ only in their times give the same.
+ */
+function importedCopy(state: RoomState): { copy: string; held: string } {
+  let made = 0;
+  const key = idKeyOf(createHash("sha256").update("the import's server key").digest());
+  const remapped = remapState(state, {
+    assets: new Map(),
+    memberIds: new Map(Object.keys(state.members).map((id) => [id, id])),
+    newId: () => sealedId(key, T0, nonce(`import ${made++}`)),
+  });
+  return { copy: JSON.stringify(projectState(remapped, { memberId: "p1", role: "player" }, { sceneId: null })), held: JSON.stringify(remapped) };
+}
+
 describe("ids through random runs in twin rooms (9.2)", () => {
   test("I1 to I5 and C17 hold over seeded runs", async (t) => {
     let creates = 0;
     let taken = 0;
     let keyChanges = 0;
     let changeOvers = 0;
+    const kinds = new Map<string, number>();
+    const count = (kind: string) => kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
     for (let seed = 1; seed <= 16; seed++) {
       const pair = [await openTwin(t, "A", 1_000 + seed), await openTwin(t, "B", 2_000 + seed)] as const;
       const r = rng(seed);
@@ -151,7 +181,7 @@ describe("ids through random runs in twin rooms (9.2)", () => {
       const idOf = (tw: Twin, label: string) => [...tw.labels].find(([, v]) => v.label === label)![0];
       await create("first", "sealed", "seen");
       for (; n < 24; n++) {
-        const step = int(r, 0, 11);
+        const step = int(r, 0, 15);
         if (step <= 2) {
           await create(`thing ${n}`, pick(r, ["sealed", "sealed", "sealed", "stale", "v7keyed", "unkeyed"] as const), pick(r, ["seen", "unseen"] as const));
         } else if (step === 3 && live.length > 0) {
@@ -212,6 +242,62 @@ describe("ids through random runs in twin rooms (9.2)", () => {
             });
             assert.equal(again, "taken", what("C17: the retry lands"));
           }
+        } else if (step === 12 && live.length > 0) {
+          // The DM deletes a thing and takes it back, and may delete it again: a restore brings back its own id.
+          const label = pick(r, live);
+          assert.equal(await both("delete to undo", (tw) => sendBy(tw, tw.room.clients.dm, { t: "token.delete", tokenId: idOf(tw, label) } as Op)), "taken");
+          await each([pair[0].room, pair[1].room], (room) => room.restore("undo"));
+          for (const tw of pair) assert.ok(tw.room.state.tokens[idOf(tw, label)], what("the undo brings it back under its id"));
+          count("undo");
+          if (r() < 0.5) {
+            await each([pair[0].room, pair[1].room], (room) => room.restore("redo"));
+            live.splice(live.indexOf(label), 1);
+            gone.push(label);
+            count("redo");
+          }
+        } else if (step === 13) {
+          // The DM duplicates the scene with its creatures: the copy's id is minted, its creatures' derived from it.
+          const label = `copy ${n}`;
+          creates++;
+          const answer = await both("duplicate", async (tw) => {
+            const now = tw.room.clock.now + 1_000;
+            const id = sealedId(tw.keyed.dm.idKey!, now, nonce(label));
+            tw.labels.set(id, { label, at: now });
+            for (const tok of Object.values(tw.room.state.tokens)) {
+              if (tok.sceneId !== "s1") continue;
+              const of = tw.labels.get(tok.id)?.label ?? tok.id;
+              tw.labels.set(derivedId(id, tok.id, OP_VERSION), { label: `${label} of ${of}`, at: now });
+            }
+            return sendBy(tw, tw.keyed.dm, { t: "scene.duplicate", sceneId: "s1", newSceneId: id, name: "Copy", include: { creatures: true, characters: false, fog: false, drawings: false } } as Op);
+          });
+          assert.equal(answer, "taken", what("I4: the DM's sealed duplicate"));
+          taken++;
+          count("duplicate");
+        } else if (step === 14 && live.length > 0) {
+          // A group save's outcome: its plan id stays version 7, its condition's id is the DM's sealed one, recorded.
+          const target = pick(r, live);
+          const label = `prone ${n}`;
+          const answer = await both("outcome", async (tw) => {
+            const now = tw.room.clock.now + 1_000;
+            const id = sealedId(tw.keyed.dm.idKey!, now, nonce(label));
+            tw.labels.set(id, { label, at: now });
+            return sendBy(tw, tw.keyed.dm, { t: "actor.outcome", plan: v7At(`plan ${n}`, now), label: "Prone", targets: [{ target: { tokenId: idOf(tw, target) }, effects: [{ id, key: "prone" }] }] } as Op);
+          });
+          assert.equal(answer, "taken", what("I4: the outcome's sealed condition"));
+          count("outcome");
+        } else if (step === 15) {
+          // P1 resyncs their character: a new class resource, under P1's key, or version 7 from a keyed page, refused.
+          const label = `rage ${n}`;
+          const shape = pick(r, ["sealed", "sealed", "v7keyed"] as const);
+          const answer = await both("resync", async (tw) => {
+            const now = tw.room.clock.now + 1_000;
+            const id = shape === "sealed" ? sealedId(tw.keyed.p1.idKey!, now, nonce(label)) : v7At(label, now);
+            tw.labels.set(id, { label, at: now });
+            const resources = [...(tw.room.state.characters.c1!.resources ?? []), { id, name: "Rage", max: 2, used: 0, reset: "long" as const }].slice(-12);
+            return sendBy(tw, tw.keyed.p1, { t: "character.update", characterId: "c1", patch: { resources } } as Op);
+          });
+          assert.deepEqual(answer, shape === "sealed" ? "taken" : STALE, what(`I4: P1's ${shape} resource`));
+          count("resync");
         } else if (step === 11 && !sealedOnly && r() < 0.3) {
           // The change over: an hour after this server first ran the build, as the rooms load again.
           sealedOnly = true;
@@ -223,6 +309,17 @@ describe("ids through random runs in twin rooms (9.2)", () => {
           }
         }
       }
+      // Each twin imported: P1's copy is the same in both, and holds no id of a thing the room holds. A line about a
+      // thing since deleted keeps the id it names, as nothing in the room resolves it (remap.ts Ids.of).
+      const imports = pair.map((tw) => importedCopy(tw.room.state));
+      assert.equal(imports[0]!.copy, imports[1]!.copy, `seed ${seed}: I3: P1's copy of each import`);
+      for (const [i, tw] of pair.entries()) {
+        const holds = JSON.stringify({ ...tw.room.state, log: [], trapLog: [], trapSeen: [], encounterHistory: [] });
+        for (const [id, { label }] of tw.labels) {
+          if (holds.includes(id)) assert.ok(!imports[i]!.held.includes(id), `seed ${seed}: the import keeps no id of ${label}`);
+        }
+      }
+      count("import");
       const [a, b] = pair.map(framesOf);
       const at = a!.findIndex((f, i) => f !== b![i]);
       const c = at < 0 ? 0 : [...a![at]!].findIndex((ch, k) => ch !== b![at]![k]);
@@ -230,7 +327,8 @@ describe("ids through random runs in twin rooms (9.2)", () => {
       for (const tw of pair) {
         const held = tw.room.pages.map((p) => JSON.stringify(p.sent)).join("");
         for (const [id, { at: madeAt, label }] of tw.labels) {
-          if (!held.includes(id) || isUuidv7(id) || label.startsWith("area")) continue;
+          // P1's own areas and resources read under P1's key, as they should.
+          if (!held.includes(id) || isUuidv7(id) || label.startsWith("area") || label.startsWith("rage")) continue;
           for (const key of [tw.keyed.p1.idKey!, NOBODY] as IdKey[]) {
             const read = sealedTime(key, id);
             assert.ok(read === null || Math.abs(read - madeAt) > 31 * MINUTE, `seed ${seed}: I2: ${label} reads near when it was made`);
@@ -240,6 +338,7 @@ describe("ids through random runs in twin rooms (9.2)", () => {
     }
     assert.ok(taken > 50 && creates > taken, `${taken} of ${creates} creates taken`);
     assert.ok(keyChanges >= 3 && changeOvers >= 2, `${keyChanges} key changes and ${changeOvers} change overs`);
+    for (const kind of ["undo", "redo", "duplicate", "outcome", "resync", "import"]) assert.ok((kinds.get(kind) ?? 0) >= 3, `${kinds.get(kind) ?? 0} ${kind} steps`);
   });
 });
 
