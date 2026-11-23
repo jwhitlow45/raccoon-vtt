@@ -114,7 +114,7 @@ No canvas is added. Today's isometric canvases at 390 by 844 and DPR 2 are the g
 
 The ground keeps its rules: taller by the lift margin, redrawn whenever its camera moves, as Top-down redraws its own layers on a pan. The applier moves it, so a pan renders none of its React layers. Its pills keep their points (`slide={false}`), so it takes the cull box's board view, which changes once a step.
 
-The upright and moving places' pills slide into the clear part of the screen by the board view (`measure/Pill.tsx:18`): pin labels, area and trap names, turn start, move pills and ruler readouts. In Isometric a small provider around the overlay and drag layers subscribes to the slot and recomputes `boardViewsOf` each move, so an edge label keeps sliding through a pan. Those pills render each move, and only they.
+The upright and moving places' pills slide into the clear part of the screen by the board view (`measure/Pill.tsx:18`): pin labels, area and trap names, turn start, move pills and ruler readouts. In Isometric a small provider around the overlay and drag layers subscribes to the slot and recomputes `boardViewsOf` each move, so an edge label keeps sliding through a pan. Those pills render each move, and only they. The holes' pills (`features/floors/linkMarks.ts` placeEnds) are judged from the rest view instead (`canvas/boardView.ts` restViewSlot), which updates 150 ms after the camera stops, and at once on a scene switch or a camera jump that is no gesture, so no pan frame renders their layer.
 
 ## 6. No board render per camera move
 
