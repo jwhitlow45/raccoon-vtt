@@ -197,11 +197,13 @@ jobs:
 
   # The unit tests in 3 shards of about 12 minutes each, 22 to 26 alone,
   # which ran against a 30 minute limit and was cancelled on a slow runner.
-  # Node's own --test-shard splits the same file list `pnpm test` runs, so
-  # every file runs in exactly one shard. The limit is a real one: a shard
-  # that outgrows it should be split further, not given more time. CI
-  # passed reads this job's one result, which is a failure when any shard
-  # failed. They need no database.
+  # Node's own --test-shard splits the same file list `pnpm test` runs (a
+  # test pins the patterns to package.json), so every file runs in exactly
+  # one shard. The flag comes before the patterns, since Node 24 reads an
+  # option after them as one more pattern and runs the whole suite in every
+  # shard. The limit is a real one: a shard that outgrows it should be split
+  # further, not given more time. CI passed reads this job's one result,
+  # which is a failure when any shard failed. They need no database.
   unit:
     if: ${{ !(startsWith(github.head_ref, 'ci/') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-24.04
@@ -222,7 +224,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Unit tests, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
-        run: pnpm -s test --test-shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: node --test --test-shard=${{ matrix.shard }}/${{ strategy.job-total }} "shared/**/*.test.ts" "server/**/*.test.ts" "client/**/*.test.ts" "scripts/**/*.test.ts" "e2e/**/*.test.ts" "desktop/**/*.test.ts"
 
   e2e:
     needs: build

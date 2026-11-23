@@ -172,7 +172,15 @@ describe("the unit job", () => {
     const block = jobBlock("unit");
     const shards = /\n {8}shard: \[(.+)\]\n/.exec(block)?.[1]?.split(", ");
     assert.deepEqual(shards, ["1", "2", "3"]);
-    assert.ok(block.includes("run: pnpm -s test --test-shard=${{ matrix.shard }}/${{ strategy.job-total }}\n"), block);
+    // Node 24 reads an option after the patterns as one more pattern, so every shard would run the whole suite.
+    const run = /\n {8}run: (node --test .+)\n/.exec(block)?.[1];
+    assert.ok(run, block);
+    const words = run.replace(/\$\{\{ (.+?) \}\}/g, "<$1>").match(/"[^"]*"|\S+/g)!;
+    assert.deepEqual(words.slice(0, 3), ["node", "--test", "--test-shard=<matrix.shard>/<strategy.job-total>"]);
+    const patterns = words.slice(3);
+    assert.ok(patterns.length > 0 && patterns.every((w) => w.startsWith('"')), "only quoted patterns follow the flag");
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { scripts: { test: string } };
+    assert.equal(`node --test ${patterns.join(" ")}`, pkg.scripts.test.replaceAll('\\"', '"'), "the patterns of pnpm test");
     assert.match(block, /\n {4}strategy:\n {6}fail-fast: false\n/);
     assert.ok(Number(/timeout-minutes: (\d+)/.exec(block)?.[1]) <= 20, "a real limit, not a raised one");
   });
