@@ -190,7 +190,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
         // The library marks what the room's state does not use (docs/design/design-v1-dm-tools.md 3.19).
         return { assets: app.hasDecorator("rooms") ? await withInUse(app.pool, app.rooms, roomId, assets) : assets };
       }
-      const assets = (await listRoomAssets(app.pool, roomId, await service.visibleAssets(roomId, grant.memberId, Date.now()), grant.memberId)).filter((a) => KINDS[a.kind].playersRead);
+      const assets = (await listRoomAssets(app.pool, roomId, await service.visibleAssets(roomId, grant.memberId, req.arrivedAt), grant.memberId)).filter((a) => KINDS[a.kind].playersRead);
       return { assets };
     });
 
@@ -206,7 +206,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       if (!grant) throw new AssetError(404, "not_found");
       if (grant.role !== "dm") {
         if (!KINDS[row.kind].playersRead) throw new AssetError(404, "not_found");
-        const visible = await service.visibleAssets(row.room_id, grant.memberId, Date.now());
+        const visible = await service.visibleAssets(row.room_id, grant.memberId, req.arrivedAt);
         if (!visible.has(row.id)) throw new AssetError(404, "not_found");
       }
       // The variant must be one this row has before any path is built.

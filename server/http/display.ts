@@ -17,6 +17,7 @@ import { parseRoomId } from "../auth/roomId.ts";
 import { DISPLAY_SESSION_DAYS } from "../auth/sessions.ts";
 import { sha256 } from "../auth/tokens.ts";
 import { withTx } from "../auth/tx.ts";
+import { ViewBusyError } from "../rooms/actor.ts";
 import { TooBusyError } from "../rooms/errors.ts";
 import { CLOSE_GRANT_REVOKED, RoomNotFoundError } from "../rooms/gateway.ts";
 import type { RoomManager } from "../rooms/manager.ts";
@@ -236,9 +237,10 @@ export async function registerDisplayRoutes(app: FastifyInstance, kit: AuthKit, 
         if (!row || row.room_id !== roomId || !KINDS[row.kind].playersRead) throw new AssetError(404, "not_found");
         let visible: Set<string>;
         try {
-          visible = await (await deps.manager.acquire(roomId)).visibleAssets(grant.memberId, Date.now());
+          visible = await (await deps.manager.acquire(roomId)).visibleAssets(grant.memberId, req.arrivedAt);
         } catch (err) {
           if (err instanceof TooBusyError) throw new AssetError(503, "busy", { retryAfter: 30 });
+          if (err instanceof ViewBusyError) throw new AssetError(503, "busy", { retryAfter: err.retryAfter });
           if (err instanceof RoomNotFoundError) throw new AssetError(404, "not_found");
           throw err;
         }

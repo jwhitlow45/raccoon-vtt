@@ -33,7 +33,7 @@ import { network, type LocalNetwork } from "./local/network.ts";
 import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
 import { sortedReplies } from "./http/sortedReplies.ts";
-import { DEFAULT_ACTOR_OPTIONS } from "./rooms/actor.ts";
+import { DEFAULT_ACTOR_OPTIONS, ViewBusyError } from "./rooms/actor.ts";
 import { TooBusyError } from "./rooms/errors.ts";
 import { RoomNotFoundError, type RoomGateway } from "./rooms/gateway.ts";
 import { RoomManager, type ManagerOptions } from "./rooms/manager.ts";
@@ -184,7 +184,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
   await registerDmRoutes(app, kit);
   await registerMemberRoutes(app, kit);
   await registerAssetRoutes(app, assets);
-  // A player's visible assets come from the room's projection (design 11.2), plus their own uploads.
+  // A player's visible assets come from the room's projection (design 11.2) as of the request's arrival, plus their own uploads.
   app.assets.setVisibleAssets(async (roomId, memberId, at) => {
     const ids = await uploadedAssetIds(pool, roomId, memberId);
     try {
@@ -192,6 +192,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
       for (const id of await actor.visibleAssets(memberId, at)) ids.add(id);
     } catch (err) {
       if (err instanceof TooBusyError) throw new AssetError(503, "busy", { retryAfter: 30 });
+      if (err instanceof ViewBusyError) throw new AssetError(503, "busy", { retryAfter: err.retryAfter });
       if (!(err instanceof RoomNotFoundError)) throw err;
     }
     return ids;

@@ -30,7 +30,8 @@ import { checkVideo } from "./video/check.ts";
  * room actor exists, the default is the player's own uploads, which is
  * strictly narrower, so nothing leaks in the meantime. Replace it with
  * `setVisibleAssets` (or the route option) once projection is wired up.
- * `at` is when the request arrived, on the server's clock.
+ * `at` is when the request arrived, on the rooms' clock (FastifyRequest
+ * arrivedAt, server/app.ts), which the room answers as of.
  */
 export type VisibleAssetsFn = (roomId: string, memberId: string, at: number) => Promise<Set<string>>;
 

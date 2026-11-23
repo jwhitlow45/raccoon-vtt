@@ -11,6 +11,7 @@ import type { AssetKind } from "../assets/kinds.ts";
 import { variantPath } from "../assets/store.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
 import { ipKey } from "../auth/ipKey.ts";
+import { ViewBusyError } from "../rooms/actor.ts";
 import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 
 /**
@@ -651,6 +652,63 @@ describe("the display image route", () => {
     // Neither the player's nor the DM's cookie reads through the display route.
     assert.equal((await player.get(`/api/rooms/${roomId}/display/assets/${map}/full`)).statusCode, 404);
     assert.equal((await dm.get(`/api/rooms/${roomId}/display/assets/${map}/full`)).statusCode, 404);
+  });
+
+  test("a display's and a player's image reads hand the room the moment they arrived, before their row and grant reads wait, and answer from the view it gives", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Arrived images");
+    const dmSocket = await t.connect(roomId, dm);
+    await dmSocket.snapshot("dm");
+    const player = t.client();
+    await player.join(roomId, "Thorn");
+    const tv = await pairDisplay(t, dm, roomId);
+    const late = await addAsset(roomId, "handout");
+    const actor = await t.manager.acquire(roomId);
+    const given = actor.committed;
+    const ok = (ev: { rejects?: unknown[] }) => assert.equal(ev.rejects, undefined, JSON.stringify(ev.rejects));
+    ok(await dmSocket.apply({ t: "handout.show", handout: { id: uuidv7(), assetId: late, title: "Late", to: "all" } }));
+    const own = actor.asOf.bind(actor);
+    const asked: number[] = [];
+    actor.asOf = (at: number) => {
+      asked.push(at);
+      return Promise.resolve({ tick: t.manager.arrivalTick(at), ...given });
+    };
+    try {
+      for (const [who, table, read] of [
+        ["display", "assets", () => tv.get(`/api/rooms/${roomId}/display/assets/${late}/full`)],
+        ["player", "assets", () => player.get(`/api/assets/${late}/full`)],
+        ["player's list", "grants", () => player.get(`/api/rooms/${roomId}/assets`)],
+      ] as const) {
+        const holder = await t.pool.connect();
+        await holder.query("begin");
+        await holder.query(`lock table ${table} in access exclusive mode`);
+        const sent = Date.now();
+        const answer = read();
+        await new Promise((r) => setTimeout(r, 50));
+        const before = Date.now();
+        await holder.query("rollback");
+        holder.release();
+        const res = await answer;
+        const at = asked.pop()!;
+        assert.ok(at >= sent && at < before, `${who}: the arrival ${at} is before the row read let go at ${before}`);
+        if (who === "player's list") assert.ok(!res.json<{ assets: { id: string }[] }>().assets.some((a) => a.id === late), who);
+        else assert.equal(res.statusCode, 404, `${who}: answered from the view the room gave`);
+      }
+    } finally {
+      actor.asOf = own;
+    }
+    assert.equal((await tv.get(`/api/rooms/${roomId}/display/assets/${late}/full`)).statusCode, 200, "the room as it stands now shows it");
+    // A room that cannot give a reader its view answers busy, to the display and the player alike.
+    actor.asOf = () => Promise.reject(new ViewBusyError("too old"));
+    try {
+      for (const res of [await tv.get(`/api/rooms/${roomId}/display/assets/${late}/full`), await player.get(`/api/assets/${late}/full`)]) {
+        assert.equal(res.statusCode, 503, res.body);
+        assert.equal(res.headers["retry-after"], "1");
+      }
+    } finally {
+      actor.asOf = own;
+    }
+    dmSocket.close();
   });
 
   test("reads every page of a handout of pages shown to everyone, and no page of one shown to chosen players or kept in a document (docs/design/design-v1-pdf-handouts.md 3.4)", async () => {
