@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createHash } from "node:crypto";
-import { ID_TIME_REFUSED, idKeyOf, idTime, sealedId, uuidv7 } from "#shared/ids.ts";
+import { ID_TIME_REFUSED, idKeyOf, idTime, sealedId, sealedTime, uuidv7 } from "#shared/ids.ts";
 import { ID_BUDGET, ID_PAGE_OLD, ID_SEAL_GRACE_MS, ID_TIME, IDS_TOO_FAST } from "#shared/limits.ts";
 import { ID_HELD_MS, ID_TAKEN, IdGate, idRow, LATEST_UNTIL, recordedRow, seedRows, SERVER_MEMBER, type IdRow, type IdSeal } from "./createIds.ts";
 
@@ -344,5 +344,39 @@ describe("version 8 ids under the sender's key", () => {
     assert.equal(idRow(sealedId(ana, far), "ana", T0, far).until, LATEST_UNTIL);
     assert.equal(new Date(LATEST_UNTIL).toISOString(), "9999-12-31T23:59:59.000Z");
     assert.equal(recordedRow(sealedId(ana, far), T0, [ana]).until, LATEST_UNTIL);
+  });
+});
+
+/**
+ * A chance tag match (C13, design 4.2): ids sealed under one key whose tag
+ * another key matches, found by a seeded search over nonces, so each pair
+ * is fixed. The other key reads a time uniform over 48 bits.
+ */
+function chancePair(maker: ReturnType<typeof key>, reader: ReturnType<typeof key>, at: number): { id: string; read: number } {
+  for (let i = 0; ; i++) {
+    const n = createHash("sha256").update(`chance ${i}`).digest().subarray(0, 8);
+    n[0]! &= 0x0f;
+    const id = sealedId(maker, at, new Uint8Array(n));
+    const read = sealedTime(reader, id);
+    if (read !== null) return { id, read };
+  }
+}
+
+describe("a chance tag match on each reader on the server (C13)", () => {
+  test("step 2 refuses a minted id whose tag another member's key matches, since the time it reads is far from now", () => {
+    const c = clock();
+    const gate = new IdGate(c.now, T0 - 60 * MINUTE);
+    const { id, read } = chancePair(key("ana"), key("ben"), T0);
+    assert.ok(Math.abs(read - T0) > ID_TIME.behindMs, "the time read is far from when it was made");
+    assert.deepEqual(gate.check([id], player("ben"), { keyed: true, key: key("ben") }), { ok: false, code: "invalid", message: ID_TIME_REFUSED });
+    assert.equal(gate.check([id], player("ana"), { keyed: true, key: key("ana") }).ok, true, "its maker's key reads it to now");
+  });
+
+  test("a recorded id whose tag another key matches is held past every time read, and is never refused for it", () => {
+    const gate = new IdGate(clock().now, T0 - 60 * MINUTE);
+    const { id, read } = chancePair(key("ana"), key("ben"), T0);
+    assert.deepEqual(gate.checkRecorded([id], true), { ok: true });
+    const row = recordedRow(id, T0, [key("ana"), key("ben")]);
+    assert.equal(row.until, Math.min(LATEST_UNTIL, Math.max(T0, read) + ID_HELD_MS));
   });
 });

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createHash } from "node:crypto";
-import { ID_TIME_REFUSED, idKeyOf, idKeyText, idTime, sealedTime, uuidv7 } from "#shared/ids.ts";
-import { ID_RETRY_FAILED } from "#shared/limits.ts";
+import { ID_TIME_REFUSED, idKeyOf, idKeyText, idTime, sealedId, sealedTime, uuidv7 } from "#shared/ids.ts";
+import { ID_RETRY_FAILED, ID_TIME } from "#shared/limits.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
 import { actor, character, DM, room, token } from "#shared/testutil.ts";
@@ -12,6 +12,7 @@ import { ZERO_HP_UNCONSCIOUS_ID } from "#shared/rules/hp.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { createRoomActions } from "./actions.ts";
 import { CLOCK_WAIT_MS, createRoomStore, IDS_AGAIN_MS, IDS_SETTLE_MS, type RoomStore } from "./store.ts";
+import { sentIdDead, unsentIdStale } from "./ids.ts";
 import { applyTestHistory, FakeClock, FakeOutbox } from "./testing.ts";
 import type { OpAnswer, OpRefusal, UnknownCause } from "./types.ts";
 
@@ -598,3 +599,32 @@ function hooked(problems: string[], state: RoomState = room()) {
   connect();
   return { room: store, actions, connect };
 }
+
+/**
+ * A chance tag match on the page's readers (C13, design 4.2): an id sealed
+ * under another key whose tag the page's key matches, from a seeded search,
+ * reads to a time uniform over 48 bits. An unsent op's id is then stale and
+ * made again, and a sent one is dead exactly when the server, reading the
+ * same time, can never take it.
+ */
+describe("a chance tag match on the page's readers (C13)", () => {
+  const own = idKeyOf(createHash("sha256").update("page").digest());
+  const other = idKeyOf(createHash("sha256").update("another member").digest());
+  function chance(): { id: string; read: number } {
+    for (let i = 0; ; i++) {
+      const n = createHash("sha256").update(`page chance ${i}`).digest().subarray(0, 8);
+      n[0]! &= 0x0f;
+      const id = sealedId(other, T0, new Uint8Array(n));
+      const read = sealedTime(own, id);
+      if (read !== null) return { id, read };
+    }
+  }
+
+  test("unsentIdStale reads the chance time as stale, and sentIdDead answers as the server reads the same time", () => {
+    const { id, read } = chance();
+    assert.ok(Math.abs(read - T0) > 31 * MINUTE);
+    assert.equal(unsentIdStale(id, T0, own), true, "stale, so made again before it goes");
+    assert.equal(sentIdDead(id, T0, own), read < T0 - ID_TIME.behindMs - 5_000, "dead only when the time read is past the window");
+    assert.equal(unsentIdStale(sealedId(own, T0), T0, own), false, "the page's own id made now goes as it is");
+  });
+});
