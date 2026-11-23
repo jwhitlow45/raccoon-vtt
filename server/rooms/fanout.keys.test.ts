@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sealedId, sealedTime } from "#shared/ids.ts";
+import { ID_TIME_REFUSED, sealedId, sealedTime } from "#shared/ids.ts";
 import { room } from "#shared/testutil.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
+import { clientKey, Connection } from "./connection.ts";
+import { publishBatch, rejectsFor, takeKeptRejects } from "./fanout.ts";
 import { RoomIdKeys } from "./idKeys.ts";
 import { scopeActor, scopeObserver, type ScopeClient } from "./undoScopeTesting.ts";
 
@@ -34,4 +36,31 @@ test("a member's socket that asks gets its own member's id key with every snapsh
   const id = sealedId(p1.idKey!, 1_700_000_000_000);
   assert.equal(sealedTime(keys.member("p1").key, id), 1_700_000_000_000);
   assert.equal(sealedTime(keys.member("p2").key, id), null);
+});
+
+test("a refusal's ids reach a keyed socket, live and kept for its next snapshot, and never a socket that did not ask", () => {
+  const state = room();
+  const sent = new Map<string, unknown[]>();
+  const socket = (name: string) => {
+    const frames: unknown[] = [];
+    sent.set(name, frames);
+    const raw = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => frames.push(JSON.parse(text)), close() {}, terminate() {} };
+    return new Connection(raw as never, { sessionId: name, roomId: "UNDOSCOPE", memberId: "dm1", role: "dm" }, "203.0.113.9");
+  };
+  const keyed = socket("keyed");
+  keyed.sealIds = true;
+  const older = socket("older");
+  for (const conn of [keyed, older]) {
+    conn.clientId = conn.sessionId;
+    conn.held = null;
+  }
+  const refusal = { n: 3, code: "invalid" as const, message: ID_TIME_REFUSED, ids: ["0190f0a8-6c1e-7a4b-9c3d-000000000001"] };
+  const batch = { pub: 1, before: state, after: state, touched: [], global: false, acks: new Map(), restored: new Map(), rejects: new Map([[clientKey("keyed", "keyed"), [refusal]], [clientKey("older", "older"), [refusal]]]) };
+  const current = (key: string) => (key === clientKey("keyed", "keyed") ? keyed : key === clientKey("older", "older") ? older : undefined);
+  // Neither socket holds a snapshot: each keeps the refusal for the one it waits on.
+  publishBatch(batch, [keyed, older], current);
+  assert.deepEqual(takeKeptRejects(keyed), [refusal]);
+  assert.deepEqual(takeKeptRejects(older), [{ n: 3, code: "invalid", message: ID_TIME_REFUSED }]);
+  assert.deepEqual(rejectsFor({ sealIds: false }, [refusal]), [{ n: 3, code: "invalid", message: ID_TIME_REFUSED }]);
+  assert.deepEqual(rejectsFor({ sealIds: true }, [refusal]), [refusal]);
 });
