@@ -156,9 +156,10 @@ export function meetsTurnMarker(pill: PillSpec, markers: readonly PillSpec[], sc
  * An end's name pill kept off the turn's marker (FL2-POLISH): the name hangs
  * over the end's top edge, and where its box meets a marker's it hangs
  * under the bottom edge (`bottom`) instead, unless the marker meets that
- * spot too, when it keeps the first. Only the marker is read, never
- * another end's name or a trap's, so no two layers chase each other, and the
- * marker places itself from the creature alone (TurnStartLayer.tsx).
+ * spot too, when it keeps the first. The markers are the turn's and the
+ * traps' names, never another end's, so no two layers chase each other: they
+ * place themselves from their own things alone (TurnStartLayer.tsx,
+ * TrapLayer.tsx).
  *
  * The boxes meet or part where they draw, not on the map (B53-SOL-02): in
  * Isometric the marker always stands upright on the overlay, and the name
@@ -341,7 +342,8 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
   type Cand = { spec: PillSpec; box: Box; solo: number };
   type Slot = { end: number; chip: boolean; cands: Cand[] };
   const slots: Slot[] = [];
-  const fixed: Box[] = [];
+  // The markers stay put, so a pill over one costs as a pill over a fixed pill does. A name is also kept off them outright, but a chip only pays.
+  const fixed: Box[] = markers.map((m) => drawnBox(m, scale, iso, true, true, view));
   const edges = ends.map((e) => {
     const { o, hole, first } = e;
     // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.

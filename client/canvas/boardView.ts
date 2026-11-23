@@ -214,6 +214,19 @@ export function pillsExcept(pills: Readonly<Record<string, readonly PillSpec[]>>
   return Object.entries(pills).flatMap(([key, list]) => (key.startsWith(prefix) ? [] : list));
 }
 
+/** The pills published under keys that start with `prefix`. */
+export function pillsOnly(pills: Readonly<Record<string, readonly PillSpec[]>>, prefix: string): PillSpec[] {
+  return Object.entries(pills).flatMap(([key, list]) => (key.startsWith(prefix) ? list : []));
+}
+
+/** The pills under keys starting with `prefix`, kept the same array while they do not change (see useBoardPillsExcept). */
+export function useBoardPillsOnly(prefix: string): readonly PillSpec[] {
+  const pills = useStore(useScoped(boardPillsSlot), (s) => s.pills);
+  const kept = useMemo(() => pillsOnly(pills, prefix), [pills, prefix]);
+  const key = JSON.stringify(kept);
+  return useMemo(() => kept, [key]);
+}
+
 /**
  * Every pill but those under keys starting with `prefix`, kept the same
  * array while they do not change, so a layer that reads them and publishes

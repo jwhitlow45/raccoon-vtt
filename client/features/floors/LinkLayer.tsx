@@ -5,7 +5,7 @@ import type { FloorLink, Scene } from "#shared/model.ts";
 import { linkDir } from "#shared/rules/floorLinks.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { useStore } from "zustand";
-import { boardPillsSlot, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
+import { boardPillsSlot, useBoardPillsOnly, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
 import { useScoped } from "../../state/scope.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
@@ -77,8 +77,10 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const far = useMemo(() => new Set(notReached.split(" ")), [notReached]);
   const hushed = useMemo(() => new Set(quiet.split(" ")), [quiet]);
   const feet = useMemo(() => dropsById(drops), [drops]);
-  // The turn's marker is the one pill the name keeps off (clearOfMarkers), read from the markers' own key.
-  const markers = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
+  // The pills a name and a chip keep off: the turn's marker and the traps' names, read from their own keys. None of them moves for a link's pill, so the layers never chase each other.
+  const turn = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
+  const traps = useBoardPillsOnly("trap:");
+  const markers = useMemo(() => (traps.length === 0 ? turn : [...turn, ...traps]), [turn, traps]);
   const iso = useIsoGround();
   const { scale } = props;
   const shown = trapNameShown(scale);

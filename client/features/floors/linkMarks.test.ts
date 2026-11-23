@@ -549,4 +549,21 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     for (const e of ends) assert.deepEqual(blocked.get(e.id), { pill: e.first, chip: e.dropPill });
     assert.deepEqual(placeEnds(ends, [], SCALE, null, () => true).get("b"), { pill: ends[1]!.first, chip: ends[1]!.dropPill });
   });
+
+  test("a trap's name on a hole's chip or name moves that pill clear of it, and a trap's name elsewhere leaves them (LP49-PILLS-1)", () => {
+    const ends = [hole("a", { x: 8, y: 4, w: 2, h: 1 })];
+    const trap = (at: { x: number; y: number }, below: boolean): PillSpec => ({ name: "Hidden Pit", value: "DC 15", ...at, ...(below ? { below: true } : { above: true }), size: "map", small: true });
+    for (const iso of [null, flat(0)] as const) {
+      const apart = placeEnds(ends, [trap({ x: 30, y: 30 }, false)], SCALE, iso, () => true);
+      assert.deepEqual(apart.get("a"), placeEnds(ends, [], SCALE, iso, () => true).get("a"), "a far trap's name changes nothing");
+      // A trap's name over the chip's default spot, and another under the name's.
+      for (const [label, spot] of [["chip", ends[0]!.dropPill!], ["name", ends[0]!.first!]] as const) {
+        const marker = trap(spot, spot.below === true);
+        const placed = placeEnds(ends, [marker], SCALE, iso, () => true);
+        const free = pillBoxes(iso, placed, "a", SCALE);
+        const there = drawnBox(marker, SCALE, iso, true, true);
+        assert.ok(free.every((b) => !meet(b, there)), `${iso ? "Isometric" : "Top-down"}: the hole's ${label} still meets the trap's name`);
+      }
+    }
+  });
 });
