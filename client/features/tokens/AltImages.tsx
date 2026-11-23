@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useId, useState, type ReactNode } from "react";
 import type { ImageRef, Token } from "#shared/model.ts";
 import type { TokenPatch } from "#shared/protocol.ts";
@@ -48,18 +49,18 @@ export function useAltImages(props: {
   const beside = (
     <>
       {removing ? null : canAdd(token) ? (
-        <Button size="sm" title={ALT_IMAGE_PURPOSE} aria-describedby={purposeId} onClick={() => setStep({ kind: "pick" })} style={PAIR_BUTTON}>
+        <Button size="sm" title={pointerWords(ALT_IMAGE_PURPOSE)} aria-describedby={purposeId} onClick={() => setStep({ kind: "pick" })} style={PAIR_BUTTON}>
           Add another image
         </Button>
       ) : (
         <Note>That is as many as a token keeps. Remove one to add another.</Note>
       )}
       <span id={purposeId} style={VISUALLY_HIDDEN}>
-        {ALT_IMAGE_PURPOSE}
+        {pointerWords(ALT_IMAGE_PURPOSE)}
       </span>
       {step?.kind === "pick" ? (
         <ImagePicker
-          hint={ALT_IMAGE_PURPOSE}
+          hint={pointerWords(ALT_IMAGE_PURPOSE)}
           onClose={() => setStep(null)}
           onPick={(image) => setStep({ kind: "crop", assetId: image.id })}
           onPickIcon={(icon) => {

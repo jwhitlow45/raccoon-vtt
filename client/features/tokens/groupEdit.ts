@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { sameImage } from "#shared/imageRef.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import type { Character, Effect, ImageRef, MemberId, Token } from "#shared/model.ts";
@@ -212,7 +213,7 @@ export function sharedImage(tokens: readonly Pick<Token, "image">[]): { same: bo
  */
 export function deleteButtonWords(armed: boolean, armedText?: string): { text: string; label: string } {
   if (!armed) return { text: "Delete", label: "Delete" };
-  return armedText !== undefined ? { text: armedText, label: armedText } : { text: "Sure?", label: "Tap again to delete" };
+  return armedText !== undefined ? { text: armedText, label: armedText } : { text: "Sure?", label: pointerWords("Tap again to delete") };
 }
 
 /**

@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useState } from "react";
 import type { Effect } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
@@ -70,7 +71,7 @@ export function ReadyControls(props: { answer: ReactionTarget; target: ActorTarg
               drop.send({ t: "actor.effect.remove", target, effectId: readied.id });
             }}
           >
-            {confirmDrop ? "Tap again to drop it" : "Drop it"}
+            {confirmDrop ? pointerWords("Tap again to drop it") : "Drop it"}
           </Button>
         </div>
       </div>

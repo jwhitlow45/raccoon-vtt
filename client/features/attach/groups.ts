@@ -248,8 +248,11 @@ export function pressLead<T extends Token>(
 }
 
 /** The words when a drag would move a mount the viewer may not move (4.2). */
+/** The tail of carriesText that says Tap: this file is shared with server code, so the page words it (pointerTail). */
+export const GET_OFF_TAP = "Tap Get off to step down.";
+
 export function carriesText(mount: Token, rider: Token, labels: Labels): string {
-  return `${displayName(mount, labels)} carries ${displayName(rider, labels)}. Tap Get off to step down.`;
+  return `${displayName(mount, labels)} carries ${displayName(rider, labels)}. ${GET_OFF_TAP}`;
 }
 
 /**

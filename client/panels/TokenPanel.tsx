@@ -1,3 +1,4 @@
+import { pointerWords } from "../lib/pointerWords.ts";
 import type { IconName } from "../components/Icon.tsx";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
@@ -172,7 +173,7 @@ function TokenDetails(props: PanelProps) {
       <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>
         {/* Focusable from script, not by Tab, for a press that took the panel's token away (DismissSection). */}
         <span tabIndex={-1} data-token-empty="">
-          Tap a token to see it here.
+          {pointerWords("Tap a token to see it here.")}
         </span>
       </Empty>
     );

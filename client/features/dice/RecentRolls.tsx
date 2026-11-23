@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
 import { creatureName, describeEvent, diceText, keptFrom, labelText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
@@ -335,7 +336,7 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
     <div data-dice-recent="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
       <Group label="Recent rolls" search="dice.recent" {...fold("recent")} summary={summary ? <MarkedText text={summary.text} marks={summary.marks} /> : undefined}>
         {rows.length === 0 ? (
-          <Empty>No rolls yet. Type a formula or tap a die.</Empty>
+          <Empty>{pointerWords("No rolls yet. Type a formula or tap a die.")}</Empty>
         ) : (
           <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => (

@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
@@ -271,7 +272,7 @@ export function typedText(name: string, typed: TypedBonus): string {
 /** The note over such a creature's options: why no bonus shows, and what a tap does. */
 export function noNumbersNote(input: { name: string; hidden: boolean; rollsHere: boolean }): string {
   const why = input.hidden ? `${input.name}'s numbers are for the DM and its own players.` : "No stat block, so no bonus is known.";
-  return input.rollsHere ? `${why} Type the bonus of the roll you make, then tap it.` : `${why} A save or check tap asks its player.`;
+  return `${why} ${pointerWords(input.rollsHere ? "Type the bonus of the roll you make, then tap it." : "A save or check tap asks its player.")}`;
 }
 
 /** The request target a `roll.dice` names: the target as the request holds it. */

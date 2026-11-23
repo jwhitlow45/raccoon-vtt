@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useDeferredValue, useMemo, useState } from "react";
 import type { CustomMonster, PartyGroup, SavedEncounter, SavedEncounterMonster } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -354,7 +355,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
       {/* One above the other: side by side, the longer label runs past a 360 px side panel. */}
       <div style={{ display: "grid", gap: theme.space(2) }}>
         <Button variant="primary" size="sm" disabled={!ready} onClick={atTap}>
-          Place where I tap
+          {pointerWords("Place where I tap")}
         </Button>
         <Button size="sm" disabled={!ready} onClick={atMiddle}>
           Place in the middle of the view

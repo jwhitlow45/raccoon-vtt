@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
 import { attackTest } from "#shared/dice/named.ts";
@@ -1146,7 +1147,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           <Chip
             pressed={used}
             onClick={() => rowUse.send("used", abilityOp(ctx.creature, rechargeUse, { back: used }))}
-            aria-label={used ? `${named.name} is used. Tap when it recharges` : `Mark ${named.name} used`}
+            aria-label={used ? `${named.name} is used. ${pointerWords("Tap when it recharges")}` : `Mark ${named.name} used`}
           >
             {rowUse.busy === "used" ? "Used…" : "Used"}
           </Chip>

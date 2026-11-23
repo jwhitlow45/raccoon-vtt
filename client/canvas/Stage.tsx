@@ -55,6 +55,7 @@ import { TOP_DOWN, toView, toWorld, viewBox, type Live, type View, type ViewPoin
 import { ellipseBox } from "./relief/standee.ts";
 import { zoomWhileIdle } from "./dragZoom.ts";
 import { isAppleDevice } from "../lib/device.ts";
+import { pointerTail } from "../lib/pointerWords.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
@@ -72,7 +73,7 @@ import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, P
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
-import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
+import { carriesText, GET_OFF_TAP, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
 import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
@@ -887,7 +888,7 @@ export function MapStage(props: {
     const lead = pressLead(grid, links.allTokens, pressed, byId, new Set(selectedIds), canDragRef.current, movesLeadRef.current);
     const rootOf = new Map<string, string>([[pressed.id, lead.id]]);
     if (lead.id !== pressed.id && lead.id === mount && !movesLeadRef.current(lead)) {
-      const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed, labelsOf(store.getState()));
+      const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? pointerTail(carriesText(lead, pressed, labelsOf(store.getState())), GET_OFF_TAP);
       return { lead, named: [], rootOf, refusal, reseatOnly: false };
     }
     const holderIn = (t: ViewToken) => {

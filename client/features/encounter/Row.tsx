@@ -1,3 +1,4 @@
+import { pointerWords } from "../../lib/pointerWords.ts";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { startsSecret } from "#shared/dice/secret.ts";
 import type { Effect, InitEntry, Token } from "#shared/model.ts";
@@ -592,7 +593,7 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean; ro
           setText(valueText(entry.value));
           setError(null);
         }}
-        aria-label={`${props.name} Initiative ${entry.value ?? "not set"}${props.editable ? ", tap to type it" : ""}`}
+        aria-label={`${props.name} Initiative ${entry.value ?? "not set"}${props.editable ? pointerWords(", tap to type it") : ""}`}
         style={{
           ...boxStyle,
           display: "grid",
