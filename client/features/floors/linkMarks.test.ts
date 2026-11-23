@@ -317,6 +317,33 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     assert.ok(sides.every((r) => over(between, r) === 0));
   });
 
+  test("a stairs end's name near the screen's edge is judged slid, so a hole's chip keeps off where it draws, not where it would hang unslid (LPE-4)", () => {
+    const scale = 40;
+    // Stairs at 15,4, their name over the top edge's middle, by the screen's right edge at 16.
+    const stairsO = outlineOf(grid, { x: 15, y: 4, w: 1, h: 1 });
+    const stairsName: PillSpec = { name: "Up to Upper floor", value: "Not reached yet", x: 15.5, y: 4, above: true, size: "map", small: true, maxLines: 1, stack: true };
+    const stairs: EndPills = { id: "s", o: stairsO, hole: false, first: stairsName, dropPill: null };
+    const view = { x0: 0, y0: -10, x1: 16, y1: 30 };
+    const unslid = drawnBox(stairsName, scale, null, true, true);
+    const slid = drawnBox(stairsName, scale, null, true, true, view);
+    assert.ok(slid.x0 < unslid.x0, "the name slides left");
+    // A 1 by 1 hole whose chip, centered over its top edge, ends just inside the slid name and well clear of the unslid one.
+    const chipW = (() => {
+      const b = drawnBox({ value: "10 ft down", x: 0, y: 0, above: true, size: "map", small: true }, scale, null, true, true);
+      return b.x1 - b.x0;
+    })();
+    const mid = slid.x0 + 0.1 - chipW / 2;
+    assert.ok(mid + chipW / 2 < unslid.x0, "clear of the unslid name");
+    const h = hole("a", { x: mid - 0.5, y: 4, w: 1, h: 1 });
+    const ends = [h, stairs];
+    const chipOf = (placed: ReturnType<typeof placeEnds>) => placed.get("a")!.chip!;
+    assert.deepEqual(chipOf(placeEnds(ends, [], scale, null, () => false)), h.dropPill, "judged unslid, the chip keeps its edge's middle");
+    const moved = chipOf(placeEnds(ends, [], scale, null, () => false, [], { view }));
+    assert.notDeepEqual(moved, h.dropPill, "judged slid, it moves");
+    assert.ok(!meet(drawnBox(moved, scale, null, true, true, view), slid), "off the name as it draws");
+    assert.deepEqual(placeEnds(ends, [], scale, null, () => false, [], { view }).get("s"), { pill: stairsName, chip: null }, "the stairs keep their own edge");
+  });
+
   test("a pill over its own hole beats one over another pill, and loses to one over another end's squares (D-261122-112)", () => {
     // Turn 0: a's lowest corner is 8,6, and its name hung there meets b's squares, and b's chip where b keeps one.
     const iso = flat(0);
