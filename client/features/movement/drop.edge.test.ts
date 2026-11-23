@@ -7,7 +7,7 @@ import { standsInScene } from "#shared/rules/sceneEdge.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { hexCenter, type HexGrid } from "#shared/rules/hex.ts";
 import { DM, P1, int, pick, rng, room, scene, token } from "#shared/testutil.ts";
-import { heldShortOfCreature, keptOnScene, moveOpsOf, pressedAim, planGroup, planOne, type DropPlan } from "./drop.ts";
+import { groupOffsetOnScene, heldShortOfCreature, keptOnScene, measuredLanding, moveOpsOf, pressedAim, planGroup, planOne, type DropPlan } from "./drop.ts";
 import { groupDragOf } from "./dragTesting.ts";
 import { line, seenRoom, thorn, world } from "./testing.ts";
 
@@ -78,6 +78,19 @@ describe("the DM's drop", () => {
       const board = groupDragOf(state, "dm", ["a", "b"], { x: -5, y: 5 });
       assert.deepEqual(board.plan.moves.find((m) => m.tokenId === "a"), { tokenId: "a", x: -5, y: 5 });
     }
+  });
+});
+
+describe("where the ruler measures a drag to (R2-OPUS-2)", () => {
+  test("a group lead that stood past the edge reads the spot planGroup pulls it to, and a lone drag its snapped spot pulled the same way", () => {
+    const s = square(false, [pc("a", { x: -4, y: 5 }), pc("b", { x: 10, y: 5 })]);
+    const view = seenRoom(s, "player");
+    const board = { x: -2, y: 5 };
+    assert.deepEqual(measuredLanding(view, s.tokens.a!, { x: 99, y: 99 }, board), { x: 0, y: 5 });
+    assert.deepEqual(planGroup(view, [s.tokens.a!, s.tokens.b!], 2, 0, "free").moves.find((m) => m.tokenId === "a"), { tokenId: "a", x: 0, y: 5 });
+    assert.deepEqual(measuredLanding(view, s.tokens.b!, { x: 5, y: -9 }, undefined), { x: 5, y: 0 });
+    assert.deepEqual(measuredLanding(seenRoom(s, "dm"), s.tokens.b!, { x: 5, y: -9 }, undefined), { x: 5, y: -9 });
+    assert.deepEqual(measuredLanding(undefined, s.tokens.b!, { x: 5, y: -9 }, undefined), { x: 5, y: -9 });
   });
 });
 
@@ -153,6 +166,19 @@ describe("a group's drop", () => {
     const s = square(false, [ogre, pc("p", { x: 6, y: 7 })]);
     const plan = planGroup(seenRoom(s, "player"), [s.tokens.o!, s.tokens.p!], 3, 0, "free");
     allInside(s, plan, "squeezed member");
+  });
+
+  test("a member squeezed against the east or south edge is pulled out of its squeeze alone, and the group still moves (R2-OPUS-1)", () => {
+    for (const [name, at] of [["east", { x: 28.5, y: 7 }], ["south", { x: 12, y: 18.5 }]] as const) {
+      const s = square(false, [pc("o", { size: "large", ...at, squeeze: true }), pc("p", { x: 15, y: 7 })]);
+      const view = seenRoom(s, "player");
+      const members = [s.tokens.o!, s.tokens.p!];
+      for (const [dx, dy] of [[0, 3], [0, -3], [-5, 0], [4, 4]] as const) {
+        const offset = groupOffsetOnScene(view, members, dx, dy);
+        assert.notDeepEqual(offset, { dx: 0, dy: 0 }, `${name} ${dx},${dy}: the group is not frozen`);
+        allInside(s, planGroup(view, members, dx, dy, "free"), `${name} ${dx},${dy}`);
+      }
+    }
   });
 
   test("a member that stood past the edge is pulled in on its own, and the rest keep their place", () => {

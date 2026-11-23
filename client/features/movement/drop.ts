@@ -69,6 +69,18 @@ export function keptOnScene(state: Pick<DropView, "scenes" | "role">, token: Dro
 }
 
 /**
+ * Where the ruler measures a drag to: a group member's spot as the board
+ * wrote it (`groupSpot`, set only for a group drag), else the snapped spot
+ * of a lone drop, both through the same pull as the plan, so a lead that
+ * stood past the edge reads the spot planGroup pulls it to
+ * (DROPMAP-R2-OPUS-2).
+ */
+export function measuredLanding(state: Pick<DropView, "scenes" | "role"> | undefined, token: DropToken, snapped: Point, groupSpot: Point | undefined): Point {
+  const to = groupSpot ?? snapped;
+  return state ? keptOnScene(state, token, to) : to;
+}
+
+/**
  * Whether a player's held spot lies past the scene's edge where the token
  * does not stand: a parked token walked in against a wall on the edge line
  * is held outside, a spot the server refuses (DROPMAP-OPUS-1), so no move
@@ -1013,8 +1025,11 @@ function groupStays(state: Pick<DropView, "scenes">, tokens: readonly DropToken[
     if (!scene) return true;
     const g = sceneGrid(scene);
     if (!standsInScene(g, scene.bounds, token)) return true;
-    const to = snapPosition(g, token.x + dx, token.y + dy, footprintSize(token));
     const { squeeze: _was, ...full } = token;
+    // One whose full size spot is outside where the move leaves it in place (a squeeze against the east or south edge) is pulled alone.
+    const home = snapPosition(g, token.x, token.y, footprintSize(token));
+    if (!standsInScene(g, scene.bounds, { ...full, ...home })) return true;
+    const to = snapPosition(g, token.x + dx, token.y + dy, footprintSize(token));
     return (to.x === token.x && to.y === token.y) || standsInScene(g, scene.bounds, { ...full, ...to });
   });
 }

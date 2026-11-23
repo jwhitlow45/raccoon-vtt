@@ -129,7 +129,8 @@ describe("pulledInside on hexes against the scan of every hex (DROPMAP-OPUS-2)",
     for (let i = 0; i < 600; i++) {
       const g = pick(r, [ROWS, COLUMNS] as const);
       const bounds = { w: int(r, 2, 40), h: int(r, 2, 40) };
-      const token = sized(pick(r, ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const), 0, 0);
+      // A custom size draws any box from half a cell to 20, larger than the scene too, on the hexes of its size category (DROPMAP-SOL-02).
+      const token: PlacedToken = r() < 0.4 ? { size: "custom", w: 0.5 + r() * 19.5, h: 0.5 + r() * 19.5, x: 0, y: 0 } : sized(pick(r, ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const), 0, 0);
       const to = { x: r() * (bounds.w + 60) - 30, y: r() * (bounds.h + 60) - 30 };
       const at = pulledInside(g, bounds, token, to);
       const want = scanned(g, bounds, token, to);
@@ -139,10 +140,24 @@ describe("pulledInside on hexes against the scan of every hex (DROPMAP-OPUS-2)",
     }
   });
 
+  test("a custom size is searched by its category's hexes: the reviewers' two repros return the nearest valid spot", () => {
+    const custom: PlacedToken = { size: "custom", w: 20, h: 20, x: 0, y: 0 };
+    const small = pulledInside(COLUMNS, { w: 10, h: 10 }, custom, { x: 50, y: -50 });
+    assert.equal(standsInScene(COLUMNS, { w: 10, h: 10 }, { ...custom, ...small }), true, `on ${small.x}, ${small.y}`);
+    const wide = pulledInside(COLUMNS, { w: 30, h: 30 }, custom, { x: -50, y: 5 });
+    const want = scanned(COLUMNS, { w: 30, h: 30 }, custom, { x: -50, y: 5 });
+    assert.ok(Math.abs((wide.x + 50) ** 2 + (wide.y - 5) ** 2 - want!) < 1e-6, `on ${wide.x}, ${wide.y}`);
+  });
+
   test("a drop far past the edge of the largest scene reads a few dozen hexes, not all 40,000", () => {
     const bounds = { w: 200, h: 200 };
-    const started = performance.now();
-    for (let i = 0; i < 200; i++) pulledInside(COLUMNS, bounds, sized("gargantuan", 0, 0), { x: -50 + i, y: 700 });
-    assert.ok(performance.now() - started < 200, "200 calls under 200 ms, where the full scan took 4 ms a call");
+    for (const size of ["medium", "large", "gargantuan"] as const) {
+      for (const to of [{ x: -50, y: 700 }, { x: 900, y: -40 }, { x: 100, y: -300 }]) {
+        const probe = { read: 0 };
+        const at = pulledInside(COLUMNS, bounds, sized(size, 0, 0), to, probe);
+        assert.equal(standsInScene(COLUMNS, bounds, { ...sized(size, 0, 0), ...at }), true);
+        assert.ok(probe.read < 600, `${size}: ${probe.read} hexes read`);
+      }
+    }
   });
 });

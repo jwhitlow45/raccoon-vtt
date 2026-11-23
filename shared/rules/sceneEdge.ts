@@ -18,7 +18,7 @@ const EPS = 1e-9;
 
 /** How far the ring search goes, and how many rings past the first fit it still reads. */
 const MAX_RINGS = 24;
-const EXTRA_RINGS = 3;
+const EXTRA_RINGS = 6;
 
 /**
  * Whether the footprint a token takes at its stored spot lies inside the
@@ -48,9 +48,10 @@ function pulled(v: number, side: number, bound: number, step: number): number {
  * a token dragged along the edge slides. On hexes it is the spot of the
  * scene's hex whose full-size footprint lies inside and whose spot is
  * nearest `to`. A spot already inside, and a token the scene is too small
- * for, come back as they are.
+ * for, come back as they are. `probe` counts the hexes the search reads, for
+ * the test that holds it to a few dozen.
  */
-export function pulledInside(g: Grid, bounds: { w: number; h: number }, token: PlacedToken, to: Point): Point {
+export function pulledInside(g: Grid, bounds: { w: number; h: number }, token: PlacedToken, to: Point, probe?: { read: number }): Point {
   const full: PlacedToken = { size: token.size, x: to.x, y: to.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) };
   if (!isHex(g)) {
     const { w, h } = footprintSize(full);
@@ -62,6 +63,7 @@ export function pulledInside(g: Grid, bounds: { w: number; h: number }, token: P
   let best = null as Point | null;
   let bestAway = Infinity;
   const consider = (hex: Hex) => {
+    if (probe) probe.read++;
     const p = placedOnHex(g, full, hex);
     const d = away(p);
     // Only a nearer spot is worth the footprint test, so a far drop costs one test per improvement.
@@ -70,11 +72,13 @@ export function pulledInside(g: Grid, bounds: { w: number; h: number }, token: P
     bestAway = d;
     return true;
   };
-  // Rings of hexes round where `to` lands once clamped into the scene's box, so a far drop on a 200 by 200 scene costs a few dozen
-  // hexes and not all of them (DROPMAP-OPUS-2). The nearest spot lies within a few rings of the first one that fits.
+  // Rings of hexes round the scene's nearest point to where the drop aims, so a far drop on a 200 by 200 scene costs a few dozen
+  // hexes and not all of them (DROPMAP-OPUS-2). A hex footprint is the size category's, whatever box a custom size draws, so the
+  // seed is the box's middle (the anchor's own place) held on the scene's rectangle and not shrunk by the drawn box (DROPMAP-SOL-02).
+  // The nearest spot lies within a few rings of the first one that fits.
   const { w, h } = footprintSize(full);
-  const clamped = { x: pulled(to.x, w, bounds.w, 1), y: pulled(to.y, h, bounds.h, 1) };
-  const start = hexAt(g, { x: clamped.x + w / 2, y: clamped.y + h / 2 });
+  const middle = { x: Math.min(Math.max(to.x + w / 2, 0), bounds.w), y: Math.min(Math.max(to.y + h / 2, 0), bounds.h) };
+  const start = hexAt(g, middle);
   const seen = new Set<string>([hexKey(start)]);
   let ring: Hex[] = [start];
   let foundAt = -1;

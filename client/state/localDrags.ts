@@ -35,6 +35,15 @@ export function groupSpot(grid: Grid, token: Parameters<typeof footprint>[0], x:
  * line and label show it. It changes only when a token crosses into another
  * cell or its landing changes, never on every pointer frame.
  */
-export type LocalDrags = { spots: Readonly<Record<string, DragSpot>> };
+export type LocalDrags = {
+  spots: Readonly<Record<string, DragSpot>>;
+  /** Whether the drag names several tokens that land by one offset (a lone drag that carries others is not one): the ruler reads each member's spot as its landing. */
+  group: boolean;
+};
 
-export const localDragSlot = scopeSlot(() => createStore<LocalDrags>(() => ({ spots: {} })));
+export const localDragSlot = scopeSlot(() => createStore<LocalDrags>(() => ({ spots: {}, group: false })));
+
+/** The spot a group drag lands `tokenId` on, as the board writes it, or none for a lone drag (the ruler measures that by the plan's own landing). */
+export function groupSpotOf(state: LocalDrags, tokenId: string): DragSpot | undefined {
+  return state.group ? state.spots[tokenId] : undefined;
+}

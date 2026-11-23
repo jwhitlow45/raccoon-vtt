@@ -1445,7 +1445,7 @@ export function MapStage(props: {
     [localDrags],
   );
   const clearSpots = useCallback(() => {
-    if (Object.keys(localDrags.getState().spots).length > 0) localDrags.setState({ spots: {} });
+    if (Object.keys(localDrags.getState().spots).length > 0 || localDrags.getState().group) localDrags.setState({ spots: {}, group: false });
   }, [localDrags]);
 
   // The bar's "Undo move" follows what this device sends and what the server refuses (undoMove.ts).
@@ -1698,6 +1698,7 @@ export function MapStage(props: {
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
         dragStopsRef.current.start(parts.lead.id, token);
+        localDrags.setState({ group: parts.named.length > 1 });
         // Frames carry the drawn spot (docs/design/design-v1-snap-off.md 5.6).
         const grid = sceneGrid(sceneRef.current);
         actions.sendEph({ k: "dragStart", tokenId: token.id, ...drawnSpot(grid, token) });
