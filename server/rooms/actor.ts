@@ -481,6 +481,8 @@ type Batch = {
   closeAt: number;
   /** Its timer has fired: it closes once no command of its tick waits to be handled or read (#closeIfDue). */
   due: boolean;
+  /** Its timer fired under a test's standing clock before the clock reached its tick (#armTimer), so its view takes the tick the clock read (#publish). */
+  standing?: true;
   /** How many members' ops the batch answered since it opened, taken or refused. */
   answered: number;
   state: RoomState;
@@ -3360,6 +3362,7 @@ export class RoomActor {
           this.#log.warn({ roomId: this.roomId, behindMs: batch.tick - clock }, "clock behind the batch tick");
         }
       }
+      if (standing && clock < batch.tick) batch.standing = true;
       batch.due = true;
       this.#closeIfDue();
       this.#maybeIdle();
@@ -3820,9 +3823,10 @@ export class RoomActor {
       for (const conn of this.#connections) conn.close(1011, "internal error");
     }
     // The batch's view joins the ring, and the frames held for it route against it before the next batch publishes.
-    // A batch that closed before the clock reached its tick, under a test's standing clock or a clock set back, is
-    // viewed at the tick the clock read then, so a reader after its commit at that reading takes it.
-    const tick = Math.min(batch.tick, this.#readerTick(batch.closeAt));
+    // A batch that closed under a test's standing clock before the clock reached its tick is viewed at the tick the
+    // clock read then, so a reader after its commit at that reading takes it. A clock set back keeps the batch's own
+    // tick: a reader that arrived in that tick before its commands never takes them.
+    const tick = batch.standing ? Math.min(batch.tick, this.#readerTick(batch.closeAt)) : batch.tick;
     this.#keepView({ tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
     this.#releaseFrames();
     for (const s of batch.sys) s.resolve();
