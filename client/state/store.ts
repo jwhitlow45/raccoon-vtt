@@ -1433,9 +1433,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * id `newId` made must bring it in a field that holds a new thing's id
    * (newIdsIn), a roll tag, a group save's plan or page, or a fog op. That
    * finds a field the table of those fields left out. Later ops name it
-   * anywhere, as a move or delete of a token made earlier does.
+   * anywhere, as a move or delete of a token made earlier does. A builder's
+   * ask brings none: the room reads its ops and keeps nothing, and the ops
+   * the gesture sends after it bring the same ids.
    */
   function checkIntroduced(op: ClientOp | HistoryCommand): void {
+    if (op.t === "build.ask") return;
     const carried = [...stringsOf(op)].filter((x) => made!.has(x) && !introduced.has(x));
     if (carried.length === 0) return;
     const fields = new Set([...newIdsIn(op), ...keptIdsOf(op)]);

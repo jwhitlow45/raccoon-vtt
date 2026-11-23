@@ -692,6 +692,22 @@ describe("the store's test hook on ids newId made", () => {
     assert.equal(new Set(tags).size, 3);
   });
 
+  test("a builder's ask carrying a stamp newId made brings nothing: the stamps op after it brings the id, and a field of no new thing after the ask is still reported", () => {
+    const problems: string[] = [];
+    const s = hooked(problems);
+    const id = s.actions.newId();
+    const stamps = { t: "build.stamps", sceneId: "s1", put: [{ id, art: { key: "barrel" }, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] } as ClientOp;
+    s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [stamps], part: 0 } as ClientOp, { group: s.actions.newId() });
+    assert.deepEqual(problems, []);
+    s.room.dispatch(stamps);
+    assert.deepEqual(problems, []);
+    const other = s.actions.newId();
+    s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [{ ...stamps, put: [{ ...(stamps as { put: object[] }).put[0], id: other }] }], part: 0 } as ClientOp, { group: s.actions.newId() });
+    s.room.dispatch({ t: "token.move", tokenId: other, x: 5, y: 5 });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /^token\.move first brings/);
+  });
+
   test("a roll tag and a group save's plan made by newId are fields it allows", () => {
     const problems: string[] = [];
     const s = hooked(problems, room({ tokens: { g1: token("g1", { actor: { inline: actor() } }) } }));
