@@ -2682,9 +2682,9 @@ export class RoomActor {
       return;
     }
     const wm = this.#watermarks.get(key);
-    // A member's own socket that asked takes their id key with every snapshot, so a changed ROOM_SECRET_KEY reaches it at its next one.
-    const idKey = conn.sealIds && !conn.display && conn.previewBy === null ? this.#idKeys.member(conn.memberId).text : null;
-    const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0, idKey);
+    // A member's own socket that asked takes their id key with every snapshot (buildSnapshot says which), so a changed
+    // ROOM_SECRET_KEY reaches it at its next one.
+    const snapshot = buildSnapshot(this.#committed.state, this.#handOut(pub), conn, wm?.committed ?? 0, (memberId) => this.#idKeys.member(memberId).text);
     // A DM's alone: by how much the room is past its far line at the last exact reading, absent under it.
     const over = this.#sizes.over;
     const message: ServerMessage = conn.role === "dm" && conn.previewBy === null && over > 0 ? { ...snapshot.message, over: { bytes: over } } : snapshot.message;
