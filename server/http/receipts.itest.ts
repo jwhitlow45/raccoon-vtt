@@ -394,6 +394,27 @@ describe("GET /api/rooms/:id/receipts/:tag as of its arrival", () => {
     assert.deepEqual(await lookup(p, tag), { parts: [] });
   });
 
+  test("lookups that wait through their room's load answer by each receipt's own time as of their arrival, and the load reads the day's rows alone", async () => {
+    const p = await party("Receipts through a load");
+    const tags = { day: uuidv7(), week: uuidv7(), young: uuidv7() };
+    // Inside 24 hours and inside 7 days by a second and a half as the lookups arrive, and past both once they read.
+    await written("roll_receipts", p, tags.day, 1, "24 hours -1500 milliseconds");
+    await written("roll_receipts", p, tags.week, 1, "7 days -1500 milliseconds");
+    await written("roll_receipts", p, tags.young, 1, "1 hour");
+    await written("roll_receipts", p, uuidv7(), 1, "10 days");
+    await written("roll_receipts_retired", p, uuidv7(), 1, "10 days");
+    await t.restart();
+    const holder = await t.pool.connect();
+    await holder.query("begin");
+    await holder.query("lock table room_snapshots in access exclusive mode");
+    const waiting = [lookup(p, tags.day), lookup(p, tags.week)];
+    await new Promise((r) => setTimeout(r, 2_500));
+    await holder.query("rollback");
+    holder.release();
+    assert.deepEqual((await Promise.all(waiting)).map(seqs), [[1], [1]]);
+    assert.equal(t.manager.get(p.roomId)!.receiptCounts().room, 1, "the day's receipt alone in memory");
+  });
+
   test("after a replay that stopped short, a committed receipt past it answers busy and one inside it is read", async () => {
     const p = await party("Receipts short replay");
     const kept = uuidv7();
