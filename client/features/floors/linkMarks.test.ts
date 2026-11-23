@@ -294,6 +294,29 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     }
   });
 
+  test("on a desk a hole's name keeps one line beside a creature it covers anyway, though two lines would cover less of it, and takes two only to cover fewer things (D-261122-221)", () => {
+    const crypt = (e: EndPills): EndPills => ({ ...e, first: { ...e.first!, name: "Down to Crypt", value: "Not reached yet" } });
+    const one = crypt(hole("a", { x: 8, y: 6, w: 1, h: 1 }));
+    const scale = 40;
+    const over = (p: PillSpec, r: FloorLink["rect"]) => {
+      const b = drawnBox(p, scale, null, true, true);
+      return Math.max(0, Math.min(b.x1, r.x + r.w) - Math.max(b.x0, r.x)) * Math.max(0, Math.min(b.y1, r.y + r.h) - Math.max(b.y0, r.y));
+    };
+    // A long, low creature under the hole, which every spot of the name meets, one line over more of it.
+    const long = { x: 0, y: 7.2, w: 18, h: 0.3 };
+    const name = placeEnds([one], [], scale, null, () => false, [long]).get("a")!.pill!;
+    assert.equal(name.stacked, undefined, "one line");
+    assert.ok(over({ ...name, stacked: true }, long) < over(name, long), "though two lines would cover less of it");
+    // Two creatures beside the hole's bottom edge, which only a two-line name between them clears.
+    const mid = one.first!.x;
+    const width = drawnBox({ ...one.first!, stacked: true }, scale, null, true, true);
+    const half = (width.x1 - width.x0) / 2 + 0.05;
+    const sides = [{ x: mid - half - 3, y: 7, w: 3, h: 1 }, { x: mid + half, y: 7, w: 3, h: 1 }];
+    const between = placeEnds([one], [], scale, null, () => false, sides).get("a")!.pill!;
+    assert.equal(between.stacked, true, "two lines clear both creatures");
+    assert.ok(sides.every((r) => over(between, r) === 0));
+  });
+
   test("a pill over its own hole beats one over another pill, and loses to one over another end's squares (D-261122-112)", () => {
     // Turn 0: a's lowest corner is 8,6, and its name hung there meets b's squares, and b's chip where b keeps one.
     const iso = flat(0);
