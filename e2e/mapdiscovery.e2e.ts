@@ -17,6 +17,7 @@ import { partySight } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { pointerText } from "./helpers/pointerText.ts";
 
 /**
  * Map discovery (docs/design/design-v1-map-discovery.md section 10, steps md-1 to
@@ -759,7 +760,7 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await pickOption(dm, "Map builder", "Builder mode", "Rectangle room");
     await dragCells(dm, MAT.bounds, MAT.room.from, MAT.room.to);
     const options = dm.getByRole("toolbar", { name: "Map builder options" });
-    await options.getByText(BUILD_IN_SIGHT).waitFor();
+    await options.getByText(await pointerText(dm, BUILD_IN_SIGHT)).waitFor();
     await shots.take(dm, "mapdiscovery-dm-builder-in-sight");
     // The room's west wall faces Bree.
     await waitFor("the room's west wall on Ben's map", () => {

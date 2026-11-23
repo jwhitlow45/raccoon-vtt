@@ -1,4 +1,5 @@
 import { isCoarsePointer } from "./device.ts";
+import { pointerWordsFor } from "./pointerRules.ts";
 
 /**
  * A line's words for the main pointer: the app words touch as "Tap", and a
@@ -11,6 +12,5 @@ import { isCoarsePointer } from "./device.ts";
  * "Tap Room" reads as named.
  */
 export function pointerWords(template: string, names: Readonly<Record<string, string>> = {}, touch: boolean = isCoarsePointer()): string {
-  const words = touch ? template : template.replace(/\b(Double-)?([Tt])ap(s?)\b/g, (_all, double: string | undefined, t: string, s: string) => `${double ?? ""}${t === "T" ? "C" : "c"}lick${s}`);
-  return words.replace(/\{(\w+)\}/g, (hole, key: string) => (Object.hasOwn(names, key) ? names[key]! : hole));
+  return pointerWordsFor(template, names, touch);
 }

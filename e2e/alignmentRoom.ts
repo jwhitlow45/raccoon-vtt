@@ -17,6 +17,7 @@ import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { pointerText } from "./helpers/pointerText.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
 import { PALETTES, theme } from "../client/lib/theme.ts";
@@ -8945,7 +8946,7 @@ export function md4Tests(): void {
         // A stroke across open ground the scout sees, so the row says the party sees it. Each size paints a row of its own: a stroke over floor already painted builds nothing.
         await dragCells(page, { w: 12, h: 8 }, { x: 5, y: i + 1 }, { x: 7, y: i + 1 });
         const bar = page.getByRole("toolbar", { name: "Map builder options" });
-        if (await shows(bar.getByText(BUILD_IN_SIGHT).first())) {
+        if (await shows(bar.getByText(await pointerText(page, BUILD_IN_SIGHT)).first())) {
           await sweep.measure(page, "md4-builder-note", bar);
           await shots.take(page, `alignment-md4-builder-note-${atName(at)}`);
           // Where the row cuts the note short, a tap opens it whole.
