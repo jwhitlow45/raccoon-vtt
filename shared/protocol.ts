@@ -3954,16 +3954,20 @@ export type SearchResult = {
  * alone meet the gate: a version 8 id read under the sender's key (a
  * version 7 one only from a page that holds no key, before the room's
  * cutover), dated within ID_TIME of the server's clock, never held
- * before, and recorded once the op applies. The rest
- * carry none (`none`), bring back or copy ids the state held (`copied`:
- * restores, and a duplicate's children, whose ids are derived from the
- * copy's own), carry keys of the thing itself (`natural`: coordinates,
- * SRD ids, the key an upsert replaces in place), or are the server's
- * own (`server`), whose ids it mints itself and trusts. `recorded` lists
- * ids a device made for new things that the gate does not read, since
- * they may be applied long after they were made, but that are recorded
- * like any taken id, so a later create that brings one again meets its
- * row.
+ * before, and recorded once the op applies. The rest carry none (`none`),
+ * bring back or copy ids the state held (`copied`: restores, and a
+ * duplicate's children, whose ids are derived from the copy's own), carry
+ * keys of the thing itself (`natural`: coordinates, SRD ids, the key an
+ * upsert replaces in place), or are the server's own (`server`), whose
+ * ids it mints itself and trusts. `recorded` lists ids a device made for
+ * new things that the gate does not read, since they may be applied long
+ * after they were made, but that are recorded like any taken id, so a
+ * later create that brings one again meets its row.
+ *
+ * The other fields that can hold a new thing's id, a key of a collection
+ * keyed by the new thing's own id or an id inside an existing thing, are
+ * NEW_ID_PATHS. The gate's last step reads them once the op applies
+ * (server/rooms/createIds.ts, newIdPaths.ts).
  *
  * A type left out fails the typecheck, so a new op is classed when it is
  * added.

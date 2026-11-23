@@ -92,7 +92,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 - Every change shows on every device at once, and your own edits show before the server confirms them.
 - The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Music and background sounds that a server restart cut off load again on their own once the room reconnects. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
 - A small dot shows the connection. A banner appears only after a few seconds offline.
-- A page left open across an update of the server may refuse what it adds with "Not saved. This page is out of date. Reload it and try again.", and a reload sets it right.
+- A page left open across an update of the server may refuse what it adds with "Not saved. This page is out of date. Reload it and try again." or "Not saved. This page is out of date. Reload it, then add that again.", and a reload sets it right.
 - Work made offline, or in an editor left open a long time, is saved once when it goes out. If the server still can't take it, the page says "Not saved. That could not be added. Try again."
 - A change the server fails to handle is refused with "That change could not be made: something went wrong on the server.", and the connection stays up, so the next change goes through. A device whose changes fail like this three times within a minute shows the third refusal too, then is disconnected and reconnects by itself.
 - On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
@@ -660,6 +660,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 ## Tokens
 
 - Token kinds: player character, NPC, monster, and object or marker.
+- Objects and markers draw under creatures, and a larger token under a smaller one, so a Medium creature standing on a Huge one stays in sight.
 - Each token has a name (which the DM can hide from players), an image, a size from Tiny to Gargantuan or a custom one, HP, maximum and Temporary HP, AC, Speeds, elevation, facing and conditions.
 - The DM and a creature's owners change its size on the fly, for Enlarge or Reduce, a Wild Shape or a polymorph: Size in its action bar, below Conditions and Multi-select, steps it one size larger or smaller, and Size in its Stats picks any, with "Back to Medium" where its character or stat block gives its own size.
   - The creature keeps its middle and its elevation, and its height, reach rings and attached areas follow.
@@ -898,7 +899,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Ruler: drag to measure, and tap to add waypoints.
   - It shows the total and each segment's length.
   - Players' rulers show to everyone in their color. The DM's stays private until shared.
-  - A double tap keeps a ruler on the map, and the Kept rulers chip lists the kept ones, each removed by its row with the eraser. On a narrow phone, the DM's Clear shows as its eraser alone, so "Kept rulers" stays in the row.
+  - A double tap keeps a ruler on the map, and the Kept rulers chip lists the kept ones by where each starts, top to bottom, then left to right, each removed by its row with the eraser. On a narrow phone, the DM's Clear shows as its eraser alone, so "Kept rulers" stays in the row.
   - A player's kept ruler on a creature they can no longer see is removed, as their areas on creatures are (see Areas of effect).
   - A point on raised or lowered ground stands on it, so the distance counts the height. A player's ruler counts only ground they can see, and everyone reads the same numbers.
   - Its readings keep one size at every zoom, grow with the interface size, and stay clear of the top bar and the toolbar at the screen's edge.
@@ -1283,7 +1284,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
 
 - A companion is a token that belongs to a character: a creature such as a familiar or a summoned spirit, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls it: moves it, changes its HP, conditions and stats, renames it and dismisses it.
 - Each companion takes its own turn with its own Initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn. A new creature starts listed under its character and a new effect out of the order, unless its maker picks another turn. One made with its own turn while its character is in a fight joins that fight at once, in a row of its own with its Initiative still to roll.
-- A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. The DM can make any token a companion in its panel.
+- A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. Where the character has several tokens on the scene, it goes beside the selected one, else the topmost (of two at the same height, the left one). The DM can make any token a companion in its panel.
 - A creature companion can have a full stat block: an SRD 5.2.1 creature, such as an owl for Find Familiar or a wolf, text pasted from a book with "Paste a stat block", or one typed in the editor.
   - Its players and the DM read it in its panel, and its action bar shows its saves, resistances and immunities. Other players see its token, name and HP as before.
   - An SRD creature picked for a new companion with no picture of its own gives it the monster's default icon, even where the DM picked another image for that monster's tokens. Picking another creature swaps that icon, and the name the first one filled in, for the new one's, so an owl changed to a wolf is named Wolf. A picture or name you chose yourself stays.
@@ -1751,6 +1752,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
 ## Drawing, pings and the laser
 
 - The Draw tool: freehand, line, rectangle, circle, polygon, arrow and text, with color, fill, opacity and line width. Everyone draws in their own color by default.
+- Filled shapes draw under lines and outlines, and text over both, so a fill never covers what is drawn or written on it.
 - Players erase and undo their own drawings. The DM can clear everything and can make drawings DM only.
 - "Who can draw" in Room settings: no one, every player (the default), or chosen players. A player who may not draw keeps the drawings they made. While they have some on the scene, their Draw tool offers only the eraser and "Clear mine". Rulers, pings and the laser stay for everyone.
 - **Ping**: tap a spot to ping it, with a sound, and a vibration on Android for everyone but you. The DM's "Look here" moves every player's view there. With the Select tool, a press held still on the map, off any token, pings that spot too.

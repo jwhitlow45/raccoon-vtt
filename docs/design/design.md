@@ -162,7 +162,7 @@ Tests sit next to the code as `*.test.ts`.
 
 ## 6. Data model
 
-All entities have `id` and `rev`. Client-created entities get a UUIDv7 from the client, so an optimistic create needs no round trip. Assets are created by the server and get random UUIDv4 IDs, so an asset ID never reveals when it was first uploaded. A create op whose ID already exists is rejected. `rev` is incremented by the reducer on every change.
+All entities have `id` and `rev`. Client-created entities get a version 8 UUID from the client, so an optimistic create needs no round trip. Its first 60 bits are a random nonce, and its last 48 are the making time sealed under a key the room gives each member (shared/ids.ts, server/rooms/idKeys.ts), which only that member and the server read back. Assets are created by the server and get random UUIDv4 IDs, so an asset ID never reveals when it was first uploaded. A create op whose ID already exists is rejected. `rev` is incremented by the reducer on every change.
 
 The room state is a set of normalized maps. Each entity kind is small and changes on its own, so an event carries only what changed.
 

@@ -260,10 +260,12 @@ export function copyFogEnabled(original: Pick<Scene, "map" | "fogEnabled">, incl
 /**
  * A copy's id: the 128-bit hash of the new scene's id and the original's,
  * as a UUID. Both ids go in as a JSON pair, so no two pairs hash the same
- * text. From op version 61 its version digit is 8, a custom UUID, so no
- * derived id ever has a device's version 7 shape and none can pass the id
- * gate as a mint (shared/protocol.ts ID_RULES). Ops stored before took the
- * hash's digit and replay so.
+ * text. From op version 61 its version digit is 8, a custom UUID, as a
+ * sealed id's is (shared/ids.ts sealedId). A derived id is sealed under no
+ * key, so the id gate refuses it as a mint (shared/protocol.ts ID_RULES):
+ * a sender's key reads a time from it only on a chance tag match, and that
+ * time is all but sure to fall far outside the gate's window. Ops stored
+ * before took the hash's digit and replay so.
  */
 export function derivedId(sceneId: string, originalId: string, opVersion?: number): string {
   const h = hash128(JSON.stringify([sceneId, originalId]));

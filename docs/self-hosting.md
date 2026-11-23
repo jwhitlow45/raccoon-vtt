@@ -89,7 +89,9 @@ sed -i "s|^ROOM_SECRET_KEY=$|ROOM_SECRET_KEY=$(openssl rand -base64 32)|" .env
 `ROOM_SECRET_KEY` is the key the server keeps each room's player password
 under, so a DM can show the player link and its QR code at any time. Keep
 it: a new key makes every stored player password unreadable, and each DM then
-changes the player password once to get a shareable link again. The second
+changes the player password once to get a shareable link again. The keys
+devices make the ids of new things under derive from it too: a new key gives
+every member a new one, which an open page takes as it reconnects. The second
 `sed` uses `|` because a base64 key can contain `/`.
 
 Then open `.env` in an editor and fill in:
@@ -660,6 +662,21 @@ formats at the top of `shared/migrate.ts`, as `SNAPSHOT_VERSION` and
 newest first.
 
 **Since v0.5.0**
+
+- **Version 8 ids** ([design](design/design-v1-player-limits.md)): room
+  format 50. The app adds a `sealed_since` column to `server_facts` at
+  start, which older builds leave alone. Devices make the ids of new things
+  as version 8 ids, under a key the room sends each member. As a room first
+  loads on this version, some of the ids it holds change, so that load takes
+  longer in a big room, and a draft open on a DM's device across the update,
+  in the journal, the monster editor, a group save or the encounter builder,
+  may no longer find a thing it names. Finish open drafts before the update.
+  Drawings, creatures and kept rulers stack in a new order. From an hour
+  after this version first runs, an old page that adds a new thing reads
+  "This page is out of date. Reload it, then add that again." until it
+  reloads, so reload every open page right after the update. Once this
+  version has stored a room, an older build refuses it, so going back needs
+  the backups taken just before the update.
 
 **v0.5.0**
 

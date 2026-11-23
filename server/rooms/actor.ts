@@ -160,7 +160,8 @@ export type ActorOptions = {
   roomSound: boolean;
   /**
    * The id gate (createIds.ts) on a new thing's id. Off only in tests that
-   * send fixture ids, which are not version 7, and then no id is recorded.
+   * send fixture ids, which are neither version 7 nor sealed under a key,
+   * and then no id is recorded.
    */
   idGate: boolean;
   /** The ROOM_SECRET_KEY the room's id keys derive from (idKeys.ts). Tests run with the development key. */

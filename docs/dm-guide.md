@@ -2154,7 +2154,7 @@ A companion is a token that belongs to a character: a familiar, a summoned spiri
 - An optional stat block, from **Choose a stat block**: an SRD creature such as an owl or a wolf, one of the character's own saved blocks, or one you paste. A stat block fills in the numbers it knows ("From the block: Speed 5 ft, Fly 60 ft. Darkvision 120 ft."), and the picture too if you haven't chosen one: an SRD creature's default icon, or a saved block's own picture when it has one.
 - Its **Turn** (see below), **Size**, **HP** and **AC**.
 
-**Add and place** puts the companion next to the character's token. Players add their own companions the same way. The form's chevron at the top (**Back to Ivo**, named for the character) or **Cancel** at its foot returns to the character's page, and asks "Discard changes?" first if you typed anything. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
+**Add and place** puts the companion next to the character's token. When the character has more than one token on the scene, it goes beside the one you have selected, or else the topmost one. Players add their own companions the same way. The form's chevron at the top (**Back to Ivo**, named for the character) or **Cancel** at its foot returns to the character's page, and asks "Discard changes?" first if you typed anything. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
 
 ![Add a companion for Ivo, a page of its own with Back to Ivo at the top: Hoot, a creature with the SRD Owl's stat block, taking its own turn, with the Fireball's area from the fight still drawn on the map behind it.](dm-guide/companion.webp)
 
