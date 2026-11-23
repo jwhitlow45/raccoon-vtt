@@ -3,17 +3,19 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { LogEntry, Member, RoomState, Token } from "#shared/model.ts";
-import { projectLogEntry } from "#shared/project.ts";
+import { eventReach, projectLogEntry } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { hiddenIn, hookPool, IN_R, IN_SIDE, privTwins, revsIn, skewOf, skewTimers, type Hidden, type PoolHooks, type PrivTwins, type TwinName } from "#shared/privTestutil.ts";
 import { FrameReader, T0, TRACK_END } from "#shared/seqTestutil.ts";
-import { token } from "#shared/testutil.ts";
+import { twins as secretTwins } from "#shared/secretDoorTestutil.ts";
+import { template, token, trap } from "#shared/testutil.ts";
 import { playerView } from "../http/playerView.ts";
 import { RoomActor, ViewBusyError, type ActorDeps, type ActorOptions } from "./actor.ts";
 import { SnapshotBudget, type SnapshotBudgetLimits } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { StoredRoomDb } from "./undoScopeTesting.ts";
+import { SizeGuard } from "./sizeGuard.ts";
+import { ScopeClient, StoredRoomDb, storedActor, until } from "./undoScopeTesting.ts";
 
 /**
  * Twin rooms that differ only in what P1 and the table display never see
@@ -379,6 +381,13 @@ function ruler(twin: Twin): void {
  * The side room's creature, which players see when the party has it in
  * sight, with party sight on the scene, so the display sees what P1 sees.
  */
+/** A public area by room R's wall that reminds on entering, the twin's own creatures out of it, and a fight on in Bree's turn. */
+function inFight(s: RoomState, creatures: readonly string[]): void {
+  s.templates.c1 = template("c1", { origin: { x: 7.5, y: 3.5, z: 0 }, size: 5, ownerId: "dm1", triggers: ["enter"] });
+  for (const id of creatures) s.tokens[id] = { ...s.tokens[id]!, x: 9, y: 8 };
+  s.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [{ id: "e1", tokenId: "b", value: 10, tieOrder: 0 }] } as unknown as RoomState["encounter"];
+}
+
 function withRat(s: RoomState, at: Partial<Token> = {}): void {
   s.tokens[RAT] = token(RAT, { name: "Rat", x: 7, y: 12, ...at });
   const scene = s.scenes.s1!;
@@ -896,17 +905,142 @@ describe("the steps before a walk run only at moments every player sees", () => 
     same(pair, "walk back");
   });
 
-  test("a DM-only creature walks into a public area at 6 ms in A, between P1's look into the side room and back, and P1's explored ground is alike", async (t) => {
+  test("a DM-only creature walks into a public area in the fight at 26 ms in A alone, after P1's walk into the side room at 22 ms and before P1's chat at 27 ms: P1's explored ground, its rows and frames are alike", async (t) => {
+    const pair = await open(t, { edit: (s, name, fixture) => inFight(s, fixture.creatures[name]!) });
+    // Each op row as its commit writes it, by its number.
+    const rows = new Map<Twin, Array<{ seq: number; op: { t: string; text?: string; tokenId?: string } }>>();
+    for (const twin of pair) {
+      rows.set(twin, []);
+      twin.hooks.observe((sql, params) => {
+        if (!sql.startsWith("insert into room_ops")) return;
+        const [seqs, ops] = [params[1] as number[], params[5] as string[]];
+        for (const [i, seq] of seqs.entries()) rows.get(twin)!.push({ seq: Number(seq), op: JSON.parse(ops[i]!) });
+      });
+    }
+    await timed(t, pair, async (twin, at) => {
+      await at(22);
+      twin.send(twin.p1, move("a", IN_SIDE.x, IN_SIDE.y));
+      await at(26);
+      if (twin.a) twin.send(twin.dm, move(twin.creatures[0]!, 7, 3));
+      await at(27);
+      twin.send(twin.p1, chat("at 27"));
+      await at(46);
+      twin.send(twin.p1, move("a", IN_R.x, IN_R.y));
+      await at(80);
+    });
+    // A's line was written, and reaches no player.
+    const state = pair[0].actor.committed.state;
+    const lines = state.log.filter((l) => l.data?.type === "area" && l.data.tokenId === pair[0].creatures[0]);
+    assert.equal(lines.length, 1, "A wrote the creature's area line");
+    assert.deepEqual(eventReach(state, lines[0]!.data!), [], "no player reads it");
+    assert.deepEqual(pair[0].actor.committed.state.exploredTiles, pair[1].actor.committed.state.exploredTiles, "P1's explored ground is alike");
+    // What P1 sees from the side room is explored at the tick's close in both, after P1's chat, not at A's line.
+    const exploredBeforeChat = (twin: Twin) => {
+      const seqOf = (match: (op: { t: string; text?: string; tokenId?: string }) => boolean) => rows.get(twin)!.filter((r) => match(r.op)).map((r) => r.seq);
+      const [walked, said] = [Math.min(...seqOf((op) => op.t === "token.move" && op.tokenId === "a")), Math.max(...seqOf((op) => op.t === "log.chat" && op.text === "at 27"))];
+      assert.ok(said > walked, `${twin.name}: P1's walk and chat were stored`);
+      return seqOf((op) => op.t === "sys.explore").some((seq) => seq > walked && seq < said);
+    };
+    assert.deepEqual(pair.map(exploredBeforeChat), [false, false], "nothing explored between P1's walk and its chat");
+    same(pair, "area");
+  });
+
+  test("the DM's round trip of Bree in A alone, in the tick the DM opens a door, has its steps put back, and leaves the size guard's growth, caps, refused scene and far line as in B", async (t) => {
+    // Each twin's guard, met as it accepts the room's work, and how many marks A's took.
+    const guards = new Map<TwinName, SizeGuard>();
+    let marks = 0;
+    let current: TwinName | null = null;
+    const { accept, mark } = SizeGuard.prototype;
+    SizeGuard.prototype.accept = function (this: SizeGuard, state: RoomState) {
+      if (current !== null) guards.set(current, this);
+      return accept.call(this, state);
+    };
+    SizeGuard.prototype.mark = function (this: SizeGuard) {
+      if (current === "door") marks++;
+      return mark.call(this);
+    };
+    t.after(() => {
+      Object.assign(SizeGuard.prototype, { accept, mark });
+    });
     const pair = await open(t);
     await timed(t, pair, async (twin, at) => {
+      current = twin.name;
       await at(3);
-      twin.send(twin.p1, move("a", IN_SIDE.x, IN_SIDE.y));
-      await at(6);
-      if (twin.a) twin.send(twin.dm, move(twin.creatures[0]!, 5, 4));
-      await at(9);
-      twin.send(twin.p1, move("a", IN_R.x, IN_R.y));
+      twin.send(twin.dm, { t: "door.set", sceneId: "s1", door: { edge: "16,5,w" }, state: "open" });
+      await at(5);
+      twin.send(twin.p1, chat("the door is open"));
+      await at(8);
+      const b = twin.actor.committed.state.tokens.b!;
+      if (twin.a) twin.send(twin.dm, { t: "token.move", tokenId: "b", x: b.x, y: b.y, route: [[b.x + 1, b.y, 0, 0], [b.x, b.y, 0, 0]] });
+      await at(26);
+      twin.send(twin.p1, chat("after"));
       await at(60);
+      current = null;
     });
-    same(pair, "area");
+    assert.ok(marks >= 1, "A's round trip ran the steps");
+    const read = (name: TwinName) => {
+      // The measures' bytes differ by what each twin alone holds. Their growth since is the shared work's.
+      const m = guards.get(name)!.mark();
+      return { growth: m.state?.growth, scenes: [...(m.scenes ?? [])].map(([id, x]) => [id, x.growth]), caps: m.caps, refusedScene: m.refusedScene, over: m.over };
+    };
+    assert.deepEqual(read("door"), read("rock"), "the guard's fields read alike");
+    same(pair, "round trip", "apart");
+  });
+});
+
+/*
+ * The steps before a walk, where a walk's end depends on them. In one
+ * tick the DM opens the passage's door, takes Bree past it, where she sees
+ * a pit Ayla cannot, and back, and then P1 walks Ayla through the pit's
+ * cell. Bree's walk back runs the steps, which explore what she saw
+ * there, so the room ends with that ground explored and Ayla's walk ends
+ * as in a build that commits the batch before every walk.
+ */
+describe("the steps before a walk, where the walk's end reads what they explored", () => {
+  const NOW = Date.parse("2026-11-10T20:00:00.000Z");
+  const quiet = { info() {}, warn() {}, error() {}, debug() {} };
+  type Ev = Extract<ServerMessage, { t: "ev" }>;
+
+  async function walk(t: TestContext, pit: { x: number; y: number }, end: { x: number; y: number }, options: ActorDeps["options"]) {
+    const room = secretTwins({ cover: "auto", explore: true }).door;
+    room.traps = { t0: trap("t0", { sceneId: "s1", name: "Pit", zone: { cells: [{ x: pit.x, y: pit.y, w: 1, h: 1 }] } }) };
+    const db = new StoredRoomDb(structuredClone(room));
+    const h = await storedActor(t, db, { batchMs: 20, now: () => NOW, ...options }, quiet);
+    const dm = await ScopeClient.open(h.actor, room.members.dm1!, "dm", () => NOW);
+    const p1 = await ScopeClient.open(h.actor, room.members.p1!, "player", () => NOW);
+    await dm.apply({ t: "log.chat", text: "ready" });
+    // One turn of the queue, one batch.
+    for (const op of [
+      { t: "door.set", sceneId: "s1", door: { edge: "16,5,w" }, state: "open" },
+      { t: "token.move", tokenId: "b", x: 20, y: 5 },
+      { t: "token.move", tokenId: "b", x: 14, y: 5 },
+    ]) void h.actor.op(dm.conn, ++dm.n, op);
+    const n = ++p1.n;
+    void h.actor.op(p1.conn, n, { t: "token.move", tokenId: "a", x: end.x, y: end.y, route: [[12, 5, 0, 0], [end.x, end.y, 0, 0]] });
+    const ev = await until(() => p1.sent.find((m): m is Ev => m.t === "ev" && Boolean(m.acks?.includes(n) || m.rejects?.some((x) => x.n === n))), "the walk's answer");
+    const state = h.actor.committed.state;
+    const a = state.tokens.a!;
+    await h.actor.shutdown({ code: 1012, snapshot: false });
+    // Whether what Bree saw past the door was explored before Ayla's walk was stored, after the door opened.
+    const seqOf = (match: (op: { t: string; tokenId?: string }) => boolean) => db.rows.filter((r) => match(r.op as { t: string })).map((r) => r.seq);
+    const walkAt = Math.max(...seqOf((op) => op.t === "token.move" && op.tokenId === "a"));
+    const doorAt = Math.max(...seqOf((op) => op.t === "door.set"));
+    const exploredFirst = seqOf((op) => op.t === "sys.explore").some((seq) => seq > doorAt && seq < walkAt);
+    const explored = Object.keys(state.exploredTiles).sort();
+    const exploredBy = Object.keys(state.exploredBy).sort();
+    return { answer: ev.rejects?.find((x) => x.n === n)?.code ?? "taken", a: [a.x, a.y], traps: Object.values(state.traps ?? {}).map((x) => [x.id, x.state, x.found]), explored, exploredBy, exploredFirst };
+  }
+
+  test("Ayla's walk through a pit only Bree saw, past the door, ends and leaves the explored ground as where the batch commits before every walk, and stops at the pit", async (t) => {
+    let stops = 0;
+    for (const pit of [{ x: 20, y: 5 }, { x: 21, y: 5 }, { x: 22, y: 5 }]) {
+      for (const end of [{ x: 23, y: 5 }, { x: 24, y: 5 }]) {
+        const steps = await walk(t, pit, end, { walkCloses: false } as ActorDeps["options"]);
+        const closes = await walk(t, pit, end, { walkCloses: true } as ActorDeps["options"]);
+        assert.deepEqual(steps, closes, `a pit at ${pit.x},${pit.y}, Ayla to ${end.x},${end.y}`);
+        if (closes.answer === "taken" && (closes.a[0] !== end.x || closes.a[1] !== end.y)) stops++;
+      }
+    }
+    assert.ok(stops >= 3, `${stops} walks stopped at the pit`);
   });
 });
