@@ -19,7 +19,7 @@ describe("the room count in Postgres", () => {
   // database's time, since a snapshot prunes covered rows by it.
   const clock = { now: Date.now() };
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => clock.now, standingClock: true, snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 

@@ -254,6 +254,7 @@ class RTwin {
         grantRecheckMs: 3_600_000,
         draw,
         now: () => clock.now,
+        standingClock: true,
         idGate: false,
         // Each build a mark makes, by its time.
         ...({ snapshotJson: (state: RoomState) => (this.builds.push(clock.now - T0), persistence.snapshotJson(state)) } as unknown as Partial<ActorOptions>),

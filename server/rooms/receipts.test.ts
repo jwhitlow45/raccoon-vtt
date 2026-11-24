@@ -248,6 +248,7 @@ describe("receipts and admission in the actor, randomized (docs/design/design-v1
         roomOpsPerSec: 1_000_000,
         now: () => clock,
         numberClock: STANDING_CLOCK,
+        standingClock: true,
         receiptCaps: CAPS,
         draw: (sides) => {
           draws++;

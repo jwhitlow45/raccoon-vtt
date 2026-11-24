@@ -19,7 +19,8 @@ type Event = Extract<ServerMessage, { t: "ev" }>;
 
 /**
  * A number clock that stands still (ActorOptions.numberClock), the default
- * of the actors these helpers load: numbers count by one, as tests that pin
+ * of the actors these helpers load, with the standing clock option
+ * (ActorOptions.standingClock): numbers count by one, as tests that pin
  * small ones expect, and a batch closes `batchMs` after it opens. A test of
  * the clock itself passes its own.
  */
@@ -308,7 +309,7 @@ export async function scopeActor(t: TestContext, state: RoomState, options: Acto
     pool: db.pool(), info,
     log: { info() {}, warn() {}, error() {}, debug() {} },
     budget: new SnapshotBudget(), gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, ...options },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, standingClock: true, ...options },
   });
   assert.ok(actor);
   t.after(async () => {
@@ -330,7 +331,7 @@ export async function storedActor(t: TestContext, db: StoredRoomDb, options: Act
     pool: db.pool(), info,
     log,
     budget: new SnapshotBudget(), gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, ...options },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, standingClock: true, ...options },
   });
   assert.ok(actor);
   t.after(() => actor.shutdown({ code: 1012, snapshot: false }));

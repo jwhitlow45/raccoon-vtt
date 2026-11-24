@@ -98,7 +98,7 @@ class World {
       log: quiet,
       budget: this.budget,
       gateway: {} as RoomGateway,
-      options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotEveryMs: Number.POSITIVE_INFINITY, grantRecheckMs: 3_600_000, now: this.now, numberClock: null },
+      options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotEveryMs: Number.POSITIVE_INFINITY, grantRecheckMs: 3_600_000, now: this.now, numberClock: null, standingClock: true },
     });
     assert.ok(actor);
     const gate = new Gate();

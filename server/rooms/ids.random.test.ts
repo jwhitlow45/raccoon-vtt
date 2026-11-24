@@ -77,7 +77,7 @@ async function openKeyed(tw: Twin): Promise<void> {
 
 async function openTwin(t: TestContext, name: string, seed: number): Promise<Twin> {
   // One options object per twin, so a key change reaches its next load.
-  const opts: Partial<ActorOptions> = { idGate: true, numberClock: STANDING_CLOCK, idSecret: DEVELOPMENT_ROOM_SECRET_KEY };
+  const opts: Partial<ActorOptions> = { idGate: true, numberClock: STANDING_CLOCK, standingClock: true, idSecret: DEVELOPMENT_ROOM_SECRET_KEY };
   const state = numberingRoom();
   state.characters.c1 = character("c1", { name: "Ayla", ownerIds: ["p1"], resources: [] });
   const room = new Room(t, name, state, opts);

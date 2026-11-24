@@ -75,7 +75,7 @@ class Labels {
 /** Opens the twins with one Labels each. */
 async function open(t: TestContext): Promise<{ pair: Twins; labels: [Labels, Labels] }> {
   // The server has run a build that keeps the gate's rows for hours, so an id made 20 minutes back is in its window.
-  const pair = await openTwins(t, numberingRoom(), numberingRoom(), {}, { numberClock: STANDING_CLOCK }, { since: T0 - 120 * MINUTE });
+  const pair = await openTwins(t, numberingRoom(), numberingRoom(), {}, { numberClock: STANDING_CLOCK, standingClock: true }, { since: T0 - 120 * MINUTE });
   return { pair, labels: [new Labels(), new Labels()] };
 }
 

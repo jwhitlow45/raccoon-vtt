@@ -55,8 +55,8 @@ export type Engine = {
 /**
  * Whether this run numbers rooms by the real clock, as production does
  * (`ITEST_NUMBER_CLOCK=real`). By default the engine's rooms take a standing
- * number clock (STANDING_CLOCK), so numbers count by one and each batch
- * closes `batchMs` after it opens. The checks run the suite once each way
+ * number clock (STANDING_CLOCK) and the standing clock option, so numbers
+ * count by one and each batch closes `batchMs` after it opens. The checks run the suite once each way
  * (`pnpm test:int` and `pnpm test:int:clock`).
  */
 export const REAL_NUMBERS = process.env.ITEST_NUMBER_CLOCK === "real";
@@ -118,7 +118,7 @@ export async function startEngine(opts: EngineOptions = {}): Promise<Engine> {
     const app = await buildApp({
       config,
       pool,
-      rooms: { idleUnloadMs: 200, ...opts.rooms, actor: { ...(REAL_NUMBERS ? {} : { numberClock: STANDING_CLOCK }), ...opts.rooms?.actor } },
+      rooms: { idleUnloadMs: 200, ...opts.rooms, actor: { ...(REAL_NUMBERS ? {} : { numberClock: STANDING_CLOCK, standingClock: true }), ...opts.rooms?.actor } },
       ws: opts.ws,
       export: opts.export,
       assets: opts.assets,

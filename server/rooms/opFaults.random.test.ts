@@ -127,6 +127,7 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
       snapshotIdleMs: 60_000,
       grantRecheckMs: 60_000,
       now: () => clock.t,
+      standingClock: true,
       // A standing number clock (STANDING_CLOCK) that throws once when armed. The op reads it at the queue, and a new
       // batch's timer reads it again only once the op is staged.
       numberClock: () => {

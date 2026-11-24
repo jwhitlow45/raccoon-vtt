@@ -95,7 +95,7 @@ class Twin {
       budget: new SnapshotBudget({ ipCount: 100_000, sessionCount: 100_000 }, () => this.clock.now),
       gateway: {} as RoomGateway,
       // The id gate is off: the rooms run on a test clock their fixture ids are not dated by (createIds.ts).
-      options: { batchMs: BATCH_MS, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, roomSound: true, draw, now: () => this.clock.now, idGate: false, ...this.#options },
+      options: { batchMs: BATCH_MS, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, roomSound: true, draw, now: () => this.clock.now, standingClock: true, idGate: false, ...this.#options },
     });
     assert.ok(actor);
     this.actor = actor;

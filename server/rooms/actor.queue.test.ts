@@ -47,7 +47,7 @@ async function room(t: TestContext, opts: { budget?: (now: () => number) => Snap
     log,
     budget: opts.budget?.(now) ?? new SnapshotBudget({}, now),
     gateway: {} as RoomGateway,
-    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, ...opts.options },
+    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true, ...opts.options },
   });
   assert.ok(actor);
   t.after(() => {
@@ -312,6 +312,14 @@ describe("a batch closes once its tick's commands are handled", () => {
     await flush();
     assert.ok(frameOf(r.p1.sent, back), "the second firing closes it");
     assert.deepEqual(r.warned.map((w) => w.msg), ["clock behind the batch tick"]);
+  });
+
+  test("a room given a clock of the test's own but not the standing clock option closes a batch on a still clock by the rule above", async (t) => {
+    // The DM's and P1's hellos as the rooms open, on a hand clock that stands at T0 while the real timers run.
+    const still = await room(t, { options: { standingClock: false } });
+    assert.deepEqual(still.warned.map((w) => w.msg), ["clock behind the batch tick"], "the batch closed at its timer's second firing");
+    const standing = await room(t);
+    assert.deepEqual(standing.warned, [], "with the option, at its first");
   });
 });
 

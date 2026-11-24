@@ -131,11 +131,19 @@ export type ActorOptions = {
    * The clock room numbers follow (docs/design/design-v1-room-count.md): each
    * number a device gets is at least its reading, and batches close on its
    * grid of `batchMs`. Null reads `now`. Tests that pin small numbers pass
-   * one that stands still, so numbers count by one and a batch closes
-   * `batchMs` after it opens. Any clock passed is one apart from `now`,
-   * the same function too.
+   * one that stands still, with `standingClock`, so numbers count by one and
+   * a batch closes `batchMs` after it opens. Any clock passed is one apart
+   * from `now`, the same function too.
    */
   numberClock: Clock | null;
+  /**
+   * Tests only: the room's clocks may stand still while its timers run, as
+   * a hand-moved clock or a standing number clock does, so a batch timer
+   * that fires with the number clock where it was armed makes the batch due
+   * at once (#armTimer). Absent, as on every room the server runs, a timer
+   * that fires short of its tick always waits once more.
+   */
+  standingClock?: boolean;
   /**
    * Tests only: a walk that needs the batch's sight commits the batch first
    * and runs after it, as before the steps ran in place, so a test can hold
@@ -692,8 +700,8 @@ export class RoomActor {
   #numberClock: Clock;
   /** Whether a test gave the room a number clock of its own (ActorOptions.numberClock), apart from the server's clock. */
   readonly #ownNumberClock: boolean;
-  /** Whether both clocks are the server's own, as on every production room, rather than a test's. */
-  readonly #serverClock: boolean;
+  /** Whether a test said the room's clocks may stand still while its timers run (ActorOptions.standingClock). */
+  readonly #standingClock: boolean;
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
   /** The published views readers answer from (#keepView), oldest first, the load's first until it ages out. */
@@ -885,7 +893,7 @@ export class RoomActor {
     this.#ownNumberClock = (this.#opts.numberClock ?? null) !== null;
     // The load's view answers every reader that arrived before it, since nothing changed while the room was unloaded.
     this.#views = [{ view: { tick: this.#readerTick(this.loadedAt), ...this.#committed }, load: true }];
-    this.#serverClock = this.#opts.numberClock === null && this.#opts.now === DEFAULT_ACTOR_OPTIONS.now;
+    this.#standingClock = this.#opts.standingClock === true;
     // A clock set back across a restart, or an imported file, leaves numbers ahead of it, and the room counts by one
     // until the clock passes them. The operator is told once, as the room loads.
     const aheadMs = loaded.pub - this.#numberClock();
@@ -3400,10 +3408,11 @@ export class RoomActor {
    * batch and however many answers joined it. One that fires with the clock
    * short of the tick, early or with the clock set back, waits once more, at
    * most a tick, and then the batch is due whatever the clock reads, which
-   * is logged once a load. A test's clock that stood still since the timer
+   * is logged once a load. Under a test's clocks that may stand still
+   * (ActorOptions.standingClock), a clock that stood still since the timer
    * was armed, as a standing number clock does, makes its batch due a tick
-   * after it opened. The server's own clock always takes the rule above. A
-   * due batch closes once no command of its tick waits (#closeIfDue).
+   * after it opened. Every other room always takes the rule above. A due
+   * batch closes once no command of its tick waits (#closeIfDue).
    */
   #armTimer(batch: Batch, again: boolean): void {
     const armedAt = this.#numberClock();
@@ -3412,7 +3421,7 @@ export class RoomActor {
       batch.timer = null;
       if (this.#batch !== batch || this.#closed) return;
       const clock = this.#numberClock();
-      const standing = clock === armedAt && !this.#serverClock;
+      const standing = clock === armedAt && this.#standingClock;
       if (clock < batch.tick && !standing) {
         if (!again) {
           this.#armTimer(batch, true);

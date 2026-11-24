@@ -57,7 +57,7 @@ async function table(budget: SnapshotBudget) {
     log: quiet,
     budget,
     gateway: {} as RoomGateway,
-    options: { batchMs: 1, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK },
+    options: { batchMs: 1, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, numberClock: STANDING_CLOCK, standingClock: true },
   };
   const actor = await RoomActor.load(deps);
   assert.ok(actor);

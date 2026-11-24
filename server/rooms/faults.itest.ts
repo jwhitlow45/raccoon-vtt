@@ -53,6 +53,7 @@ function scriptedFault(what: string): Error {
 
 const actorOptions = {
   batchMs: 10,
+  standingClock: true,
   retryBaseMs: 20,
   retryMaxMs: 40,
   draw: (sides: number) => {

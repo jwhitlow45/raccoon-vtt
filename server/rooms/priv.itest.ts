@@ -87,7 +87,7 @@ function rising(ids: readonly string[], what: string): void {
 
 describe("room numbers on the database follow the clock", () => {
   before(async () => {
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => (counting ? 0 : clock.now), draw, snapshotIdleMs: 60_000 } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { now: () => clock.now, numberClock: () => (counting ? 0 : clock.now), standingClock: true, draw, snapshotIdleMs: 60_000 } } });
   });
   after(() => t.close());
 

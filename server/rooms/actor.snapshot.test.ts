@@ -89,6 +89,7 @@ async function markRoom(t: TestContext, opts: { options?: ActorDeps["options"]; 
       roomOpsPerSec: 10_000,
       now,
       numberClock: null,
+      standingClock: true,
       snapshotJson: (state) => {
         builds.push(clock.now);
         return snapshotJson(state);

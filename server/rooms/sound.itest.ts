@@ -90,7 +90,7 @@ describe("synced music and sound in a live room", () => {
   before(async () => {
     // These tests read music times off their own clock to the millisecond, so in either run of the suite numbers stand
     // still and every op's `at` is that clock.
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => clock.now } } });
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, standingClock: true, now: () => clock.now } } });
   });
   after(() => t.close());
 
@@ -290,7 +290,7 @@ describe("the queue in a live room", () => {
   const qclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => qclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, standingClock: true, now: () => qclock.now } } });
   });
   after(() => t.close());
 
@@ -569,7 +569,7 @@ describe("only DM devices play in a live room", () => {
   const dclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => dclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, standingClock: true, now: () => dclock.now } } });
   });
   after(() => t.close());
 
@@ -694,7 +694,7 @@ describe("the next track's reveal after a change of crossfade", () => {
   const xclock = { now: Date.now() };
   let t: Engine;
   before(async () => {
-    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, now: () => xclock.now } } });
+    t = await startEngine({ env: { ROOM_SOUND: "1" }, rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000, roomSound: true, numberClock: STANDING_CLOCK, standingClock: true, now: () => xclock.now } } });
   });
   after(() => t.close());
   let level = 40;

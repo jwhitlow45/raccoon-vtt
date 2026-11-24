@@ -119,7 +119,7 @@ class Twin {
       gateway: {} as RoomGateway,
       // The production batch and number clock: the room's numbers follow the twin's clock. The id gate is off, since the
       // fixtures' ids are not dated by that clock (createIds.ts).
-      options: { batchMs: BATCH_MS, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 3_600_000, grantRecheckMs: 3_600_000, snapshotOps: 1_000_000, draw, now: () => this.clock.now, idGate: false, ...this.#options },
+      options: { batchMs: BATCH_MS, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 3_600_000, grantRecheckMs: 3_600_000, snapshotOps: 1_000_000, draw, now: () => this.clock.now, standingClock: true, idGate: false, ...this.#options },
     } satisfies ActorDeps);
     assert.ok(actor);
     this.actor = actor;

@@ -58,7 +58,7 @@ async function room(t: TestContext, options: ActorDeps["options"] = {}) {
     log: quiet,
     budget: new SnapshotBudget({}, now),
     gateway: {} as RoomGateway,
-    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomOpsPerSec: 10_000, now, numberClock: null, ...options },
+    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomOpsPerSec: 10_000, now, numberClock: null, standingClock: true, ...options },
   });
   assert.ok(actor);
   const gate = new Gate();
@@ -271,7 +271,7 @@ describe("a room that published nothing since it loaded", () => {
       log: quiet,
       budget: new SnapshotBudget({}, now),
       gateway: {} as RoomGateway,
-      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null },
+      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true },
     });
     assert.ok(actor);
     t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
@@ -293,7 +293,7 @@ describe("a room that published nothing since it loaded", () => {
       log: quiet,
       budget: new SnapshotBudget({}, now),
       gateway: {} as RoomGateway,
-      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null },
+      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true },
     });
     assert.ok(actor);
     t.after(() => actor.shutdown({ code: 1012, snapshot: false }));

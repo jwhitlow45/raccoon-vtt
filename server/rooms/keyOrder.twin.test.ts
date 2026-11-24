@@ -67,7 +67,7 @@ class Twin {
       budget: new SnapshotBudget({}, () => this.clock.now),
       gateway: {} as RoomGateway,
       // The id gate is off: the fixture's ids are not dated by the test clock (createIds.ts).
-      options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, now: () => this.clock.now, idGate: false },
+      options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, snapshotOps: 1_000_000, now: () => this.clock.now, standingClock: true, idGate: false },
     } satisfies ActorDeps);
     assert.ok(actor);
     this.actor = actor;

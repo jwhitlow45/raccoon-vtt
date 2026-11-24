@@ -42,7 +42,7 @@ async function gridRoom(t: TestContext, opts: { budget?: (now: () => number) => 
     log: quiet,
     budget: opts.budget?.(now) ?? new SnapshotBudget({}, now),
     gateway: {} as RoomGateway,
-    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, ...opts.options },
+    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true, ...opts.options },
   });
   assert.ok(actor);
   t.after(() => {
