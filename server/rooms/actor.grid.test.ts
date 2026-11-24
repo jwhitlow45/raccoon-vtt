@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, test, type TestContext } from "node:test";
+import { after, before, describe, mock, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
@@ -20,6 +20,12 @@ import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesti
 /** A multiple of every batch window below, so the first tick after it is a whole window on. */
 const T0 = Date.parse("2026-11-10T20:00:00.000Z");
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
+
+// The drain lets the loop go once a turn has used DRAIN_TURN_MS on the loop's clock (actor.ts #drain). Read in real
+// time, a slow machine ends a turn partway through commands a test sends at once, which then wait for a later turn than
+// the test reads them at. The loop's clock stands still in this file, so each command is handled as it arrives.
+before(() => mock.method(performance, "now", () => 0));
+after(() => mock.restoreAll());
 
 type Wire = ServerMessage | HistoryMessage;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
@@ -312,26 +318,30 @@ describe("commands handled while a commit is held", () => {
   async function gapAcross(t: TestContext, between: number): Promise<{ first: number; gap: number }> {
     const r = await gridRoom(t);
     let holding = false;
-    let release!: () => void;
+    let release: (() => void) | undefined;
     r.db.beforeCommit = () => {
       if (holding) return Promise.resolve();
       holding = true;
       return new Promise<void>((resolve) => (release = resolve));
     };
-    r.clock.now = T0 + 1_005;
-    chat(r.p1, "opens a batch");
-    await until(() => (holding ? true : undefined), "the commit held");
-    r.clock.now = T0 + 1_100;
-    chat(r.p1, "first");
-    for (let i = 0; i < between; i++) {
-      r.clock.now = T0 + 1_101 + i;
-      void r.actor.op(r.dm.conn, ++r.dm.n, { t: "token.update", tokenId: r.f.goblin, patch: { name: `Goblin ${i}` } });
+    try {
+      r.clock.now = T0 + 1_005;
+      chat(r.p1, "opens a batch");
+      await until(() => (holding ? true : undefined), "the commit held");
+      r.clock.now = T0 + 1_100;
+      chat(r.p1, "first");
+      for (let i = 0; i < between; i++) {
+        r.clock.now = T0 + 1_101 + i;
+        void r.actor.op(r.dm.conn, ++r.dm.n, { t: "token.update", tokenId: r.f.goblin, patch: { name: `Goblin ${i}` } });
+      }
+      r.clock.now = T0 + 1_110;
+      chat(r.p1, "second");
+      assert.equal(r.actor.queueLength, 0, "the queue goes on while the commit is held");
+    } finally {
+      // The room's shutdown waits for every commit, so one left held would hold the file open past a failure here.
+      r.clock.now = T0 + 1_200;
+      release?.();
     }
-    r.clock.now = T0 + 1_110;
-    chat(r.p1, "second");
-    assert.equal(r.actor.queueLength, 0, "the queue goes on while the commit is held");
-    r.clock.now = T0 + 1_200;
-    release();
     const numberOf = async (text: string) => Number((await until(() => r.actor.committed.state.log.find((line) => line.text === text), text)).id.split(":")[0]);
     const first = await numberOf("first");
     return { first, gap: (await numberOf("second")) - first };
