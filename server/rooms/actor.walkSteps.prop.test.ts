@@ -10,11 +10,15 @@ import { ScopeClient, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
 /*
  * The steps before a walk run only for some walks (RoomActor
  * #walkNeedsSteps). Over random traps, DM answers before the walk in its
- * tick, and walks with routes, round trips among them, the walk ends the
- * same as in a build that commits the batch before every walk
- * (`walkCloses`), whose walks always read the sight the batch left: so
- * wherever the trap step read stop ground between a walk's ends, the steps
- * had run.
+ * tick (the door opened and Bree taken past it, and maybe back, among
+ * them) and walks with routes, round trips among them, each scenario runs
+ * twice: with the steps, and in a build that commits the batch before
+ * every walk (`walkCloses`), whose walks always read the sight the batch
+ * left. Both must end alike: the walk's answer, where Ayla ends, each
+ * trap's state and whether it was found, the explored ground and what
+ * each player remembers. The test compares those ends only, so it does
+ * not see which walks ran the steps: queue.twin.test.ts's pit walk checks
+ * that they ran where a walk's end reads them.
  */
 
 const NOW = Date.parse("2026-11-10T20:00:00.000Z");
@@ -22,7 +26,7 @@ const SEEDS = 60;
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 type Ev = Extract<ServerMessage, { t: "ev" }>;
 
-type Scenario = { room: RoomState; answer: unknown; walk: { t: "token.move"; tokenId: "a"; x: number; y: number; route: Array<[number, number, number, 0]> } };
+type Scenario = { room: RoomState; answers: unknown[]; walk: { t: "token.move"; tokenId: "a"; x: number; y: number; route: Array<[number, number, number, 0]> } };
 
 /** The party's room, its corridor and the passage past the door, each cell a walk may reach. */
 const FLOOR = [
@@ -55,7 +59,10 @@ function scenario(seed: number): Scenario {
     { t: "token.move", tokenId: "m", x: int(r, 2, 9), y: int(r, 2, 9) },
     { t: "log.chat", text: "a DM line" },
   ];
-  const answer = pick(r, answers);
+  // Or the DM opens the door and takes Bree to that cell, and maybe back, so the walk can cross ground only she saw.
+  const bStart = { x: room.tokens.b!.x, y: room.tokens.b!.y };
+  const opened = [answers[1], answers[0], ...(r() < 0.5 ? [{ t: "token.move", tokenId: "b", x: bStart.x, y: bStart.y }] : [])];
+  const chosen = r() < 0.4 ? opened : [pick(r, answers)];
   const start = { x: room.tokens.a!.x, y: room.tokens.a!.y };
   const via = pick(r, nearBree);
   // A round trip out to a cell and back, or a walk to a cell through another.
@@ -65,7 +72,7 @@ function scenario(seed: number): Scenario {
     [via.x, via.y, 0, 0],
     [end.x, end.y, 0, 0],
   ];
-  return { room, answer, walk: { t: "token.move", tokenId: "a", x: end.x, y: end.y, route } };
+  return { room, answers: chosen, walk: { t: "token.move", tokenId: "a", x: end.x, y: end.y, route } };
 }
 
 async function run(t: TestContext, s: Scenario, options: ActorDeps["options"]) {
@@ -75,8 +82,8 @@ async function run(t: TestContext, s: Scenario, options: ActorDeps["options"]) {
   const p1 = await ScopeClient.open(h.actor, s.room.members.p1!, "player", () => NOW);
   // Explored as it loaded, so the steps start from the room's own ground.
   await dm.apply({ t: "log.chat", text: "ready" });
-  // One turn of the queue: the DM's answer, then the walk, in one batch.
-  void h.actor.op(dm.conn, ++dm.n, s.answer);
+  // One turn of the queue: the DM's answers, then the walk, in one batch.
+  for (const op of s.answers) void h.actor.op(dm.conn, ++dm.n, op);
   const n = ++p1.n;
   void h.actor.op(p1.conn, n, s.walk);
   const ev = await waitFor(() => p1.sent.find((m): m is Ev => m.t === "ev" && Boolean(m.acks?.includes(n) || m.rejects?.some((x) => x.n === n))));
@@ -87,6 +94,8 @@ async function run(t: TestContext, s: Scenario, options: ActorDeps["options"]) {
     answer: ev.rejects?.find((x) => x.n === n)?.code ?? "taken",
     a: a === undefined ? null : [a.x, a.y, a.elevation ?? 0],
     traps: Object.fromEntries(Object.values(state.traps ?? {}).map((x) => [x.id, [x.state, x.found]])),
+    explored: state.exploredTiles,
+    remembered: state.exploredBy,
   };
 }
 
@@ -106,7 +115,7 @@ test(`over ${SEEDS} random walks, a walk ends as it does where the batch commits
     const s = scenario(seed);
     const steps = await run(t, s, { walkCloses: false });
     const closes = await run(t, s, { walkCloses: true });
-    assert.deepEqual(steps, closes, `seed ${seed}: ${JSON.stringify(s.answer)} then ${JSON.stringify(s.walk)}`);
+    assert.deepEqual(steps, closes, `seed ${seed}: ${JSON.stringify(s.answers)} then ${JSON.stringify(s.walk)}`);
     if (closes.answer === "taken" && (closes.a?.[0] !== s.walk.x || closes.a?.[1] !== s.walk.y)) stops++;
     if (s.walk.x === s.room.tokens.a!.x && s.walk.y === s.room.tokens.a!.y) trips++;
   }
