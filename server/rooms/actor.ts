@@ -700,7 +700,7 @@ export class RoomActor {
   /** The next mark's timer (#armMark), and the index on the room's grid of the last mark handled, null until the first is placed. */
   #markTimer: NodeJS.Timeout | null = null;
   #lastMark: number | null = null;
-  /** The quota check after a stored snapshot (#recheckQuota), and whether another was asked for while it ran. */
+  /** The quota check after a stored snapshot or a deletion (#recheckQuota), and whether another was asked for while it ran. */
   #quotaCheck: Promise<void> | null = null;
   #quotaAgain = false;
   /** Whether the last snapshot write failed, so a run of failures warns once. */
@@ -1249,7 +1249,7 @@ export class RoomActor {
         this.#stepRunning = null;
         this.#drain();
       }
-      if (deleted > 0) await this.#checkQuota().catch((err: unknown) => this.#log.warn({ err, roomId: this.roomId }, "quota recheck failed"));
+      if (deleted > 0) await this.#recheckQuota();
     });
   }
 
@@ -4112,7 +4112,7 @@ export class RoomActor {
     this.#opsSinceSnapshot = this.#committed.seq - seq;
   }
 
-  /** The quota check after a stored snapshot, one at a time: one asked for while it runs runs once more after it. */
+  /** The quota check after a stored snapshot or a deletion, one at a time: one asked for while it runs runs once more after it. */
   #recheckQuota(): Promise<void> {
     if (this.#quotaCheck) {
       this.#quotaAgain = true;

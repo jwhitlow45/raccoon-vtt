@@ -295,6 +295,45 @@ describe("writes", () => {
     await flush();
     assert.deepEqual([checks, most], [2, 1], "and run once more after it");
   });
+
+  test("the quota check after a deletion waits for the one a write started, as a write's own does", async (t) => {
+    let checks = 0;
+    let running = 0;
+    let most = 0;
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => (release = resolve));
+    t.after(() => release());
+    const pool = (base: Pool) =>
+      ({
+        connect: base.connect.bind(base),
+        query: async (text: string, params?: unknown[]) => {
+          if (text.includes(" as bytes")) {
+            checks++;
+            running++;
+            most = Math.max(most, running);
+            await slow;
+            running--;
+            return { rows: [{ bytes: "0" }] };
+          }
+          return base.query(text, params);
+        },
+      }) as unknown as Pool;
+    const r = await markRoom(t, { options: { snapshotBackstopRows: 1, quotaBytes: 1_000_000_000 }, pool });
+    const [m1] = marksBetween(r.clock.now, T0 + 100_000) as [Mark];
+    await r.to(m1.at - 500);
+    chat(r.p1, "a row");
+    await r.to(m1.at - 400);
+    await r.to(m1.at);
+    assert.deepEqual(r.writes, [m1.at]);
+    assert.deepEqual([checks, most], [1, 1], "the write's check is held");
+    assert.equal(await r.actor.deletionStep(async () => ({ deleted: [r.f.goblin], result: 1 })), 1);
+    await flush();
+    assert.deepEqual([checks, most], [1, 1], "the deletion's check waits for the running one");
+    release();
+    await flush();
+    await flush();
+    assert.deepEqual([checks, most], [2, 1], "and runs once after it");
+  });
 });
 
 describe("the size guard and marks", () => {
