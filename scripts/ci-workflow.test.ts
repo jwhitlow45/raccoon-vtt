@@ -176,8 +176,9 @@ describe("the unit job", () => {
     const run = /\n {8}run: (node --test .+)\n/.exec(block)?.[1];
     assert.ok(run, block);
     const words = run.replace(/\$\{\{ (.+?) \}\}/g, "<$1>").match(/"[^"]*"|\S+/g)!;
-    assert.deepEqual(words.slice(0, 3), ["node", "--test", "--test-shard=<matrix.shard>/<strategy.job-total>"]);
-    const patterns = words.slice(3);
+    // The timeout names a test that never ends, and the forced exit ends a file whose hung test left a handle open.
+    assert.deepEqual(words.slice(0, 5), ["node", "--test", "--test-timeout=180000", "--test-force-exit", "--test-shard=<matrix.shard>/<strategy.job-total>"]);
+    const patterns = words.slice(5);
     assert.ok(patterns.length > 0 && patterns.every((w) => w.startsWith('"')), "only quoted patterns follow the flag");
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { scripts: { test: string } };
     assert.equal(`node --test ${patterns.join(" ")}`, pkg.scripts.test.replaceAll('\\"', '"'), "the patterns of pnpm test");
