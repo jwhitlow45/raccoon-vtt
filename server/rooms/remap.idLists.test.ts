@@ -4,8 +4,6 @@ import { uuidv7 } from "#shared/ids.ts";
 import { SEALED_IDS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { FALL_RIDERS_MOST, type RoomState, type TrapDue } from "#shared/model.ts";
 import { actor, member, room, scene, token, trap } from "#shared/testutil.ts";
-import { labelsFor } from "../../client/lib/labels.ts";
-import { fallRead, hiddenLine, whoLines } from "../../client/features/traps/desk.ts";
 import { ReidPlan, renamedState } from "./reid.ts";
 import { remapState } from "./remap.ts";
 
@@ -15,7 +13,9 @@ import { remapState } from "./remap.ts";
  * Each of its creatures takes the same new id both ways, and the new ids
  * sort in the reverse of the order the DM made the creatures, so only a
  * list sorted again by them reads alike. A list cut at its cap by the old
- * ids goes both ways, and the DM's cards read the same.
+ * ids goes both ways, and the DM's cards name the same creatures in the
+ * same order, with the same counts (client/features/traps/desk.ts whoLines
+ * and fallRead read no more of them).
  */
 
 const T0 = Date.parse("2026-10-01T12:00:00.000Z");
@@ -23,7 +23,7 @@ const MINUTE = 60_000;
 const AT = "2026-10-01T13:00:00.000Z";
 const NAMES = Array.from({ length: FALL_RIDERS_MOST + 1 }, (_, i) => `Imp ${String.fromCharCode(65 + i)}`);
 
-/** The room before the update: an imp for each name, made in that order and hidden from players, a trap with a cut and a whole occurrence, and a full and a short fall card. */
+/** The room before the update: an imp for each name, made in that order and shown to no player, a trap with a cut and a whole occurrence, and a full and a short fall card. */
 function oldRoom(): { state: RoomState; imps: string[] } {
   const dm = member(uuidv7(T0), "dm");
   const p1 = member(uuidv7(T0 + 1));
@@ -53,15 +53,14 @@ function countingDown(): () => string {
   return () => `${String(n--).padStart(8, "0")}-0000-8000-8000-000000000000`;
 }
 
-/** What the DM's cards read: each occurrence's lines on who, and each fall card's. */
+/** What the DM's cards name: each occurrence's creatures that set it off and that it hits, each count of the rest, and each fall card's creatures. */
 function cards(state: RoomState): string[] {
-  const labels = labelsFor(state, "dm");
+  const name = (id: string) => state.tokens[id]?.name ?? "?";
   const out: string[] = [];
   for (const due of Object.values(state.traps).find((t) => t.name === "Spike Hall")!.rig!.due!) {
-    const who = whoLines(state, due, labels);
-    out.push(due.hidden ? hiddenLine(state, due, labels) : `${who.by} ${who.hits}`);
+    out.push(`by ${[...due.by.map(name), `${due.more ?? 0} more`].join(", ")}; hits ${[...due.hits.map(name), `${due.hitsMore ?? 0} more`].join(", ")}`);
   }
-  for (const card of Object.values(state.falls ?? {}).sort((x, y) => x.made - y.made)) out.push(fallRead(state, card, state.meta.playerSceneId, labels).line);
+  for (const card of Object.values(state.falls ?? {}).sort((x, y) => x.made - y.made)) out.push(`fell ${[card.tokenId, ...(card.riders ?? [])].map(name).join(", ")}`);
   return out;
 }
 
@@ -76,10 +75,10 @@ describe("an import of an export from before sealed ids (remap.ts, idLists.ts)",
     const upgraded = renamedState(state, renames);
     assert.deepEqual(cards(imported), cards(upgraded));
     assert.deepEqual(cards(imported), [
-      "5 creatures set it off. It hits 5 creatures.",
-      "Imp E and Imp D set it off, out of the players' sight. The trap is still armed for them.",
-      `Imp ${String.fromCharCode(65 + FALL_RIDERS_MOST)} fell 10 ft to Battle mat: 1d6 Bludgeoning, Prone.`,
-      "Imp F, Imp E, Imp D and 1 more fell 10 ft to Battle mat: each 1d6 Bludgeoning, Prone.",
+      "by 5 more; hits 5 more",
+      "by Imp E, Imp D, 0 more; hits Imp F, Imp E, Imp D, 0 more",
+      `fell Imp ${String.fromCharCode(65 + FALL_RIDERS_MOST)}`,
+      "fell Imp F, Imp E, Imp D, Imp C",
     ]);
   });
 
