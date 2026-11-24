@@ -196,6 +196,37 @@ describe("a batch closes once its tick's commands are handled", () => {
     for (const [i, n] of sent.entries()) assert.equal(await until(() => answerOf(r.dms[i % 3]!, n), `chat ${i}'s answer`), "taken");
   });
 
+  test("reads across many ticks whose batches land without I/O run no further than one turn before an immediate queued first", async (t) => {
+    const r = await room(t, { options: { roomOpsPerSec: 100_000 } });
+    const step = heldStep(r.actor);
+    await flush();
+    // A hundred ids asks behind the step, each in its own tick, so each closes a batch of reads that lands in microtasks.
+    for (let k = 1; k <= 100; k++) {
+      r.clock.now += 20;
+      r.actor.ids(r.dm.conn, { k, ids: [uuidv7()] });
+    }
+    await flush();
+    assert.equal(r.actor.queueLength, 100);
+    // Every reading of the loop's clock moves it 2 ms, so a command costs about 2 ms of the turn.
+    let loopClock = 0;
+    const loop = t.mock.method(performance, "now", () => (loopClock += 2));
+    let takenFirst = -1;
+    const first = new Promise<void>((resolve) =>
+      setImmediate(() => {
+        takenFirst = 100 - r.actor.queueLength;
+        resolve();
+      }),
+    );
+    step.release();
+    await first;
+    loop.mock.restore();
+    assert.ok(takenFirst >= 1 && takenFirst <= 8, `${takenFirst} asks taken before the immediate`);
+    await flush();
+    assert.equal(r.actor.queueLength, 0);
+    const answered = new Set(r.dm.sent.filter((m) => m.t === "ids").map((m) => (m as { k: number }).k));
+    assert.equal(answered.size, 100);
+  });
+
   test("a timer that fires late closes the batch at its tick, and one an op arrives after is in the next batch", async (t) => {
     const r = await room(t);
     r.timers.enable();
