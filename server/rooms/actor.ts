@@ -455,9 +455,11 @@ type Admission =
  * until it comes due or a newer request of its client, a resync or the
  * client's close of its socket takes its place. `ended` is that moment on
  * the server's clock, the last its `wait` frames are sent for, and `next`
- * the timer of the next one (#sendWaits).
+ * the timer of the next one (#sendWaits). `joined` says the command
+ * that answers it is in the queue at the moment numbered `after`, so the
+ * snapshot it comes due to joins the queue behind that command.
  */
-type Delayed = { conn: Connection; ended: number | null; next: NodeJS.Timeout | null; cancel: () => void };
+type Delayed = { conn: Connection; ended: number | null; next: NodeJS.Timeout | null; cancel: () => void; joined: (after: number) => void };
 
 /**
  * Where a batch's explore and map steps last ran (#stepInPlace): the state
@@ -1177,6 +1179,25 @@ export class RoomActor {
     const key = clientKey(conn.sessionId, msg.clientId);
     const fresh = conn.helloCount === 0;
     conn.helloCount++;
+    if (conn.closed) return;
+    // The budget every room shares is asked as the hello arrives, before its watermark read, so the work of this room or
+    // another one the session is in, and how long the shared pool keeps the read waiting, cannot change its answer
+    // (Admission). A hello takes the place of its client's delayed request then too, instead of spending the budget
+    // twice, so how long its turn in the queue takes never lets that request run first. A preview's request goes by its
+    // socket's own key (Connection.key once its hello is handled).
+    const at = this.#opts.now();
+    const request = conn.previewBy === null ? key : `preview|${conn.id}`;
+    this.#delayed.get(request)?.cancel();
+    this.#delayed.delete(request);
+    // A hello past the abuse rule closes the session's sockets in this room as it arrives, so the sockets that close are
+    // the ones open then, never one that came while the hello waited its turn in the queue.
+    if (fresh && this.#pastAbuseRule(conn, at)) {
+      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+      return;
+    }
+    // A socket closed before its hello joins the queue keeps what the budget spent for it, and a delayed request of one
+    // the room closed comes due as it would have (detach).
+    const admission = this.#admit(conn, request, at);
     let stored = 0;
     // A preview sends no ops, so it has no watermark to read (docs/design/design-v1-per-player-vision.md 7.4).
     if (conn.previewBy === null && !this.#watermarks.has(key)) {
@@ -1191,22 +1212,9 @@ export class RoomActor {
       }
     }
     if (conn.closed) return;
-    // The budget every room shares is asked as the hello arrives, so the work of this room or another one the session
-    // is in cannot change its answer (Admission). A hello takes the place of its client's delayed request then too,
-    // instead of spending the budget twice, so how long its turn in the queue takes never lets that request run first.
-    // A preview's request goes by its socket's own key (Connection.key once its hello is handled).
     const moment = this.#clocks();
-    const request = conn.previewBy === null ? key : `preview|${conn.id}`;
-    this.#delayed.get(request)?.cancel();
-    this.#delayed.delete(request);
-    // A hello past the abuse rule closes the session's sockets in this room as it arrives, so the sockets that close are
-    // the ones open then, never one that came while the hello waited its turn in the queue.
-    if (fresh && this.#pastAbuseRule(conn, moment.now)) {
-      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
-      return;
-    }
-    const admission = this.#admit(conn, request, moment.now);
     this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, admission }, moment);
+    if (admission.kind === "waits") admission.wait.joined(moment.number);
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
@@ -3234,10 +3242,14 @@ export class RoomActor {
    * the queue where #delayedMoment places it, which follows how far the
    * room's queue has got and so never decides its place in the budget.
    * The timer is the room's, not the socket's, so a socket the room closes
-   * meanwhile still asks at `due` (detach).
+   * meanwhile still asks at `due` (detach). The snapshot it comes due to
+   * joins the queue behind the command that answers the request, at the
+   * earliest at that command's moment (Delayed.joined), and waits for it to
+   * join when it has not yet: a hello joins after its watermark read.
    */
   #awaitDue(conn: Connection, key: ClientKey, due: number): Delayed {
-    const delayed: Delayed = { conn, ended: null, next: null, cancel: () => undefined };
+    let after: number | null = null;
+    let join: ((after: number) => void) | null = null;
     const end = (at: number) => {
       delayed.ended ??= at;
       if (delayed.next) conn.cancel(delayed.next);
@@ -3248,12 +3260,27 @@ export class RoomActor {
       end(due);
       if (this.#delayed.get(key) === delayed) this.#delayed.delete(key);
       const admission = this.#admit(conn, key, due);
-      this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due), admission });
-      this.#drain();
+      join = (from) => {
+        if (this.#closed) return;
+        const moment = this.#delayedMoment(Math.max(due, from));
+        this.#insertByMoment({ t: "snapshot", conn, key, moment, admission });
+        if (admission.kind === "waits") admission.wait.joined(moment.number);
+        this.#drain();
+      };
+      if (after !== null) join(after);
     }, Math.max(0, due - this.#opts.now()));
-    delayed.cancel = () => {
-      end(this.#opts.now());
-      clearTimeout(timer);
+    const delayed: Delayed = {
+      conn,
+      ended: null,
+      next: null,
+      cancel: () => {
+        end(this.#opts.now());
+        clearTimeout(timer);
+      },
+      joined: (at) => {
+        after = at;
+        join?.(at);
+      },
     };
     this.#delayed.set(key, delayed);
     return delayed;
@@ -3344,15 +3371,17 @@ export class RoomActor {
   }
 
   /**
-   * A delayed snapshot's moment as its timer fires: its due time, or the
-   * newest moment the drain took or the newest tick a batch closed at when
-   * either is later, so it joins no closed batch and goes behind no command
-   * taken. A moment equal to a closed tick belongs to the next tick. Under a
-   * number clock of its own, a test's, it is the clocks as the timer fires.
+   * A delayed snapshot's moment as it joins the queue: `from`, its due time
+   * or the moment of the command that answers its request when that is
+   * later, or the newest moment the drain took or the newest tick a batch
+   * closed at when either is later, so it joins no closed batch and goes
+   * behind no command taken. A moment equal to a closed tick belongs to the
+   * next tick. Under a number clock of its own, a test's, it is the clocks
+   * as it joins.
    */
-  #delayedMoment(due: number): Moment {
+  #delayedMoment(from: number): Moment {
     if (this.#ownNumberClock) return this.#clocks();
-    const at = Math.max(due, this.#lastTaken?.number ?? Number.NEGATIVE_INFINITY, this.#lastClosedTick);
+    const at = Math.max(from, this.#lastTaken?.number ?? Number.NEGATIVE_INFINITY, this.#lastClosedTick);
     return { now: at, number: at };
   }
 

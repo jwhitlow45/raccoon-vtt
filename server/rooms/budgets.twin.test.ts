@@ -53,7 +53,7 @@ class Gate {
   }
 }
 
-type Room = { actor: RoomActor; gate: Gate; player: string; dm: Device; n: number };
+type Room = { actor: RoomActor; gate: Gate; reads: Gate; player: string; dm: Device; n: number };
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
@@ -96,8 +96,18 @@ class World {
   async #room(roomId: string): Promise<Room> {
     const f = scopeFixture();
     const db = new StoredRoomDb(f.state);
+    // A client's watermark read waits while `reads` is shut, as one does behind other rooms' work on the shared pool.
+    const reads = new Gate();
+    const stored = db.pool();
+    const pool = {
+      query: async (sql: string, params?: unknown[]) => {
+        if (sql.includes("from client_watermarks where")) await reads.pass();
+        return stored.query(sql, params);
+      },
+      connect: () => stored.connect(),
+    } as unknown as typeof stored;
     const actor = await RoomActor.load({
-      pool: db.pool(),
+      pool,
       info: { roomId, pinned: false, createdIp: null, readOnly: false },
       log: quiet,
       budget: this.budget,
@@ -110,13 +120,14 @@ class World {
     this.#t.after(() => {
       this.#t.mock.timers.reset();
       gate.open();
+      reads.open();
       db.beforeCommit = undefined;
       return actor.shutdown({ code: 1012, snapshot: false });
     });
     const dm = socketOn({ actor }, { sessionId: uuidv7(), memberId: f.dm.id, role: "dm" }, "203.0.113.30", this.now);
     await actor.hello(dm.conn, { clientId: uuidv7(), resumeFrom: 1 });
     await until(() => (dm.sent.some((m) => m.t === "snapshot") ? true : undefined), `${roomId}: the DM's snapshot`);
-    return { actor, gate, player: f.player.id, dm, n: 0 };
+    return { actor, gate, reads, player: f.player.id, dm, n: 0 };
   }
 
   /**
@@ -164,8 +175,18 @@ class World {
     await flush();
   }
 
+  /** The room's client watermark reads from now on wait until `releaseReads` or `release`. */
+  holdReads(room: Room): void {
+    room.reads.shut();
+  }
+
+  releaseReads(room: Room): void {
+    room.reads.open();
+  }
+
   release(room: Room): void {
     room.gate.open();
+    room.reads.open();
   }
 
   /** A new socket of the session's in `room`, with its hello sent now. */
@@ -349,6 +370,32 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
       {},
     );
     assert.deepEqual([out.A.x0, out.A.x1, out.A.x2], [["snapshot", "closed 4008"], ["closed 4008"], ["snapshot"]]);
+    assert.deepEqual(out.A, out.B);
+  });
+
+  test("a hello's place in the budget is read as it arrives, however long its watermark read waits: the same whichever room's reads are held", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        w.spent([0]);
+        await w.to(1_000, 1_000);
+        await w.holdQueue(held);
+        w.holdReads(held);
+        // A page of the session's in X 100 ms before the session's place comes free, and one in Y after then.
+        await w.to(9_900, 1_000);
+        w.hello(w.x, "x");
+        await w.to(10_200);
+        w.hello(w.y, "y");
+        // The reads land while the queue is still held, so each hello joins it behind the request it answers.
+        await w.to(10_500);
+        w.releaseReads(held);
+        await w.to(10_600);
+        w.release(held);
+        await w.to(21_000, 1_000);
+      },
+      { sessionCount: 1, windowMs: 10_000 },
+    );
+    assert.deepEqual([out.A.x, out.A.y], [["wait 100", "snapshot"], ["wait 9800", "wait 7800", "wait 5800", "wait 3800", "wait 1800", "snapshot"]]);
     assert.deepEqual(out.A, out.B);
   });
 
