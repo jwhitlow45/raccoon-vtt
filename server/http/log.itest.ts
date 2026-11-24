@@ -938,6 +938,59 @@ describe("PostgreSQL's cancel request", () => {
       await pool.end();
     }
   });
+
+  for (const reader of ["raw", "indexed"] as const) test(`${reader === "raw" ? "a raw" : "an indexed"} scan's statement whose cancel request is lost is stopped by PostgreSQL at the scan's deadline, and a scan that ends leaves its connection's own timeout`, async () => {
+    const appName = `rvtt-scan-deadline-${reader}-${process.pid}`;
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL, max: 1, application_name: appName });
+    const holder = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    const watcher = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await holder.connect();
+    await watcher.connect();
+    // No cancel request reaches the backend, as when PostgreSQL discards one that arrives before the statement does.
+    const history = new LogHistory({ pool, cancel: () => Promise.resolve(), ...(reader === "indexed" ? { metadata: { ready: true, want: () => undefined } } : {}) });
+    const dm = { id: "dm1", rev: 1, name: "DM", color: "#f7df00", kind: "dm" as const, createdAt: "2026-01-01T00:00:00Z" };
+    const view = captureView({ state: createInitialState({ roomName: "Deadline", dm: dm as never }), through: 10 }, "NOSUCHROOM", { memberId: dm.id, role: "dm" });
+    const budget = new LogScanBudget();
+    const open = (ms: number) => budget.open({ pool: "page", roomId: "NOSUCHROOM", memberId: dm.id, signal: AbortSignal.timeout(ms), stopAt: performance.now() + ms });
+    try {
+      await holder.query("begin");
+      // Both readers' first statement reads room_log: the raw one's cursor, the indexed one's completeness check.
+      await holder.query("lock table room_log in access exclusive mode");
+      const stopped = open(300);
+      try {
+        await assert.rejects(history.page(view, { limit: 50 }, stopped), ScanCancelledError);
+      } finally {
+        stopped.close();
+      }
+      let waits: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        waits = (await watcher.query<{ query: string }>("select query from pg_stat_activity where application_name = $1 and wait_event_type = 'Lock'", [appName])).rows.map((r) => r.query);
+        if (waits.length === 0) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.deepEqual(waits, [], "no statement of the scan waits on the lock");
+      await holder.query("rollback");
+      const ended = open(5_000);
+      try {
+        assert.deepEqual((await history.page(view, { limit: 50 }, ended)).entries, []);
+      } finally {
+        ended.close();
+      }
+      const client = await pool.connect();
+      try {
+        const { rows } = await client.query<{ own: boolean }>("select setting = reset_val as own from pg_settings where name = 'statement_timeout'");
+        assert.equal(rows[0]!.own, true, "the connection went back to the pool with its own statement timeout");
+      } finally {
+        client.release();
+      }
+      assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+    } finally {
+      await holder.query("rollback");
+      await holder.end();
+      await watcher.end();
+      await pool.end();
+    }
+  });
 });
 
 describe("archive scans and what happens around them", () => {
@@ -1257,5 +1310,41 @@ describe("log reads as of their arrival", () => {
     const res = await answer;
     assert.equal(res.statusCode, 200, res.body);
     assert.ok(res.json<Page>().entries.some((e) => e.text === "kept across the load"));
+  });
+});
+
+describe("a log page whose scan's cancel request is lost", () => {
+  let t: Engine;
+  before(async () => {
+    // No cancel request reaches a scan's backend, as when PostgreSQL discards one that arrives before the statement does.
+    t = await startEngine({ log: { deadlines: { pageMs: 300 }, history: { cancel: () => Promise.resolve() } } });
+  });
+  after(() => t.close());
+
+  test("answers busy at its deadline, and PostgreSQL stops the scan's statement there by itself", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Scan cancel lost");
+    const s = await t.connect(roomId, dm);
+    await s.snapshot("dm");
+    await s.apply({ t: "log.chat", text: "behind the lock" });
+    const holder = await t.pool.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("lock table room_log in access exclusive mode");
+      const res = await dm.get(`/api/rooms/${roomId}/log?limit=50`);
+      assert.equal(res.statusCode, 503, res.body);
+      let waits: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        waits = (await t.pool.query<{ query: string }>("select query from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'")).rows.map((r) => r.query);
+        if (!waits.some((q) => q.startsWith("declare log_history"))) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.ok(!waits.some((q) => q.startsWith("declare log_history")), `the scan's cursor no longer waits on the lock. Statements waiting on a lock: ${JSON.stringify(waits)}`);
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+      s.close();
+    }
+    assert.equal((await dm.get(`/api/rooms/${roomId}/log?limit=50`)).statusCode, 200);
   });
 });

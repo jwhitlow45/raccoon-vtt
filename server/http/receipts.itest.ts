@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import type { Socket as NetSocket } from "node:net";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
@@ -8,7 +9,8 @@ import { OP_VERSION } from "#shared/migrate.ts";
 import { sortedJson } from "#shared/sortedJson.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
-import { heldOpLines } from "../rooms/logHistory.ts";
+import { heldOpLines, ReceiptLines } from "../rooms/logHistory.ts";
+import { ScanCancelledError } from "../rooms/logScanBudget.ts";
 import { commitBatch, pruneReceipts } from "../rooms/persistence.ts";
 import { failCommits, lineNumber, startEngine, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
 
@@ -38,6 +40,87 @@ async function noneWaiting(pool: pg.Pool, sent: readonly string[], what: string)
     await new Promise((r) => setTimeout(r, 20));
   }
   assert.fail(`${what}. Statements waiting on a lock: ${JSON.stringify(waits)}`);
+}
+
+/** Whether each connection in the pool has the statement timeout it started with, checked once every one is idle. */
+async function ownTimeouts(pool: pg.Pool): Promise<boolean[]> {
+  const clients = await Promise.all(Array.from({ length: pool.totalCount }, () => pool.connect()));
+  try {
+    return await Promise.all(clients.map(async (c) => (await c.query<{ own: boolean }>("select setting = reset_val as own from pg_settings where name = 'statement_timeout'")).rows[0]!.own));
+  } finally {
+    for (const c of clients) c.release();
+  }
+}
+
+/**
+ * Holds back the bytes of the next statement sent from `pool` whose text
+ * holds `marker`, and every write and close after it on that connection,
+ * until `release`, which sends them in order and says whether it held any.
+ * As far as the client knows the statement has gone, while its backend
+ * still waits for it: a cancel request now reaches the backend between
+ * statements, where PostgreSQL discards it, as it does when the request
+ * beats a statement sent a moment before the deadline.
+ */
+function holdStatement(pool: pg.Pool, marker: string): { release(): Promise<boolean>; restore(): void } {
+  type Held = { write: unknown[] } | { close: () => void };
+  let flush: (() => Promise<void>) | null = null;
+  const restores: (() => void)[] = [];
+  const wrapped = new WeakSet<NetSocket>();
+  const onAcquire = (client: pg.PoolClient) => {
+    const stream = (client as unknown as { connection: { stream: NetSocket } }).connection.stream;
+    if (wrapped.has(stream)) return;
+    wrapped.add(stream);
+    const own = { write: stream.write, end: stream.end, destroy: stream.destroy };
+    const queue: Held[] = [];
+    let holding = false;
+    const unwrap = () => Object.assign(stream, own);
+    const send = (args: unknown[]) => new Promise<void>((resolve) => {
+      const done = args.find((a) => typeof a === "function") as ((err?: Error | null) => void) | undefined;
+      (own.write as (...a: unknown[]) => boolean).call(stream, args[0], (err?: Error | null) => {
+        done?.(err);
+        resolve();
+      });
+    });
+    stream.write = ((...args: unknown[]) => {
+      const chunk = args[0];
+      if (!holding && flush === null && Buffer.isBuffer(chunk) && chunk.includes(marker)) {
+        holding = true;
+        flush = async () => {
+          unwrap();
+          for (const item of queue) {
+            if ("write" in item) await send(item.write);
+            else item.close();
+          }
+        };
+      }
+      if (!holding) return (own.write as (...a: unknown[]) => boolean).apply(stream, args);
+      queue.push({ write: args });
+      return true;
+    }) as NetSocket["write"];
+    for (const name of ["end", "destroy"] as const) {
+      stream[name] = ((...args: unknown[]) => {
+        if (!holding) return (own[name] as (...a: unknown[]) => NetSocket).apply(stream, args);
+        queue.push({ close: () => (own[name] as (...a: unknown[]) => NetSocket).apply(stream, args) });
+        return stream;
+      }) as never;
+    }
+    restores.push(() => {
+      if (!holding) unwrap();
+    });
+  };
+  pool.on("acquire", onAcquire);
+  return {
+    release: async () => {
+      const held = flush as (() => Promise<void>) | null;
+      if (!held) return false;
+      await held();
+      return true;
+    },
+    restore: () => {
+      pool.off("acquire", onAcquire);
+      for (const r of restores) r();
+    },
+  };
 }
 
 describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
@@ -249,6 +332,73 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       holder.release();
     }
     assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200);
+  });
+
+  for (const [stage, lock, marker] of [
+    ["receipt read", "lock table roll_receipts in access exclusive mode", "distinct on (part)"],
+    ["grant read", "lock table grants in access exclusive mode", "from grants g"],
+  ] as const) test(`a ${stage} whose backend has the deadline's cancel request before the statement is stopped by PostgreSQL in the time it had left, and its pool keeps no timeout`, async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Receipts cancel lost");
+    const pip = t.client();
+    await pip.join(roomId, "Pip");
+    const pipSocket = await t.connect(roomId, pip);
+    await pipSocket.snapshot(uuidv7());
+    const tag = uuidv7();
+    await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
+    const hold = holdStatement(t.pool, marker);
+    const holder = await t.pool.connect();
+    const sent = recordSent();
+    try {
+      await holder.query("begin");
+      await holder.query(lock);
+      const res = await pip.get(`/api/rooms/${roomId}/receipts/${tag}`);
+      assert.equal(res.statusCode, 503, res.body);
+      // The deadline's cancel request has gone, to a backend still waiting for the statement, which discarded it.
+      assert.ok(await hold.release(), `the ${stage} was held back`);
+      await noneWaiting(t.pool, sent, `the ${stage} no longer waits on the lock: PostgreSQL stopped it by itself`);
+    } finally {
+      beforeQuery = null;
+      hold.restore();
+      await holder.query("rollback");
+      holder.release();
+    }
+    assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200);
+    assert.ok((await ownTimeouts(t.pool)).every(Boolean), "every connection back in the pool has its own statement timeout again");
+  });
+
+  test("a statement PostgreSQL stops at the deadline fails as cancelled, with no cancel request or abort to stop it", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Receipts stopped by the server");
+    const pip = t.client();
+    const pipId = await pip.join(roomId, "Pip");
+    const pipSocket = await t.connect(roomId, pip);
+    await pipSocket.snapshot(uuidv7());
+    const tag = uuidv7();
+    await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
+    const { state, through } = t.manager.get(roomId)!.committed;
+    // A view whose live log has lost the op's lines, so the lookup reads them from the archive.
+    const view = { state: { ...state, log: [] }, through };
+    const lines = new ReceiptLines({ pool: t.pool, cancel: () => Promise.resolve() });
+    const never = new AbortController().signal;
+    const read = (stopAt: number) => lines.withQueries(never, (q) => q.query("select 1 from roll_receipts limit 1"), stopAt);
+    for (const [what, table, left, work] of [
+      ["a receipt read", "roll_receipts", 200, read],
+      ["a receipt read past its deadline as it goes out", "roll_receipts", -50, read],
+      ["a lookup's line read", "room_log", 200, (stopAt: number) => lines.lookup(roomId, { memberId: pipId, role: "player" }, tag, never, view, Date.now() + 60_000, stopAt)],
+    ] as const) {
+      const holder = await t.pool.connect();
+      try {
+        await holder.query("begin");
+        await holder.query(`lock table ${table} in access exclusive mode`);
+        const started = performance.now();
+        await assert.rejects(work(started + left), ScanCancelledError, what);
+        assert.ok(performance.now() - started < 2_000, `${what}: stopped at its deadline, not at the client's query timeout`);
+      } finally {
+        await holder.query("rollback");
+        holder.release();
+      }
+    }
   });
 });
 

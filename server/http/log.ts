@@ -164,7 +164,7 @@ export async function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps
     };
     reply.raw.on("close", onClose);
     const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(deadlineMs)]);
-    const scan = budget.open({ pool, roomId, memberId, signal });
+    const scan = budget.open({ pool, roomId, memberId, signal, stopAt: performance.now() + deadlineMs });
     return {
       scan,
       close: () => {

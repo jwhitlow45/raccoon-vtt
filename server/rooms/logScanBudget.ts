@@ -138,9 +138,9 @@ export class LogScanBudget {
     };
   }
 
-  /** A scan, admitted batch by batch through `Scan.batch`. Close it in a finally. */
-  open(job: { pool: ScanPool; roomId: string; memberId: string; background?: boolean; signal?: AbortSignal }): Scan {
-    const scan = new Scan(this, job.pool, job.roomId, job.memberId, job.background === true, job.signal);
+  /** A scan, admitted batch by batch through `Scan.batch`. Close it in a finally. `stopAt` is its deadline, if it has one (Scan.stopAt). */
+  open(job: { pool: ScanPool; roomId: string; memberId: string; background?: boolean; signal?: AbortSignal; stopAt?: number }): Scan {
+    const scan = new Scan(this, job.pool, job.roomId, job.memberId, job.background === true, job.signal, job.stopAt);
     if (this.#closed) scan.cancel(new Error("closed"));
     else this.#scans.add(scan);
     return scan;
@@ -296,6 +296,12 @@ export class Scan {
   readonly memberId: string;
   readonly background: boolean;
   readonly signal: AbortSignal;
+  /**
+   * When the scan's request deadline passes, on performance.now()'s clock,
+   * which `signal` also fires at: its statements are stopped there by
+   * PostgreSQL too (logHistory.ts guardedQueries).
+   */
+  readonly stopAt: number | undefined;
   /** @internal */ leased = false;
   /** @internal */ turn = false;
   /** @internal */ waiter: Waiter | null = null;
@@ -305,8 +311,9 @@ export class Scan {
   /** Connections the scan's owner still holds (retain), which keep the lease after close until they are let go. */
   #retained = 0;
 
-  constructor(budget: LogScanBudget, pool: ScanPool, roomId: string, memberId: string, background: boolean, signal: AbortSignal | undefined) {
+  constructor(budget: LogScanBudget, pool: ScanPool, roomId: string, memberId: string, background: boolean, signal: AbortSignal | undefined, stopAt: number | undefined) {
     this.#budget = budget;
+    this.stopAt = stopAt;
     this.pool = pool;
     this.roomId = roomId;
     this.memberId = memberId;

@@ -61,6 +61,8 @@ export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, 
       };
       reply.raw.on("close", onClose);
       const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(deadlineMs)]);
+      // The same deadline, for PostgreSQL to stop each statement at by itself (guardedQueries).
+      const stopAt = performance.now() + deadlineMs;
       try {
         // The request limiter already resolved this memo, including cookie-less requests.
         if (!(await receiptWait(kit.sessions.lookup(req), signal))) throw new HttpError(403, "no_access");
@@ -71,12 +73,12 @@ export async function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, 
           if (retryAfter !== null) return new HttpError(429, "rate_limited", { retryAfter });
           await kit.limits.recordReceiptLookup(roomId, allowed.memberId, q);
           return allowed;
-        });
+        }, stopAt);
         if (grant instanceof HttpError) throw grant;
         const actor = await receiptWait(deps.manager.acquire(roomId), signal);
         const viewer: Viewer = { memberId: grant.memberId, role: grant.role };
         const view = await receiptWait(actor.asOf(arrivedAt, { signal }), signal);
-        const { rows, lines } = await archive.lookup(roomId, viewer, tag.data, signal, view, deps.manager.arrivalTick(arrivedAt));
+        const { rows, lines } = await archive.lookup(roomId, viewer, tag.data, signal, view, deps.manager.arrivalTick(arrivedAt), stopAt);
         const state = view.state;
         // The DM's lines read as on the players' scene, every floor of it (docs/design/design-v1-floors.md 8.3).
         const start = grant.role === "dm" ? state.meta.playerSceneId : null;

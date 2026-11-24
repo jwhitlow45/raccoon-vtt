@@ -200,16 +200,56 @@ function bound(id: string, inclusive: boolean): LogBound {
  * the drop are done, so this refuses it, as ScanCancelledError. `queryMs`
  * bounds each statement where the pool sets no query timeout of its own.
  * `before` is a test's hook, run before each statement goes out.
+ *
+ * `stopAt`, on performance.now()'s clock, is the work's deadline: each
+ * statement then goes out after one that sets the session's
+ * statement_timeout to the time left before it, so PostgreSQL stops the
+ * statement there by itself. The cancel request at the deadline is not
+ * enough alone. PostgreSQL discards a cancel that reaches a backend before
+ * it starts the statement, as it does any cancel while it waits for a
+ * command, and destroying the connection does not stop a backend waiting
+ * on a lock. A statement sent just before the deadline could otherwise
+ * wait on with no bound. One the timeout stops fails as ScanCancelledError,
+ * as one its cancel stops does. The setting outlives the statement, so
+ * `settle` resets it before the connection goes back to its pool.
  */
-export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: AbortSignal, dropping: () => boolean, opts: { queryMs?: number; before?: (text: string) => Promise<void> } = {}): Queryable {
+export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: AbortSignal, dropping: () => boolean, opts: { queryMs?: number; before?: (text: string) => Promise<void>; stopAt?: number } = {}): GuardedQueries {
+  let timed = false;
+  const send = <R extends pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> =>
+    opts.queryMs === undefined ? client.query<R>(text, values) : client.query<R>({ text, values, query_timeout: opts.queryMs } as pg.QueryConfig);
+  const refuse = () => {
+    if (signal.aborted || dropping()) throw new ScanCancelledError(signal.reason);
+  };
   return {
     query: async <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> => {
       await opts.before?.(text);
-      if (signal.aborted || dropping()) throw new ScanCancelledError(signal.reason);
-      return opts.queryMs === undefined ? client.query<R>(text, values) : client.query<R>({ text, values, query_timeout: opts.queryMs } as pg.QueryConfig);
+      refuse();
+      if (opts.stopAt !== undefined) {
+        timed = true;
+        // 0 would turn the timeout off: a deadline already past stops the statement at once.
+        await send("select set_config('statement_timeout', $1, false)", [String(Math.max(1, Math.ceil(opts.stopAt - performance.now())))]);
+        refuse();
+      }
+      try {
+        return await send<R>(text, values);
+      } catch (err) {
+        if (timed && (err as { code?: unknown }).code === QUERY_CANCELED) throw new ScanCancelledError(signal.reason ?? err);
+        throw err;
+      }
+    },
+    settle: async () => {
+      if (!timed) return;
+      refuse();
+      await send("reset statement_timeout");
     },
   };
 }
+
+/** A guarded connection's queries, and the reset its statement timeout needs before the connection is reused (guardedQueries). */
+export type GuardedQueries = Queryable & { settle(): Promise<void> };
+
+/** PostgreSQL's SQLSTATE for a statement stopped by a cancel request or by statement_timeout. */
+const QUERY_CANCELED = "57014";
 
 // Admission -----------------------------------------------------------------
 
@@ -414,7 +454,9 @@ export class LogHistory {
     scan.signal.addEventListener("abort", onAbort);
     try {
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
-      const out = await fn(guardedQueries(client, scan.signal, () => dropping !== null));
+      const queries = guardedQueries(client, scan.signal, () => dropping !== null, { stopAt: scan.stopAt });
+      const out = await fn(queries);
+      await queries.settle();
       // A cancel that landed as the last statement answered fails the quantum too: its answer is not used.
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
       return out;
@@ -456,7 +498,7 @@ export class LogHistory {
   async *#rawBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
     let client: pg.PoolClient | null = null;
     /** The cursor connection's queries, refused once the scan is cancelled (guardedQueries). */
-    let sql: Queryable | null = null;
+    let sql: GuardedQueries | null = null;
     let letGo: (() => void) | null = null;
     let dropping: Promise<void> | null = null;
     let failed = false;
@@ -493,7 +535,7 @@ export class LogHistory {
                 await drop();
                 throw new ScanCancelledError(scan.signal.reason);
               }
-              sql = guardedQueries(taken, scan.signal, () => dropping !== null);
+              sql = guardedQueries(taken, scan.signal, () => dropping !== null, { stopAt: scan.stopAt });
               // One snapshot for the cursor and every entry read beside it.
               await sql.query("begin isolation level repeatable read read only");
               await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.through });
@@ -527,6 +569,8 @@ export class LogHistory {
         else {
           try {
             await held.query("rollback");
+            // A statement timeout set before the transaction began outlives its rollback.
+            await (sql as GuardedQueries | null)?.settle();
           } catch {
             await drop();
           }
@@ -845,9 +889,11 @@ export type ReceiptLinesOptions = {
  *
  * Every step is bounded and stops at the request's cancel: the checkout by
  * `checkoutMs` (a connection handed over after that is destroyed), each
- * query by `queryMs`. A cancelled or failed lookup sends its backend a
- * cancel request and destroys the connection, with no more SQL on it
- * (guardedQueries), and fails even when its last statement had answered.
+ * query by `queryMs`, and by PostgreSQL itself at the request's deadline
+ * (`stopAt`) where one is given. A cancelled or failed lookup sends its
+ * backend a cancel request and destroys the connection, with no more SQL
+ * on it (guardedQueries), and fails even when its last statement had
+ * answered.
  */
 export class ReceiptLines {
   #pool: Pick<pg.Pool, "connect">;
@@ -875,8 +921,8 @@ export class ReceiptLines {
    * that stopped short of its op, and the lookup answers busy rather than
    * project its lines against a state without it (ScanBusyError).
    */
-  async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, view: { readonly state: RoomState; readonly through: number }, before: number): Promise<{ rows: ReceiptRow[]; lines: Map<number, LogEntry[]> }> {
-    const rows = await this.withQueries(signal, (q) => readReceipts(q, roomId, viewer.memberId, tag, before));
+  async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, view: { readonly state: RoomState; readonly through: number }, before: number, stopAt?: number): Promise<{ rows: ReceiptRow[]; lines: Map<number, LogEntry[]> }> {
+    const rows = await this.withQueries(signal, (q) => readReceipts(q, roomId, viewer.memberId, tag, before), stopAt);
     if (rows.some((row) => row.state === "committed" && row.seq !== null && row.seq > view.through)) throw new ScanBusyError();
     const lines = new Map<number, LogEntry[]>();
     const missing = new Set<number>();
@@ -886,13 +932,13 @@ export class ReceiptLines {
       if (held) lines.set(row.seq, held);
       else missing.add(row.seq);
     }
-    if (missing.size > 0) for (const [seq, read] of await this.read(roomId, [...missing], viewer, signal)) lines.set(seq, read);
+    if (missing.size > 0) for (const [seq, read] of await this.read(roomId, [...missing], viewer, signal, stopAt)) lines.set(seq, read);
     return { rows, lines };
   }
 
   /** Each seq's lines from the archive, read on one connection after one completeness check. */
-  read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal): Promise<Map<number, LogEntry[]>> {
-    return this.withQueries(signal, (q) => this.#lines(q, roomId, seqs, viewer));
+  read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal, stopAt?: number): Promise<Map<number, LogEntry[]>> {
+    return this.withQueries(signal, (q) => this.#lines(q, roomId, seqs, viewer), stopAt);
   }
 
   async #lines(q: Queryable, roomId: string, seqs: readonly number[], viewer: Viewer): Promise<Map<number, LogEntry[]>> {
@@ -912,8 +958,8 @@ export class ReceiptLines {
     return out;
   }
 
-  /** Bounded request-stage SQL, with the same cancellation and release rules as receipt reads. */
-  async withQueries<T>(signal: AbortSignal, fn: (q: Queryable) => Promise<T>): Promise<T> {
+  /** Bounded request-stage SQL, with the same cancellation and release rules as receipt reads. `stopAt` is the request's deadline (guardedQueries). */
+  async withQueries<T>(signal: AbortSignal, fn: (q: Queryable) => Promise<T>, stopAt?: number): Promise<T> {
     const client = await checkout(this.#pool, signal, this.#checkoutMs);
     let ended = false;
     const onEnd = () => {
@@ -930,7 +976,9 @@ export class ReceiptLines {
     signal.addEventListener("abort", onAbort);
     try {
       if (signal.aborted) throw new ScanCancelledError(signal.reason);
-      const out = await receiptWait(fn(guardedQueries(client, signal, () => dropping !== null, { queryMs: this.#queryMs, before: this.#before })), signal);
+      const queries = guardedQueries(client, signal, () => dropping !== null, { queryMs: this.#queryMs, before: this.#before, stopAt });
+      const out = await receiptWait(fn(queries), signal);
+      await receiptWait(queries.settle(), signal);
       // A cancel that landed as the last statement answered fails the lookup too: its answer is not used.
       if (signal.aborted) throw new ScanCancelledError(signal.reason);
       return out;
