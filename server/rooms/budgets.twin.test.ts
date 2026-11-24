@@ -320,4 +320,33 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
     assert.deepEqual(out.A, { x: ["wait 510", "snapshot"], y: ["snapshot"] }, "X's request asks the budget at its due time, before Y's place");
     assert.deepEqual(out.A, out.B);
   });
+
+  test("a hello past the abuse rule closes the session's sockets in its room as it arrives, never one that came after it: the same whichever room's queue is held", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        // A socket of the session's in X that fits, before the session's other rooms spend the rest of its budget.
+        await w.to(99_000, 1_000);
+        w.hello(w.x, "x0");
+        await w.to(100_950, 1_000);
+        w.spent(Array.from({ length: 20 }, (_, i) => 100_000 + 50 * i));
+        await w.to(100_990);
+        await w.holdQueue(held);
+        // Over budget at 101 s in Y, which starts the session's time over budget, and again 30 s on in X.
+        await w.to(101_000, 1);
+        w.hello(w.y, "y");
+        await w.to(131_000, 1_000);
+        w.hello(w.x, "x1");
+        // Once the budget has room again, another socket of the session's in X.
+        await w.to(161_000, 1_000);
+        w.hello(w.x, "x2");
+        await w.to(162_000);
+        w.release(held);
+        await w.to(163_000);
+      },
+      {},
+    );
+    assert.deepEqual([out.A.x0, out.A.x1, out.A.x2], [["snapshot", "closed 4008"], ["closed 4008"], ["snapshot"]]);
+    assert.deepEqual(out.A, out.B);
+  });
 });

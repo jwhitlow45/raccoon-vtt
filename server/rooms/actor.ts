@@ -408,7 +408,7 @@ export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ delete
 
 type Command = (
   | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean; lookupRefused?: true }
-  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean; admission: Admission }
+  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; admission: Admission }
   | { t: "snapshot"; conn: Connection; key: ClientKey; admission: Admission }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
@@ -442,16 +442,13 @@ type Read = { conn: Connection; key: ClientKey; resent?: number; admission?: Adm
  * A snapshot request's place in the snapshot budget every room shares,
  * decided once, as it arrives at `at` (#admit). It fits, its spend counted
  * then, and the bytes it sends count once it is sent. Or the budget delays
- * it by `delay` ms, and it comes due on the clock from then (Delayed). Or
- * it is a fresh socket's hello past the abuse rule, which closes the
- * session's sockets (#processHello). The publish that answers it carries
- * this out and never asks the budget again, so no room's work before then
- * can change it.
+ * it by `delay` ms, and it comes due on the clock from then (Delayed). The
+ * publish that answers it carries this out and never asks the budget
+ * again, so no room's work before then can change it.
  */
 type Admission =
   | { at: number; kind: "fits"; sent: (bytes: number) => void }
-  | { at: number; kind: "waits"; delay: number; wait: Delayed }
-  | { at: number; kind: "abuse" };
+  | { at: number; kind: "waits"; delay: number; wait: Delayed };
 
 /**
  * A snapshot request the budget delayed (#awaitDue), from its arrival
@@ -1192,8 +1189,14 @@ export class RoomActor {
     const request = conn.previewBy === null ? key : `preview|${conn.id}`;
     this.#delayed.get(request)?.cancel();
     this.#delayed.delete(request);
-    const admission = this.#admit(conn, request, moment.now, fresh);
-    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, fresh, admission }, moment);
+    // A hello past the abuse rule closes the session's sockets in this room as it arrives, so the sockets that close are
+    // the ones open then, never one that came while the hello waited its turn in the queue.
+    if (fresh && this.#pastAbuseRule(conn, moment.now)) {
+      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+      return;
+    }
+    const admission = this.#admit(conn, request, moment.now);
+    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, admission }, moment);
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
@@ -3148,10 +3151,6 @@ export class RoomActor {
       // the device asks for or the players start on (docs/design/design-v1-floors.md 10, D-261107-288).
       conn.sceneId = asked === null ? null : mainFloorId(state, asked);
     }
-    if (cmd.admission.kind === "abuse") {
-      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
-      return;
-    }
     let wm = this.#watermarks.get(key);
     if (!wm) {
       wm = { sessionId: conn.sessionId, clientId: cmd.clientId, staged: cmd.stored, closed: cmd.stored, committed: cmd.stored };
@@ -3180,10 +3179,6 @@ export class RoomActor {
     conn.clientId = cmd.clientId;
     conn.held = null;
     if (!this.#previewStands(conn, this.#staged.state)) return;
-    if (cmd.admission.kind === "abuse") {
-      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
-      return;
-    }
     this.#readSnapshot(conn, conn.key!, cmd.admission);
   }
 
@@ -3201,16 +3196,23 @@ export class RoomActor {
   }
 
   /**
+   * Whether a fresh socket's hello that arrives at `at` is past the abuse
+   * rule (SnapshotBudget.request). Only such a hello counts toward it, never
+   * a delayed request that comes due.
+   */
+  #pastAbuseRule(conn: Connection, at: number): boolean {
+    const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned), at) > 0;
+    return this.#budget.request(conn.sessionId, over, at);
+  }
+
+  /**
    * A snapshot request's place in the snapshot budget (Admission), read as
    * it arrives at `at` under the key it goes by: delayed while its session
-   * or address is over budget then, and counted at once otherwise. A fresh
-   * socket's hello also counts toward the abuse rule, and a delayed
-   * request that comes due never does (SnapshotBudget.request).
+   * or address is over budget then, and counted at once otherwise.
    */
-  #admit(conn: Connection, key: ClientKey, at: number, fresh: boolean): Admission {
+  #admit(conn: Connection, key: ClientKey, at: number): Admission {
     const keys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
     const delay = this.#budget.delay(keys, at);
-    if (fresh && this.#budget.request(conn.sessionId, delay > 0, at)) return { at, kind: "abuse" };
     if (delay > 0) return { at, kind: "waits", delay, wait: this.#awaitDue(conn, key, at + delay) };
     return { at, kind: "fits", sent: this.#budget.reserve(keys, at) };
   }
@@ -3232,7 +3234,7 @@ export class RoomActor {
     const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
       end(due);
       this.#delayed.delete(key);
-      const admission = this.#admit(conn, key, due, false);
+      const admission = this.#admit(conn, key, due);
       this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due), admission });
       this.#drain();
     });
@@ -3263,8 +3265,8 @@ export class RoomActor {
    */
   #snapshot(conn: Connection, key: ClientKey, pub: number, admission: Admission): void {
     if (conn.closed) return;
-    if (admission.kind !== "fits") {
-      if (admission.kind === "waits") this.#sendWaits(conn, admission);
+    if (admission.kind === "waits") {
+      this.#sendWaits(conn, admission);
       return;
     }
     const wm = this.#watermarks.get(key);

@@ -564,4 +564,25 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     assert.equal(page.conn.closed, false);
     assert.deepEqual(answers(page.sent).slice(-3), ["wait 1000", "wait 1000", "snapshot"], "its last wait, then the one it waits again, then its snapshot");
   });
+
+  test("only a socket's first hello counts toward the abuse rule, never another hello over the same socket", async (t) => {
+    let budget!: SnapshotBudget;
+    const r = await room(t, { budget: (now) => (budget = new SnapshotBudget({ ipCount: 2, abuseMs: 30_000 }, now)) });
+    r.timers.enable();
+    // Another session at the same address spends both of the address's places by 1 s. A page of P1's session asks at
+    // 5 s, which starts the session's time over budget, and asks again over the same socket 31 s later.
+    const other = budget.keys("0199f0a0-0000-7000-8000-00000000b002", "203.0.113.20", false);
+    budget.record(other, 1_000, T0);
+    budget.record(other, 1_000, T0 + 1_000);
+    const clientId = uuidv7();
+    const page = reconnect(r, T0 + 5_000, clientId);
+    await flush();
+    r.timers.move(T0 + 36_000);
+    void r.actor.hello(page.conn, { clientId, resumeFrom: 1 });
+    await flush();
+    r.timers.move(T0 + 36_020);
+    await flush();
+    assert.equal(page.conn.closed, false);
+    assert.equal(answers(page.sent).at(-1), "wait 24000", "the second hello's own wait");
+  });
 });
