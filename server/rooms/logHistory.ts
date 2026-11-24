@@ -209,9 +209,16 @@ function bound(id: string, inclusive: boolean): LogBound {
  * it starts the statement, as it does any cancel while it waits for a
  * command, and destroying the connection does not stop a backend waiting
  * on a lock. A statement sent just before the deadline could otherwise
- * wait on with no bound. One the timeout stops fails as ScanCancelledError,
- * as one its cancel stops does. The setting outlives the statement, so
- * `settle` resets it before the connection goes back to its pool.
+ * wait on with no bound. The setting outlives the statement, so `settle`
+ * resets it before the connection goes back to its pool.
+ *
+ * A step this request's deadline or abort stopped, the setting and the
+ * reset included since each runs under the timeout set before it, fails as
+ * ScanCancelledError, as one its cancel stops does. The server's timer
+ * cannot fire before `stopAt`: each value is rounded up from a moment
+ * before the step it bounds starts. So a cancel before the deadline with no
+ * abort, such as an operator's pg_cancel_backend, is someone else's, and
+ * stays the error it is.
  */
 export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: AbortSignal, dropping: () => boolean, opts: { queryMs?: number; before?: (text: string) => Promise<void>; stopAt?: number } = {}): GuardedQueries {
   let timed = false;
@@ -220,6 +227,15 @@ export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: Abo
   const refuse = () => {
     if (signal.aborted || dropping()) throw new ScanCancelledError(signal.reason);
   };
+  const bounded = async <R extends pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> => {
+    try {
+      return await send<R>(text, values);
+    } catch (err) {
+      const stopAt = opts.stopAt;
+      if (stopAt !== undefined && (err as { code?: unknown }).code === QUERY_CANCELED && (signal.aborted || performance.now() >= stopAt)) throw new ScanCancelledError(signal.reason ?? err);
+      throw err;
+    }
+  };
   return {
     query: async <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> => {
       await opts.before?.(text);
@@ -227,20 +243,15 @@ export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: Abo
       if (opts.stopAt !== undefined) {
         timed = true;
         // 0 would turn the timeout off: a deadline already past stops the statement at once.
-        await send("select set_config('statement_timeout', $1, false)", [String(Math.max(1, Math.ceil(opts.stopAt - performance.now())))]);
+        await bounded("select set_config('statement_timeout', $1, false)", [String(Math.max(1, Math.ceil(opts.stopAt - performance.now())))]);
         refuse();
       }
-      try {
-        return await send<R>(text, values);
-      } catch (err) {
-        if (timed && (err as { code?: unknown }).code === QUERY_CANCELED) throw new ScanCancelledError(signal.reason ?? err);
-        throw err;
-      }
+      return bounded<R>(text, values);
     },
     settle: async () => {
       if (!timed) return;
       refuse();
-      await send("reset statement_timeout");
+      await bounded("reset statement_timeout");
     },
   };
 }

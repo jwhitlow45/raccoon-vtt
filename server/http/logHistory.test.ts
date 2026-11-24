@@ -336,13 +336,25 @@ describe("the indexed reader against the raw reader", () => {
   });
 });
 
+/** Which step of a guarded connection a stop lands on: the timeout's setting, the statement, or the reset. */
+type Step = "set" | "statement" | "reset";
+
+/**
+ * How a sequence's connections behave. `stopped` is the server's own timer:
+ * the first step of kind `at` that runs under a timeout fails with SQLSTATE
+ * 57014 once that timeout has passed since the step began. `external` is
+ * someone else's cancel, such as an operator's pg_cancel_backend: the
+ * first step of kind `at` fails with 57014 at once. `hang` holds every
+ * statement until its connection is destroyed.
+ */
+type Fate = { kind: "answer" | "hang" } | { kind: "stopped" | "external"; at: Step };
+
 /**
  * A connection whose session keeps a statement timeout as PostgreSQL's does:
- * set_config sets it, a reset puts back the session's own (null here), and
- * a statement may outlast it, failing with SQLSTATE 57014 as the server's
- * stop does. Every step lands a few turns later, so a cancel can come
- * between any two of them. Broken invariants are kept in `broken`, since
- * the code under test would swallow a throw.
+ * set_config sets it and a reset puts back the session's own (null here),
+ * a step that fails changing neither. Every step lands a few turns later,
+ * so a cancel can come between any two of them. Broken invariants are kept
+ * in `broken`, since the code under test would swallow a throw.
  */
 class TimedConnection extends EventEmitter {
   readonly steps: string[] = [];
@@ -352,38 +364,37 @@ class TimedConnection extends EventEmitter {
   /** Runs as the nth step answers, in the same turn, before its caller hears the answer. */
   onAnswer: ((n: number) => void) | null = null;
   readonly random: () => number;
-  readonly fate: "answer" | "stopped" | "hang";
-  #answers: { n: number };
+  readonly fate: Fate;
+  /** Shared by a sequence's connections: answers so far, and the step the fate's stop landed on. */
+  readonly shared: { answers: number; fired: Step | null };
   #pending = new Set<(err: Error) => void>();
-  constructor(random: () => number, fate: "answer" | "stopped" | "hang", answers: { n: number }) {
+  constructor(random: () => number, fate: Fate, shared: { answers: number; fired: Step | null }) {
     super();
     this.random = random;
     this.fate = fate;
-    this.#answers = answers;
+    this.shared = shared;
   }
   query(config: string | { text: string; values?: unknown[] }, params?: unknown[]): Promise<{ rows: unknown[] }> {
     const text = typeof config === "string" ? config : config.text;
     const values = typeof config === "string" ? params : config.values;
     if (this.let !== null) this.broken.push(`SQL after the connection was let go: ${text}`);
     if (this.steps.includes("cancel")) this.broken.push(`SQL after its backend was told to stop: ${text}`);
-    if (text.startsWith("select set_config('statement_timeout'")) {
+    const step: Step | "rollback" = text.startsWith("select set_config('statement_timeout'") ? "set" : text === "reset statement_timeout" ? "reset" : text === "rollback" ? "rollback" : "statement";
+    this.steps.push(step);
+    const started = performance.now();
+    const fate = this.fate;
+    if (step !== "rollback" && this.shared.fired === null && (fate.kind === "stopped" || fate.kind === "external") && fate.at === step && (fate.kind === "external" || this.timeout !== null)) {
+      this.shared.fired = step;
+      if (fate.kind === "external") return this.#after(Object.assign(new Error("canceling statement due to user request"), { code: "57014" }));
+      const ends = started + this.timeout!;
+      return this.#after(Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }), 0, ends);
+    }
+    if (step === "set") {
       this.timeout = Number(values?.[0]);
       if (!(this.timeout >= 1)) this.broken.push(`a timeout of ${this.timeout}: 0 would turn it off`);
-      this.steps.push("set");
-      return this.#after(null);
     }
-    if (text === "reset statement_timeout") {
-      this.timeout = null;
-      this.steps.push("reset");
-      return this.#after(null);
-    }
-    if (text === "rollback") {
-      this.steps.push("rollback");
-      return this.#after(null);
-    }
-    this.steps.push("statement");
-    if (this.fate === "hang") return this.#after(null, Infinity);
-    if (this.fate === "stopped" && this.timeout !== null) return this.#after(Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }));
+    if (step === "reset") this.timeout = null;
+    if (step === "statement" && fate.kind === "hang") return this.#after(null, Infinity);
     return this.#after(null);
   }
   release(destroy?: boolean): void {
@@ -393,42 +404,82 @@ class TimedConnection extends EventEmitter {
     for (const reject of this.#pending) reject(new Error("Connection terminated"));
     this.#pending.clear();
   }
-  #after(err: Error | null, turns = Math.floor(this.random() * 3)): Promise<{ rows: unknown[] }> {
+  /** Lands a few turns later, and not before `notBefore` on performance.now()'s clock, which a server timer never beats. */
+  #after(err: Error | null, turns = Math.floor(this.random() * 3), notBefore = 0): Promise<{ rows: unknown[] }> {
     return new Promise((resolve, reject) => {
       this.#pending.add(reject);
       if (turns === Infinity) return;
       const land = (left: number) => {
         if (!this.#pending.has(reject)) return;
+        const wait = notBefore - performance.now();
+        if (wait > 0) return void setTimeout(() => land(left), Math.ceil(wait));
         if (left > 0) return void setImmediate(() => land(left - 1));
         this.#pending.delete(reject);
         if (err) return reject(err);
         resolve({ rows: [] });
-        this.onAnswer?.(this.#answers.n++);
+        this.onAnswer?.(this.shared.answers++);
       };
       land(turns);
     });
   }
 }
 
-test("random deadlines, cancels and server stops, for a receipt read and both scan readers: each statement goes out with its own timeout, nothing after the cancel, and no timeout back to the pool", async () => {
+/** A receipt read of `statements` statements on one TimedConnection, as withQueries runs it, and what became of it. */
+async function timedRead(fate: Fate, stopIn: number, statements: number): Promise<{ result: unknown; conn: TimedConnection }> {
+  const conn = new TimedConnection(rng(1), fate, { answers: 0, fired: null });
+  const lines = new ReceiptLines({ pool: { connect: async () => conn } as never, cancel: async () => void conn.steps.push("cancel") });
+  const result = await lines
+    .withQueries(new AbortController().signal, async (q) => {
+      for (let k = 0; k < statements; k++) await q.query(`select ${k}`);
+    }, performance.now() + stopIn)
+    .then(() => "answered", (err: unknown) => err);
+  return { result, conn };
+}
+
+test("the server's own stop during the timeout's setting or its reset fails as cancelled, which answers busy, and destroys the connection", async () => {
+  for (const at of ["set", "statement", "reset"] as const) {
+    // Two statements, so the second setting runs under the first one's timeout.
+    const { result, conn } = await timedRead({ kind: "stopped", at }, 3, 2);
+    assert.equal(conn.shared.fired, at, `${at}: the stop landed`);
+    assert.ok(result instanceof ScanCancelledError, `${at}: ${String(result)}`);
+    assert.equal(conn.let, "destroy", at);
+    assert.deepEqual(conn.broken, [], at);
+  }
+});
+
+test("a cancel before the deadline with no abort is someone else's and stays the error it is, while one at or after the deadline is the request's own", async () => {
+  for (const at of ["set", "statement", "reset"] as const) {
+    const early = await timedRead({ kind: "external", at }, 60_000, 1);
+    assert.ok(!(early.result instanceof ScanCancelledError) && (early.result as { code?: unknown }).code === "57014", `${at}, early: ${String(early.result)}`);
+    assert.equal(early.conn.let, "destroy", at);
+    const late = await timedRead({ kind: "external", at }, -5, 1);
+    assert.ok(late.result instanceof ScanCancelledError, `${at}, late: ${String(late.result)}`);
+    assert.equal(late.conn.let, "destroy", at);
+  }
+});
+
+test("random deadlines, cancels and stops, the server's own and others', for a receipt read and both scan readers: each statement goes out with its own timeout, nothing after the cancel, no timeout back to the pool, and only this request's stops answer busy", async () => {
   const random = rng(4103);
   const outcomes = new Map<string, number>();
   const turn = () => new Promise((r) => setImmediate(r));
   const view = captureView({ state: createInitialState({ roomName: "Timed", dm: member("dm1", "dm") }), through: 10 }, "ROOM", { memberId: "dm1", role: "dm" });
-  for (let i = 0; i < 450; i++) {
+  const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)]!;
+  for (let i = 0; i < 900; i++) {
     const driver = (["receipt", "indexed", "raw"] as const)[i % 3]!;
-    const fate = (["answer", "stopped", "hang"] as const)[Math.floor(random() * 3)]!;
-    // A statement that hangs ends only at its cancel, so the cancel comes in that case: after some turns, or as a step answers.
-    const cancel = fate === "hang" || random() < 0.6 ? (random() < 0.5 ? "turns" : "answer") : "none";
+    const kind = pick(["answer", "stopped", "external", "hang"] as const);
+    const fate: Fate = kind === "stopped" || kind === "external" ? { kind, at: pick(["set", "statement", "reset"] as const) } : { kind };
+    // Someone else's cancel comes with no abort, so which side of the deadline it lands on alone decides its answer.
+    // A statement that hangs ends only at its cancel, so the cancel comes then: after some turns, or as a step answers.
+    const cancel = kind === "external" ? "none" : kind === "hang" || random() < 0.6 ? pick(["turns", "answer"] as const) : "none";
     const abortAfter = Math.floor(random() * 12);
     const answerAt = Math.floor(random() * 6);
     const cancelTurns = Math.floor(random() * 3);
-    const answers = { n: 0 };
+    const shared = { answers: 0, fired: null as Step | null };
     const abort = new AbortController();
     const conns: TimedConnection[] = [];
     const pool = {
       connect: async () => {
-        const conn = new TimedConnection(random, fate, answers);
+        const conn = new TimedConnection(random, fate, shared);
         if (cancel === "answer") conn.onAnswer = (n) => void (n === answerAt && abort.abort(new Error("client went away")));
         conns.push(conn);
         return conn;
@@ -439,7 +490,9 @@ test("random deadlines, cancels and server stops, for a receipt read and both sc
       (client as TimedConnection).steps.push("cancel");
       for (let t = 0; t < cancelTurns; t++) await turn();
     };
-    const stopAt = performance.now() + [-5, 5, 60_000][Math.floor(random() * 3)]!;
+    // The server's own stops wait out their timeout in real time, so theirs are short.
+    const stopIn = pick(kind === "stopped" ? [-5, 2, 6] : kind === "external" ? [-5, 60_000] : [-5, 5, 60_000]);
+    const stopAt = performance.now() + stopIn;
     const statements = 1 + Math.floor(random() * 3);
     const budget = new LogScanBudget();
     const scan = budget.open({ pool: "page", roomId: "ROOM", memberId: "dm1", signal: abort.signal, stopAt });
@@ -451,9 +504,9 @@ test("random deadlines, cancels and server stops, for a receipt read and both sc
         : new LogHistory({ pool: pool as never, cancel: cancelRequest as never, ...(driver === "indexed" ? { metadata: { ready: true, want: () => undefined } } : {}) }).page(view, { limit: 50 }, scan);
     const outcome = work.then(
       () => "answered",
-      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : `failed: ${String(err)}`),
+      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : (err as { code?: unknown }).code === "57014" ? "raw 57014" : `failed: ${String(err)}`),
     );
-    if (cancel === "turns" || fate === "hang") {
+    if (cancel === "turns" || kind === "hang") {
       // A hung statement whose cancel was to come at an answer that never comes ends at the deadline.
       for (let t = 0; t < (cancel === "turns" ? abortAfter : 12); t++) await turn();
       abort.abort(new Error("deadline"));
@@ -461,12 +514,11 @@ test("random deadlines, cancels and server stops, for a receipt read and both sc
     const result = await outcome;
     for (let t = 0; t < 6; t++) await turn();
     scan.close();
-    const where = `sequence ${i} (${driver}, ${fate}, cancel ${cancel}): ${conns.map((c) => `${c.steps.join(",")} ${c.let}`).join(" | ")}`;
-    assert.ok(result === "answered" || result === "cancelled", `${where}: ${result}`);
-    outcomes.set(`${driver} ${fate} ${result}`, (outcomes.get(`${driver} ${fate} ${result}`) ?? 0) + 1);
+    const where = `sequence ${i} (${driver}, ${JSON.stringify(fate)}, in ${stopIn} ms, cancel ${cancel}, fired ${shared.fired}): ${result}: ${conns.map((c) => `${c.steps.join(",")} ${c.let}`).join(" | ")}`;
+    outcomes.set(`${driver} ${kind}${shared.fired ? ` at ${shared.fired}` : ""} ${result}`, (outcomes.get(`${driver} ${kind}${shared.fired ? ` at ${shared.fired}` : ""} ${result}`) ?? 0) + 1);
     // Invariants, for every connection: each statement goes out right after its own timeout is set, nothing goes out
     // after the cancel request or the let-go, the let-go comes once, a destroy after SQL follows a cancel request, and
-    // one back in the pool has the session's own timeout, reset last. An answer with no cancel let every connection go back.
+    // one back in the pool has the session's own timeout, reset last. An answer with no cancel or stop let every connection go back.
     for (const c of conns) {
       assert.deepEqual(c.broken, [], where);
       c.steps.forEach((step, n) => {
@@ -475,12 +527,23 @@ test("random deadlines, cancels and server stops, for a receipt read and both sc
       assert.notEqual(c.let, null, `${where}: a connection never let go`);
       if (c.let === "destroy" && c.steps.some((s) => s !== "cancel")) assert.ok(c.steps.includes("cancel"), `${where}: destroyed after SQL without a cancel request`);
       if (c.let === "release" && c.steps.includes("set")) assert.equal(c.steps.at(-1), "reset", where);
-      if (result === "answered" && !abort.signal.aborted) assert.equal(c.let, "release", where);
+      if (result === "answered" && !abort.signal.aborted && shared.fired === null) assert.equal(c.let, "release", where);
     }
-    if (fate === "stopped" && conns.some((c) => c.steps.includes("statement"))) assert.equal(result, "cancelled", `${where}: a statement the server stopped fails as cancelled`);
+    // Invariants on the answer: a stop on the raw reader's closing reset comes after its page was whole, so it answers;
+    // any other stop of the server's own, or someone else's past the deadline, is cancelled, and someone else's before
+    // the deadline stays its own error.
+    if (shared.fired === "reset" && driver === "raw") assert.equal(result, "answered", where);
+    else if (kind === "stopped" && shared.fired) assert.equal(result, "cancelled", where);
+    else if (kind === "external") assert.equal(result, stopIn > 0 ? "raw 57014" : "cancelled", where);
+    else assert.ok(result === "answered" || result === "cancelled", where);
     assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 }, where);
   }
+  const seen = (key: string) => (outcomes.get(key) ?? 0) > 0;
   for (const driver of ["receipt", "indexed", "raw"]) {
-    for (const seen of ["answer answered", "answer cancelled", "stopped cancelled", "hang cancelled"]) assert.ok((outcomes.get(`${driver} ${seen}`) ?? 0) > 0, `${driver} ${seen}: ${JSON.stringify([...outcomes])}`);
+    for (const key of ["answer answered", "answer cancelled", "hang cancelled", "stopped at set cancelled", "stopped at statement cancelled", "external at set raw 57014", "external at set cancelled", "external at statement raw 57014", "external at statement cancelled"]) {
+      assert.ok(seen(`${driver} ${key}`), `${driver} ${key}: ${JSON.stringify([...outcomes])}`);
+    }
+    const reset = driver === "raw" ? ["answered", "answered", "answered"] : ["cancelled", "raw 57014", "cancelled"];
+    assert.ok(seen(`${driver} stopped at reset ${reset[0]}`) && seen(`${driver} external at reset ${reset[1]}`) && seen(`${driver} external at reset ${reset[2]}`), `${driver} reset: ${JSON.stringify([...outcomes])}`);
   }
 });

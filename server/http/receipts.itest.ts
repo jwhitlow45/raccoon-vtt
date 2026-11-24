@@ -495,6 +495,32 @@ describe("GET /api/rooms/:id/receipts/:tag as of its arrival", () => {
     assert.deepEqual(seqs(await lookup(p, tag)), [newSeq], "a lookup after the reuse finds the new receipt");
   });
 
+  test("a receipt read someone else cancels while the lookup has time left answers that error, not busy", async () => {
+    const p = await party("Receipts cancelled by hand");
+    const tag = uuidv7();
+    await p.socket.apply(roll(tag));
+    const holder = await t.pool.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("lock table roll_receipts in access exclusive mode");
+      const answer = p.pip.get(`/api/rooms/${p.roomId}/receipts/${tag}`);
+      let pid: number | undefined;
+      for (let i = 0; i < 100 && pid === undefined; i++) {
+        pid = (await t.pool.query<{ pid: number }>("select pid from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like 'select distinct on (part)%'")).rows[0]?.pid;
+        if (pid === undefined) await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.ok(pid !== undefined, "the receipt read waits on the lock");
+      // As an operator's pg_cancel_backend would, with most of the lookup's 4 s left: no deadline of this request stopped it.
+      await t.pool.query("select pg_cancel_backend($1)", [pid]);
+      const res = await answer;
+      assert.equal(res.statusCode, 500, res.body);
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
+    await lookup(p, tag);
+  });
+
   test("a lookup held across the sweep answers as one the sweep never met: unknown past 7 days, found inside them", async () => {
     const p = await party("Receipts swept");
     const tags = { far: uuidv7(), lagging: uuidv7(), inside: uuidv7() };
