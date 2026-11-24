@@ -3916,7 +3916,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
     }
   });
 
-  test("an ask reads in turns that let the event loop go, its sender's later ops wait behind it, and it costs an op of rate for each op it reads (MD4-ASTRA-7)", async () => {
+  test("an ask reads in turns that let the event loop go, its sender's later ops wait behind it, and it costs an op of rate for each op it reads (MD4-ASTRA-7)", async (t) => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId } = discovery(dm, player);
@@ -3931,15 +3931,18 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       // Held stone ground keeps every band's detailed comparisons active. Narrow bands
       // keep their combined memory growth below the cap, so the ask reads all 16.
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: k, w: 96, h: 1 }));
-      // Counts the timer's turns while the ask is read, not how long the longest took: a loaded machine
-      // stretches every turn (243 ms once beside other lanes, GP3-FLAKE-ACTOR) but never merges two into one.
+      // The loop's clock moves 3 ms each time it is read, so a turn of the read takes three bands on any machine, fast or
+      // loaded (GP3-FLAKE-ACTOR), and the ask is read in six turns.
+      let loop = 0;
+      t.mock.method(performance, "now", () => (loop += 3));
+      // Counts the event loop's turns while the ask is read: a read that never let go would leave none.
       let turnsWhileReading = 0;
       let done = false;
       const tick = () => {
         if (actor.askState.reading) turnsWhileReading++;
-        if (!done) setTimeout(tick, 0);
+        if (!done) setImmediate(tick);
       };
-      setTimeout(tick, 0);
+      setImmediate(tick);
       await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g1");
       assert.equal(actor.askState.reading, true, "still reading after its first turn");
       await actor.op(table.conn, 2, { t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, "g2");
@@ -3949,9 +3952,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(asked !== "stuck" && painted !== "stuck");
       assert.ok(asked.acks?.includes(1), "the bands fit");
       assert.ok(table.sent.indexOf(asked) <= table.sent.indexOf(painted) && (asked !== painted || asked.acks!.indexOf(1) < asked.acks!.indexOf(2)), "the paint was answered after the ask");
-      // A read that never let go would get at most one turn. How many more it gets depends on how many
-      // bands fit in an 8 ms turn, which a faster change scan raises, so only the yield is pinned.
-      assert.ok(turnsWhileReading >= 2, `the timer got ${turnsWhileReading} turns while the ask was read`);
+      assert.ok(turnsWhileReading >= 2, `the loop got ${turnsWhileReading} turns while the ask was read`);
       // A socket that spent most of its burst is told busy for an ask of 16, though one op would go.
       // The 60-op burst paid 16 for the ask and one for the paint, with no refill.
       assert.ok(table.conn.opRate.wouldAllow(43) && !table.conn.opRate.wouldAllow(44));
