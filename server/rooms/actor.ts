@@ -1064,6 +1064,11 @@ export class RoomActor {
     return this.#deleted.size;
   }
 
+  /** How many delayed snapshot requests wait to come due, for its tests. */
+  get delayedRequests(): number {
+    return this.#delayed.size;
+  }
+
   /** How many clients' gestures still ask or were refused, and whether an ask is being read, for its tests (MD4-ASTRA-6). */
   get askState(): { asking: number; refused: number; reading: boolean } {
     return { asking: this.#asking.size, refused: this.#askRefused.size, reading: this.#reading !== null };
@@ -1099,12 +1104,15 @@ export class RoomActor {
       this.#asking.delete(key);
       this.#askRefused.delete(key);
       this.#wingGroups.delete(key);
-      // A socket the room closed keeps its delayed request, which comes due as it would have: when the room closes it
-      // follows how far the room's queue has got, and so must not decide what the session's budget spends.
-      const delayed = this.#delayed.get(key);
-      if (delayed && delayed.conn === conn && conn.closedWith === null) {
+    }
+    // A socket the room closed keeps its delayed request, which comes due as it would have: when the room closes it
+    // follows how far the room's queue has got, and so must not decide what the session's budget spends. A request is
+    // found by its socket, not by Connection.key, which is null until its hello is handled.
+    if (conn.closedWith === null) {
+      for (const [request, delayed] of this.#delayed) {
+        if (delayed.conn !== conn) continue;
         delayed.cancel();
-        this.#delayed.delete(key);
+        this.#delayed.delete(request);
       }
     }
     cancelPreviews(conn, this.#connections);

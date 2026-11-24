@@ -507,22 +507,47 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     r.actor.detach(socket.conn);
   }
 
-  test("a delayed request of a socket its client closes spends nothing", async (t) => {
+  test("a delayed request of a socket its client closes spends nothing, and another client's still comes due", async (t) => {
     const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
     r.timers.enable();
+    // P1's page and another page of P1's session both wait for the place P1's first snapshot holds until 1,010 ms.
     const gone = reconnect(r, T0 + 500);
     await flush();
-    r.timers.move(T0 + 520);
+    const stays = reconnect(r, T0 + 510, uuidv7());
+    await flush();
+    r.timers.move(T0 + 540);
     await flush();
     r.timers.move(T0 + 600);
     clientCloses(r, gone);
-    r.timers.move(T0 + 1_100);
+    for (let at = T0 + 1_000; at <= T0 + 1_100; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    assert.deepEqual([answers(gone.sent), answers(stays.sent)], [["wait 510"], ["wait 500", "snapshot"]]);
+  });
+
+  test("sockets their clients close before their hellos are handled keep no delayed request and spend nothing", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
+    r.timers.enable();
+    r.timers.move(T0 + 490);
+    const step = heldStep(r.actor);
     await flush();
+    for (let i = 0; i < 5; i++) {
+      const page = reconnect(r, T0 + 500 + 10 * i, uuidv7());
+      await flush();
+      clientCloses(r, page);
+    }
+    const kept = r.actor.delayedRequests;
+    r.timers.move(T0 + 1_100);
+    step.release();
+    await flush();
+    assert.equal(kept, 0);
     const page = reconnect(r, T0 + 1_100, uuidv7());
     await flush();
     r.timers.move(T0 + 1_120);
     await flush();
-    assert.deepEqual([answers(gone.sent), answers(page.sent)], [["wait 510"], ["snapshot"]]);
+    assert.deepEqual(answers(page.sent), ["snapshot"]);
+    assert.equal(r.actor.delayedRequests, 0);
   });
 
   test("a snapshot's bytes count against its session once it is sent", async (t) => {
