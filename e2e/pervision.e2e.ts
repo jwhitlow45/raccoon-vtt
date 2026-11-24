@@ -1336,7 +1336,7 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     try {
       const wait = preview.locator("[data-preview-wait]");
       await wait.getByRole("status").filter({ hasText: "Loading what Ana sees…" }).waitFor();
-      // The server's word as server/rooms/actor.ts #delaySnapshot sends it, while the held snapshot stands for the one it delays.
+      // The server's word as server/rooms/actor.ts #sendWaits sends it, while the held snapshot stands for the one it delays.
       await waitFor("the preview's socket", () => previews.socket);
       previews.socket!.send(JSON.stringify({ t: "wait", ms: 15_000 }));
       await dm.waitForTimeout(Math.max(0, opened + 11_500 - Date.now()));

@@ -312,7 +312,7 @@ describe("view as a player (docs/design/design-v1-per-player-vision.md 7.4)", ()
     const s = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") } });
     s.scenes.s1 = scene("s1");
     const snapshot: ServerMessage = { t: "snapshot", seq: 0, state: projectState(s, P1, { sceneId: null }), you: { memberId: "p1", role: "player", sceneId: "s1" }, watermark: 0 };
-    // The server waits 49 s and says so every 2 s, as the snapshot budget does (server/rooms/actor.ts #delaySnapshot): no failure at 10 s, nor at 40.
+    // The server waits 49 s and says so every 2 s, as the snapshot budget does (server/rooms/actor.ts #sendWaits): no failure at 10 s, nor at 40.
     assert.deepEqual(
       run((send, tick) => {
         for (let left = 49_000; left > 9_000; left -= 2_000) {
