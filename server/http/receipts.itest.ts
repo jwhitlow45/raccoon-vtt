@@ -22,6 +22,24 @@ import { failCommits, lineNumber, startEngine, type Engine, type Socket, type Te
 
 type Lookup = { parts: ({ part: number; state: "committed"; seq: number; lines: LogEntry[] } | { part: number; state: "refused"; code: string; message: string })[] };
 
+/**
+ * Waits up to 2 s for no statement in `sent` to wait on a lock, and fails
+ * naming every statement waiting then. Other work can wait on the same
+ * lock meanwhile and is no part of the lookup: a room's quota check after
+ * it stores a snapshot, or the receipt sweep, reads roll_receipts too. The
+ * server shows at most the first 1023 bytes of a statement's text.
+ */
+async function noneWaiting(pool: pg.Pool, sent: readonly string[], what: string): Promise<void> {
+  const ours = (text: string) => text !== "" && sent.some((s) => s.startsWith(text));
+  let waits: string[] = [];
+  for (let i = 0; i < 100; i++) {
+    waits = (await pool.query<{ query: string }>("select query from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'")).rows.map((r) => r.query);
+    if (!waits.some(ours)) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.fail(`${what}. Statements waiting on a lock: ${JSON.stringify(waits)}`);
+}
+
 describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
   let t: Engine;
   const appName = `rvtt-receipts-itest-${randomBytes(4).toString("hex")}`;
@@ -46,6 +64,13 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     assert.ok(t.app.logMigration.ready, "the index is ready");
   });
   after(() => t.close());
+
+  /** The statements the lookups send from here until the test sets `beforeQuery` again. */
+  function recordSent(): string[] {
+    const sent: string[] = [];
+    beforeQuery = async (text) => void sent.push(text);
+    return sent;
+  }
 
   /** Enough chats to move an earlier op's lines out of the live log, 50 a socket so no socket's op budget slows them. */
   async function fill(roomId: string, dm: ReturnType<Engine["client"]>): Promise<void> {
@@ -103,6 +128,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     await fill(roomId, dm);
     assert.equal(heldOpLines(t.manager.get(roomId)!.committed.state, { memberId: pipId, role: "player" }, lineNumber(rolled)), null);
     const holder = await t.pool.connect();
+    const sent = recordSent();
     try {
       await holder.query("begin");
       await holder.query("lock table room_log_access in access exclusive mode");
@@ -111,14 +137,10 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       assert.equal(res.statusCode, 503, res.body);
       assert.equal(res.json<{ error: string }>().error, "busy");
       assert.ok(Date.now() - started < 3_000, "bounded by the deadline");
-      // The lookup's statement no longer waits on the lock: its backend was told to stop.
-      let waiting = 1;
-      for (let i = 0; i < 100 && waiting > 0; i++) {
-        waiting = (await t.pool.query("select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%room_log_access%'")).rowCount ?? 0;
-        if (waiting > 0) await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.equal(waiting, 0);
+      assert.ok(sent.some((s) => s.includes("room_log_access")), "the lookup read by the access key");
+      await noneWaiting(t.pool, sent, "the lookup's statement no longer waits on the lock: its backend was told to stop");
     } finally {
+      beforeQuery = null;
       await holder.query("rollback");
       holder.release();
     }
@@ -133,6 +155,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Receipt admission deadline");
     const holder = await t.pool.connect();
+    const sent = recordSent();
     try {
       await holder.query("begin");
       await holder.query(lock);
@@ -143,16 +166,10 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       assert.ok(Date.now() - started < 3_000, "bounded by the configured receipt deadline");
       assert.equal((await t.pool.query("select 1 as unrelated")).rows[0]!.unrelated, 1);
       const table = stage === "grant read" ? "grants" : "rate_events";
-      let waiting = 1;
-      for (let i = 0; i < 100 && waiting > 0; i++) {
-        waiting = (await t.pool.query(
-          "select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like $1",
-          [`%${table}%`],
-        )).rowCount ?? 0;
-        if (waiting > 0) await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.equal(waiting, 0, "the route's backend is no longer waiting on the lock");
+      assert.ok(sent.some((s) => s.includes(table)), `the route reached the ${stage}`);
+      await noneWaiting(t.pool, sent, "the route's backend is no longer waiting on the lock");
     } finally {
+      beforeQuery = null;
       await holder.query("rollback");
       holder.release();
     }
@@ -215,6 +232,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     const tag = uuidv7();
     await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
     const holder = await t.pool.connect();
+    const sent = recordSent();
     try {
       await holder.query("begin");
       // A row lock would not stop a select: only a lock on the table does.
@@ -223,13 +241,10 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       const res = await pip.get(`/api/rooms/${roomId}/receipts/${tag}`);
       assert.equal(res.statusCode, 503, res.body);
       assert.ok(Date.now() - started < 3_000, "bounded by the deadline");
-      let waiting = 1;
-      for (let i = 0; i < 100 && waiting > 0; i++) {
-        waiting = (await t.pool.query("select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%from roll_receipts%'")).rowCount ?? 0;
-        if (waiting > 0) await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.equal(waiting, 0, "the receipt read no longer waits on the lock");
+      assert.ok(sent.some((s) => s.includes("distinct on (part)")), "the lookup sent its receipt read");
+      await noneWaiting(t.pool, sent, "the receipt read no longer waits on the lock");
     } finally {
+      beforeQuery = null;
       await holder.query("rollback");
       holder.release();
     }
