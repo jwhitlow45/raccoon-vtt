@@ -467,9 +467,9 @@ export class SnapshotBudget {
   }
 
   /**
-   * One timer for the earliest due time, read against `now`, the newest
-   * time the budget was given. It settles up to that due time when it fires,
-   * so it never reads a clock, and holds no process open.
+   * One timer for the earliest due time, set from `now`, and holding no
+   * process open. A timer that fires late settles every request due by the
+   * time it fires, each at its own due time, and sets the next from then.
    */
   #arm(now: number): void {
     let earliest = Number.POSITIVE_INFINITY;
@@ -484,7 +484,7 @@ export class SnapshotBudget {
         this.#timer = null;
         this.#timerAt = Number.POSITIVE_INFINITY;
       }
-      this.#settle(earliest);
+      this.#settle(Math.max(this.#now(), earliest));
     }, Math.max(0, earliest - now));
     timer.unref?.();
     this.#timer = timer;

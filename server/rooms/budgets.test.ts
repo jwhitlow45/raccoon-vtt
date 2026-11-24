@@ -329,6 +329,28 @@ describe("SnapshotBudget", () => {
     assert.deepEqual([b.waiting, b.size], [0, 0]);
   });
 
+  test("a timer that fires late settles every request due by then, each at its own due time, and sets the next from then", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const c = clock(0);
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, c.now);
+    const heard: string[] = [];
+    const hear = (o: DueOutcome) => void heard.push(`${o.at} ${o.kind}`);
+    // Three sessions, each with its one place taken, ask at once and come due at 1,000, 1,100 and 2,000 ms.
+    const asks = [["s1", 0, 1_000], ["s2", 100, 1_100], ["s3", 1_000, 2_000]] as const;
+    for (const [session, spent] of asks) b.record(b.keys(session, `ip-${session}`, false), 1, spent);
+    for (const [session, , due] of asks) b.wait(`X|${session}|a`, b.keys(session, `ip-${session}`, false), due, 0, hear);
+    assert.deepEqual(heard, []);
+    // The loop is busy until 1,500 ms, when the first timer fires, with no other call to the budget.
+    c.tick(1_500);
+    t.mock.timers.tick(1_000);
+    assert.deepEqual(heard, ["1000 fits", "1100 fits"]);
+    // The next timer runs 500 ms on from then, at 2,000.
+    c.tick(500);
+    t.mock.timers.tick(500);
+    assert.deepEqual(heard, ["1000 fits", "1100 fits", "2000 fits"]);
+    assert.equal(b.waiting, 0);
+  });
+
   test("the budget's own timer settles a request at its due time with no call to the budget, and holds no process open", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);
