@@ -560,6 +560,18 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     assert.deepEqual([answers(more.sent).length, more.conn.closed, past.conn.closedWith], [1, false, CLOSE.abuse]);
   });
 
+  test("a hello past the abuse rule leaves no request waiting", async (t) => {
+    let budget!: SnapshotBudget;
+    const r = await room(t, { budget: (now) => (budget = new SnapshotBudget({ sessionCount: 1, windowMs: 120_000, abuseMs: 30_000 }, now)) });
+    r.timers.enable();
+    // The session asked over budget in another room at 1 s, which starts its time over budget, and a new socket of its
+    // asks here 30 s later.
+    budget.request(r.p1.conn.sessionId, true, T0 + 1_000);
+    const page = reconnect(r, T0 + 31_000, uuidv7());
+    await flush();
+    assert.deepEqual([page.conn.closedWith, r.actor.delayedRequests], [CLOSE.abuse, 0]);
+  });
+
   test("sockets their clients close before their hellos are handled keep no delayed request and spend nothing", async (t) => {
     const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
     r.timers.enable();
