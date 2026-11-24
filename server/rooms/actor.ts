@@ -3217,9 +3217,10 @@ export class RoomActor {
 
   /**
    * A delayed request's wait (Delayed), on the clock from its arrival
-   * whenever the batch that answers it publishes. At `due` it asks the
-   * budget again, as a request that arrives then, and joins the queue at
-   * that moment (#delayedMoment).
+   * whenever the batch that answers it publishes. It asks the budget again
+   * as a request that arrives at `due`, whenever its timer fires, and joins
+   * the queue where #delayedMoment places it, which follows how far the
+   * room's queue has got and so never decides its place in the budget.
    */
   #awaitDue(conn: Connection, key: ClientKey, due: number): Delayed {
     const delayed: Delayed = { conn, ended: null, next: null, cancel: () => undefined };
@@ -3231,8 +3232,8 @@ export class RoomActor {
     const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
       end(due);
       this.#delayed.delete(key);
-      const moment = this.#delayedMoment(due);
-      this.#insertByMoment({ t: "snapshot", conn, key, moment, admission: this.#admit(conn, key, moment.now, false) });
+      const admission = this.#admit(conn, key, due, false);
+      this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due), admission });
       this.#drain();
     });
     delayed.cancel = () => {

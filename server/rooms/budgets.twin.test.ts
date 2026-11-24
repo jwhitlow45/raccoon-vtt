@@ -76,6 +76,8 @@ class World {
   /** The session's sockets, by label, in the order they were opened. */
   readonly devices = new Map<string, Device>();
   readonly #t: TestContext;
+  /** The mocked timers' own time, which runs behind the clock after `hand` until the next `to`. */
+  #timers = T0;
 
   constructor(t: TestContext, limits: Partial<SnapshotBudgetLimits>) {
     this.#t = t;
@@ -118,17 +120,29 @@ class World {
   /**
    * Moves the clock and the timers together to `at` ms past T0, `step` ms at
    * a time, letting the rooms work first and at each, so a hello sent before
-   * it arrives with the clock where it was sent.
+   * it arrives with the clock where it was sent. Timers a `hand` move left
+   * behind fire first, all at once, with the clock where it stands.
    */
   async to(at: number, step = 20): Promise<void> {
     await flush();
-    while (this.clock.now < T0 + at) {
-      const next = Math.min(T0 + at, this.clock.now + step);
-      const by = next - this.clock.now;
-      this.clock.now = next;
-      this.#t.mock.timers.tick(by);
+    if (this.#timers < this.clock.now) {
+      this.#t.mock.timers.tick(this.clock.now - this.#timers);
+      this.#timers = this.clock.now;
       await flush();
     }
+    while (this.clock.now < T0 + at) {
+      const next = Math.min(T0 + at, this.clock.now + step);
+      this.clock.now = next;
+      this.#t.mock.timers.tick(next - this.#timers);
+      this.#timers = next;
+      await flush();
+    }
+  }
+
+  /** Moves the clock alone to `at` ms past T0, as a loop busy elsewhere does: timers due meanwhile fire late, at the next `to`. */
+  async hand(at: number): Promise<void> {
+    await flush();
+    this.clock.now = T0 + at;
   }
 
   /** The DM's work in `room` from now on waits at its commit, from a chat whose commit is held, until `release`. */
@@ -277,6 +291,33 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
     );
     assert.deepEqual([out.A.x?.[0], out.A.x?.at(-1)], ["wait 59000", "snapshot"], "the first starts the session's time over budget");
     assert.deepEqual(out.A.y, ["closed 4008"], "the second, 30 s on, closes the session's sockets in its room");
+    assert.deepEqual(out.A, out.B);
+  });
+
+  test("a delayed request whose timer fires late, after the session spent in Y and X took a later command: the same answers whichever room's queue is held", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        // One spend a window: the session's at T0 holds X's hello at 500 ms until 1,010 ms.
+        w.spent([0]);
+        await w.to(490);
+        await w.holdQueue(held);
+        await w.to(500, 1);
+        w.hello(w.x, "x");
+        await w.to(1_000);
+        // The loop is busy past X's due time: Y's hello at 1,030 ms takes the place first, and the DM in X sends a chat
+        // at 1,035 ms, before X's timer fires.
+        await w.hand(1_030);
+        w.hello(w.y, "y");
+        await w.hand(1_035);
+        void w.x.actor.op(w.x.dm.conn, ++w.x.n, { t: "log.chat", text: "later" });
+        await w.to(1_100);
+        w.release(held);
+        await w.to(1_500);
+      },
+      { sessionCount: 1, windowMs: 1_010, abuseMs: 3_600_000 },
+    );
+    assert.deepEqual(out.A, { x: ["wait 510", "snapshot"], y: ["snapshot"] }, "X's request asks the budget at its due time, before Y's place");
     assert.deepEqual(out.A, out.B);
   });
 });
