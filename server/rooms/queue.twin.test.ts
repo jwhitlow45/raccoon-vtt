@@ -14,6 +14,7 @@ import { RoomActor, ViewBusyError, type ActorDeps, type ActorOptions } from "./a
 import { SnapshotBudget, type SnapshotBudgetLimits } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
+import { mapStepOps } from "./remember.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 import { ScopeClient, StoredRoomDb, storedActor, until } from "./undoScopeTesting.ts";
 
@@ -945,6 +946,20 @@ describe("the steps before a walk run only at moments every player sees", () => 
     same(pair, "area");
   });
 
+  /** The DM opens the door at 3 ms and, in A alone, takes Bree a cell east and back at 8 ms. P1 chats at 5 and 26 ms. */
+  async function roundTrip(twin: Twin, at: (ms: number) => Promise<void>): Promise<void> {
+    await at(3);
+    twin.send(twin.dm, { t: "door.set", sceneId: "s1", door: { edge: "16,5,w" }, state: "open" });
+    await at(5);
+    twin.send(twin.p1, chat("the door is open"));
+    await at(8);
+    const b = twin.actor.committed.state.tokens.b!;
+    if (twin.a) twin.send(twin.dm, { t: "token.move", tokenId: "b", x: b.x, y: b.y, route: [[b.x + 1, b.y, 0, 0], [b.x, b.y, 0, 0]] });
+    await at(26);
+    twin.send(twin.p1, chat("after"));
+    await at(60);
+  }
+
   test("the DM's round trip of Bree in A alone, in the tick the DM opens a door, has its steps put back, and leaves the size guard's growth, caps, refused scene and far line as in B", async (t) => {
     // Each twin's guard, met as it accepts the room's work, and how many marks A's took.
     const guards = new Map<TwinName, SizeGuard>();
@@ -965,16 +980,7 @@ describe("the steps before a walk run only at moments every player sees", () => 
     const pair = await open(t);
     await timed(t, pair, async (twin, at) => {
       current = twin.name;
-      await at(3);
-      twin.send(twin.dm, { t: "door.set", sceneId: "s1", door: { edge: "16,5,w" }, state: "open" });
-      await at(5);
-      twin.send(twin.p1, chat("the door is open"));
-      await at(8);
-      const b = twin.actor.committed.state.tokens.b!;
-      if (twin.a) twin.send(twin.dm, { t: "token.move", tokenId: "b", x: b.x, y: b.y, route: [[b.x + 1, b.y, 0, 0], [b.x, b.y, 0, 0]] });
-      await at(26);
-      twin.send(twin.p1, chat("after"));
-      await at(60);
+      await roundTrip(twin, at);
       current = null;
     });
     assert.ok(marks >= 1, "A's round trip ran the steps");
@@ -985,6 +991,43 @@ describe("the steps before a walk run only at moments every player sees", () => 
     };
     assert.deepEqual(read("door"), read("rock"), "the guard's fields read alike");
     same(pair, "round trip", "apart");
+  });
+
+  test("the same round trip in a room that owes its memory measure leaves the tick's close to measure every layer in both", async (t) => {
+    // Each twin's guard owes the measure from the script's first mark or map step on, whichever comes first.
+    let current: TwinName | null = null;
+    const owed = new Set<TwinName>();
+    const owe = (guard: SizeGuard) => {
+      if (current === null || owed.has(current)) return;
+      owed.add(current);
+      guard.capsUnmeasured();
+    };
+    const steps = new Map<TwinName, boolean[]>([["door", []], ["rock", []]]);
+    const { capsMoved, mark } = SizeGuard.prototype;
+    SizeGuard.prototype.capsMoved = function (this: SizeGuard, state: RoomState) {
+      owe(this);
+      return capsMoved.call(this, state);
+    };
+    SizeGuard.prototype.mark = function (this: SizeGuard) {
+      owe(this);
+      return mark.call(this);
+    };
+    t.after(() => {
+      Object.assign(SizeGuard.prototype, { capsMoved, mark });
+    });
+    const mapStep: typeof mapStepOps = (input) => {
+      if (current !== null) steps.get(current)!.push(input.everyLayer === true);
+      return mapStepOps(input);
+    };
+    const pair = await open(t, { options: { mapStep } });
+    await timed(t, pair, async (twin, at) => {
+      current = twin.name;
+      await roundTrip(twin, at);
+      current = null;
+    });
+    assert.deepEqual(steps.get("door"), [true, true, false], "A's steps, then the tick's close, each measure every layer, and the next close does not");
+    assert.deepEqual(steps.get("rock"), [true, false], "B's close of the tick measures every layer, and the next does not");
+    same(pair, "round trip owing the measure", "apart");
   });
 });
 
