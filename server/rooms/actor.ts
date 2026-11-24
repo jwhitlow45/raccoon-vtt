@@ -295,7 +295,7 @@ type Watermark = { sessionId: string; clientId: string; staged: number; closed: 
  */
 export type RoomView = { readonly tick: number; readonly state: RoomState; readonly seq: number; readonly pub: number; readonly through: number };
 
-/** How long published views are kept by their tick, past which a reader that waited answers busy. */
+/** How long published views are kept by their tick, past which a reader that asks then answers busy. One that waits takes its view whenever its tick is covered. */
 export const RETAIN_MS = 2_000;
 /** The most readers a room holds waiting for their view, past which one answers busy. */
 export const MAX_WAITING_READERS = 200;
@@ -1435,6 +1435,9 @@ export class RoomActor {
     if (signal?.aborted) return Promise.reject(new ViewBusyError("the reader is gone"));
     const a = this.#readerTick(at);
     if (this.#covered(a)) return this.#viewFor(a);
+    // Its age is judged as it asks, as a covered reader's is (#viewAt), never by how long it waits after: so whether it
+    // is answered never follows how long the commits before its tick take, only its deadline does.
+    if (this.#opts.now() - a > RETAIN_MS) return Promise.reject(new ViewBusyError("the reader's view is past its retention"));
     if (this.#waiting.size >= MAX_WAITING_READERS) return Promise.reject(new ViewBusyError("too many readers wait"));
     return new Promise<RoomView>((resolve, reject) => {
       const waiter: Waiter = {
@@ -1484,10 +1487,12 @@ export class RoomActor {
     return view === null ? Promise.reject(new ViewBusyError("the reader's view is past its retention")) : Promise.resolve(view);
   }
 
-  #viewAt(a: number): RoomView | null {
+  /** `aged` false for a reader that waited, whose view the ring holds as its tick is covered whatever its age (#endWaiter). */
+  #viewAt(a: number, aged = true): RoomView | null {
     for (let i = this.#views.length - 1; i >= 0; i--) {
       const entry = this.#views[i]!;
       if (!entry.load && entry.view.tick > a) continue;
+      if (!aged) return entry.view;
       // The load's view ages from the load's end for a reader that came before it, and from the reader's tick after.
       const age = this.#opts.now() - (entry.load ? Math.max(a, this.loadedAt) : a);
       return age > RETAIN_MS ? null : entry.view;
@@ -1499,8 +1504,15 @@ export class RoomActor {
     if (!this.#waiting.delete(waiter)) return;
     clearTimeout(waiter.timer);
     waiter.stop();
-    if (err) waiter.reject(err);
-    else this.#viewFor(waiter.a).then(waiter.resolve, waiter.reject);
+    if (err) {
+      waiter.reject(err);
+      return;
+    }
+    // Answered by the publish or the turn of the queue that covered its tick, before any later view joins the ring
+    // (#serveCovered), so the newest view through its tick is still there, however long it waited.
+    const view = this.#viewAt(waiter.a, false);
+    if (view === null) waiter.reject(new ViewBusyError("the reader's view is gone"));
+    else waiter.resolve(view);
   }
 
   /**

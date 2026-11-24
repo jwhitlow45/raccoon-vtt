@@ -207,6 +207,42 @@ describe("readers waiting for their tick", () => {
     await assert.rejects(r.actor.asOf(T + 30), ViewBusyError, "past it");
   });
 
+  test("readers that arrived during a commit held 6 s take their ticks' views once it lands, through a catch-up past the batches that may wait", async (t) => {
+    const r = await room(t);
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    // P1 chats once a tick for 1.5 s, past the 25 batches that may wait on a commit, and a reader arrives every 300 ms.
+    const readers: Array<{ k: number; read: ReturnType<typeof settled> }> = [];
+    for (let k = 1; k <= 75; k++) {
+      moveTo(t, r.clock, T + 20 * k + 5);
+      chat(r.p1, `tick ${k}`);
+      moveTo(t, r.clock, T + 20 * k + 6);
+      if (k % 15 === 0) readers.push({ k, read: settled(r.actor.asOf(T + 20 * k + 6)) });
+      await flush();
+    }
+    moveTo(t, r.clock, T + 6_000);
+    await flush();
+    assert.ok(readers.every((reader) => !reader.read.done), "all wait while the commit is held");
+    r.gate.open();
+    for (let i = 0; i < 20 && !readers.every((reader) => reader.read.done); i++) await flush();
+    for (const { k, read } of readers) {
+      assert.ok(read.done && !read.error, `the reader at tick ${k}: ${String(read.error)}`);
+      const view = read.value as RoomView;
+      // Its tick's batch holds the chats sent before it, the one sent 5 ms into it the next batch's.
+      assert.deepEqual([view.tick, texts(view).includes("held"), texts(view).includes(`tick ${k - 1}`), texts(view).includes(`tick ${k}`)], [T + 20 * k, true, true, false], `the reader at tick ${k}`);
+    }
+  });
+
+  test("a reader that would wait but asks more than RETAIN_MS after its tick answers busy at once, as a covered one does", async (t) => {
+    const r = await room(t);
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 20 + RETAIN_MS + 1);
+    const late = settled(r.actor.asOf(T + 25));
+    await flush();
+    assert.ok(late.done && late.error instanceof ViewBusyError, "answered before the commit lands");
+  });
+
   test("a reader that arrived before the room loaded takes the load's view, aged from the load's end", async (t) => {
     const r = await room(t);
     const loaded = r.actor.loadedAt;
