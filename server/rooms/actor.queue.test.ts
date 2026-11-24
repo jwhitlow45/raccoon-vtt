@@ -536,10 +536,10 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     let budget!: SnapshotBudget;
     const r = await room(t, { budget: (now) => (budget = new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now)) });
     r.timers.enable();
-    // Twelve pages of P1's session ask while it is over budget, and the room closes each socket as its second hello
+    // Twenty pages of P1's session ask while it is over budget, and the room closes each socket as its second hello
     // would close it (ws.ts), once its wait is sent.
     const pages: Array<ReturnType<typeof reconnect>> = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 20; i++) {
       const page = reconnect(r, T0 + 500 + 40 * i, uuidv7());
       pages.push(page);
       await flush();
@@ -548,16 +548,16 @@ describe("a snapshot's wait read from the hello's arrival", () => {
       page.conn.close(CLOSE.authFailure, "unexpected hello");
       r.actor.detach(page.conn);
     }
-    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [8, 0], "eight wait in the budget, and the room follows none");
+    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [16, 0], "sixteen wait in the budget, and the room follows none");
     assert.deepEqual(
       pages.map((p) => [answers(p.sent).length, p.conn.closedWith]),
-      [...Array.from({ length: 8 }, () => [1, CLOSE.authFailure]), ...Array.from({ length: 4 }, () => [0, CLOSE.abuse])],
-      "the first eight waited, and the rest closed as they arrived",
+      [...Array.from({ length: 16 }, () => [1, CLOSE.authFailure]), ...Array.from({ length: 4 }, () => [0, CLOSE.abuse])],
+      "the first sixteen waited, and the rest closed as they arrived",
     );
     // At 10 s the first fits and the rest wait again, still counted, so the session has room for one more.
     r.timers.move(T0 + 10_100);
     await flush();
-    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [7, 0], "the room follows none of them as they wait again");
+    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [15, 0], "the room follows none of them as they wait again");
     const more = reconnect(r, T0 + 10_100, uuidv7());
     await flush();
     const past = reconnect(r, T0 + 10_120, uuidv7());

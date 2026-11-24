@@ -268,8 +268,8 @@ export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   ipCount: 40,
   ipBytes: 120 * 1024 * 1024,
   abuseMs: 30_000,
-  sessionWaiting: DEFAULT_SOCKET_CAPS.perSession,
-  ipWaiting: DEFAULT_SOCKET_CAPS.perIp,
+  sessionWaiting: 2 * DEFAULT_SOCKET_CAPS.perSession,
+  ipWaiting: 2 * DEFAULT_SOCKET_CAPS.perIp,
 };
 
 type Spent = { at: number; bytes: number };
@@ -285,10 +285,12 @@ type Spent = { at: number; bytes: number };
  * starts the clock, a request that goes through stops it, and a delayed
  * request that is simply waiting never touches it.
  *
- * A session may have as many delayed requests waiting at once as it may
- * hold sockets, and an address likewise (DEFAULT_SOCKET_CAPS). Each socket
- * waits on at most one, from its own hello, and a client's new hello in
- * the same room takes the place of its old request. The budget holds each
+ * A session may have twice as many delayed requests waiting at once as it
+ * may hold sockets, and an address likewise (DEFAULT_SOCKET_CAPS). Each
+ * socket waits on at most one, from its own hello, and a client's new
+ * hello in the same room takes the place of its old request, so only
+ * requests left by sockets that are gone count past the sockets a session
+ * holds: a new preview's, or one in another room. The budget holds each
  * request (WaitingRequest) from its arrival until it fits at a due time, or
  * until its client closes its socket or sends a newer hello in its room. A
  * socket the room closed and a room that unloaded leave it waiting as it

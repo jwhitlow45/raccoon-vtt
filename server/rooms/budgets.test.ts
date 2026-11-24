@@ -264,8 +264,8 @@ describe("SnapshotBudget", () => {
     assert.equal(b.request("s1", true), false);
   });
 
-  test("a session may have as many requests waiting at once as it may hold sockets, and an address likewise", () => {
-    assert.deepEqual([DEFAULT_SNAPSHOT_BUDGET.sessionWaiting, DEFAULT_SNAPSHOT_BUDGET.ipWaiting], [DEFAULT_SOCKET_CAPS.perSession, DEFAULT_SOCKET_CAPS.perIp]);
+  test("a session may have twice as many requests waiting at once as it may hold sockets, and an address likewise", () => {
+    assert.deepEqual([DEFAULT_SNAPSHOT_BUDGET.sessionWaiting, DEFAULT_SNAPSHOT_BUDGET.ipWaiting], [2 * DEFAULT_SOCKET_CAPS.perSession, 2 * DEFAULT_SOCKET_CAPS.perIp]);
     const b = new SnapshotBudget({ sessionWaiting: 2, ipWaiting: 3 }, () => 0);
     const one = b.keys("s1", "ip-1", false);
     const two = b.keys("s2", "ip-1", false);
