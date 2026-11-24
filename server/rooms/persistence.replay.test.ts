@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { Op } from "#shared/protocol.ts";
 import { room } from "#shared/testutil.ts";
+import { cpuBackstopMs } from "../assets/video/videoTestutil.ts";
 import { loadRoom, REPLAY_PAGE_ROWS, type Pool } from "./persistence.ts";
 
 /*
@@ -44,16 +45,17 @@ describe("a load's replay of a long tail", () => {
     const rows = stored(25_860);
     const whole = await loadRoom(pool(rows, false), "R");
     const paged = pool(rows, true);
-    // The work between two turns of the loop, read as the process's CPU time, so a busy machine that holds the
-    // process off the CPU does not count as the replay holding the loop.
+    // The work between two turns of the loop, read as the CPU time of the thread that runs the loop. A busy machine that
+    // holds the process off the CPU does not count as the replay holding the loop, and neither do the collector's and
+    // the compiler's threads working beside it: counted in the process's CPU time, they more than doubled a turn's.
     let turns = 0;
     let longestMs = 0;
-    let last = process.cpuUsage();
+    let last = process.threadCpuUsage();
     let ticking = true;
     const tick = () => {
-      const now = process.cpuUsage(last);
+      const now = process.threadCpuUsage(last);
       longestMs = Math.max(longestMs, (now.user + now.system) / 1_000);
-      last = process.cpuUsage();
+      last = process.threadCpuUsage();
       turns++;
       if (ticking) setImmediate(tick);
     };
@@ -66,7 +68,11 @@ describe("a load's replay of a long tail", () => {
     assert.equal(loaded.pub, 25_860);
     assert.equal(paged.pages, Math.ceil(25_860 / REPLAY_PAGE_ROWS), "each page by its bounds, the last a short one");
     assert.ok(turns > 10, `the loop ran ${turns} turns during the replay`);
-    assert.ok(longestMs < 50, `the longest turn took ${longestMs.toFixed(1)} ms of CPU`);
+    // The replay lets the loop go every REPLAY_TURN_MS, so a turn's own work is about that on any machine. The 50 ms
+    // grows on a machine slower than the quiet one, as the video checks' budgets do (cpuBackstopMs). It is read after
+    // the replay, so the reference task's garbage is not collected in one of the replay's turns.
+    const bound = cpuBackstopMs(50);
+    assert.ok(longestMs < bound, `the longest turn took ${longestMs.toFixed(1)} ms of CPU, over ${bound} ms`);
   });
 
   test("a replay that stops inside a page reads the rest for their numbers, as a whole read does", async () => {
