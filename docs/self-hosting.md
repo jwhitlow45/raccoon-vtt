@@ -671,7 +671,11 @@ newest first.
   longer in a big room, and a draft open on a DM's device across the update,
   in the journal, the monster editor, a group save or the encounter builder,
   may no longer find a thing it names. Finish open drafts before the update.
-  Drawings, creatures and kept rulers stack in a new order. From an hour
+  So may a DM's change made while the server is down for the update and sent
+  once it is back, such as a move of a creature or an area only the DM sees:
+  it is refused without a word, and the thing stays where it was. Let every
+  DM page settle before stopping the server, and make such changes again
+  after. Drawings, creatures and kept rulers stack in a new order. From an hour
   after this version first runs, an old page that adds a new thing reads
   "This page is out of date. Reload it, then add that again." until it
   reloads, so reload every open page right after the update. Once this
