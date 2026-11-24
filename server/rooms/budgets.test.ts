@@ -351,6 +351,28 @@ describe("SnapshotBudget", () => {
     assert.equal(b.waiting, 0);
   });
 
+  test("a room that fails to take its due time stops neither the other requests nor the timer", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const c = clock(0);
+    const warned: string[] = [];
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, c.now, { warn: (_obj, msg) => void warned.push(msg) });
+    const heard: string[] = [];
+    const asks = [
+      ["s1", 1_000, () => { throw new Error("room failed"); }],
+      ["s2", 1_000, (o: DueOutcome) => void heard.push(`s2 ${o.at}`)],
+      ["s3", 2_000, (o: DueOutcome) => void heard.push(`s3 ${o.at}`)],
+    ] as const;
+    for (const [session, due] of asks) b.record(b.keys(session, `ip-${session}`, false), 1, due - 1_000);
+    for (const [session, due, onDue] of asks) b.wait(`X|${session}|a`, b.keys(session, `ip-${session}`, false), due, 0, onDue);
+    assert.deepEqual(heard, []);
+    // A call from another room settles all three due by 1,000 ms, and returns.
+    assert.equal(b.mayWait(b.keys("s4", "ip-s4", false), 1_000), true);
+    assert.deepEqual([heard, warned.length, b.waiting], [["s2 1000"], 1, 1]);
+    c.tick(2_000);
+    t.mock.timers.tick(2_000);
+    assert.deepEqual(heard, ["s2 1000", "s3 2000"]);
+  });
+
   test("the budget's own timer settles a request at its due time with no call to the budget, and holds no process open", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);

@@ -251,6 +251,9 @@ export type DueOutcome = { at: number; kind: "fits"; sent: (bytes: number) => vo
  */
 export type WaitingRequest = { readonly id: string; readonly keys: readonly BudgetKey[]; due: number; onDue: ((outcome: DueOutcome) => void) | null };
 
+/** Where the budget reports a room that failed to take its request's due time (SnapshotBudget). */
+export type BudgetLog = { warn(obj: object, msg: string): void };
+
 /*
  * The byte budgets hold ten of the largest DM snapshot under the DM's own
  * limits a minute per session and twenty per session of a pinned room: 6
@@ -310,11 +313,13 @@ export class SnapshotBudget {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #timerAt = Number.POSITIVE_INFINITY;
   #now: Clock;
+  #log: BudgetLog;
   #lastSweep: number;
 
-  constructor(limits: Partial<SnapshotBudgetLimits> = {}, now: Clock = Date.now) {
+  constructor(limits: Partial<SnapshotBudgetLimits> = {}, now: Clock = Date.now, log: BudgetLog = { warn: (obj, msg) => console.warn(msg, obj) }) {
     this.limits = { ...DEFAULT_SNAPSHOT_BUDGET, ...limits };
     this.#now = now;
+    this.#log = log;
     this.#lastSweep = now();
   }
 
@@ -458,12 +463,18 @@ export class SnapshotBudget {
           for (const k of next.keys) bump(this.#waiting, k.key, -1);
           outcome = { at, kind: "fits", sent: this.#reserveAt(next.keys, at) };
         }
-        next.onDue?.(outcome);
+        try {
+          next.onDue?.(outcome);
+        } catch (err) {
+          // One room that fails to take its request's due time stops neither the other requests nor the call that
+          // settled them, which may be another room's.
+          this.#log.warn({ err, roomId: next.id.slice(0, next.id.indexOf("|")) }, "a room failed to take a delayed snapshot's due time");
+        }
       }
     } finally {
       this.#settling = false;
+      this.#arm(now);
     }
-    this.#arm(now);
   }
 
   /**

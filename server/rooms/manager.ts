@@ -118,7 +118,7 @@ export class RoomManager {
     this.#pool = deps.pool;
     this.#log = deps.log;
     this.options = { ...DEFAULT_MANAGER_OPTIONS, ...deps.options };
-    this.budget = new SnapshotBudget(this.options.snapshotBudget, this.options.now);
+    this.budget = new SnapshotBudget(this.options.snapshotBudget, this.options.now, deps.log);
     this.gateway = new ActorGateway(this, deps.pool);
     this.#pruneTimer = setInterval(() => void this.prune(), DAY_MS);
     this.#pruneTimer.unref();
