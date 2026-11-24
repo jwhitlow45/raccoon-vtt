@@ -3345,7 +3345,9 @@ export class RoomActor {
    * what is left of the delay then, each once its time has come and while
    * the request still waits. Those whose time came while the batch
    * committed go at once, so the frames are the same however long its
-   * commit took.
+   * commit took, while its socket is still its client's. One a newer hello
+   * of its client in this room has taken over by then gets none
+   * (#snapshotOwed).
    */
   #sendWaits(conn: Connection, admission: Extract<Admission, { kind: "waits" }>): void {
     const { at, delay, wait } = admission;
