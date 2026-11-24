@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, test, type TestContext } from "node:test";
+import { after, before, describe, mock, test, type TestContext } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
@@ -21,6 +21,11 @@ import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesti
 
 /** A multiple of every batch window below. */
 const T0 = Date.parse("2026-11-10T20:00:00.000Z");
+
+// The loop's clock, which the drain spends its turns on (actor.ts DRAIN_TURN_MS), stands still in this file, so a fixed
+// flush is enough on any machine. A test of the drain's turns moves it on purpose, over this one.
+before(() => mock.method(performance, "now", () => 0));
+after(() => mock.restoreAll());
 
 type Wire = ServerMessage | HistoryMessage;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
@@ -140,6 +145,9 @@ describe("a batch closes once its tick's commands are handled", () => {
     assert.equal(r.actor.queueLength, 500);
     // The clock reads T + 19 as the step lets go: the batch's timer fires a millisecond after it opens.
     r.timers.hand(T + 19);
+    // Every reading of the loop's clock moves it 1 ms, so a turn takes a few of the 500 and lets the loop go.
+    let loopClock = 0;
+    t.mock.method(performance, "now", () => (loopClock += 1));
     step.release();
     let firedMidway = false;
     for (let i = 0; i < 200 && r.actor.queueLength > 0; i++) {
