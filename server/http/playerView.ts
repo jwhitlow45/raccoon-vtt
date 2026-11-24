@@ -71,8 +71,8 @@ export async function registerPlayerViewRoutes(app: FastifyInstance, kit: AuthKi
       limiter.record(checks);
       const sceneId = SceneId.safeParse((req.params as { sceneId?: unknown }).sceneId);
       if (!sceneId.success) throw new HttpError(404, "not_found");
-      // Taken on the queue, so it is a committed state, and projected off it, so the room keeps playing:
-      // a committed state is never changed.
+      // Read as of the request's arrival (RoomActor.read), so it is a committed state, and projected off it, so the room
+      // keeps playing: a committed state is never changed.
       const state = await committedState(deps.manager, roomId, req.arrivedAt);
       const view = playerView(state, sceneId.data);
       if (!view) throw new HttpError(404, "not_found");

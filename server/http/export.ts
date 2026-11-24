@@ -23,8 +23,8 @@ import { diskHasRoom } from "./rooms.ts";
 /**
  * Room export and import (design 16.4 and 10.3).
  *
- * Export copies the committed state on the actor queue and streams the zip
- * outside it, so the room keeps playing. `?sounds=0` leaves the room's
+ * Export copies the committed state as of the request's arrival and streams
+ * the zip outside the room's work, so the room keeps playing. `?sounds=0` leaves the room's
  * sounds out, files and state (docs/design/design-v1-music.md 6.7), and so
  * does the server's switch off, since it then serves no sound bytes. Slots bound what streams at once
  * (1 per room, 1 per IP, 2 server-wide) and hourly counts bound how often
@@ -98,7 +98,7 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
       };
       try {
         const actor = await deps.manager.acquire(roomId);
-        // The state is immutable, so the copy on the queue is a reference and the manifest query is the only wait.
+        // The state is immutable, so the copy is a reference: it is read as of the request's arrival (RoomActor.read).
         const copied = await actor.read((state, seq) => ({ state: exportableState(state, { memberId: grant.memberId, role: "dm" }, choice), seq }), req.arrivedAt);
         // Read after the copy: a member marked later got its DM grant after
         // the copy too, so the copied log holds nothing it had as DM.

@@ -4380,7 +4380,7 @@ function reachesPlayers(reach: ReturnType<typeof eventReach>): boolean {
   return reach === "all" || reach.length > 0;
 }
 
-/** The members' ops a batch answered since its steps last ran (StepCursor), which the cap and the steps count, as a new batch's own would. */
+/** The members' ops a batch answered since its steps last ran (StepCursor), which the steps count, as a new batch's own would. */
 function answeredSinceStep(batch: Batch): number {
   return batch.answered - batch.step.answered;
 }
