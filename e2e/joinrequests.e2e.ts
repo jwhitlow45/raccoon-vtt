@@ -672,6 +672,10 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     // The member's op cannot commit while this holds the room's row, as a stalled database would.
     const holder = new pg.Client({ connectionString: DATABASE_URL });
     await holder.connect();
+    // A page's read of the room waits behind the held commit, and one that waits longer than the room keeps its view answers busy, which the browser logs as a failed resource.
+    const busyList = /status of 503 .*\/join-requests/;
+    dmConsole.allow.push(busyList);
+    hazel.watch.allow.push(busyList);
     try {
       await holder.query("begin");
       await holder.query("select 1 from rooms where id = $1 for update", [run.roomId]);
@@ -699,6 +703,9 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     }
     await hazel.page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 20_000 });
     await row.waitFor({ state: "detached" });
+    // A read that waited through the hold is answered as the let-in lands, so its busy answer may be logged just after.
+    dmConsole.allow = dmConsole.allow.filter((re) => re !== busyList);
+    hazel.watch.allow = hazel.watch.allow.filter((re) => re !== busyList);
     await hazel.context.close();
   });
 
