@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test, type TestContext } from "node:test";
+import { OP_VERSION, SNAPSHOT_VERSION, WALK_TRIM_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { markOffset, RoomActor, SNAPSHOT_EVERY_MS, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { snapshotJson, type Pool } from "./persistence.ts";
-import { ScopeClient, scopeFixture, StoredRoomDb, storedActor } from "./undoScopeTesting.ts";
+import { ScopeClient, scopeFixture, StoredRoomDb, storedActor, type StoredRow } from "./undoScopeTesting.ts";
 
 /*
  * A loaded room builds its snapshot at every mark, every SNAPSHOT_EVERY_MS
@@ -44,11 +45,11 @@ type Logged = { level: "warn" | "error"; msg: string; obj: Record<string, unknow
  * records the clock, and every write outside a commit too, through
  * `beforeWrite`, which a test scripts to hold or fail it.
  */
-async function markRoom(t: TestContext, opts: { options?: ActorDeps["options"]; pool?: (base: Pool) => Pool; state?: RoomState } = {}) {
-  const f = scopeFixture();
+async function markRoom(t: TestContext, opts: { options?: ActorDeps["options"]; pool?: (base: Pool) => Pool; state?: RoomState; version?: number; rows?: StoredRow[]; f?: ReturnType<typeof scopeFixture> } = {}) {
+  const f = opts.f ?? scopeFixture();
   const clock = { now: T0 };
   const now = () => clock.now;
-  const db = new StoredRoomDb(opts.state ?? f.state);
+  const db = new StoredRoomDb(opts.state ?? f.state, { version: opts.version, rows: opts.rows });
   const builds: number[] = [];
   const writes: number[] = [];
   const logged: Logged[] = [];
@@ -255,6 +256,35 @@ describe("writes", () => {
     await r.to(m5.at);
     assert.equal(r.logged.filter((l) => l.msg === "snapshot write failed").length, 4);
     assert.equal(failing(r.logged).length, 2, "a new failing run warns again");
+  });
+
+  test("a mark while a commit that carries the room's snapshot keeps failing builds and leaves the write to that commit", async (t) => {
+    // A room stored at an older version with a row after its snapshot, which a mark would write a snapshot for.
+    const f = scopeFixture();
+    const tail: StoredRow = { seq: 1, at: new Date(T0 - 60_000).toISOString(), actorMemberId: f.dm.id, actorRole: "dm", op: { t: "log.chat", text: "stored" }, opVersion: OP_VERSION, pub: 1 };
+    const r = await markRoom(t, { options: { snapshotBackstopRows: 1, reidAtLoad: false }, f, version: WALK_TRIM_SNAPSHOT_VERSION - 1, rows: [tail] });
+    assert.equal(r.db.snapshot.version, WALK_TRIM_SNAPSHOT_VERSION - 1, "no commit stored the snapshot yet");
+    assert.equal(r.actor.committed.seq, 1);
+    const [m1] = marksBetween(r.clock.now, T0 + 100_000) as [Mark];
+    let failed = 0;
+    r.db.beforeCommit = async () => {
+      failed++;
+      throw new Error("database down");
+    };
+    await r.to(m1.at - 500);
+    chat(r.p1, "a row");
+    await r.to(m1.at - 400);
+    assert.ok(failed > 0, "the commit carrying the snapshot is failing");
+    const before = r.db.snapshotWrites;
+    await r.to(m1.at);
+    assert.ok(r.builds.includes(m1.at), "the mark builds");
+    assert.deepEqual(r.writes, [], "and writes nothing of its own");
+    assert.equal(r.db.snapshotWrites, before);
+    r.db.beforeCommit = undefined;
+    await r.to(m1.at + 100);
+    assert.equal(r.db.snapshot.version, SNAPSHOT_VERSION, "the commit stores it");
+    assert.equal(r.db.snapshot.seq, r.actor.committed.seq);
+    assert.deepEqual(r.writes, []);
   });
 
   test("the quota check after a write runs outside its hold, one at a time, so a slow one never holds the next write", async (t) => {
