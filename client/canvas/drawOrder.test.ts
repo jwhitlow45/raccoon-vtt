@@ -23,6 +23,14 @@ test("a fill draws first, then strokes and unfilled shapes, then text, each by i
   assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(1), ID(0), ID(3), ID(2), ID(4)]);
 });
 
+test("drawings of one kind draw in board order, by the top, then the left, of their boxes, then by id", () => {
+  const style = { stroke: "#ffffff", width: 2, opacity: 1, fill: "#ff000055" };
+  const box = (n: number, x: number, y: number) => drawing(ID(n), { kind: "rect", points: [x + 2, y + 2, x, y], style });
+  // A box drawn from its bottom right corner is placed by its top left all the same.
+  const list = [box(0, 9, 1), box(1, 2, 5), box(2, 1, 1), box(3, 1, 1), drawing(ID(4), { kind: "free", points: [0, 0, 1, 1], style: { stroke: "#ffffff", width: 2, opacity: 1 } })];
+  assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(3), ID(2), ID(0), ID(1), ID(4)]);
+});
+
 test("objects draw under creatures, a larger one under a smaller one, then by id", () => {
   const list: Token[] = [
     token(ID(0), { size: "medium" }),

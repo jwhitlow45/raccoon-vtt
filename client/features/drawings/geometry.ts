@@ -257,9 +257,15 @@ function drawingRank(d: Pick<Drawing, "kind" | "style">): number {
 /**
  * The order a scene's drawings draw in, bottom first: filled shapes, then
  * strokes (free, line, arrow, an unfilled rectangle, ellipse or polygon),
- * then text, each by id, so a fill never covers a line or words drawn over
- * it.
+ * then text, so a fill never covers a line or words drawn over it. Each
+ * kind draws in board order, by the top, then the left, of its box, then
+ * by id: a version 8 id is random, so id order alone would lay a new box
+ * under an older one as often as over it, and differently in every room.
  */
-export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style">, b: Pick<Drawing, "id" | "kind" | "style">): number {
-  return drawingRank(a) - drawingRank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style" | "points">, b: Pick<Drawing, "id" | "kind" | "style" | "points">): number {
+  const rank = drawingRank(a) - drawingRank(b);
+  if (rank !== 0) return rank;
+  const ba = bounds(a.points);
+  const bb = bounds(b.points);
+  return ba.y0 - bb.y0 || ba.x0 - bb.x0 || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
