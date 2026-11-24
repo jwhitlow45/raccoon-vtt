@@ -236,6 +236,26 @@ describe("which walks run the steps, and when they are put back", () => {
     assert.ok(w.calls[1]?.includes("token:m"), JSON.stringify(w.calls));
   });
 
+  test("a walk's steps that measured every layer and were put back leave the close to measure every layer again", async (t) => {
+    // The batch's other map steps throw, so the measure stays owed until the close.
+    let walking = false;
+    const everyLayer: boolean[] = [];
+    const w = await walked(
+      t,
+      { by: "p1", op: { t: "token.move", tokenId: "a", x: 4, y: 4, route: [[5, 4, 0, 0], [4, 4, 0, 0]] } },
+      {
+        capsPending: true,
+        around: (now) => void (walking = now),
+        mapStep: (input) => {
+          everyLayer.push(input.everyLayer === true);
+          if (!walking) throw new Error("scripted map step fault");
+        },
+      },
+    );
+    assert.equal(w.mid, 1);
+    assert.deepEqual(everyLayer.slice(-2), [true, true], "the steps in place, then the close, each measure every layer");
+  });
+
   test("a room that owes its memory measure still owes it when a walk's steps measured and were put back", async (t) => {
     // Only the map step in place measures every layer. Every other throws, so nothing the room commits measured them.
     let walking = false;
