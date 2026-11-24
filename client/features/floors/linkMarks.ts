@@ -159,19 +159,24 @@ export function meetsTurnMarker(pill: PillSpec, markers: readonly PillSpec[], sc
  * spot too, when it keeps the first. The markers are the turn's and the
  * traps' names, never another end's, so no two layers chase each other: they
  * place themselves from their own things alone (TurnStartLayer.tsx,
- * TrapLayer.tsx).
+ * TrapLayer.tsx). A name over a trap's squares (`squares`) moves under the
+ * same way, where that spot meets neither a marker nor squares.
  *
  * The boxes meet or part where they draw, not on the map (B53-SOL-02): in
  * Isometric the marker always stands upright on the overlay, and the name
  * stands too where `upright` (the stand rule) or else lies flat, so two
  * pills apart on the map can cover each other on screen, and the reverse.
  */
-export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number, iso: DrawSpace = null, upright = true): PillSpec {
+export function clearOfMarkers(pill: PillSpec, bottom: { x: number; y: number }, markers: readonly PillSpec[], scale: number, iso: DrawSpace = null, upright = true, squares: readonly Outline[] = []): PillSpec {
   const meetsMarker = (p: PillSpec) => meetsTurnMarker(p, markers, scale, iso, upright);
-  if (!meetsMarker(pill)) return pill;
+  const onSquares = (p: PillSpec) => {
+    const box = drawnBox(p, scale, iso, upright, true);
+    return squares.some((o) => boxCoversOutline(box, cornersOf(o), iso));
+  };
+  if (!meetsMarker(pill) && !onSquares(pill)) return pill;
   // Under the end can meet the marker too (Isometric on a phone), and then moving only trades one cover for another.
   const under: PillSpec = { ...pill, x: bottom.x, y: bottom.y, above: false, below: true };
-  return meetsMarker(under) ? pill : under;
+  return meetsMarker(under) || onSquares(under) ? pill : under;
 }
 
 /** An end's squares as the board draws them: a box in cells, and on hexes the outline of its hexes. */
@@ -320,13 +325,15 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * from the hole, or keeps the end's own edge, and the choice that costs
  * least wins. Each cover adds its charge and its area: a pill over a pill
  * weighs more than one over its own hole, which weighs more than one over
- * another end's squares or a token (D-261122-112). The charges add up, so
+ * another end's squares, a trap's squares (`traps`) or a token
+ * (D-261122-112). The charges add up, so
  * enough lesser covers can weigh as much as a greater one, and area only
  * breaks a tie of charges. The search keeps the first of equal choices,
  * so a lone hole's pills hang where they would alone: in Isometric a name
  * under the lowest corner on the screen and a chip over the highest, and
  * in Top-down from the middles of its bottom and top edges. Ends that are
- * not holes keep their own edge, and the holes keep off their pills.
+ * not holes keep their own edge, or the other one off a marker or a trap's
+ * squares (clearOfMarkers), and the holes keep off their pills.
  * Each pill is judged where it draws: near the edge of `view`, the clear
  * part of the screen at the camera's rest (canvas/boardView.ts
  * restViewSlot), a standing pill slides back inside it, which on a phone at
@@ -334,10 +341,19 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * `prune` false searches without the lower bound, which only cuts the
  * search, so a test can check it changes no answer.
  */
-export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[], scale: number, iso: DrawSpace, stands: (p: PillSpec) => boolean, tokens: readonly FloorLink["rect"][] = [], options: { view?: Box | null; prune?: boolean } = {}): Map<string, PlacedPills> {
-  const { view = null, prune = true } = options;
+export function placeEnds(
+  ends: readonly EndPills[],
+  markers: readonly PillSpec[],
+  scale: number,
+  iso: DrawSpace,
+  stands: (p: PillSpec) => boolean,
+  tokens: readonly FloorLink["rect"][] = [],
+  options: { view?: Box | null; prune?: boolean; traps?: readonly Outline[] } = {},
+): Map<string, PlacedPills> {
+  const { view = null, prune = true, traps = [] } = options;
   const out = new Map<string, PlacedPills>();
   const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
+  const trapBoxes = traps.map((o) => outlineBox(cornersOf(o), iso));
   const standing = tokens.map((r) => tokenBox(r, iso));
   type Cand = { spec: PillSpec; box: Box; solo: number };
   type Slot = { end: number; chip: boolean; cands: Cand[] };
@@ -347,7 +363,7 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
   const edges = ends.map((e) => {
     const { o, hole, first } = e;
     // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
-    return first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? stands(first) : true) : null;
+    return first ? clearOfMarkers(first, nameAnchor(o, hole ? "top" : "bottom"), markers, scale, iso, iso ? stands(first) : true, hole ? [] : traps) : null;
   });
   // Every pill stands in Top-down.
   const fits = (p: PillSpec) => iso === null || stands(p);
@@ -396,10 +412,15 @@ export function placeEnds(ends: readonly EndPills[], markers: readonly PillSpec[
   });
   // A two-line name pays a charge below the least cover's split among every slot, so two lines win only by covering fewer things than one line can, never by less area alone (D-261122-221), as long as the areas differ by less than it.
   const stackCharge = PILL_ON_SQUARES / (slots.length + 1);
-  // What a pill covers apart from the other holes' pills: another end's squares, the tokens, and the pills that stay put.
+  // What a pill covers apart from the other holes' pills: another end's squares, a trap's, the tokens, and the pills that stay put.
   for (const slot of slots) {
     for (const c of slot.cands) {
-      c.solo += (c.spec.stacked ? stackCharge : 0) + squares.reduce((n, b, j) => (j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) + standing.reduce((n, b) => n + covers(c.box, b, PILL_ON_TOKEN), 0) + fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
+      c.solo +=
+        (c.spec.stacked ? stackCharge : 0) +
+        squares.reduce((n, b, j) => (j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) +
+        trapBoxes.reduce((n, b) => n + covers(c.box, b, PILL_ON_SQUARES), 0) +
+        standing.reduce((n, b) => n + covers(c.box, b, PILL_ON_TOKEN), 0) +
+        fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
     }
     // Cheapest first, so the first path is already good when the node limit cuts the search short. The sort is stable, so equal choices keep their corner order.
     slot.cands.sort((a, b) => a.solo - b.solo);

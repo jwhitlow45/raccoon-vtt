@@ -1,7 +1,7 @@
 import type Konva from "konva";
 import { memo, useContext, useMemo, type ReactNode } from "react";
 import { Circle, Ellipse, Group, Line, Path, Rect, Shape } from "react-konva";
-import type { BuildChunk, CellRect, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
+import type { BuildChunk, CellRect, FloorLink, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
@@ -19,6 +19,8 @@ import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
 import { areaOutline } from "../areas/placement.ts";
 import { findDoor } from "../doors/doors.ts";
+import { boxCoversOutline, cornersOf, outlineOf, type Outline } from "../floors/linkMarks.ts";
+import { pillPlace } from "../measure/pillPlace.ts";
 import type { LayerProps } from "../layers.ts";
 import { BADGE_PX, trapBadgeBox } from "./badge.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
@@ -27,6 +29,7 @@ import { trapSlot, type TrapDraft } from "./store.ts";
 
 const NO_TRAPS: Readonly<Record<string, Trap>> = {};
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
+const NO_LINKS: Readonly<Record<string, FloorLink>> = {};
 const NO_TOKENS = {};
 
 const ICON_PX = 13;
@@ -56,6 +59,7 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   // Both trees publish a trap's name pill under one key, so a hidden tree holds its traps with the build they lie on and never sends a pill placed on an old build.
   const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
   const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
+  const links = useTreeShownView((s) => s.floorView?.floorLinks ?? NO_LINKS);
   const settings = useTreeShownView((s) => s.floorView?.meta.settings);
   const tool = useTreeShownView((s) => s.local.tool);
   const store = useScoped(trapSlot).store;
@@ -73,10 +77,11 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   );
   const open = dm && tool === "trap" && paneId ? traps[paneId] : undefined;
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
+  const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
   return (
     <Group listening={false}>
       {list.map((t) => (
-        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} grid={grid} />
+        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} grid={grid} frames={frames} />
       ))}
       {ground && open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} grid={grid} /> : null}
       {ground && dm && draft ? <Draft draft={draft} scale={props.scale} grid={grid} /> : null}
@@ -95,13 +100,15 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
 export const TrapNameLayer = memo(function TrapNameLayer(props: LayerProps) {
   const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
   const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
+  const links = useTreeShownView((s) => s.floorView?.floorLinks ?? NO_LINKS);
   const dm = props.role === "dm";
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
+  const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
   const list = useMemo(() => Object.values(traps).filter((t) => t.sceneId === props.scene.id), [traps, props.scene.id]);
   return (
     <Group listening={false}>
       {list.map((trap) => {
-        const name = trapNamePill(grid, trap, chunks, props.scale, dm);
+        const name = trapNamePill(grid, trap, chunks, props.scale, dm, frames);
         if (!name) return null;
         return (
           <Group key={trap.id} opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
@@ -129,20 +136,32 @@ function lookOf(trap: SeenTrap, dm: boolean): Look {
 /**
  * A trap's name as the board draws it, minus the zoom, or null where it
  * shows none. Squares name the trap over their top edge, as an area does,
- * clear of the name a creature standing in it shows below itself. A wire
- * or a door names it under its badge. Published to the board's label pass
- * (canvas/boardView.ts), which keeps token labels off every place the view
- * can slide it to (canvas/useBoardText.ts pillObstacles).
+ * clear of the name a creature standing in it shows below itself. Where
+ * that covers the frame of a floor link's end beside it (`ends`, as the
+ * board draws them), the name leans away from it, else hangs under the
+ * bottom edge, centered or leaning, and keeps the first spot that covers
+ * no end. An end stays where it is whatever its pills do, so no layer
+ * chases another. A wire or a door names it under its badge. Published to
+ * the board's label pass (canvas/boardView.ts), which keeps token labels
+ * off every place the view can slide it to (canvas/useBoardText.ts
+ * pillObstacles).
  */
-export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec | null {
+export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = []): PillSpec | null {
   if (!trapNameShown(scale)) return null;
   const zone = trap.zone;
   const words = !dm && (trap as SeenTrap).disarmed ? "Disarmed" : undefined;
   const pill = { name: trap.name, value: words, size: "map" as const, small: true, maxLines: 1 as const };
-  if ("cells" in zone && isHex(g)) return { ...pill, ...hexNameAnchor(g, zone.cells, zoneBox(g, trap, chunks)!), above: true };
   if ("cells" in zone) {
-    const top = zone.cells.reduce((a, r) => (r.y < a.y || (r.y === a.y && r.x < a.x) ? r : a));
-    return { ...pill, x: top.x + top.w / 2, y: top.y, above: true };
+    const box = zoneBox(g, trap, chunks)!;
+    const over: PillSpec = { ...pill, ...edgeAnchor(g, zone.cells, box, "top"), above: true };
+    if (ends.length === 0) return over;
+    const under: PillSpec = { ...pill, ...edgeAnchor(g, zone.cells, box, "bottom"), below: true };
+    const spots = [over, under].flatMap((p) => [p, { ...p, side: "right" as const }, { ...p, side: "left" as const }]);
+    const clear = (p: PillSpec) => {
+      const drawn = pillPlace({ ...p, scale }, null).box;
+      return ends.every((o) => !boxCoversOutline(drawn, cornersOf(o), null));
+    };
+    return spots.find(clear) ?? over;
   }
   const badge = "wire" in zone ? { x: (zone.wire.a[0] + zone.wire.b[0]) / 2, y: (zone.wire.a[1] + zone.wire.b[1]) / 2 } : findDoor(chunks, trap.sceneId, zone.door)?.mid;
   return badge ? { ...pill, x: badge.x, y: badge.y, offsetPx: BADGE_PX / 2 + 2, below: true } : null;
@@ -156,11 +175,35 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
  * nudged spot would let a link pill move token text that moves a trap name
  * that moves the link pill.
  */
-export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec[] {
+export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = []): PillSpec[] {
   return Object.values(traps)
     .filter((t) => t.sceneId === sceneId)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .flatMap((t) => trapNamePill(g, t, chunks, scale, dm) ?? []);
+    .flatMap((t) => trapNamePill(g, t, chunks, scale, dm, ends) ?? []);
+}
+
+/** The frames of the floor link ends a scene's board draws, which a trap's name keeps off (trapNamePill). */
+export function linkFrames(g: Grid, sceneId: string, links: Readonly<Record<string, Pick<FloorLink, "id" | "sceneId" | "rect">>>): Outline[] {
+  return Object.values(links)
+    .filter((l) => l.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((l) => outlineOf(g, l.rect));
+}
+
+/** The squares of a scene's trap zones as the board draws them, which a floor link's pills keep off (floors/linkMarks.ts placeEnds). */
+export function trapSquares(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>): Outline[] {
+  return Object.values(traps)
+    .filter((t) => t.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .flatMap((t) => ("cells" in t.zone ? t.zone.cells.map((r) => outlineOf(g, r)) : []));
+}
+
+/** Where a zone's name hangs from its top or bottom edge: on squares the middle of its first rectangle at that edge, on hexes hexNameAnchor's point. */
+function edgeAnchor(g: Grid, rects: readonly CellRect[], box: { x0: number; x1: number }, edge: "top" | "bottom"): { x: number; y: number } {
+  if (isHex(g)) return hexNameAnchor(g, rects, box, edge);
+  const at = (r: CellRect) => (edge === "top" ? r.y : r.y + r.h);
+  const r = rects.reduce((a, b) => (edge === "top" ? at(b) < at(a) : at(b) > at(a)) || (at(b) === at(a) && b.x < a.x) ? b : a);
+  return { x: r.x + r.w / 2, y: at(r) };
 }
 
 /**
@@ -169,15 +212,18 @@ export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record
  * and a top side's middle on hex columns. The box's own top middle can lie
  * off the zone, in the notch between two hexes or over an L's empty corner,
  * and an isometric name keeps its anchor only on the zone (FU40B-OPUS-7).
+ * The bottom alike, for a name hung under it.
  */
-function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number; x1: number }): { x: number; y: number } {
+function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number; x1: number }, edge: "top" | "bottom" = "top"): { x: number; y: number } {
   const mid = (box.x0 + box.x1) / 2;
   const tops: { x: number; y: number }[] = [];
+  // The bottom is the top with every y turned over.
+  const flip = edge === "top" ? 1 : -1;
   let top = Infinity;
   for (const r of rects) {
     const points = hexOutline(g, rectHexes([r]));
     for (let i = 0; i < points.length; i += 2) {
-      const ay = points[i + 1]!;
+      const ay = flip * points[i + 1]!;
       if (ay > top + 1e-9) continue;
       if (ay < top - 1e-9) {
         top = ay;
@@ -185,11 +231,11 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
       }
       const ax = points[i]!;
       const bx = points[(i + 2) % points.length]!;
-      const by = points[(i + 3) % points.length]!;
-      const py = points[(i - 1 + points.length) % points.length]!;
+      const by = flip * points[(i + 3) % points.length]!;
+      const py = flip * points[(i - 1 + points.length) % points.length]!;
       // A level side at the top is named at its middle, and a point at itself.
-      if (Math.abs(by - ay) < 1e-9) tops.push({ x: (ax + bx) / 2, y: ay });
-      else if (Math.abs(py - ay) >= 1e-9) tops.push({ x: ax, y: ay });
+      if (Math.abs(by - ay) < 1e-9) tops.push({ x: (ax + bx) / 2, y: flip * ay });
+      else if (Math.abs(py - ay) >= 1e-9) tops.push({ x: ax, y: flip * ay });
     }
   }
   return tops.reduce((a, b) => (Math.abs(b.x - mid) < Math.abs(a.x - mid) - 1e-9 ? b : a));
@@ -253,14 +299,14 @@ export function nameStands(name: PillSpec, iso: IsoGround | null, scale: number)
   return iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
 }
 
-const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid }) {
+const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid; frames: readonly Outline[] }) {
   const { trap, scale, dm, grid } = props;
   const seen = trap as SeenTrap;
   const look = lookOf(seen, dm);
   const zone = trap.zone;
   const s = 1 / scale;
   const names = useContext(IsoNamesContext);
-  const original = trapNamePill(grid, trap, props.chunks, scale, dm);
+  const original = trapNamePill(grid, trap, props.chunks, scale, dm, props.frames);
   const name = useMemo(() => {
     const allowed = (p: PillSpec) => !props.iso || pillStands(props.iso.fog, { ...p, scale });
     if (!original || !names || !allowed(original)) return original;

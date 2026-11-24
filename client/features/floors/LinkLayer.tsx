@@ -13,7 +13,7 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
-import { trapNameMarkers } from "../traps/TrapLayer.tsx";
+import { linkFrames, trapNameMarkers, trapSquares } from "../traps/TrapLayer.tsx";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
@@ -85,7 +85,10 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const turn = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
   const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
   const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
-  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm), [grid, props.scene.id, traps, chunks, scale, dm]);
+  // The traps' names keep off the ends' frames as the trap layers place them, and the ends' pills keep off the traps' squares, neither off the other's pills.
+  const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
+  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames), [grid, props.scene.id, traps, chunks, scale, dm, frames]);
+  const squares = useMemo(() => trapSquares(grid, props.scene.id, traps), [grid, props.scene.id, traps]);
   const trapKey = JSON.stringify(trapNames);
   const markers = useMemo(() => (trapNames.length === 0 ? turn : [...turn, ...trapNames]), [turn, trapKey]);
   const iso = useIsoGround();
@@ -114,7 +117,7 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   );
   // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
   const view = useRestView();
-  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view }), [ends, markers, scale, iso, tokens, view]);
+  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view, traps: squares }), [ends, markers, scale, iso, tokens, view, squares]);
   return (
     <Group listening={false}>
       {list.map((l, i) => {

@@ -73,6 +73,10 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - FLR4R1-2: fog on Ground floor, hidden but for the hole's west column:
  *   the DM's window keeps the map in the revealed squares as it drew them
  *   with the fog off, and draws the fog over the rest.
+ * - lp50fix-1: Nave, a hole down to Undercroft, a pit beside it and stairs
+ *   up to Belfry beside the pit: on the DM's phone the pit's name keeps off
+ *   the stairs' frame, and the stairs' name off the pit's squares, measured
+ *   on the page from the pills Konva draws and the cells' page points.
  * - fl4o-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-one, one file after
@@ -812,6 +816,78 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     const shown = await colorAt(dm, revealed);
     assert.ok(near(shown, unfogged.a), `a revealed square of the window shows the map as with the fog off: read ${shown}, then ${unfogged.a}`);
     await shots.take(dm, "flr4r1-2-window-fog-revealed");
+  });
+
+  test("lp50fix-1. on the DM's phone a trap's name keeps off the frame of the stairs beside it, and the stairs' name off the trap's squares, at 390 x 844 at 100% and 130%", async () => {
+    const NAVE = { w: 8, h: 6 };
+    const nave = uuidv7();
+    const stairs = { id: uuidv7(), pairId: uuidv7(), rect: { x: 5, y: 1, w: 2, h: 2 } };
+    const pit = { x: 3, y: 2, w: 2, h: 1 };
+    await ops.send({ t: "scene.create", scene: { id: nave, name: "Nave", bounds: NAVE } });
+    const belfry = uuidv7();
+    const undercroft = uuidv7();
+    await ops.send({ t: "scene.create", scene: { id: belfry, name: "Nave", bounds: NAVE }, floor: { beside: nave, side: "above", besideName: "Nave", name: "Belfry" } });
+    await ops.send({ t: "scene.create", scene: { id: undercroft, name: "Nave", bounds: NAVE }, floor: { beside: nave, side: "below", name: "Undercroft" } });
+    // As live play laid it out: a hole down to Undercroft, the pit beside it, and the stairs up to Belfry beside the pit, a row taller.
+    await ops.send({ t: "floorLink.put", link: { id: uuidv7(), pairId: uuidv7(), sceneId: nave, to: undercroft, rect: { x: 1, y: 2, w: 2, h: 1 }, kind: "opening" } });
+    await ops.send({ t: "floorLink.put", link: { id: stairs.id, pairId: stairs.pairId, sceneId: nave, to: belfry, rect: stairs.rect, kind: "stairs" } });
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: uuidv7(), sceneId: nave, name: "Hidden Pit", zone: { cells: [pit] }, rig } });
+    await showScene(dm, "Nave", nave);
+    /** The board's pills in page px, by their first words. */
+    const pills = () =>
+      dm.evaluate(() => {
+        type KRect = { x: number; y: number; width: number; height: number };
+        type KLabel = { isVisible(): boolean; getClientRect(o?: { skipStroke?: boolean }): KRect; getText(): { text(): string } | undefined; getTag(): { getClientRect(o?: { skipStroke?: boolean }): KRect } | undefined };
+        type KStage = { container(): { getBoundingClientRect(): { left: number; top: number } }; find(selector: string): KLabel[] };
+        const out: { text: string; l: number; t: number; r: number; b: number }[] = [];
+        for (const stage of (globalThis as unknown as { Konva: { stages: KStage[] } }).Konva.stages) {
+          const host = stage.container().getBoundingClientRect();
+          for (const label of stage.find("Label")) {
+            if (!label.isVisible()) continue;
+            const r = (label.getTag() ?? label).getClientRect({ skipStroke: true });
+            out.push({ text: (label.getText()?.text() ?? "").replace(/\n/g, " "), l: host.left + r.x, t: host.top + r.y, r: host.left + r.x + r.width, b: host.top + r.y + r.height });
+          }
+        }
+        return out;
+      });
+    /** A cell rectangle's box in page px. */
+    const pageBox = async (r: { x: number; y: number; w: number; h: number }) => {
+      const a = await pagePoint(dm, NAVE, { x: r.x, y: r.y });
+      const b = await pagePoint(dm, NAVE, { x: r.x + r.w, y: r.y + r.h });
+      return { l: a.x, t: a.y, r: b.x, b: b.y };
+    };
+    // A pill's edge may touch a frame's line: past a pixel it covers it.
+    const covered = (p: { l: number; t: number; r: number; b: number }, f: { l: number; t: number; r: number; b: number }) => Math.min(p.r, f.r) - Math.max(p.l, f.l) > 1 && Math.min(p.b, f.b) - Math.max(p.t, f.t) > 1;
+    const lines: string[] = [];
+    try {
+      for (const scale of SCALES) {
+        const where = at(PHONE, scale);
+        await sizeTo(dm, PHONE, scale);
+        // A reload starts the page on the players' scene, so the phone picks Nave from its Scenes sheet.
+        if (dmSocket.you?.sceneId !== nave) {
+          await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+          await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Scenes", exact: true }).click();
+          await dm.locator('section[aria-label="Scenes"]').first().getByRole("button", { name: /^Nave(?![A-Za-z])/ }).first().click();
+        }
+        await waitFor(`the DM on Nave at ${where}`, () => (dmSocket.you?.sceneId === nave ? true : null));
+        if (await dm.locator('section[aria-label="Scenes"]').first().isVisible()) await keyOn(dm, "Escape");
+        const [name, stairsName] = await waitFor(`both names drawn at ${where}`, async () => {
+          const seen = await pills();
+          const a = seen.find((p) => p.text.startsWith("Hidden Pit"));
+          const b = seen.find((p) => p.text.startsWith("Up to Belfry"));
+          return a && b ? ([a, b] as const) : null;
+        });
+        const frame = await pageBox(stairs.rect);
+        const squares = await pageBox(pit);
+        if (covered(name, frame)) lines.push(`${where}: the pit's name ${JSON.stringify(name)} covers the stairs' frame ${JSON.stringify(frame)}`);
+        if (covered(stairsName, squares)) lines.push(`${where}: the stairs' name ${JSON.stringify(stairsName)} covers the pit's squares ${JSON.stringify(squares)}`);
+        await shots.take(dm, `lp50fix-1-pit-beside-stairs-${where}`);
+      }
+    } finally {
+      await deskAgain(dm);
+    }
+    assert.deepEqual(lines, [], "a name over the thing beside it");
   });
 
   test("fl4o-10. no page logged an error", () => {
