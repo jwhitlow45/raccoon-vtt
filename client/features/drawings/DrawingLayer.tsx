@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { Arrow, Circle, Ellipse, Group, Line, Rect, Text } from "react-konva";
 import type { Drawing, DrawingKind, RoomState } from "#shared/model.ts";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
@@ -47,7 +47,9 @@ export const DrawingLayer = memo(function DrawingLayer(props: LayerProps) {
   const memberColor = useTreeShownView((s) => (s.you ? s.floorView?.members[s.you.memberId]?.color : undefined)) ?? boardTheme.color.crest;
   const iso = useIsoGround();
   // Kept rulers are drawings in the state, drawn and measured by the ruler layer (features/measure).
-  const list = Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === props.scene.id && d.kind !== "ruler").sort(drawingOrder);
+  // Sorted only when the drawings or the scene change, not on each pointer move while drawing re-renders the layer.
+  const sceneId = props.scene.id;
+  const list = useMemo(() => Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === sceneId && d.kind !== "ruler").sort(drawingOrder), [drawings, sceneId]);
   const drawing = tool === "draw";
   if (list.length === 0 && !(drawing && (draft || textAt))) return null;
   const stroke = color ?? memberColor;

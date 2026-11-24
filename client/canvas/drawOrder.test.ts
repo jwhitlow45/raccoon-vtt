@@ -31,6 +31,25 @@ test("drawings of one kind draw in board order, by the top, then the left, of th
   assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(3), ID(2), ID(0), ID(1), ID(4)]);
 });
 
+test("a drawing's points are scanned once however many drawings it is compared with", () => {
+  const style = { stroke: "#ffffff", width: 2, opacity: 1 };
+  let reads = 0;
+  const counted = (n: number, points: number[]) => {
+    const proxied = new Proxy(points, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    return drawing(ID(n), { kind: "free", points: proxied, style });
+  };
+  const list = Array.from({ length: 50 }, (_, n) => counted(n % 10, [(n * 7) % 5, (n * 3) % 4, 9, 9]));
+  const sorted = [...list].sort(drawingOrder);
+  assert.equal(reads, 50 * 4 * 2, "one scan each (bounds reads a value for its low and its high), not one per comparison");
+  const reference = [...list].sort((a, b) => (a.points[1]! - b.points[1]! || a.points[0]! - b.points[0]! || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  assert.deepEqual(sorted.map((d) => d.id), reference.map((d) => d.id));
+});
+
 test("objects draw under creatures, a larger one under a smaller one, then by id", () => {
   const list: Token[] = [
     token(ID(0), { size: "medium" }),

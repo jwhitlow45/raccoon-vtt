@@ -265,7 +265,25 @@ function drawingRank(d: Pick<Drawing, "kind" | "style">): number {
 export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style" | "points">, b: Pick<Drawing, "id" | "kind" | "style" | "points">): number {
   const rank = drawingRank(a) - drawingRank(b);
   if (rank !== 0) return rank;
-  const ba = bounds(a.points);
-  const bb = bounds(b.points);
+  const ba = boxCorner(a.points);
+  const bb = boxCorner(b.points);
   return ba.y0 - bb.y0 || ba.x0 - bb.x0 || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * The top left of a drawing's box, found once per points array. A sort
+ * compares each drawing about log n times, and a drawing can hold tens of
+ * thousands of point values, so scanning them in every comparison cost a
+ * pass over every point per frame. State is never changed in place, so a
+ * points array keeps its box for as long as it lives.
+ */
+const corners = new WeakMap<readonly number[], { x0: number; y0: number }>();
+function boxCorner(points: readonly number[]): { x0: number; y0: number } {
+  let found = corners.get(points);
+  if (!found) {
+    const { x0, y0 } = bounds(points);
+    found = { x0, y0 };
+    corners.set(points, found);
+  }
+  return found;
 }
