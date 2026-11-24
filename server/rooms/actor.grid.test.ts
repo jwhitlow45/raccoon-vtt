@@ -318,9 +318,11 @@ describe("commands handled while a commit is held", () => {
   async function gapAcross(t: TestContext, between: number): Promise<{ first: number; gap: number }> {
     const r = await gridRoom(t);
     let holding = false;
+    // Set once the case ends, passed or not, so no commit that starts after it is held, the shutdown's own included.
+    let done = false;
     let release: (() => void) | undefined;
     r.db.beforeCommit = () => {
-      if (holding) return Promise.resolve();
+      if (holding || done) return Promise.resolve();
       holding = true;
       return new Promise<void>((resolve) => (release = resolve));
     };
@@ -339,6 +341,7 @@ describe("commands handled while a commit is held", () => {
       assert.equal(r.actor.queueLength, 0, "the queue goes on while the commit is held");
     } finally {
       // The room's shutdown waits for every commit, so one left held would hold the file open past a failure here.
+      done = true;
       r.clock.now = T0 + 1_200;
       release?.();
     }
