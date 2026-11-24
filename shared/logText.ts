@@ -24,8 +24,13 @@ import { ownLabel } from "./numbering.ts";
  * creature" rather than leaking anything.
  */
 
-/** The parts of a view that log text reads. A player's projected view and a DM's full view both fit. */
-export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "handouts" | "encounter"> & Partial<Pick<RoomState, "traps">>;
+/**
+ * The parts of a view that log text reads. A player's projected view and a
+ * DM's full view both fit. `known` is the names a device last read off the
+ * viewer's own creatures, by token id, for a line naming one the view no
+ * longer holds (client/features/log/ownNames.ts).
+ */
+export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "handouts" | "encounter"> & Partial<Pick<RoomState, "traps">> & { known?: ReadonlyMap<string, string> };
 
 const SOMEONE = "Someone";
 const A_CREATURE = "A creature";
@@ -361,13 +366,13 @@ export function memberName(names: { members: Readonly<Record<string, Member | un
   return (id !== undefined && ownEntry(names.members, id)?.name) || SOMEONE;
 }
 
-/** The viewer's own name for the creature an event is about: its token on this view, else its character. */
+/** The viewer's own name for the creature an event is about: its token on this view, else its character, else the name the device kept for one of the viewer's own. */
 export function creatureName(names: LogNames, ref: { tokenId?: string; characterId?: string }): string {
   const token = ref.tokenId !== undefined ? ownEntry(names.tokens, ref.tokenId) : undefined;
   if (token) return displayName(token);
   const character = ref.characterId !== undefined ? ownEntry(names.characters, ref.characterId) : undefined;
   if (character) return character.name;
-  return A_CREATURE;
+  return (ref.tokenId !== undefined ? names.known?.get(ref.tokenId) : undefined) ?? A_CREATURE;
 }
 
 const CONDITION_SET: ReadonlySet<string> = new Set(CONDITION_KEYS);

@@ -21,6 +21,7 @@ import { canUndoLogLine } from "../features/encounter/hpLog.ts";
 import { useConfirmedSeq } from "../features/encounter/hooks.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
+import { useOwnNames } from "../features/log/ownNames.ts";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { historyKey, HistoryWindow, type HistoryState } from "./historyWindow.ts";
@@ -76,9 +77,10 @@ export default function LogPanel(_props: PanelProps) {
   const handouts = useRoomView((s) => s.view?.handouts);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
   const traps = useRoomView((s) => s.view?.traps);
+  const known = useOwnNames();
   const names = useMemo<LogNames>(
-    () => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter, traps: traps ?? {} }),
-    [members, tokens, characters, handouts, encounter, traps],
+    () => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter, traps: traps ?? {}, known }),
+    [members, tokens, characters, handouts, encounter, traps, known],
   );
   const me = you?.memberId ?? "";
   const loaded = useRoomView((s) => s.view != null);

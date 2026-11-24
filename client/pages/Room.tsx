@@ -61,6 +61,7 @@ import { ASK_TEXT, useSoundAsk } from "../features/sound/engine/useSoundAsk.ts";
 import { somethingPlays } from "../features/sound/panel/state.ts";
 import { Notice } from "../components/Notice.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
+import { useKeepOwnNames } from "../features/log/ownNames.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
 import { RollToasts } from "../features/dice/useRollToasts.ts";
@@ -546,6 +547,8 @@ function RoomPage() {
   const badgeLabels: Record<string, string> = { dm: dmBadgeLabel(uploadWaiting, joinWaiting) };
   const panelsLabel = panelsButtonLabel(unread + journalUnread, uploadWaiting, joinWaiting);
   usePdfJobRoom();
+  // A player's log names their own creatures on another scene by the names read here (features/log/ownNames.ts).
+  useKeepOwnNames();
   // Here rather than in each panel, which remounts as the layout crosses 900 px: a reveal and a held start last while their panel stays open (docs/design/design-v1-panel-groups.md 6.1).
   useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
   useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);
