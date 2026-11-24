@@ -3717,7 +3717,7 @@ export class RoomActor {
     }
     const release = snapshot;
     const lines = batch.ops.some((r) => r.log.length > 0);
-    // A batch of reads alone writes nothing, so it waits only for the commit before it, which it could not close during.
+    // A batch of reads alone writes nothing: it waits only for its turn behind the batches closed before it.
     const stores = write.ops.length > 0 || write.watermarks.length > 0 || batch.receipts.length > 0 || write.name !== undefined || write.snapshot !== undefined;
     let attempt = 0;
     // Once a COMMIT's answer is lost, the batch may be durable, so nothing is
