@@ -132,7 +132,8 @@ export type ActorOptions = {
    * number a device gets is at least its reading, and batches close on its
    * grid of `batchMs`. Null reads `now`. Tests that pin small numbers pass
    * one that stands still, so numbers count by one and a batch closes
-   * `batchMs` after it opens.
+   * `batchMs` after it opens. Any clock passed is one apart from `now`,
+   * the same function too.
    */
   numberClock: Clock | null;
   /**
@@ -665,6 +666,8 @@ export class RoomActor {
    */
   #handed: number;
   #numberClock: Clock;
+  /** Whether a test gave the room a number clock of its own (ActorOptions.numberClock), apart from the server's clock. */
+  readonly #ownNumberClock: boolean;
   /** Whether both clocks are the server's own, as on every production room, rather than a test's. */
   readonly #serverClock: boolean;
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
@@ -854,6 +857,7 @@ export class RoomActor {
     this.#handed = loaded.pub;
     this.#committedStored = loaded.pub;
     this.#numberClock = this.#opts.numberClock ?? this.#opts.now;
+    this.#ownNumberClock = (this.#opts.numberClock ?? null) !== null;
     // The load's view answers every reader that arrived before it, since nothing changed while the room was unloaded.
     this.#views = [{ view: { tick: this.#readerTick(this.loadedAt), ...this.#committed }, load: true }];
     this.#serverClock = this.#opts.numberClock === null && this.#opts.now === DEFAULT_ACTOR_OPTIONS.now;
@@ -1324,7 +1328,7 @@ export class RoomActor {
     if (conn.held === null || !conn.eph.take()) return;
     // Under a number clock of a test's own, ticks do not follow the server's clock, so a frame routes as it arrives,
     // against the committed room.
-    if (this.#numberClock !== this.#opts.now) {
+    if (this.#ownNumberClock) {
       routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
       return;
     }
@@ -2972,7 +2976,7 @@ export class RoomActor {
   /** The server's clock and the number clock, read once when they are the same clock, so a number and its time agree. */
   #clocks(): Moment {
     const now = this.#opts.now();
-    return { now, number: this.#numberClock === this.#opts.now ? now : this.#numberClock() };
+    return { now, number: this.#ownNumberClock ? this.#numberClock() : now };
   }
 
   /** The tick a moment's commands belong to: the first multiple of `batchMs` on the number clock after it. */
@@ -3256,7 +3260,7 @@ export class RoomActor {
    * number clock of its own, a test's, it is the clocks as the timer fires.
    */
   #delayedMoment(due: number): Moment {
-    if (this.#numberClock !== this.#opts.now) return this.#clocks();
+    if (this.#ownNumberClock) return this.#clocks();
     const at = Math.max(due, this.#lastTaken?.number ?? Number.NEGATIVE_INFINITY, this.#lastClosedTick);
     return { now: at, number: at };
   }
@@ -3423,8 +3427,8 @@ export class RoomActor {
    */
   #closeMoment(batch: Batch): Moment {
     const now = this.#opts.now();
-    const same = this.#numberClock === this.#opts.now;
-    return { now: same ? Math.min(now, batch.tick) : now, number: Math.min(same ? now : this.#numberClock(), batch.tick) };
+    const own = this.#ownNumberClock;
+    return { now: own ? now : Math.min(now, batch.tick), number: Math.min(own ? this.#numberClock() : now, batch.tick) };
   }
 
   /** Starts the oldest waiting batch's commit, when none is in flight: commits run one at a time, in tick order. */

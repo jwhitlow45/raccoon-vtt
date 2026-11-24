@@ -62,7 +62,7 @@ async function gridRoom(t: TestContext, options: ActorDeps["options"] = {}) {
     log: quiet,
     budget: new SnapshotBudget({}, now),
     gateway: {} as RoomGateway,
-    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: now, ...options },
+    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, ...options },
   });
   assert.ok(actor);
   const gate = new Gate();
@@ -259,7 +259,7 @@ describe("the queue goes on while commits are held", () => {
     };
     const db = new StoredRoomDb(room);
     t.after(() => t.mock.timers.reset());
-    const h = await storedActor(t, db, { batchMs: 20, now, numberClock: now, mapStep: counted });
+    const h = await storedActor(t, db, { batchMs: 20, now, numberClock: null, mapStep: counted });
     const dm = await ScopeClient.open(h.actor, room.members.dm1!, "dm", now);
     const p1 = await ScopeClient.open(h.actor, room.members.p1!, "player", now);
     await dm.apply({ t: "log.chat", text: "ready" });

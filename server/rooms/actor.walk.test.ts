@@ -28,7 +28,7 @@ async function walkRoom(t: TestContext, options: ActorDeps["options"] = {}, setu
   const db = new StoredRoomDb(room, { capsPending: setup.capsPending ?? false });
   // Ahead of the shutdown storedActor registers, so it clears a real snapshot timer with the real clearTimeout.
   t.after(() => t.mock.timers.reset());
-  const h = await storedActor(t, db, { batchMs: 20, now, numberClock: now, ...options });
+  const h = await storedActor(t, db, { batchMs: 20, now, numberClock: null, ...options });
   const dm = await ScopeClient.open(h.actor, room.members.dm1!, "dm", now);
   const p1 = await ScopeClient.open(h.actor, room.members.p1!, "player", now);
   // The room's first answer explores the sight it loaded with, so the steps below start from explored ground.
