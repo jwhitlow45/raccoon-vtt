@@ -133,13 +133,37 @@ describe("dead keys", () => {
       b.request(`session-${i}`, b.delay(keys) > 0);
     }
     assert.equal(b.size, 150);
+    // A spend is kept a window past its own, for a call that reads a slightly earlier time.
     c.tick(61_000);
     b.record(b.keys("fresh", "ip-fresh", false), 1_000);
-    assert.equal(b.size, 2);
+    assert.equal(b.size, 102, "the abuse clocks go after their window, the spends not yet");
+    c.tick(60_000);
+    b.record(b.keys("later", "ip-later", false), 1_000);
+    assert.equal(b.size, 4);
   });
 });
 
 describe("SnapshotBudget", () => {
+  test("a request at a time counts no spend recorded later at a later time", () => {
+    const c = clock(100_000);
+    const b = new SnapshotBudget({}, c.now);
+    const keys = b.keys("s1", "ip1", false);
+    for (let i = 0; i < 19; i++) b.record(keys, 1_000, 100_000 + i);
+    b.record(keys, 1_000, 150_000);
+    assert.equal(b.delay(keys, 120_000), 0, "the spend at 150,000 is no part of a request at 120,000");
+    assert.equal(b.delay(keys, 150_000), 10_000, "a request at 150,000 counts all 20");
+  });
+
+  test("a call at a later time keeps every spend a request a little earlier still counts", () => {
+    const c = clock(100_000);
+    const b = new SnapshotBudget({}, c.now);
+    const keys = b.keys("s1", "ip1", false);
+    for (let i = 0; i < 20; i++) b.record(keys, 1_000, 100_000 + i * 50);
+    assert.equal(b.delay(keys, 161_000), 0, "the 20 left the window by 161,000");
+    b.record(b.keys("s2", "ip2", false), 1_000, 161_000);
+    assert.equal(b.delay(keys, 159_000), 1_000, "the 20 spent still hold a request at 159,000 until the oldest leaves at 160,000");
+  });
+
   test("delays the 21st snapshot of a session until the oldest leaves the minute", () => {
     const c = clock(100_000);
     const b = new SnapshotBudget({}, c.now);

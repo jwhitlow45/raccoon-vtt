@@ -319,11 +319,12 @@ export class SnapshotBudget {
   record(keys: readonly BudgetKey[], bytes: number, now = this.#now()): void {
     this.#sweep(now);
     for (const k of keys) {
-      const live = this.#live(k.key, now);
-      let at = live.length;
-      while (at > 0 && live[at - 1]!.at > now) at--;
-      live.splice(at, 0, { at: now, bytes });
-      this.#spent.set(k.key, live);
+      this.#live(k.key, now);
+      const list = this.#spent.get(k.key) ?? [];
+      let at = list.length;
+      while (at > 0 && list[at - 1]!.at > now) at--;
+      list.splice(at, 0, { at: now, bytes });
+      this.#spent.set(k.key, list);
     }
   }
 
@@ -365,15 +366,23 @@ export class SnapshotBudget {
     }
   }
 
+  /**
+   * The spends that count at `now`: those in the window before it, none
+   * after it. Only spends a further window older are dropped, so a call
+   * that reads a time a little earlier than another's still finds them.
+   */
   #live(key: string, now: number): Spent[] {
     const list = this.#spent.get(key);
     if (!list) return [];
     const cutoff = now - this.limits.windowMs;
     let drop = 0;
-    while (drop < list.length && list[drop]!.at <= cutoff) drop++;
+    while (drop < list.length && list[drop]!.at <= cutoff - this.limits.windowMs) drop++;
     if (drop > 0) list.splice(0, drop);
-    if (list.length === 0) this.#spent.delete(key);
-    return list;
+    if (list.length === 0) {
+      this.#spent.delete(key);
+      return [];
+    }
+    return list.filter((s) => s.at > cutoff && s.at <= now);
   }
 }
 
