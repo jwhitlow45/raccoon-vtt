@@ -59,9 +59,11 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
 }
 
-function socketOn(room: Room | { actor: RoomActor }, grant: { sessionId: string; memberId: string; role: "dm" | "player" }, ip: string, now: () => number): Device {
+function socketOn(room: Room | { actor: RoomActor }, grant: { sessionId: string; memberId: string; role: "dm" | "player"; previewOf?: string }, ip: string, now: () => number): Device {
   const sent: ServerMessage[] = [];
-  const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close() {}, terminate() {} };
+  // The room learns of a close it made as the server's socket closes, after it (ws.ts).
+  const close = () => void Promise.resolve().then(() => room.actor.detach(conn));
+  const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close, terminate: close };
   const conn = new Connection(socket as never, { ...grant, roomId: "BUDGETS" }, ip, { now });
   room.actor.attach(conn);
   return { conn, sent };
@@ -347,6 +349,35 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
       {},
     );
     assert.deepEqual([out.A.x0, out.A.x1, out.A.x2], [["snapshot", "closed 4008"], ["closed 4008"], ["snapshot"]]);
+    assert.deepEqual(out.A, out.B);
+  });
+
+  test("a delayed request of a socket the room closes comes due as it would have: the same whichever room's queue is held", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        w.spent([0]);
+        // The session's preview of X's player, a DM's, waits for the session's place until 10 s.
+        await w.to(1_000, 1_000);
+        const preview = socketOn(w.x, { sessionId: SESSION, memberId: w.x.dm.conn.memberId, role: "dm", previewOf: w.x.player }, ADDRESS, w.now);
+        void w.x.actor.hello(preview.conn, { clientId: uuidv7(), resumeFrom: 1 });
+        await w.to(1_020);
+        await w.holdQueue(held);
+        // X's player leaves the roster, which closes the preview as X publishes it: at once when X's queue is free, after
+        // its request comes due when X's queue is held.
+        void w.x.actor.sys({ t: "sys.memberRemove", memberId: w.x.player });
+        await w.to(9_000, 1_000);
+        assert.equal(preview.conn.closed, held === w.y);
+        // A request of the session's in Y after then.
+        await w.to(10_500);
+        w.hello(w.y, "y");
+        await w.to(12_000);
+        w.release(held);
+        await w.to(21_000, 1_000);
+      },
+      { sessionCount: 1, windowMs: 10_000 },
+    );
+    assert.deepEqual(out.A.y, ["wait 9500", "wait 7500", "wait 5500", "wait 3500", "wait 1500", "snapshot"]);
     assert.deepEqual(out.A, out.B);
   });
 });

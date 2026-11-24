@@ -500,6 +500,31 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     assert.deepEqual([answers(second.sent), answers(third.sent)], [["wait 510"], ["wait 410", "snapshot"]]);
   });
 
+  /** The client's close of `socket`, as the server's socket reports it (ws.ts). */
+  function clientCloses(r: Awaited<ReturnType<typeof room>>, socket: { conn: Connection }) {
+    socket.conn.closed = true;
+    socket.conn.clearTimers();
+    r.actor.detach(socket.conn);
+  }
+
+  test("a delayed request of a socket its client closes spends nothing", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
+    r.timers.enable();
+    const gone = reconnect(r, T0 + 500);
+    await flush();
+    r.timers.move(T0 + 520);
+    await flush();
+    r.timers.move(T0 + 600);
+    clientCloses(r, gone);
+    r.timers.move(T0 + 1_100);
+    await flush();
+    const page = reconnect(r, T0 + 1_100, uuidv7());
+    await flush();
+    r.timers.move(T0 + 1_120);
+    await flush();
+    assert.deepEqual([answers(gone.sent), answers(page.sent)], [["wait 510"], ["snapshot"]]);
+  });
+
   test("a snapshot's bytes count against its session once it is sent", async (t) => {
     const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionBytes: 1 }, now) });
     r.timers.enable();

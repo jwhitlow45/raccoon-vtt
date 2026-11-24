@@ -453,9 +453,9 @@ type Admission =
 /**
  * A snapshot request the budget delayed (#awaitDue), from its arrival
  * until it comes due or a newer request of its client, a resync or the
- * socket's end takes its place. `ended` is that moment on the server's
- * clock, the last its `wait` frames are sent for, and `next` the timer of
- * the next one (#sendWaits).
+ * client's close of its socket takes its place. `ended` is that moment on
+ * the server's clock, the last its `wait` frames are sent for, and `next`
+ * the timer of the next one (#sendWaits).
  */
 type Delayed = { conn: Connection; ended: number | null; next: NodeJS.Timeout | null; cancel: () => void };
 
@@ -1099,8 +1099,10 @@ export class RoomActor {
       this.#asking.delete(key);
       this.#askRefused.delete(key);
       this.#wingGroups.delete(key);
+      // A socket the room closed keeps its delayed request, which comes due as it would have: when the room closes it
+      // follows how far the room's queue has got, and so must not decide what the session's budget spends.
       const delayed = this.#delayed.get(key);
-      if (delayed && delayed.conn === conn) {
+      if (delayed && delayed.conn === conn && conn.closedWith === null) {
         delayed.cancel();
         this.#delayed.delete(key);
       }
@@ -3223,6 +3225,8 @@ export class RoomActor {
    * as a request that arrives at `due`, whenever its timer fires, and joins
    * the queue where #delayedMoment places it, which follows how far the
    * room's queue has got and so never decides its place in the budget.
+   * The timer is the room's, not the socket's, so a socket the room closes
+   * meanwhile still asks at `due` (detach).
    */
   #awaitDue(conn: Connection, key: ClientKey, due: number): Delayed {
     const delayed: Delayed = { conn, ended: null, next: null, cancel: () => undefined };
@@ -3231,16 +3235,17 @@ export class RoomActor {
       if (delayed.next) conn.cancel(delayed.next);
       delayed.next = null;
     };
-    const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
+    const timer = setTimeout(() => {
+      if (this.#closed) return;
       end(due);
-      this.#delayed.delete(key);
+      if (this.#delayed.get(key) === delayed) this.#delayed.delete(key);
       const admission = this.#admit(conn, key, due);
       this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due), admission });
       this.#drain();
-    });
+    }, Math.max(0, due - this.#opts.now()));
     delayed.cancel = () => {
       end(this.#opts.now());
-      conn.cancel(timer);
+      clearTimeout(timer);
     };
     this.#delayed.set(key, delayed);
     return delayed;
@@ -3345,6 +3350,8 @@ export class RoomActor {
 
   #resync(conn: Connection, reason: string): void {
     const key = conn.key;
+    // The client says hello again over this socket at once, and that hello would take the delayed request's place as
+    // it arrives. Answered after the resync instead, the request would close the socket as an unexpected hello (ws.ts).
     if (key !== null) {
       const delayed = this.#delayed.get(key);
       if (delayed && delayed.conn === conn) {
