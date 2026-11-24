@@ -480,7 +480,7 @@ type Batch = {
   closeAt: number;
   /** Its timer has fired: it closes once no command of its tick waits to be handled or read (#closeIfDue). */
   due: boolean;
-  /** Its timer fired under a test's standing clock before the clock reached its tick (#armTimer), so its view takes the tick the clock read (#publish). */
+  /** Its timer fired under a test's standing clock before the clock reached its tick (#armTimer), so its view takes the tick the clock read (#runCommit). */
   standing?: true;
   /** How many members' ops the batch answered since it opened, taken or refused. */
   answered: number;
@@ -2976,16 +2976,16 @@ export class RoomActor {
     return { now, number: this.#numberClock === this.#opts.now ? now : this.#numberClock() };
   }
 
-  /**
-   * An answer that stores no row of its own takes a number, a refusal or a
-   * taken op answered without one, as #reduce gives one to an op it
-   * installs. `lastOpAt`, which eviction reads, moves with it.
-   */
   /** The tick a moment's commands belong to: the first multiple of `batchMs` on the number clock after it. */
   #tickOf(moment: Moment): number {
     return (Math.floor(moment.number / this.#opts.batchMs) + 1) * this.#opts.batchMs;
   }
 
+  /**
+   * An answer that stores no row of its own takes a number, a refusal or a
+   * taken op answered without one, as #reduce gives one to an op it
+   * installs. `lastOpAt`, which eviction reads, moves with it.
+   */
   #countAnswer(batch: Batch): void {
     const number = this.#nextNumber();
     this.#pub = this.#handed = number;
@@ -4371,12 +4371,12 @@ function acknowledgmentValueHash(key: EntityKey, value: unknown): string {
   return hashValue(fields);
 }
 
-/** The members' ops a batch answered since its steps last ran (StepCursor), which the cap and the steps count, as a new batch's own would. */
 /** Whether a line's readers (eventReach) hold any player. */
 function reachesPlayers(reach: ReturnType<typeof eventReach>): boolean {
   return reach === "all" || reach.length > 0;
 }
 
+/** The members' ops a batch answered since its steps last ran (StepCursor), which the cap and the steps count, as a new batch's own would. */
 function answeredSinceStep(batch: Batch): number {
   return batch.answered - batch.step.answered;
 }
