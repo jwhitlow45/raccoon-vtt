@@ -577,3 +577,24 @@ describe("rooms from one creator", () => {
     c.close();
   });
 });
+
+describe("a room loaded with no socket open", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+  });
+  after(() => t.close());
+
+  test("me answers from the same load twice, 3 s apart", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const first = await dm.me(roomId);
+    assert.equal(first.status, 200);
+    const loaded = t.manager.get(roomId);
+    assert.ok(loaded);
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    const second = await dm.me(roomId);
+    assert.equal(t.manager.get(roomId), loaded, "the room stayed loaded");
+    assert.deepEqual(second, first);
+  });
+});
