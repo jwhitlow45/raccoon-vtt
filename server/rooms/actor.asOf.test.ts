@@ -159,6 +159,31 @@ describe("readers waiting for their tick", () => {
     await assert.rejects(r.actor.asOf(r.clock.now), ViewBusyError, "a closed room answers busy");
   });
 
+  test("a copy read through read() waits as a reader does: bounded, to its deadline, and busy at a stop", async (t) => {
+    const r = await room(t);
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 25);
+    const copies = Array.from({ length: MAX_WAITING_READERS - 1 }, () => settled(r.actor.read((state) => state.log.length, T + 25)));
+    const late = settled(r.actor.read((state) => state.log.map((l) => l.text), T + 25));
+    await assert.rejects(r.actor.read(() => 0, T + 25), ViewBusyError, "one past the bound");
+    // A later chat in the next tick's batch, which none of the copies above may take.
+    moveTo(t, r.clock, T + 45);
+    chat(r.p1, "later");
+    await flush();
+    moveTo(t, r.clock, T + 25 + READER_DEADLINE_MS);
+    await flush();
+    assert.ok(copies.every((c) => c.done && c.error instanceof ViewBusyError), "each answers busy at its deadline");
+    assert.ok(late.done && late.error instanceof ViewBusyError);
+    // A copy waiting as the room stops answers busy, never the committed room.
+    const atStop = settled(r.actor.read((state) => state.log.map((l) => l.text), T + 25 + READER_DEADLINE_MS));
+    const down = r.actor.shutdown({ code: 1012, snapshot: false });
+    await flush();
+    assert.ok(atStop.done && atStop.error instanceof ViewBusyError, JSON.stringify(atStop.value));
+    r.gate.open();
+    await down;
+  });
+
   test("a reader older than the views kept answers busy, and one within them takes the view of its tick", async (t) => {
     const r = await room(t);
     t.mock.timers.enable({ apis: ["setTimeout"] });

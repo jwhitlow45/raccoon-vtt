@@ -402,7 +402,6 @@ type Command = (
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
-  | { t: "read"; at: number; run: (view: RoomView) => void; fail: (err: Error) => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
   /** The server's music tick (docs/design/design-v1-music.md 6.4): its step is worked out when the queue reaches it, never before. */
   | { t: "soundTick" }
@@ -1377,28 +1376,13 @@ export class RoomActor {
 
   /**
    * Runs `fn` on the room and its count as of `at`, when the reader
-   * arrived (asOf), in queue order, for copies that must not interleave
-   * with a snapshot.
+   * arrived: a reader as asOf takes one, counted among the waiting
+   * readers, bounded by its deadline and its signal, and answered busy if
+   * the room stops first.
    */
-  read<T>(fn: (state: RoomState, pub: number) => T, at = this.#opts.now()): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      if (this.#closed) {
-        reject(new ActorClosedError(this.roomId));
-        return;
-      }
-      this.#enqueue({
-        t: "read",
-        at,
-        run: (view) => {
-          try {
-            resolve(fn(view.state, view.pub));
-          } catch (err) {
-            reject(err as Error);
-          }
-        },
-        fail: reject,
-      });
-    });
+  read<T>(fn: (state: RoomState, pub: number) => T, at = this.#opts.now(), opts: { signal?: AbortSignal } = {}): Promise<T> {
+    if (this.#closed) return Promise.reject(new ActorClosedError(this.roomId));
+    return this.asOf(at, opts).then((view) => fn(view.state, view.pub));
   }
 
   /**
@@ -1478,11 +1462,6 @@ export class RoomActor {
     waiter.stop();
     if (err) waiter.reject(err);
     else this.#viewFor(waiter.a).then(waiter.resolve, waiter.reject);
-  }
-
-  /** The committed room as a view, which a read at shutdown answers from. */
-  #committedView(): RoomView {
-    return { tick: this.#readerTick(this.#opts.now()), ...this.#committed };
   }
 
   /**
@@ -1610,7 +1589,6 @@ export class RoomActor {
       this.#queue = [];
       for (const cmd of queued) {
         if (cmd.t === "sys" || cmd.t === "step") cmd.reject(new ActorClosedError(this.roomId));
-        if (cmd.t === "read") cmd.run(this.#committedView());
         if (cmd.t === "op" && cmd.lookup) this.#endLookup(cmd.lookup);
       }
       // A step waiting for the batch below never runs: the room it would delete from is going.
@@ -1872,8 +1850,6 @@ export class RoomActor {
         return;
       case "sys":
         return this.#processSys(cmd);
-      case "read":
-        return void this.asOf(cmd.at).then(cmd.run, cmd.fail);
       case "step":
         return this.#runStep(cmd);
       case "soundTick":
