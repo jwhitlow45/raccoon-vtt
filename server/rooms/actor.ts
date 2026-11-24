@@ -1840,7 +1840,8 @@ export class RoomActor {
         try {
           return this.#processOp(cmd, this.#settleFacts(cmd.lookup, cmd.facts));
         } finally {
-          // Steps a walk never installed after go, before a throw's refusal settles anything (#commandFailed).
+          // Steps a walk never installed go once the op is answered: a refused walk leaves none of them, and they go before a
+          // throw's refusal settles anything (#commandFailed).
           this.#restoreSteps();
         }
       case "hello":
@@ -2523,8 +2524,6 @@ export class RoomActor {
    * the same words, so the same tag sent again is refused again.
    */
   #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null, ids?: readonly string[]): Batch {
-    // A refused walk leaves none of the steps it ran first.
-    this.#restoreSteps();
     // Any refusal ends the client's gesture still asking: a later part then finds no chain and is refused, so none is read on a guess.
     this.#asking.delete(key);
     wm.staged = n;
