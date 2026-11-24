@@ -463,4 +463,97 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     assert.ok(held.some((m) => m.startsWith("snapshot")));
     assert.deepEqual(held, free);
   });
+
+  /** The frames that answered a socket's snapshot requests: each `wait` with its value, and each `snapshot`. */
+  const answers = (sent: readonly Wire[]) => sent.flatMap((m) => (m.t === "wait" ? [`wait ${m.ms}`] : m.t === "snapshot" ? ["snapshot"] : []));
+
+  /** A new socket of P1's session at `at`, P1's page's own unless `clientId` names another page, with its hello sent then. */
+  function reconnect(r: Awaited<ReturnType<typeof room>>, at: number, clientId = r.p1.clientId) {
+    r.timers.move(at);
+    const socket = socketOn(r.actor, { sessionId: r.p1.conn.sessionId, memberId: r.f.player.id, role: "player" }, r.now);
+    void r.actor.hello(socket.conn, { clientId, resumeFrom: clientId === r.p1.clientId ? r.p1.n + 1 : 1 });
+    return socket;
+  }
+
+  test("a hello takes the place of its client's delayed request as it arrives, so the request it replaced spends nothing", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
+    r.timers.enable();
+    // Two reconnects of P1's page inside the window its first snapshot spent, before the server hears its older sockets close.
+    const second = reconnect(r, T0 + 500);
+    await flush();
+    r.timers.move(T0 + 520);
+    await flush();
+    const third = reconnect(r, T0 + 600);
+    await flush();
+    for (let at = T0 + 620; at <= T0 + 3_000; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    assert.deepEqual([answers(second.sent), answers(third.sent)], [["wait 510"], ["wait 410", "snapshot"]]);
+  });
+
+  test("a snapshot's bytes count against its session once it is sent", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionBytes: 1 }, now) });
+    r.timers.enable();
+    const again = reconnect(r, T0 + 500);
+    await flush();
+    r.timers.move(T0 + 520);
+    await flush();
+    assert.deepEqual(answers(again.sent), ["wait 59500"], "P1's first snapshot, sent at T0, holds the session's bytes for a minute");
+  });
+
+  test("a request a newer hello took the place of sends its waits only up to then, though its batch publishes after", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now) });
+    r.timers.enable();
+    let land!: () => void;
+    const held = new Promise<void>((resolve) => (land = resolve));
+    r.db.beforeCommit = () => held;
+    // P1's reconnect waits 9.5 s, and a chat of the DM's in its tick holds its batch at the commit until 5 s.
+    const first = reconnect(r, T0 + 500);
+    chat(r.dm, "held");
+    await flush();
+    // A deletion step behind that batch holds the queue before any later tick, so the next reconnect is handled after
+    // the first's batch publishes, while the first is still its client's socket.
+    r.timers.move(T0 + 510);
+    const step = heldStep(r.actor);
+    await flush();
+    reconnect(r, T0 + 3_000);
+    await flush();
+    r.timers.move(T0 + 5_000);
+    land();
+    await flush();
+    for (let at = T0 + 5_500; at <= T0 + 9_500; at += 500) {
+      r.timers.move(at);
+      await flush();
+    }
+    step.release();
+    await step.done;
+    assert.deepEqual(answers(first.sent), ["wait 9500", "wait 7500"], "its wait, and the one each 2 s after it up to 3 s");
+  });
+
+  test("a delayed request that comes due and waits again counts nothing toward the abuse rule", async (t) => {
+    let budget!: SnapshotBudget;
+    const r = await room(t, { budget: (now) => (budget = new SnapshotBudget({ ipCount: 2, windowMs: 40_000, abuseMs: 30_000 }, now)) });
+    r.timers.enable();
+    // Another session at the same address spends both of the address's places by 1 s. A page of P1's session asks at
+    // 5 s and waits for the oldest place, which starts the session's time over budget.
+    const other = budget.keys("0199f0a0-0000-7000-8000-00000000b002", "203.0.113.20", false);
+    budget.record(other, 1_000, T0);
+    budget.record(other, 1_000, T0 + 1_000);
+    const page = reconnect(r, T0 + 5_000, uuidv7());
+    await flush();
+    for (let at = T0 + 5_500; at < T0 + 40_000; at += 500) {
+      r.timers.move(at);
+      await flush();
+    }
+    // The other session takes that place first, at 40 s, as its snapshot in another room would, so the page's request
+    // comes due 35 s after the session's time over budget started and waits again, for the next place at 41 s.
+    budget.record(other, 1_000, T0 + 40_000);
+    for (let at = T0 + 40_000; at <= T0 + 42_000; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    assert.equal(page.conn.closed, false);
+    assert.deepEqual(answers(page.sent).slice(-3), ["wait 1000", "wait 1000", "snapshot"], "its last wait, then the one it waits again, then its snapshot");
+  });
 });

@@ -317,15 +317,30 @@ export class SnapshotBudget {
 
   /** Spends one snapshot of `bytes` at `now`, kept in time order whatever order the rooms record in. */
   record(keys: readonly BudgetKey[], bytes: number, now = this.#now()): void {
+    this.reserve(keys, now)(bytes);
+  }
+
+  /**
+   * Spends one snapshot at `now` whose size is not known yet, kept in time
+   * order as `record` keeps it: it counts from `now` at once, and its bytes
+   * count once the function returned is called with them, as it is sent.
+   */
+  reserve(keys: readonly BudgetKey[], now = this.#now()): (bytes: number) => void {
     this.#sweep(now);
+    const spends: Spent[] = [];
     for (const k of keys) {
       this.#live(k.key, now);
       const list = this.#spent.get(k.key) ?? [];
       let at = list.length;
       while (at > 0 && list[at - 1]!.at > now) at--;
-      list.splice(at, 0, { at: now, bytes });
+      const spent = { at: now, bytes: 0 };
+      list.splice(at, 0, spent);
       this.#spent.set(k.key, list);
+      spends.push(spent);
     }
+    return (bytes) => {
+      for (const spent of spends) spent.bytes = bytes;
+    };
   }
 
   /**

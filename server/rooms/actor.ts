@@ -400,8 +400,8 @@ export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ delete
 
 type Command = (
   | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null; admitted?: Admitted | null; requeued?: boolean; lookupRefused?: true }
-  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean }
-  | { t: "snapshot"; conn: Connection; key: ClientKey }
+  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; sealIds: boolean; stored: number; fresh: boolean; admission: Admission }
+  | { t: "snapshot"; conn: Connection; key: ClientKey; admission: Admission }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
   /** The server's music tick (docs/design/design-v1-music.md 6.4): its step is worked out when the queue reaches it, never before. */
@@ -424,11 +424,35 @@ type Moment = { now: number; number: number };
 
 /**
  * A request a batch answers at its close (#answerReads): a snapshot, the
- * hello's or a delayed one's, with the moment it was asked at, the ack of
- * an op resent after its commit with the history after it, or a device's
- * `ids` ask (#processIds).
+ * hello's or a delayed one's, with its place in the snapshot budget, the
+ * ack of an op resent after its commit with the history after it, or a
+ * device's `ids` ask (#processIds).
  */
-type Read = { conn: Connection; key: ClientKey; resent?: number; at?: number; ids?: { k: number; memberId: string; ids: string[] } };
+type Read = { conn: Connection; key: ClientKey; resent?: number; admission?: Admission; ids?: { k: number; memberId: string; ids: string[] } };
+
+/**
+ * A snapshot request's place in the snapshot budget every room shares,
+ * decided once, as it arrives at `at` (#admit). It fits, its spend counted
+ * then, and the bytes it sends count once it is sent. Or the budget delays
+ * it by `delay` ms, and it comes due on the clock from then (Delayed). Or
+ * it is a fresh socket's hello past the abuse rule, which closes the
+ * session's sockets (#processHello). The publish that answers it carries
+ * this out and never asks the budget again, so no room's work before then
+ * can change it.
+ */
+type Admission =
+  | { at: number; kind: "fits"; sent: (bytes: number) => void }
+  | { at: number; kind: "waits"; delay: number; wait: Delayed }
+  | { at: number; kind: "abuse" };
+
+/**
+ * A snapshot request the budget delayed (#awaitDue), from its arrival
+ * until it comes due or a newer request of its client, a resync or the
+ * socket's end takes its place. `ended` is that moment on the server's
+ * clock, the last its `wait` frames are sent for, and `next` the timer of
+ * the next one (#sendWaits).
+ */
+type Delayed = { conn: Connection; ended: number | null; next: NodeJS.Timeout | null; cancel: () => void };
 
 /**
  * Where a batch's explore and map steps last ran (#stepInPlace): the state
@@ -730,7 +754,8 @@ export class RoomActor {
   #watermarks = new Map<ClientKey, Watermark>();
   #connections = new Set<Connection>();
   #clients = new Map<ClientKey, Connection>();
-  #delayed = new Map<ClientKey, { conn: Connection; cancel: () => void }>();
+  /** Each client's delayed snapshot request by the key it goes by, from its arrival until it comes due or another takes its place. */
+  #delayed = new Map<ClientKey, Delayed>();
   /**
    * Table displays that have had a snapshot, the only ones DM sockets count.
    * A display is counted once it can receive events, not when its socket
@@ -1151,7 +1176,16 @@ export class RoomActor {
       }
     }
     if (conn.closed) return;
-    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, fresh });
+    // The budget every room shares is asked as the hello arrives, so the work of this room or another one the session
+    // is in cannot change its answer (Admission). A hello takes the place of its client's delayed request then too,
+    // instead of spending the budget twice, so how long its turn in the queue takes never lets that request run first.
+    // A preview's request goes by its socket's own key (Connection.key once its hello is handled).
+    const moment = this.#clocks();
+    const request = conn.previewBy === null ? key : `preview|${conn.id}`;
+    this.#delayed.get(request)?.cancel();
+    this.#delayed.delete(request);
+    const admission = this.#admit(conn, request, moment.now, fresh);
+    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, sealIds: msg.sealIds === true, stored, fresh, admission }, moment);
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
@@ -1623,11 +1657,12 @@ export class RoomActor {
 
   // The queue.
 
-  #enqueue(cmd: Command): void {
+  /** `moment` is the clocks as the command arrived, read now unless its sender read them for it (hello). */
+  #enqueue(cmd: Command, moment = this.#clocks()): void {
     // A command's number, times and tick are its arrival's, so commands that waited behind a commit or a deletion step
     // and are handled in one millisecond once it ends keep the times and the batch they came at. The music's tick is
     // stamped too: only its step reads the clock as the queue reaches it, since the step is for that moment.
-    cmd.moment = this.#clocks();
+    cmd.moment = moment;
     if ("conn" in cmd) cmd.socketAt = cmd.conn.now();
     this.#queue.push(cmd);
     this.#drain();
@@ -1852,7 +1887,7 @@ export class RoomActor {
       case "hello":
         return this.#processHello(cmd);
       case "snapshot":
-        if (this.#snapshotOwed(cmd.conn, cmd.key)) this.#readSnapshot(cmd.conn, cmd.key);
+        if (this.#snapshotOwed(cmd.conn, cmd.key)) this.#readSnapshot(cmd.conn, cmd.key, cmd.admission);
         return;
       case "sys":
         return this.#processSys(cmd);
@@ -3081,12 +3116,6 @@ export class RoomActor {
       return;
     }
     const key = clientKey(conn.sessionId, cmd.clientId);
-    const delayed = this.#delayed.get(key);
-    if (delayed) {
-      // A reconnect replaces the client's delayed request instead of spending the budget twice.
-      delayed.cancel();
-      this.#delayed.delete(key);
-    }
     // What this socket kept is the client's it answered for until now, which a hello for another client never takes.
     if (conn.clientId !== null && conn.clientId !== cmd.clientId) takeKeptRejects(conn);
     conn.clientId = cmd.clientId;
@@ -3099,13 +3128,9 @@ export class RoomActor {
       // the device asks for or the players start on (docs/design/design-v1-floors.md 10, D-261107-288).
       conn.sceneId = asked === null ? null : mainFloorId(state, asked);
     }
-    if (cmd.fresh) {
-      const at = this.#time();
-      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned), at) > 0;
-      if (this.#budget.request(conn.sessionId, over, at)) {
-        this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
-        return;
-      }
+    if (cmd.admission.kind === "abuse") {
+      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+      return;
     }
     let wm = this.#watermarks.get(key);
     if (!wm) {
@@ -3121,7 +3146,7 @@ export class RoomActor {
       const batch = this.#ensureBatch();
       batch.watermarks.set(key, Math.max(batch.watermarks.get(key) ?? 0, wm.staged));
     }
-    this.#readSnapshot(conn, key);
+    this.#readSnapshot(conn, key, cmd.admission);
   }
 
   /**
@@ -3135,34 +3160,67 @@ export class RoomActor {
     conn.clientId = cmd.clientId;
     conn.held = null;
     if (!this.#previewStands(conn, this.#staged.state)) return;
-    const key = conn.key!;
-    const delayed = this.#delayed.get(key);
-    if (delayed) {
-      delayed.cancel();
-      this.#delayed.delete(key);
+    if (cmd.admission.kind === "abuse") {
+      this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+      return;
     }
-    if (cmd.fresh) {
-      const at = this.#time();
-      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned), at) > 0;
-      if (this.#budget.request(conn.sessionId, over, at)) {
-        this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
-        return;
-      }
-    }
-    this.#readSnapshot(conn, key);
+    this.#readSnapshot(conn, conn.key!, cmd.admission);
   }
 
   /**
-   * A snapshot asked for, by a hello or as a delayed one's wait ends, joins
+   * A snapshot asked for, by a hello or as a delayed one comes due, joins
    * the open batch as a read (opening one if none is), and is built from
    * the committed state once that batch commits, with its number
    * (#answerReads). So each number a device gets is a tick at or after its
    * own request, and a request waits behind a commit being retried, as an
-   * op does.
+   * op does. Its place in the snapshot budget was settled as it arrived.
    */
-  #readSnapshot(conn: Connection, key: ClientKey): void {
-    this.#ensureBatch().reads.push({ conn, key, at: this.#time() });
+  #readSnapshot(conn: Connection, key: ClientKey, admission: Admission): void {
+    this.#ensureBatch().reads.push({ conn, key, admission });
     this.#scheduleCommit();
+  }
+
+  /**
+   * A snapshot request's place in the snapshot budget (Admission), read as
+   * it arrives at `at` under the key it goes by: delayed while its session
+   * or address is over budget then, and counted at once otherwise. A fresh
+   * socket's hello also counts toward the abuse rule, and a delayed
+   * request that comes due never does (SnapshotBudget.request).
+   */
+  #admit(conn: Connection, key: ClientKey, at: number, fresh: boolean): Admission {
+    const keys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
+    const delay = this.#budget.delay(keys, at);
+    if (fresh && this.#budget.request(conn.sessionId, delay > 0, at)) return { at, kind: "abuse" };
+    if (delay > 0) return { at, kind: "waits", delay, wait: this.#awaitDue(conn, key, at + delay) };
+    return { at, kind: "fits", sent: this.#budget.reserve(keys, at) };
+  }
+
+  /**
+   * A delayed request's wait (Delayed), on the clock from its arrival
+   * whenever the batch that answers it publishes. At `due` it asks the
+   * budget again, as a request that arrives then, and joins the queue at
+   * that moment (#delayedMoment).
+   */
+  #awaitDue(conn: Connection, key: ClientKey, due: number): Delayed {
+    const delayed: Delayed = { conn, ended: null, next: null, cancel: () => undefined };
+    const end = (at: number) => {
+      delayed.ended ??= at;
+      if (delayed.next) conn.cancel(delayed.next);
+      delayed.next = null;
+    };
+    const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
+      end(due);
+      this.#delayed.delete(key);
+      const moment = this.#delayedMoment(due);
+      this.#insertByMoment({ t: "snapshot", conn, key, moment, admission: this.#admit(conn, key, moment.now, false) });
+      this.#drain();
+    });
+    delayed.cancel = () => {
+      end(this.#opts.now());
+      conn.cancel(timer);
+    };
+    this.#delayed.set(key, delayed);
+    return delayed;
   }
 
   /** Whether a snapshot asked for on `conn` is still owed: a preview is never its client's current socket, and its key is its own (Connection.key). */
@@ -3179,15 +3237,13 @@ export class RoomActor {
 
   /**
    * A snapshot of the committed state, sent at the close of the batch `pub`
-   * numbers (#answerReads), unless the snapshot budget delays it. The budget
-   * reads `at`, the moment it was asked at.
+   * numbers (#answerReads), unless the snapshot budget delayed it as it was
+   * asked for (Admission).
    */
-  #snapshot(conn: Connection, key: ClientKey, pub: number, at: number): void {
+  #snapshot(conn: Connection, key: ClientKey, pub: number, admission: Admission): void {
     if (conn.closed) return;
-    const budgetKeys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
-    const delay = this.#budget.delay(budgetKeys, at);
-    if (delay > 0) {
-      this.#delaySnapshot(conn, key, delay, at);
+    if (admission.kind !== "fits") {
+      if (admission.kind === "waits") this.#sendWaits(conn, admission);
       return;
     }
     const wm = this.#watermarks.get(key);
@@ -3212,7 +3268,7 @@ export class RoomActor {
     conn.previewsHeld.clear();
     conn.helloPending = false;
     conn.helloAllowed = false;
-    this.#budget.record(budgetKeys, bytes, at);
+    admission.sent(bytes);
     conn.send(this.#presenceFor(conn, this.#online(), this.#displayCount()));
     if (conn.display && !this.#shownDisplays.has(conn)) {
       this.#shownDisplays.add(conn);
@@ -3221,36 +3277,34 @@ export class RoomActor {
   }
 
   /**
-   * A snapshot asked for at `at` that the budget delays by `delay`: due at
-   * `at` plus the delay, with a `wait` frame now and one every 2 s after
-   * `at`, each saying what is left of the delay then. Every time reads `at`
-   * and the clock, never when the batch that answered it published.
+   * A delayed request's answer, sent as the batch that holds it publishes:
+   * a `wait` frame with its delay, then one each 2 s after its arrival with
+   * what is left of the delay then, each once its time has come and while
+   * the request still waits. Those whose time came while the batch
+   * committed go at once, so the frames are the same however long its
+   * commit took.
    */
-  #delaySnapshot(conn: Connection, key: ClientKey, delay: number, at: number): void {
-    const due = at + delay;
+  #sendWaits(conn: Connection, admission: Extract<Admission, { kind: "waits" }>): void {
+    const { at, delay, wait } = admission;
     conn.send({ t: "wait", ms: delay });
-    let wait: NodeJS.Timeout | null = null;
-    const nextWait = (k: number) => {
-      if (2000 * k >= delay) return;
-      wait = conn.after(Math.max(0, at + 2000 * k - this.#opts.now()), () => {
+    const from = (k: number): void => {
+      for (; 2000 * k < delay; k++) {
+        const time = at + 2000 * k;
+        const now = this.#opts.now();
+        if (time > (wait.ended ?? now)) {
+          if (wait.ended === null) {
+            const next = k;
+            wait.next = conn.after(time - now, () => {
+              wait.next = null;
+              from(next);
+            });
+          }
+          return;
+        }
         conn.send({ t: "wait", ms: delay - 2000 * k });
-        nextWait(k + 1);
-      });
+      }
     };
-    nextWait(1);
-    const timer = conn.after(Math.max(0, due - this.#opts.now()), () => {
-      if (wait) conn.cancel(wait);
-      this.#delayed.delete(key);
-      this.#insertByMoment({ t: "snapshot", conn, key, moment: this.#delayedMoment(due) });
-      this.#drain();
-    });
-    this.#delayed.set(key, {
-      conn,
-      cancel: () => {
-        if (wait) conn.cancel(wait);
-        conn.cancel(timer);
-      },
-    });
+    from(1);
   }
 
   /**
@@ -3860,8 +3914,8 @@ export class RoomActor {
           if (conn.closed || conn.closing || conn.held === null) continue;
           conn.send({ t: "ev", seq: this.#handOut(batch.pub), changes: [], acks: [read.resent] });
           this.#sendHistory(conn, batch.pub);
-        } else if (this.#snapshotOwed(conn, key) && conn.held === null) {
-          this.#snapshot(conn, key, batch.pub, read.at ?? this.#opts.now());
+        } else if (read.admission !== undefined && this.#snapshotOwed(conn, key) && conn.held === null) {
+          this.#snapshot(conn, key, batch.pub, read.admission);
         }
       } catch (err) {
         this.#fault("snapshot failed", err, conn, read.resent === undefined ? "hello" : "resend");

@@ -154,6 +154,19 @@ describe("SnapshotBudget", () => {
     assert.equal(b.delay(keys, 150_000), 10_000, "a request at 150,000 counts all 20");
   });
 
+  test("a reserved spend counts at once, and its bytes once they are given, at the time it was reserved", () => {
+    const c = clock(100_000);
+    const b = new SnapshotBudget({ sessionCount: 3, sessionBytes: 10_000 }, c.now);
+    const keys = b.keys("s1", "ip1", false);
+    b.record(keys, 4_000, 100_000);
+    const sent = b.reserve(keys, 100_010);
+    b.record(keys, 4_000, 100_005);
+    assert.equal(b.delay(keys, 100_020), 59_980, "the third request in the minute counts: the next waits for the first to leave");
+    assert.equal(b.delay(keys, 160_000), 0, "a spend not sent yet holds no bytes");
+    sent(7_000);
+    assert.equal(b.delay(keys, 160_000), 5, "once sent, its bytes count from its place, after the one at 100,005");
+  });
+
   test("a call at a later time keeps every spend a request a little earlier still counts", () => {
     const c = clock(100_000);
     const b = new SnapshotBudget({}, c.now);
