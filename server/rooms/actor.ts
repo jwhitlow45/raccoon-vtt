@@ -1454,7 +1454,8 @@ export class RoomActor {
     for (let i = this.#views.length - 1; i >= 0; i--) {
       const entry = this.#views[i]!;
       if (!entry.load && entry.view.tick > a) continue;
-      const age = entry.load && a < entry.view.tick ? this.#opts.now() - this.loadedAt : this.#opts.now() - a;
+      // The load's view ages from the load's end for a reader that came before it, and from the reader's tick after.
+      const age = this.#opts.now() - (entry.load ? Math.max(a, this.loadedAt) : a);
       return age > RETAIN_MS ? null : entry.view;
     }
     return null;

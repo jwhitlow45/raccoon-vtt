@@ -245,6 +245,28 @@ describe("a room that published nothing since it loaded", () => {
       assert.equal(view.seq, actor.committed.seq, `${after} ms after the load`);
     }
   });
+
+  test("a reader in the load's own tick, before a load that ends mid-tick, takes the load's view up to its age bound from the load's end", async (t) => {
+    const f = scopeFixture();
+    const base = Math.ceil(T0 / 20) * 20;
+    const clock = { now: base + 19 };
+    const now = () => clock.now;
+    const actor = await RoomActor.load({
+      pool: new StoredRoomDb(f.state).pool(),
+      info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
+      log: quiet,
+      budget: new SnapshotBudget({}, now),
+      gateway: {} as RoomGateway,
+      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null },
+    });
+    assert.ok(actor);
+    t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
+    const arrived = actor.loadedAt - 1;
+    clock.now = actor.loadedAt + RETAIN_MS;
+    assert.equal((await actor.asOf(arrived)).seq, actor.committed.seq, "at its age bound");
+    clock.now = actor.loadedAt + RETAIN_MS + 1;
+    await assert.rejects(actor.asOf(arrived), ViewBusyError, "past it");
+  });
 });
 
 describe("a clock set back", () => {
