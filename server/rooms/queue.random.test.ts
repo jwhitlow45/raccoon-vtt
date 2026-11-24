@@ -611,6 +611,11 @@ async function runTwin(t: TestContext, twin: RTwin, plan: Shared[][], ownR: () =
     dues.push(twin.clock.now + Math.max(0, ms ?? 0));
     return mocked(fn, ms, ...args);
   }) as typeof globalThis.setTimeout;
+  // The loop's clock, which the drain and an ask's reading spend their turns on (actor.ts DRAIN_TURN_MS, ASK_TURN_MS),
+  // is the twin's clock too. Read in real time, a slow machine ends their turns early, and commands the room has not
+  // handled in the few turns `work` gives it wait past a shared event that opens or closes a socket, as no command does
+  // on the stepped clock.
+  const loop = t.mock.method(performance, "now", () => twin.clock.now);
   let skew: { restore(): void } | null = null;
   let stillUntil = -1;
   /** Until when this twin's commits are held or slow, or its queue held, for the floors. */
@@ -978,9 +983,12 @@ async function runTwin(t: TestContext, twin: RTwin, plan: Shared[][], ownR: () =
     twin.hooks.commitLength(0);
     stillUntil = -1;
     await to(now() + 2_000);
+    // A command still queued here has sent nothing yet, so the frames and answers compared below would miss it.
+    assert.equal(twin.actor.queueLength, 0, `${twin.name}: every command was handled before the run ended`);
   } finally {
     skew?.restore();
     globalThis.setTimeout = mocked;
+    loop.mock.restore();
     t.mock.timers.reset();
   }
 }
