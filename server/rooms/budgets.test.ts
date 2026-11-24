@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
-import { DEFAULT_SNAPSHOT_BUDGET, DEFAULT_SOCKET_CAPS, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket } from "./budgets.ts";
+import { DEFAULT_SNAPSHOT_BUDGET, DEFAULT_SOCKET_CAPS, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket, type DueOutcome } from "./budgets.ts";
 
 function clock(start = 0): { now: () => number; tick: (ms: number) => void } {
   let t = start;
@@ -266,26 +266,81 @@ describe("SnapshotBudget", () => {
 
   test("a session may have as many requests waiting at once as it may hold sockets, and an address likewise", () => {
     assert.deepEqual([DEFAULT_SNAPSHOT_BUDGET.sessionWaiting, DEFAULT_SNAPSHOT_BUDGET.ipWaiting], [DEFAULT_SOCKET_CAPS.perSession, DEFAULT_SOCKET_CAPS.perIp]);
-    const c = clock(0);
-    const b = new SnapshotBudget({ sessionWaiting: 2, ipWaiting: 3 }, c.now);
+    const b = new SnapshotBudget({ sessionWaiting: 2, ipWaiting: 3 }, () => 0);
     const one = b.keys("s1", "ip-1", false);
     const two = b.keys("s2", "ip-1", false);
-    const first = b.wait(one, 5_000);
-    b.wait(one, 8_000);
-    assert.equal(b.mayWait(one, 1_000), false, "the session's two");
-    assert.equal(b.mayWait(two, 1_000), true, "another session at the address, which holds two");
-    b.wait(two, 8_000);
-    assert.equal(b.mayWait(two, 1_000), false, "the address's three");
-    // A request counts until its due time, or until it is dropped: whichever the time it was moved to says.
-    assert.equal(b.mayWait(one, 5_000), true);
-    first.until = 2_000;
-    assert.equal(b.mayWait(one, 2_000), true);
-    assert.equal(b.mayWait(one, 1_999), false, "a time before it was dropped still counts it");
+    b.wait("X|s1|a", one, 5_000, 0);
+    b.wait("X|s1|b", one, 8_000, 0);
+    assert.equal(b.mayWait(one, 0), false, "the session's two");
+    assert.equal(b.mayWait(two, 0), true, "another session at the address, which holds two");
+    b.wait("X|s2|a", two, 8_000, 0);
+    assert.equal(b.mayWait(two, 0), false, "the address's three");
+    // The same id takes the old request's place, and a dropped request counts no more.
+    b.wait("X|s1|a", one, 6_000, 0);
+    assert.deepEqual([b.waiting, b.mayWait(one, 0)], [3, false]);
+    b.drop("X|s1|a", 0);
+    assert.deepEqual([b.waiting, b.mayWait(one, 0)], [2, true]);
     // The pinned room's second key counts per session.
-    assert.equal(b.mayWait(b.keys("s3", "ip-1", true), 1_000), true);
-    c.tick(130_000);
-    b.record(b.keys("later", "ip-later", false), 1_000);
-    assert.equal(b.size, 2, "the waiting lists went a window after their requests' times");
+    assert.equal(b.mayWait(b.keys("s3", "ip-1", true), 0), true);
+  });
+
+  test("requests due by a call's time are settled first, earliest first, so one that waits again still counts", () => {
+    const c = clock(0);
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000, sessionWaiting: 2 }, c.now);
+    const keys = b.keys("s1", "ip-1", false);
+    b.record(keys, 1, 0);
+    const heard: string[] = [];
+    const hear = (id: string) => (o: DueOutcome) => void heard.push(`${id} ${o.at} ${o.kind === "waits" ? `waits ${o.delay}` : "fits"}`);
+    b.wait("X|s1|late", keys, 1_000, 200, hear("late"));
+    b.wait("X|s1|early", keys, 1_000, 100, hear("early"));
+    b.drop("X|s1|early", 100);
+    b.wait("X|s1|early", keys, 900, 100, hear("early"));
+    // No timer has fired by 1,500 ms, and the call settles both before it reads the budget.
+    assert.equal(b.mayWait(keys, 1_500), true);
+    assert.deepEqual(heard, ["early 900 waits 100", "late 1000 fits", "early 1000 waits 1000"]);
+    assert.equal(b.waiting, 1);
+    assert.equal(b.delay(keys, 1_500), 500);
+  });
+
+  test("every call that reads, spends or drops settles the requests due by its time first", () => {
+    const run = (call: (b: SnapshotBudget, keys: ReturnType<SnapshotBudget["keys"]>) => void) => {
+      const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);
+      const keys = b.keys("s1", "ip-1", false);
+      b.record(keys, 1, 0);
+      const heard: number[] = [];
+      b.wait("X|s1|a", keys, 1_000, 0, (o) => void heard.push(o.at));
+      call(b, keys);
+      return [heard, b.waiting];
+    };
+    assert.deepEqual(run((b, keys) => b.delay(keys, 1_500)), [[1_000], 0]);
+    assert.deepEqual(run((b, keys) => b.reserve(keys, 1_500)), [[1_000], 0]);
+    assert.deepEqual(run((b, keys) => b.mayWait(keys, 1_500)), [[1_000], 0]);
+    assert.deepEqual(run((b) => b.drop("X|s1|a", 1_500)), [[1_000], 0], "a request due before its drop spent its place");
+    assert.deepEqual(run((b) => b.drop("X|s1|a", 900)), [[], 0], "one dropped before it is due spends nothing");
+  });
+
+  test("a request dropped as it arrives leaves nothing behind, however many sockets come and go", () => {
+    const b = new SnapshotBudget({}, () => 0);
+    for (let i = 0; i < 1_000; i++) {
+      const keys = b.keys("s1", `ip-${i % 7}`, false);
+      b.wait(`X|s1|${i}`, keys, 60_000, i);
+      b.drop(`X|s1|${i}`, i);
+    }
+    assert.deepEqual([b.waiting, b.size], [0, 0]);
+  });
+
+  test("the budget's own timer settles a request at its due time with no call to the budget, and holds no process open", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);
+    const keys = b.keys("s1", "ip-1", false);
+    b.record(keys, 1, 0);
+    const heard: DueOutcome[] = [];
+    b.wait("X|s1|a", keys, 1_000, 0, (o) => void heard.push(o));
+    t.mock.timers.tick(999);
+    assert.equal(heard.length, 0);
+    t.mock.timers.tick(1);
+    assert.deepEqual(heard.map((o) => [o.at, o.kind]), [[1_000, "fits"]]);
+    assert.equal(b.waiting, 0);
   });
 });
 

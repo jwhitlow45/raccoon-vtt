@@ -30,7 +30,7 @@ import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { roomStoredBytes } from "../assets/quota.ts";
-import { OP_RATE, SnapshotBudget, TokenBucket, type BudgetKey, type Clock, type Waiting } from "./budgets.ts";
+import { OP_RATE, SnapshotBudget, TokenBucket, type Clock, type WaitingRequest } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
@@ -454,26 +454,23 @@ type Admission =
   | { at: number; resyncs: number; kind: "waits"; delay: number; wait: Delayed };
 
 /**
- * A snapshot request the budget delayed (#awaitDue), from its arrival
- * until it comes due or a newer request of its client or the client's
- * close of its socket takes its place. `ended` is that moment on the
- * server's clock, the last its `wait` frames are sent for, and `next` the
- * timer of the next one (#sendWaits). A resync of its socket leaves it to
- * come due with no answer (#resync). `joined` says the command
- * that answers it is in the queue at the moment numbered `after`, so the
- * snapshot it comes due to joins the queue behind that command.
+ * What the room keeps of one wait of a delayed snapshot request of an
+ * open socket (#awaitDue): from its arrival or its last due time until it
+ * comes due, until a newer request of its client takes its place, or until
+ * its socket closes. The budget holds the request itself (`request`). `ended`
+ * is that moment on the server's clock, the last its `wait` frames are
+ * sent for (`end`), and `next` the timer of the next one (#sendWaits). A
+ * resync of its socket leaves it to come due with no answer (#resync).
+ * `joined` says the command that answers it is in the queue at the moment
+ * numbered `after`, so the snapshot it comes due to joins the queue behind
+ * that command.
  */
 type Delayed = {
-  /** The socket that asked, and null once the room closed it, when nothing is owed to it any more (release). */
-  conn: Connection | null;
+  conn: Connection;
+  request: WaitingRequest;
   ended: number | null;
   next: NodeJS.Timeout | null;
-  /** Drops it as its client closes its socket or sends a newer hello: it never comes due, and counts no more (Waiting). */
-  cancel: () => void;
-  /** Stops its timer as the room shuts down, its count left to end at its due time. */
-  stop: () => void;
-  /** Lets go of its socket, which the room closed: it still comes due, holding only its keys (detach). */
-  release: () => void;
+  end: (at: number) => void;
   joined: (after: number) => void;
 };
 
@@ -777,7 +774,7 @@ export class RoomActor {
   #watermarks = new Map<ClientKey, Watermark>();
   #connections = new Set<Connection>();
   #clients = new Map<ClientKey, Connection>();
-  /** Each client's delayed snapshot request by the key it goes by, from its arrival until it comes due or another takes its place. */
+  /** The current wait of each open socket's delayed snapshot request, by the key its client goes by (Delayed). */
   #delayed = new Map<ClientKey, Delayed>();
   /** How many resyncs each socket was sent, which its requests from before the latest go unanswered for (Admission). */
   #resyncs = new WeakMap<Connection, number>();
@@ -1084,16 +1081,9 @@ export class RoomActor {
     return this.#deleted.size;
   }
 
-  /** How many delayed snapshot requests wait to come due, for its tests. */
+  /** How many delayed snapshot requests of open sockets the room follows, for its tests. */
   get delayedRequests(): number {
     return this.#delayed.size;
-  }
-
-  /** How many of those still hold their socket, for its tests: one the room closed holds only its keys (Delayed). */
-  get delayedSockets(): number {
-    let held = 0;
-    for (const delayed of this.#delayed.values()) if (delayed.conn !== null) held++;
-    return held;
   }
 
   /** How many clients' gestures still ask or were refused, and whether an ask is being read, for its tests (MD4-ASTRA-6). */
@@ -1132,17 +1122,15 @@ export class RoomActor {
       this.#askRefused.delete(key);
       this.#wingGroups.delete(key);
     }
-    // A socket the room closed keeps its delayed request, which comes due as it would have: when the room closes it
-    // follows how far the room's queue has got, and so must not decide what the session's budget spends or counts. A
-    // request is found by its socket, not by Connection.key, which is null until its hello is handled.
+    // A socket's delayed request is found by its socket, not by Connection.key, which is null until its hello is handled.
+    // Its client's close drops it. One the room closed waits on in the budget as it was, with nothing owed to the socket:
+    // the moment the room closes a socket follows how far its queue has got, so it must not decide what the session's
+    // budget spends or counts.
     for (const [request, delayed] of this.#delayed) {
       if (delayed.conn !== conn) continue;
-      if (conn.closedWith === null) {
-        delayed.cancel();
-        this.#delayed.delete(request);
-      } else {
-        delayed.release();
-      }
+      this.#delayed.delete(request);
+      this.#letGo(delayed);
+      if (conn.closedWith === null) this.#budget.drop(delayed.request.id, this.#opts.now());
     }
     cancelPreviews(conn, this.#connections);
     this.#held.delete(conn);
@@ -1214,8 +1202,13 @@ export class RoomActor {
     // socket's own key (Connection.key once its hello is handled).
     const at = this.#opts.now();
     const request = conn.previewBy === null ? key : `preview|${conn.id}`;
-    this.#delayed.get(request)?.cancel();
-    this.#delayed.delete(request);
+    // Found by its id in the budget, so a hello finds its client's request after the room unloaded and loaded again.
+    this.#budget.drop(this.#requestId(request), at);
+    const replaced = this.#delayed.get(request);
+    if (replaced) {
+      this.#delayed.delete(request);
+      this.#letGo(replaced);
+    }
     // A hello past the abuse rule closes the session's sockets in this room as it arrives, so the sockets that close are
     // the ones open then, never one that came while the hello waited its turn in the queue.
     if (fresh && this.#pastAbuseRule(conn, at)) {
@@ -1690,7 +1683,8 @@ export class RoomActor {
       this.#clearSoundTimer();
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
       if (this.#markTimer) clearTimeout(this.#markTimer);
-      for (const d of this.#delayed.values()) d.stop();
+      // The budget keeps each request waiting as it was, as it keeps one whose socket the room closed (detach).
+      for (const d of this.#delayed.values()) this.#letGo(d);
       this.#delayed.clear();
       // An ask being read goes unanswered, as queued work does: its client asks again after it reconnects.
       this.#reading = null;
@@ -3269,8 +3263,19 @@ export class RoomActor {
     const delay = this.#budget.delay(keys, at);
     if (delay <= 0) return { at, resyncs, kind: "fits", sent: this.#budget.reserve(keys, at) };
     if (!this.#budget.mayWait(keys, at)) return null;
-    const due = at + delay;
-    return { at, resyncs, kind: "waits", delay, wait: this.#awaitDue(conn, key, keys, due, this.#budget.wait(keys, due), resyncs) };
+    const request = this.#budget.wait(this.#requestId(key), keys, at + delay, at);
+    return { at, resyncs, kind: "waits", delay, wait: this.#awaitDue(conn, key, request, resyncs) };
+  }
+
+  /** A delayed request's id in the budget: this room's id and the key its client goes by here (WaitingRequest). */
+  #requestId(key: ClientKey): string {
+    return `${this.roomId}|${key}`;
+  }
+
+  /** Stops a wait's frames, and leaves its request to the budget with nothing owed to the room any more. */
+  #letGo(delayed: Delayed): void {
+    delayed.end(this.#opts.now());
+    delayed.request.onDue = null;
   }
 
   #resyncsOf(conn: Connection): number {
@@ -3279,68 +3284,50 @@ export class RoomActor {
 
   /**
    * A delayed request's wait (Delayed), on the clock from its arrival
-   * whenever the batch that answers it publishes. It asks the budget again
-   * as a request that arrives at `due`, whenever its timer fires, and joins
-   * the queue where #delayedMoment places it, which follows how far the
-   * room's queue has got and so never decides its place in the budget.
-   * The timer is the room's, not the socket's, so a socket the room closes
-   * meanwhile still asks at `due` (detach). The snapshot it comes due to
-   * joins the queue behind the command that answers the request, at the
-   * earliest at that command's moment (Delayed.joined), and waits for it to
-   * join when it has not yet: a hello joins after its watermark read. One
-   * that waits again goes on counting against its keys' bound (Waiting).
+   * whenever the batch that answers it publishes. The budget decides each
+   * due time (SnapshotBudget), whatever has become of the socket or the
+   * room by then, as a request that arrives at the due time, and tells the
+   * room while it follows the request. The snapshot or the next wait then
+   * joins the queue where #delayedMoment places it, which follows how far
+   * the room's queue has got and so never decides its place in the budget:
+   * behind the command that answers the request, at the earliest at that
+   * command's moment (Delayed.joined), and once that command has joined: a
+   * hello joins after its watermark read.
    */
-  #awaitDue(conn: Connection | null, key: ClientKey, keys: readonly BudgetKey[], due: number, waiting: Waiting, resyncs: number): Delayed {
+  #awaitDue(conn: Connection, key: ClientKey, request: WaitingRequest, resyncs: number): Delayed {
     let after: number | null = null;
     let join: ((after: number) => void) | null = null;
-    const end = (at: number) => {
-      delayed.ended ??= at;
-      if (delayed.next) delayed.conn?.cancel(delayed.next);
-      delayed.next = null;
-    };
-    const timer = setTimeout(() => {
-      if (this.#closed) return;
-      end(due);
-      if (this.#delayed.get(key) === delayed) this.#delayed.delete(key);
-      const delay = this.#budget.delay(keys, due);
-      let admission: Admission;
-      if (delay > 0) {
-        waiting.until = due + delay;
-        admission = { at: due, resyncs, kind: "waits", delay, wait: this.#awaitDue(delayed.conn, key, keys, due + delay, waiting, resyncs) };
-      } else {
-        admission = { at: due, resyncs, kind: "fits", sent: this.#budget.reserve(keys, due) };
-      }
-      join = (from) => {
-        const conn = delayed.conn;
-        if (this.#closed || conn === null) return;
-        const moment = this.#delayedMoment(Math.max(due, from));
-        this.#insertByMoment({ t: "snapshot", conn, key, moment, admission });
-        if (admission.kind === "waits") admission.wait.joined(moment.number);
-        this.#drain();
-      };
-      if (after !== null) join(after);
-    }, Math.max(0, due - this.#opts.now()));
     const delayed: Delayed = {
       conn,
+      request,
       ended: null,
       next: null,
-      cancel: () => {
-        end(this.#opts.now());
-        clearTimeout(timer);
-        waiting.until = Math.min(waiting.until, this.#opts.now());
-      },
-      stop: () => {
-        end(this.#opts.now());
-        clearTimeout(timer);
-      },
-      release: () => {
-        end(this.#opts.now());
-        delayed.conn = null;
+      end: (at) => {
+        delayed.ended ??= at;
+        if (delayed.next) conn.cancel(delayed.next);
+        delayed.next = null;
       },
       joined: (at) => {
         after = at;
         join?.(at);
       },
+    };
+    request.onDue = (outcome) => {
+      delayed.end(outcome.at);
+      if (this.#delayed.get(key) === delayed) this.#delayed.delete(key);
+      request.onDue = null;
+      const admission: Admission =
+        outcome.kind === "waits"
+          ? { at: outcome.at, resyncs, kind: "waits", delay: outcome.delay, wait: this.#awaitDue(conn, key, request, resyncs) }
+          : { at: outcome.at, resyncs, kind: "fits", sent: outcome.sent };
+      join = (from) => {
+        if (this.#closed || conn.closed) return;
+        const moment = this.#delayedMoment(Math.max(outcome.at, from));
+        this.#insertByMoment({ t: "snapshot", conn, key, moment, admission });
+        if (admission.kind === "waits") admission.wait.joined(moment.number);
+        this.#drain();
+      };
+      if (after !== null) join(after);
     };
     this.#delayed.set(key, delayed);
     return delayed;

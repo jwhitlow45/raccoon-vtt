@@ -41,20 +41,26 @@ async function room(t: TestContext, opts: { budget?: (now: () => number) => Snap
   const db = new StoredRoomDb(f.state);
   const warned: Logged[] = [];
   const log = { info() {}, debug() {}, error() {}, warn: (obj: Record<string, unknown>, msg?: string) => void warned.push({ msg: msg ?? "", obj }) };
-  const actor = await RoomActor.load({
-    pool: opts.pool?.(db.pool()) ?? db.pool(),
-    info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
-    log,
-    budget: opts.budget?.(now) ?? new SnapshotBudget({}, now),
-    gateway: {} as RoomGateway,
-    options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true, ...opts.options },
-  });
-  assert.ok(actor);
-  t.after(() => {
-    t.mock.timers.reset();
-    db.beforeCommit = undefined;
-    return actor.shutdown({ code: 1012, snapshot: false });
-  });
+  const budget = opts.budget?.(now) ?? new SnapshotBudget({}, now);
+  /** The room loaded, as the server loads it again after it unloaded, on the same budget. */
+  const load = async () => {
+    const loaded = await RoomActor.load({
+      pool: opts.pool?.(db.pool()) ?? db.pool(),
+      info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
+      log,
+      budget,
+      gateway: {} as RoomGateway,
+      options: { batchMs: 20, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: null, standingClock: true, ...opts.options },
+    });
+    assert.ok(loaded);
+    t.after(() => {
+      t.mock.timers.reset();
+      db.beforeCommit = undefined;
+      return loaded.shutdown({ code: 1012, snapshot: false });
+    });
+    return loaded;
+  };
+  const actor = await load();
   // Opened while the clock stands and the timers are real.
   const dm = await ScopeClient.open(actor, f.dm, "dm", now);
   const p1 = await ScopeClient.open(actor, f.player, "player", now);
@@ -80,7 +86,7 @@ async function room(t: TestContext, opts: { budget?: (now: () => number) => Snap
       timers.mock(Math.max(mocked, at));
     },
   };
-  return { f, clock, db, actor, dm, dms, p1, now, warned, timers };
+  return { f, clock, db, actor, dm, dms, p1, now, warned, timers, budget, load };
 }
 
 async function flush(): Promise<void> {
@@ -527,7 +533,8 @@ describe("a snapshot's wait read from the hello's arrival", () => {
   });
 
   test("requests of sockets the room closed count against their session's bound on requests waiting at once until each is answered", async (t) => {
-    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now) });
+    let budget!: SnapshotBudget;
+    const r = await room(t, { budget: (now) => (budget = new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now)) });
     r.timers.enable();
     // Twelve pages of P1's session ask while it is over budget, and the room closes each socket as its second hello
     // would close it (ws.ts), once its wait is sent.
@@ -541,7 +548,7 @@ describe("a snapshot's wait read from the hello's arrival", () => {
       page.conn.close(CLOSE.authFailure, "unexpected hello");
       r.actor.detach(page.conn);
     }
-    assert.deepEqual([r.actor.delayedRequests, r.actor.delayedSockets], [8, 0], "eight wait, and none holds its closed socket");
+    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [8, 0], "eight wait in the budget, and the room follows none");
     assert.deepEqual(
       pages.map((p) => [answers(p.sent).length, p.conn.closedWith]),
       [...Array.from({ length: 8 }, () => [1, CLOSE.authFailure]), ...Array.from({ length: 4 }, () => [0, CLOSE.abuse])],
@@ -550,7 +557,7 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     // At 10 s the first fits and the rest wait again, still counted, so the session has room for one more.
     r.timers.move(T0 + 10_100);
     await flush();
-    assert.equal(r.actor.delayedRequests, 7);
+    assert.deepEqual([budget.waiting, r.actor.delayedRequests], [7, 0], "the room follows none of them as they wait again");
     const more = reconnect(r, T0 + 10_100, uuidv7());
     await flush();
     const past = reconnect(r, T0 + 10_120, uuidv7());
@@ -558,6 +565,65 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     r.timers.move(T0 + 10_140);
     await flush();
     assert.deepEqual([answers(more.sent).length, more.conn.closed, past.conn.closedWith], [1, false, CLOSE.abuse]);
+  });
+
+  test("requests due before a hello is read are settled first, so one that waits again keeps its place against the bound", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000, sessionWaiting: 2 }, now) });
+    r.timers.enable();
+    // Two pages of P1's session wait for the place P1's first snapshot holds until 10 s, and the room closes both.
+    for (const at of [T0 + 500, T0 + 540]) {
+      const page = reconnect(r, at, uuidv7());
+      await flush();
+      r.timers.move(at + 30);
+      await flush();
+      page.conn.close(CLOSE.authFailure, "unexpected hello");
+      r.actor.detach(page.conn);
+    }
+    // The loop is busy past their due time: two more pages ask at 10,001 and 10,002 ms, before the budget's timer fires.
+    const late: Array<ReturnType<typeof socketOn>> = [];
+    for (const at of [T0 + 10_001, T0 + 10_002]) {
+      r.timers.hand(at);
+      const page = socketOn(r.actor, { sessionId: r.p1.conn.sessionId, memberId: r.f.player.id, role: "player" }, r.now);
+      void r.actor.hello(page.conn, { clientId: uuidv7(), resumeFrom: 1 });
+      late.push(page);
+      await flush();
+    }
+    r.timers.move(T0 + 10_100);
+    await flush();
+    // At 10 s one of the two fit and the other waits again, so only one of the later pages has room.
+    assert.deepEqual(late.map((p) => p.conn.closedWith), [null, CLOSE.abuse]);
+    assert.equal(r.budget.waiting, 2);
+  });
+
+  test("a hello after the room unloaded and loaded again takes the place of its client's request", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000, sessionWaiting: 2 }, now) });
+    r.timers.enable();
+    const clients = [uuidv7(), uuidv7()];
+    for (const [i, clientId] of clients.entries()) {
+      reconnect(r, T0 + 500 + 40 * i, clientId);
+      await flush();
+    }
+    r.timers.move(T0 + 600);
+    await flush();
+    await r.actor.shutdown({ code: CLOSE.evicted, snapshot: false });
+    const again = await r.load();
+    r.timers.move(T0 + 700);
+    const pages = clients.map((clientId) => {
+      const page = socketOn(again, { sessionId: r.p1.conn.sessionId, memberId: r.f.player.id, role: "player" }, r.now);
+      void again.hello(page.conn, { clientId, resumeFrom: 1 });
+      return page;
+    });
+    await flush();
+    r.timers.move(T0 + 720);
+    await flush();
+    assert.deepEqual(
+      pages.map((p) => [p.conn.closedWith, answers(p.sent)]),
+      [
+        [null, ["wait 9300"]],
+        [null, ["wait 9300"]],
+      ],
+    );
+    assert.equal(r.budget.waiting, 2);
   });
 
   test("a hello past the abuse rule leaves no request waiting", async (t) => {
@@ -590,7 +656,7 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     r.timers.move(T0 + 1_100);
     step.release();
     await flush();
-    assert.equal(kept, 0);
+    assert.deepEqual([kept, r.budget.waiting], [0, 0]);
     assert.deepEqual(closed.map((p) => p.conn.closedWith), Array.from({ length: 10 }, () => null), "every one was let in");
     const page = reconnect(r, T0 + 1_100, uuidv7());
     await flush();
@@ -728,9 +794,10 @@ describe("a snapshot's wait read from the hello's arrival", () => {
       r.timers.move(at);
       await flush();
     }
-    // The other session takes that place first, at 40 s, as its snapshot in another room would, so the page's request
-    // comes due 35 s after the session's time over budget started and waits again, for the next place at 41 s.
-    budget.record(other, 1_000, T0 + 40_000);
+    // The other session takes that place just before it frees, as its snapshot in another room would, so the page's
+    // request comes due at 40 s, 35 s after the session's time over budget started, and waits again, for the next
+    // place at 41 s.
+    budget.record(other, 1_000, T0 + 39_999);
     for (let at = T0 + 40_000; at <= T0 + 42_000; at += 20) {
       r.timers.move(at);
       await flush();

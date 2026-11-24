@@ -4,7 +4,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { ServerMessage } from "#shared/protocol.ts";
 import { RoomActor } from "./actor.ts";
 import { SnapshotBudget, type SnapshotBudgetLimits } from "./budgets.ts";
-import { Connection } from "./connection.ts";
+import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
@@ -328,8 +328,8 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
         await w.to(500, 1);
         w.hello(w.x, "x");
         await w.to(1_000);
-        // The loop is busy past X's due time: Y's hello at 1,030 ms takes the place first, and the DM in X sends a chat
-        // at 1,035 ms, before X's timer fires.
+        // The loop is busy past X's due time: Y's hello comes at 1,030 ms, and the DM in X sends a chat at 1,035 ms, before
+        // the budget's timer fires.
         await w.hand(1_030);
         w.hello(w.y, "y");
         await w.hand(1_035);
@@ -340,7 +340,7 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
       },
       { sessionCount: 1, windowMs: 1_010, abuseMs: 3_600_000 },
     );
-    assert.deepEqual(out.A, { x: ["wait 510", "snapshot"], y: ["snapshot"] }, "X's request asks the budget at its due time, before Y's place");
+    assert.deepEqual(out.A, { x: ["wait 510", "snapshot"], y: ["wait 990"] }, "X's request takes the place at its due time, before Y's hello is read");
     assert.deepEqual(out.A, out.B);
   });
 
@@ -426,6 +426,30 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
       { sessionCount: 1, windowMs: 10_000, sessionWaiting: 2 },
     );
     assert.deepEqual([out.A.y1, out.A.y2?.at(-1)], [["closed 4008"], "snapshot"]);
+    assert.deepEqual(out.A, out.B);
+  });
+
+  test("a delayed request of a room that unloads still comes due: the same whether the room unloads before its due time or after", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        w.spent([0]);
+        // A page of the session's in X waits for the session's place until 10 s. X unloads at 3 s in A and at 12 s in B,
+        // with no queue held in either.
+        await w.to(1_000, 1_000);
+        const page = socketOn(w.x, { sessionId: SESSION, memberId: w.x.player, role: "player" }, ADDRESS, w.now);
+        void w.x.actor.hello(page.conn, { clientId: uuidv7(), resumeFrom: 1 });
+        const unloadAt = held === w.x ? 3_000 : 12_000;
+        await w.to(unloadAt, 500);
+        await w.x.actor.shutdown({ code: CLOSE.evicted, snapshot: false });
+        // A page of the session's in Y after the request's due time.
+        await w.to(12_500, 500);
+        w.hello(w.y, "y");
+        await w.to(23_000, 1_000);
+      },
+      { sessionCount: 1, windowMs: 10_000 },
+    );
+    assert.deepEqual(out.A.y, ["wait 7500", "wait 5500", "wait 3500", "wait 1500", "snapshot"], "the page's request took the place at 10 s");
     assert.deepEqual(out.A, out.B);
   });
 

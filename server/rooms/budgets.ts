@@ -239,8 +239,17 @@ export type SnapshotBudgetLimits = {
   ipWaiting: number;
 };
 
-/** A delayed request counted against its keys' waiting bound until `until` (SnapshotBudget.wait). */
-export type Waiting = { until: number };
+/** What a waiting request's due time decided (SnapshotBudget): it fits and spends then, or it waits again `delay` ms. */
+export type DueOutcome = { at: number; kind: "fits"; sent: (bytes: number) => void } | { at: number; kind: "waits"; delay: number };
+
+/**
+ * A delayed snapshot request, which the budget holds from its arrival until
+ * it fits at a due time or is dropped (SnapshotBudget.wait). `id` is its
+ * room and the key its client goes by there, so a hello in that room finds
+ * it whichever actor holds the room by then. `onDue` is told each due
+ * time's outcome, and is null once nothing is owed to its socket.
+ */
+export type WaitingRequest = { readonly id: string; readonly keys: readonly BudgetKey[]; due: number; onDue: ((outcome: DueOutcome) => void) | null };
 
 /*
  * The byte budgets hold ten of the largest DM snapshot under the DM's own
@@ -278,19 +287,26 @@ type Spent = { at: number; bytes: number };
  *
  * A session may have as many delayed requests waiting at once as it may
  * hold sockets, and an address likewise (DEFAULT_SOCKET_CAPS). Each socket
- * waits on at most one, from its own hello, and a client's new hello takes
- * the place of its old request, so only requests left by sockets that are
- * gone can reach the bound. A request counts from its arrival until it is
- * answered at its due time or is dropped as its client closes its socket
- * or sends a newer hello (Waiting).
+ * waits on at most one, from its own hello, and a client's new hello in
+ * the same room takes the place of its old request. The budget holds each
+ * request (WaitingRequest) from its arrival until it fits at a due time, or
+ * until its client closes its socket or sends a newer hello in its room. A
+ * socket the room closed and a room that unloaded leave it waiting as it
+ * was. Its due timer is the budget's own, and every call that reads or
+ * spends the budget first settles each request whose due time has passed,
+ * in due order, so a timer that fires late changes nothing.
  */
 export class SnapshotBudget {
   readonly limits: SnapshotBudgetLimits;
   #spent = new Map<string, Spent[]>();
   /** Sessions whose requests are being delayed: since when, and their latest request. */
   #overSince = new Map<string, { since: number; last: number }>();
-  /** The delayed requests counted against each key's waiting bound. */
-  #waiting = new Map<string, Waiting[]>();
+  /** The delayed requests waiting, by id, and how many count against each key's bound. */
+  #requests = new Map<string, WaitingRequest>();
+  #waiting = new Map<string, number>();
+  #settling = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #timerAt = Number.POSITIVE_INFINITY;
   #now: Clock;
   #lastSweep: number;
 
@@ -303,6 +319,11 @@ export class SnapshotBudget {
   /** Keys still held, for tests. */
   get size(): number {
     return this.#spent.size + this.#overSince.size + this.#waiting.size;
+  }
+
+  /** Delayed requests waiting, for tests. */
+  get waiting(): number {
+    return this.#requests.size;
   }
 
   /**
@@ -323,6 +344,11 @@ export class SnapshotBudget {
 
   /** Milliseconds from `now` until one more snapshot fits under every key, 0 when it fits then. */
   delay(keys: readonly BudgetKey[], now = this.#now()): number {
+    this.#settle(now);
+    return this.#delayAt(keys, now);
+  }
+
+  #delayAt(keys: readonly BudgetKey[], now: number): number {
     let delay = 0;
     for (const k of keys) {
       const live = this.#live(k.key, now);
@@ -352,6 +378,11 @@ export class SnapshotBudget {
    * count once the function returned is called with them, as it is sent.
    */
   reserve(keys: readonly BudgetKey[], now = this.#now()): (bytes: number) => void {
+    this.#settle(now);
+    return this.#reserveAt(keys, now);
+  }
+
+  #reserveAt(keys: readonly BudgetKey[], now: number): (bytes: number) => void {
     this.#sweep(now);
     const spends: Spent[] = [];
     for (const k of keys) {
@@ -369,24 +400,92 @@ export class SnapshotBudget {
     };
   }
 
-  /** Whether one more delayed request may wait under every key at `now`, with those that count then (Waiting). */
+  /** Whether one more delayed request may wait under every key at `now`, once those due by then are settled. */
   mayWait(keys: readonly BudgetKey[], now = this.#now()): boolean {
-    return keys.every((k) => this.#waitingAt(k.key, now).length < k.maxWaiting);
+    this.#settle(now);
+    return keys.every((k) => (this.#waiting.get(k.key) ?? 0) < k.maxWaiting);
   }
 
   /**
-   * Counts a delayed request against every key from now until `until`, its
-   * due time. Its owner moves `until` on when it waits again at its due
-   * time, and back to the moment it is dropped.
+   * Holds a delayed request that arrived at `now` and comes due at `due`,
+   * in place of any request with its id, and counts it against every key.
    */
-  wait(keys: readonly BudgetKey[], until: number): Waiting {
-    const waiting = { until };
-    for (const k of keys) {
-      const list = this.#waiting.get(k.key) ?? [];
-      list.push(waiting);
-      this.#waiting.set(k.key, list);
+  wait(id: string, keys: readonly BudgetKey[], due: number, now: number, onDue: WaitingRequest["onDue"] = null): WaitingRequest {
+    this.drop(id, now);
+    const request: WaitingRequest = { id, keys, due, onDue };
+    this.#requests.set(id, request);
+    for (const k of keys) bump(this.#waiting, k.key, 1);
+    this.#arm(now);
+    return request;
+  }
+
+  /**
+   * Drops the request with this id at `now`, once those due by then are
+   * settled: its client closed its socket or sent a newer hello. It never
+   * comes due, and it counts no more.
+   */
+  drop(id: string, now: number): void {
+    this.#settle(now);
+    const held = this.#requests.get(id);
+    if (!held) return;
+    this.#requests.delete(id);
+    for (const k of held.keys) bump(this.#waiting, k.key, -1);
+  }
+
+  /**
+   * Each request due by `now`, earliest first, asks again as a request that
+   * arrives at its due time. One that fits spends then and leaves, and one
+   * that does not waits again, still counted. Its `onDue` hears which.
+   */
+  #settle(now: number): void {
+    if (this.#settling) return;
+    this.#settling = true;
+    try {
+      for (;;) {
+        let next: WaitingRequest | null = null;
+        for (const request of this.#requests.values()) if (request.due <= now && (next === null || request.due < next.due)) next = request;
+        if (next === null) break;
+        const at = next.due;
+        const delay = this.#delayAt(next.keys, at);
+        let outcome: DueOutcome;
+        if (delay > 0) {
+          next.due = at + delay;
+          outcome = { at, kind: "waits", delay };
+        } else {
+          this.#requests.delete(next.id);
+          for (const k of next.keys) bump(this.#waiting, k.key, -1);
+          outcome = { at, kind: "fits", sent: this.#reserveAt(next.keys, at) };
+        }
+        next.onDue?.(outcome);
+      }
+    } finally {
+      this.#settling = false;
     }
-    return waiting;
+    this.#arm(now);
+  }
+
+  /**
+   * One timer for the earliest due time, read against `now`, the newest
+   * time the budget was given. It settles up to that due time when it fires,
+   * so it never reads a clock, and holds no process open.
+   */
+  #arm(now: number): void {
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const request of this.#requests.values()) earliest = Math.min(earliest, request.due);
+    if (earliest === this.#timerAt) return;
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#timerAt = earliest;
+    if (earliest === Number.POSITIVE_INFINITY) return;
+    const timer = setTimeout(() => {
+      if (this.#timer === timer) {
+        this.#timer = null;
+        this.#timerAt = Number.POSITIVE_INFINITY;
+      }
+      this.#settle(earliest);
+    }, Math.max(0, earliest - now));
+    timer.unref?.();
+    this.#timer = timer;
   }
 
   /**
@@ -422,7 +521,6 @@ export class SnapshotBudget {
     if (now - this.#lastSweep < SWEEP_EVERY_MS) return;
     this.#lastSweep = now;
     for (const key of [...this.#spent.keys()]) this.#live(key, now);
-    for (const key of [...this.#waiting.keys()]) this.#waitingAt(key, now);
     for (const [sessionId, over] of this.#overSince) {
       if (now - over.last > this.limits.abuseMs) this.#overSince.delete(sessionId);
     }
@@ -445,20 +543,6 @@ export class SnapshotBudget {
       return [];
     }
     return list.filter((s) => s.at > cutoff && s.at <= now);
-  }
-
-  /**
-   * The delayed requests that count against a key at `now`: those still
-   * waiting then. Only those a window past their time are dropped, as
-   * #live drops spends.
-   */
-  #waitingAt(key: string, now: number): Waiting[] {
-    const list = this.#waiting.get(key);
-    if (!list) return [];
-    const kept = list.filter((w) => w.until > now - this.limits.windowMs);
-    if (kept.length === 0) this.#waiting.delete(key);
-    else if (kept.length < list.length) this.#waiting.set(key, kept);
-    return kept.filter((w) => w.until > now);
   }
 }
 
