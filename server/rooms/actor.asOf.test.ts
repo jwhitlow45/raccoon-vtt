@@ -247,6 +247,54 @@ describe("a room that published nothing since it loaded", () => {
   });
 });
 
+describe("a clock set back", () => {
+  test("a later batch at a lower tick shows no earlier batch to a reader before that batch's tick", async (t) => {
+    const r = await room(t);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const T = T0 + 1_000;
+    moveTo(t, r.clock, T + 5);
+    chat(r.p1, "at 5");
+    await flush();
+    moveTo(t, r.clock, T + 45);
+    await flush();
+    const said = (view: RoomView) => texts(view).includes("at 5");
+    assert.equal(said(await r.actor.asOf(T + 3)), false, "a reader before its tick");
+    // The clock steps back a second, and a chat forms a batch of a lower tick, closed at its timer's second firing.
+    r.clock.now = T - 1_000 + 45;
+    chat(r.p1, "after the set back");
+    await flush();
+    for (let i = 0; i < 60; i++) {
+      r.clock.now += 1;
+      t.mock.timers.tick(1);
+      await flush();
+    }
+    assert.ok(texts(await r.actor.asOf(r.clock.now + 1_000)).includes("after the set back"), "the later batch published");
+    assert.equal(said(await r.actor.asOf(T + 3)), false, "still none of it before its tick");
+  });
+
+  test("a reader waits for every committing batch through its tick, a later one at a lower tick included", async (t) => {
+    const r = await room(t);
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    // The clock steps back a second, and a chat forms a batch of a lower tick behind the one committing.
+    r.clock.now = T - 1_000 + 5;
+    chat(r.p1, "after the set back");
+    await flush();
+    for (let i = 0; i < 60; i++) {
+      r.clock.now += 1;
+      t.mock.timers.tick(1);
+      await flush();
+    }
+    const reader = settled(r.actor.asOf(T - 1_000 + 60));
+    await flush();
+    assert.equal(reader.done, false, "its tick's batch still commits behind the first");
+    r.gate.open();
+    await flush();
+    await flush();
+    assert.ok(reader.done && !reader.error, String(reader.error));
+  });
+});
+
 describe("the ring of views", () => {
   test(`200 publications in 800 ms keep at most ${MAX_VIEWS} views`, async (t) => {
     const r = await room(t, { batchMs: 4 });

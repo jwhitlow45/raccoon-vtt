@@ -1431,8 +1431,8 @@ export class RoomActor {
     const head = this.#queue[0];
     if (head !== undefined && (head.moment?.number ?? Number.NEGATIVE_INFINITY) < a) return false;
     if (this.#batch !== null && this.#batch.tick <= a) return false;
-    const oldest = this.#pending[0];
-    return oldest === undefined || oldest.tick > a;
+    // Every closed batch, not only the oldest: behind a clock set back, a later one can hold a lower tick.
+    return this.#pending.every((b) => b.tick > a);
   }
 
   /**
@@ -3813,11 +3813,12 @@ export class RoomActor {
       this.#fault("batch publish failed, closing the room's sockets", err, null);
       for (const conn of this.#connections) conn.close(1011, "internal error");
     }
-    // The batch's view joins the ring, and the frames held for it route against it before the next batch publishes.
-    // A batch that closed under a test's standing clock before the clock reached its tick is viewed at the tick the
-    // clock read then, so a reader after its commit at that reading takes it. A clock set back keeps the batch's own
-    // tick: a reader that arrived in that tick before its commands never takes them.
-    const tick = batch.standing ? Math.min(batch.tick, this.#readerTick(batch.closeAt)) : batch.tick;
+    // The batch's view joins the ring at its tick, never below the newest view's, so a reader that arrived before a
+    // batch's tick never takes it, behind a clock set back too. A batch that closed under a test's standing clock
+    // before the clock reached its tick is viewed at the tick the clock read then, so a reader after its commit at that
+    // reading takes it. The frames held for it route against it before the next batch publishes.
+    const own = batch.standing ? Math.min(batch.tick, this.#readerTick(batch.closeAt)) : batch.tick;
+    const tick = Math.max(own, this.#views.at(-1)?.view.tick ?? own);
     this.#keepView({ tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
     this.#releaseFrames();
     for (const s of batch.sys) s.resolve();
