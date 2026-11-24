@@ -38,7 +38,11 @@ function counted(): Work {
 /**
  * Sends an op into the open batch: the actor handles it as it arrives, and
  * no timer runs before the next op sent the same way, so they share the
- * batch. Its answer waits for the batch's close.
+ * batch. Its answer waits for the batch's close. It is handled as it
+ * arrives only while the loop's clock stands (playerWork): the drain lets
+ * the loop go once a turn has used DRAIN_TURN_MS on that clock, and a slow
+ * machine can spend it on the DM's ops, leaving the next op queued for the
+ * drain's next turn as this one returns.
  */
 async function into(client: ScopeClient, op: Op): Promise<number> {
   await client.actor.op(client.conn, ++client.n, op);
@@ -58,17 +62,22 @@ async function answered(client: ScopeClient, n: number): Promise<number> {
  */
 async function playerWork(t: TestContext, f: ReturnType<typeof hiddenRoom>, before: (dm: ScopeClient) => Promise<number[]>, options: Parameters<typeof scopeActor>[2] = {}): Promise<Work> {
   const h = await scopeActor(t, f.state, options);
-  const dm = await h.connect(f.dm);
-  const player = await h.connect(f.player, "player");
-  const shared = await before(dm);
-  const was = counted();
-  const n = await into(player, { t: "token.move", tokenId: f.pc, x: 9, y: 0 });
-  const now = counted();
-  const batch = await answered(player, n);
-  for (const m of shared) assert.equal(await answered(dm, m), batch, "the DM's op shares the player's batch");
-  assert.ok(!player.sent.some((m) => m.t === "ev" && m.rejects?.some((r) => r.n === n)), "the player's walk is taken");
-  refusedOf.set(dm, shared.filter((m) => dm.sent.some((e) => e.t === "ev" && e.rejects?.some((r) => r.n === m))).length);
-  return { keys: now.keys - was.keys, entries: now.entries - was.entries, compared: now.compared - was.compared, read: now.read - was.read };
+  const loop = t.mock.method(performance, "now", () => 0);
+  try {
+    const dm = await h.connect(f.dm);
+    const player = await h.connect(f.player, "player");
+    const shared = await before(dm);
+    const was = counted();
+    const n = await into(player, { t: "token.move", tokenId: f.pc, x: 9, y: 0 });
+    const now = counted();
+    const batch = await answered(player, n);
+    for (const m of shared) assert.equal(await answered(dm, m), batch, "the DM's op shares the player's batch");
+    assert.ok(!player.sent.some((m) => m.t === "ev" && m.rejects?.some((r) => r.n === n)), "the player's walk is taken");
+    refusedOf.set(dm, shared.filter((m) => dm.sent.some((e) => e.t === "ev" && e.rejects?.some((r) => r.n === m))).length);
+    return { keys: now.keys - was.keys, entries: now.entries - was.entries, compared: now.compared - was.compared, read: now.read - was.read };
+  } finally {
+    loop.mock.restore();
+  }
 }
 
 /** How many of the DM's ops in the player's batch the room refused, by the DM's client. */
