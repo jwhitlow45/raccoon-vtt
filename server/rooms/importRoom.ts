@@ -316,7 +316,8 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Each video's and each sound's facts from the row its check just made, by its new id: the file's own are never trusted.
       const videoFacts = new Map([...assetIds.values()].flatMap((a) => (a.video ? [[a.id, a.video] as const] : [])));
       const soundFacts = new Map([...assetIds.values()].flatMap((a) => (a.audio ? [[a.id, a.audio] as const] : [])));
-      // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
+      // The remap carries the file's memory and marks under the new ids, and sets right the lists an older file kept by
+      // version 7 id, as an older room's first load does (idLists.ts). A file from before map discovery then takes
       // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5). The
       // refills then overwrite every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3), and
       // every sound's length from its row (docs/design/design-v1-music.md 6.7). The sound refill always runs after the remap,
@@ -332,7 +333,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
         minted.push({ id, at });
         return id;
       };
-      const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds, newId }), videoFacts), soundFacts);
+      const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds, newId, schemaVersion: header.data.schemaVersion }), videoFacts), soundFacts);
       const remapped = finishState(withNumberingUpgrade(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.

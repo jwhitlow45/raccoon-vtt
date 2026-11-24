@@ -62,8 +62,10 @@ import { soundUseFits, stillFitsVideo } from "#shared/limits.ts";
 import { onPlayersScene } from "#shared/rules/floors.ts";
 import { bareAutomatic } from "#shared/rules/effects.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
+import { SEALED_IDS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { SOUND_MEDIA, soundFactsOfRow } from "../assets/store.ts";
+import { inIdOrderAgain, withoutCutLists } from "./idLists.ts";
 
 /**
  * Gives every entity of an imported room a fresh id and rewrites every
@@ -92,6 +94,12 @@ export type RemapOptions = {
   memberIds?: ReadonlyMap<string, string>;
   /** Makes every new id but the members': the import's maker (importRoom.ts), or a test's. */
   newId: () => string;
+  /**
+   * The file's room format. Below SEALED_IDS_SNAPSHOT_VERSION its lists kept
+   * in id order hold version 7 ids, and are set right as the first load
+   * sets them (idLists.ts). Left out, the file is taken as today's.
+   */
+  schemaVersion?: number;
 };
 
 class Ids {
@@ -117,7 +125,9 @@ class Ids {
   }
 }
 
-export function remapState(state: RoomState, opts: RemapOptions): RoomState {
+export function remapState(file: RoomState, opts: RemapOptions): RoomState {
+  const older = opts.schemaVersion !== undefined && opts.schemaVersion < SEALED_IDS_SNAPSHOT_VERSION;
+  const state = older ? withoutCutLists(file) : file;
   const newId = opts.newId;
   const members = new Ids(newId, opts.memberIds);
   const scenes = new Ids(newId);
@@ -844,6 +854,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // A file's trap lines come in its own order, and the reducer finds a line by its id in each log.
   out.trapLog.sort((a, b) => compareLogIds(a.id, b.id));
   out.trapSeen.sort((a, b) => compareLogIds(a.id, b.id));
+  // Every creature took a new id, so an older file's lists are sorted by them, as an older room's are at its first load.
+  if (older) inIdOrderAgain(out, new Set(tokens.map.values()));
   // A hand-made or older file is brought within the companion rules (docs/design/design-v1-combat-flow.md 4.7), a character's
   // initiative and Passive Perception follow its stat block, and a Wild Shape mark stands only beside its creature
   // (docs/design/design-v1-pc-stats.md 3.5 and 3.6).
