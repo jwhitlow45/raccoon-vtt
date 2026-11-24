@@ -32,7 +32,7 @@ type Ev = Extract<ServerMessage, { t: "ev" }>;
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Logged = { msg: string; obj: Record<string, unknown> };
 
-async function room(t: TestContext, opts: { budget?: (now: () => number) => SnapshotBudget; options?: ActorDeps["options"]; dms?: number } = {}) {
+async function room(t: TestContext, opts: { budget?: (now: () => number) => SnapshotBudget; options?: ActorDeps["options"]; dms?: number; pool?: (pool: ActorDeps["pool"]) => ActorDeps["pool"] } = {}) {
   // A room loaded earlier in the test keeps its timers mocked no longer: this one opens on real ones.
   t.mock.timers.reset();
   const f = scopeFixture();
@@ -42,7 +42,7 @@ async function room(t: TestContext, opts: { budget?: (now: () => number) => Snap
   const warned: Logged[] = [];
   const log = { info() {}, debug() {}, error() {}, warn: (obj: Record<string, unknown>, msg?: string) => void warned.push({ msg: msg ?? "", obj }) };
   const actor = await RoomActor.load({
-    pool: db.pool(),
+    pool: opts.pool?.(db.pool()) ?? db.pool(),
     info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
     log,
     budget: opts.budget?.(now) ?? new SnapshotBudget({}, now),
@@ -548,6 +548,80 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     await flush();
     assert.deepEqual(answers(page.sent), ["snapshot"]);
     assert.equal(r.actor.delayedRequests, 0);
+  });
+
+  test("a role resync while a hello reads its watermark leaves that hello's requests unanswered until the client's next hello", async (t) => {
+    // The room checks each socket's grant every 20 ms of the loop's own time. A session the test has not named yet has no
+    // answer, which leaves its sockets as they are, and P1's session turns DM once `promoted` is set.
+    const roles = new Map<string, { member_id: string; role: "dm" | "player" }>();
+    let promoted = false;
+    let shut: { promise: Promise<void>; open: () => void } | null = null;
+    const pool = (stored: ActorDeps["pool"]) =>
+      ({
+        query: async (sql: string, params: unknown[] = []) => {
+          if (sql.includes("where g.session_id = $1")) {
+            const grant = roles.get(params[0] as string);
+            if (!grant) throw new Error("a session the test has not named");
+            return { rows: [{ ...grant, role: promoted && grant.role === "player" ? "dm" : grant.role, epoch: 1, player_epoch: 1, dm_epoch: 1 }] };
+          }
+          if (sql.includes("from client_watermarks where")) await shut?.promise;
+          return stored.query(sql, params as never);
+        },
+        connect: () => stored.connect(),
+      }) as unknown as ActorDeps["pool"];
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now), options: { grantRecheckMs: 20 }, pool });
+    for (const client of r.dms) roles.set(client.conn.sessionId, { member_id: r.f.dm.id, role: "dm" });
+    roles.set(r.p1.conn.sessionId, { member_id: r.f.player.id, role: "player" });
+    r.timers.enable();
+    let open!: () => void;
+    shut = { promise: new Promise<void>((resolve) => (open = resolve)), open };
+    // A page of P1's session asks at 500 ms and waits for P1's first snapshot's place until 1,010, its watermark read held.
+    const clientId = uuidv7();
+    const page = reconnect(r, T0 + 500, clientId);
+    await flush();
+    promoted = true;
+    const deadline = Date.now() + 10_000;
+    while (!page.sent.some((m) => m.t === "resync") && Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+    const resynced = page.sent.length;
+    assert.ok(resynced > 0, "the role resync came");
+    shut.open();
+    shut = null;
+    await flush();
+    for (let at = T0 + 520; at <= T0 + 1_200; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    // The client's next hello over the same socket. Its request waits for the place its old one took at 1,010 ms.
+    void r.actor.hello(page.conn, { clientId, resumeFrom: 1 });
+    await flush();
+    for (let at = T0 + 1_220; at <= T0 + 2_100; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    assert.deepEqual(answers(page.sent.slice(resynced)), ["wait 820", "snapshot"]);
+  });
+
+  test("a resync stops the waits of a request from before it, and it never sends that request's snapshot", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now) });
+    r.timers.enable();
+    // A device of the DM's session asks at 500 ms and waits 9.5 s, then switches scene at 3 s.
+    r.timers.move(T0 + 500);
+    const device = socketOn(r.actor, { sessionId: r.dm.conn.sessionId, memberId: r.f.dm.id, role: "dm" }, r.now);
+    void r.actor.hello(device.conn, { clientId: uuidv7(), resumeFrom: 1 });
+    await flush();
+    for (let at = T0 + 520; at <= T0 + 3_000; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    r.actor.scene(device.conn);
+    for (let at = T0 + 3_500; at <= T0 + 11_000; at += 500) {
+      r.timers.move(at);
+      await flush();
+    }
+    assert.deepEqual(
+      device.sent.filter((m) => m.t === "wait" || m.t === "snapshot" || m.t === "resync").map((m) => (m.t === "wait" ? `wait ${m.ms}` : m.t)),
+      ["wait 9500", "wait 7500", "resync"],
+    );
   });
 
   test("a snapshot's bytes count against its session once it is sent", async (t) => {

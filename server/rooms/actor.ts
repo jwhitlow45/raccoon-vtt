@@ -444,18 +444,22 @@ type Read = { conn: Connection; key: ClientKey; resent?: number; admission?: Adm
  * then, and the bytes it sends count once it is sent. Or the budget delays
  * it by `delay` ms, and it comes due on the clock from then (Delayed). The
  * publish that answers it carries this out and never asks the budget
- * again, so no room's work before then can change it.
+ * again, so no room's work before then can change it. `resyncs` is how
+ * many resyncs its socket had been sent as it arrived: one sent since
+ * asks the client for a new hello, and the request is answered no more
+ * (#resync).
  */
 type Admission =
-  | { at: number; kind: "fits"; sent: (bytes: number) => void }
-  | { at: number; kind: "waits"; delay: number; wait: Delayed };
+  | { at: number; resyncs: number; kind: "fits"; sent: (bytes: number) => void }
+  | { at: number; resyncs: number; kind: "waits"; delay: number; wait: Delayed };
 
 /**
  * A snapshot request the budget delayed (#awaitDue), from its arrival
- * until it comes due or a newer request of its client, a resync or the
- * client's close of its socket takes its place. `ended` is that moment on
- * the server's clock, the last its `wait` frames are sent for, and `next`
- * the timer of the next one (#sendWaits). `joined` says the command
+ * until it comes due or a newer request of its client or the client's
+ * close of its socket takes its place. `ended` is that moment on the
+ * server's clock, the last its `wait` frames are sent for, and `next` the
+ * timer of the next one (#sendWaits). A resync of its socket leaves it to
+ * come due with no answer (#resync). `joined` says the command
  * that answers it is in the queue at the moment numbered `after`, so the
  * snapshot it comes due to joins the queue behind that command.
  */
@@ -763,6 +767,8 @@ export class RoomActor {
   #clients = new Map<ClientKey, Connection>();
   /** Each client's delayed snapshot request by the key it goes by, from its arrival until it comes due or another takes its place. */
   #delayed = new Map<ClientKey, Delayed>();
+  /** How many resyncs each socket was sent, which its requests from before the latest go unanswered for (Admission). */
+  #resyncs = new WeakMap<Connection, number>();
   /**
    * Table displays that have had a snapshot, the only ones DM sockets count.
    * A display is counted once it can receive events, not when its socket
@@ -3228,11 +3234,15 @@ export class RoomActor {
    * it arrives at `at` under the key it goes by: delayed while its session
    * or address is over budget then, and counted at once otherwise.
    */
-  #admit(conn: Connection, key: ClientKey, at: number): Admission {
+  #admit(conn: Connection, key: ClientKey, at: number, resyncs = this.#resyncsOf(conn)): Admission {
     const keys = this.#budget.keys(conn.sessionId, conn.ip, this.pinned);
     const delay = this.#budget.delay(keys, at);
-    if (delay > 0) return { at, kind: "waits", delay, wait: this.#awaitDue(conn, key, at + delay) };
-    return { at, kind: "fits", sent: this.#budget.reserve(keys, at) };
+    if (delay > 0) return { at, resyncs, kind: "waits", delay, wait: this.#awaitDue(conn, key, at + delay, resyncs) };
+    return { at, resyncs, kind: "fits", sent: this.#budget.reserve(keys, at) };
+  }
+
+  #resyncsOf(conn: Connection): number {
+    return this.#resyncs.get(conn) ?? 0;
   }
 
   /**
@@ -3247,7 +3257,7 @@ export class RoomActor {
    * earliest at that command's moment (Delayed.joined), and waits for it to
    * join when it has not yet: a hello joins after its watermark read.
    */
-  #awaitDue(conn: Connection, key: ClientKey, due: number): Delayed {
+  #awaitDue(conn: Connection, key: ClientKey, due: number, resyncs: number): Delayed {
     let after: number | null = null;
     let join: ((after: number) => void) | null = null;
     const end = (at: number) => {
@@ -3259,7 +3269,7 @@ export class RoomActor {
       if (this.#closed) return;
       end(due);
       if (this.#delayed.get(key) === delayed) this.#delayed.delete(key);
-      const admission = this.#admit(conn, key, due);
+      const admission = this.#admit(conn, key, due, resyncs);
       join = (from) => {
         if (this.#closed) return;
         const moment = this.#delayedMoment(Math.max(due, from));
@@ -3304,7 +3314,7 @@ export class RoomActor {
    * asked for (Admission).
    */
   #snapshot(conn: Connection, key: ClientKey, pub: number, admission: Admission): void {
-    if (conn.closed) return;
+    if (conn.closed || admission.resyncs !== this.#resyncsOf(conn)) return;
     if (admission.kind === "waits") {
       this.#sendWaits(conn, admission);
       return;
@@ -3353,6 +3363,7 @@ export class RoomActor {
     const { at, delay, wait } = admission;
     conn.send({ t: "wait", ms: delay });
     const from = (k: number): void => {
+      if (this.#resyncsOf(conn) !== admission.resyncs) return;
       for (; 2000 * k < delay; k++) {
         const time = at + 2000 * k;
         const now = this.#opts.now();
@@ -3388,16 +3399,11 @@ export class RoomActor {
   }
 
   #resync(conn: Connection, reason: string): void {
-    const key = conn.key;
-    // The client says hello again over this socket at once, and that hello would take the delayed request's place as
-    // it arrives. Answered after the resync instead, the request would close the socket as an unexpected hello (ws.ts).
-    if (key !== null) {
-      const delayed = this.#delayed.get(key);
-      if (delayed && delayed.conn === conn) {
-        delayed.cancel();
-        this.#delayed.delete(key);
-      }
-    }
+    // The client says hello again over this socket at once. Answered after the resync, a request from before it, its
+    // hello's own or a delayed one, would close the socket as an unexpected hello (ws.ts), so none is answered (#snapshot).
+    // The socket's requests are found by the socket, whose key is null until its hello is handled. A delayed one still
+    // asks the budget at its due time, as one whose socket closed does, unless the new hello takes its place first.
+    this.#resyncs.set(conn, this.#resyncsOf(conn) + 1);
     conn.held = null;
     conn.helloAllowed = true;
     conn.helloPending = false;
