@@ -199,6 +199,29 @@ describe("readers waiting for their tick", () => {
   });
 });
 
+describe("a room that published nothing since it loaded", () => {
+  test("answers a reader 3 s and 60 s after the load from the load's view", async (t) => {
+    const f = scopeFixture();
+    const clock = { now: T0 };
+    const now = () => clock.now;
+    const actor = await RoomActor.load({
+      pool: new StoredRoomDb(f.state).pool(),
+      info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
+      log: quiet,
+      budget: new SnapshotBudget({}, now),
+      gateway: {} as RoomGateway,
+      options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, now, numberClock: now },
+    });
+    assert.ok(actor);
+    t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
+    for (const after of [3_000, 60_000]) {
+      clock.now = actor.loadedAt + after;
+      const view = await actor.asOf(clock.now);
+      assert.equal(view.seq, actor.committed.seq, `${after} ms after the load`);
+    }
+  });
+});
+
 describe("the ring of views", () => {
   test(`200 publications in 800 ms keep at most ${MAX_VIEWS} views`, async (t) => {
     const r = await room(t, { batchMs: 4 });

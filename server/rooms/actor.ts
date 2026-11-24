@@ -1453,9 +1453,9 @@ export class RoomActor {
 
   /**
    * The newest published view at or before tick `a`, once it is covered:
-   * busy when `a` is older than RETAIN_MS, or the load's view, which
-   * answers every reader before the load, is older than that from the
-   * load's end.
+   * busy when `a` is older than RETAIN_MS. The load's view answers every
+   * reader before the load, aged from the load's end, and a later reader
+   * of a room that published nothing since, aged from its own tick.
    */
   #viewFor(a: number): Promise<RoomView> {
     const view = this.#viewAt(a);
@@ -1466,7 +1466,7 @@ export class RoomActor {
     for (let i = this.#views.length - 1; i >= 0; i--) {
       const entry = this.#views[i]!;
       if (!entry.load && entry.view.tick > a) continue;
-      const age = entry.load ? this.#opts.now() - this.loadedAt : this.#opts.now() - a;
+      const age = entry.load && a < entry.view.tick ? this.#opts.now() - this.loadedAt : this.#opts.now() - a;
       return age > RETAIN_MS ? null : entry.view;
     }
     return null;
