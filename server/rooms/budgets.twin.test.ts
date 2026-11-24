@@ -399,6 +399,36 @@ describe("a session at the edge of the snapshot budget in two rooms", () => {
     assert.deepEqual(out.A, out.B);
   });
 
+  test("requests of sockets a room closed count against the session's bound on requests waiting at once: the same whichever room's queue is held", async (t) => {
+    const out = await twins(
+      t,
+      async (w, held) => {
+        w.spent([0]);
+        // Two previews of X's player, the session's, wait for the session's place until 10 s, which is the session's bound.
+        await w.to(1_000, 1_000);
+        const previews = Array.from({ length: 2 }, () => socketOn(w.x, { sessionId: SESSION, memberId: w.x.dm.conn.memberId, role: "dm", previewOf: w.x.player }, ADDRESS, w.now));
+        for (const preview of previews) void w.x.actor.hello(preview.conn, { clientId: uuidv7(), resumeFrom: 1 });
+        await w.to(1_020);
+        await w.holdQueue(held);
+        // X's player leaves the roster, which closes both previews as X publishes it: at once when X's queue is free,
+        // after their requests come due when X's queue is held.
+        void w.x.actor.sys({ t: "sys.memberRemove", memberId: w.x.player });
+        // A page of the session's in Y while both requests still count, and another once one of them was answered.
+        await w.to(5_000, 1_000);
+        assert.deepEqual(previews.map((p) => p.conn.closed), [held === w.y, held === w.y]);
+        w.hello(w.y, "y1");
+        await w.to(10_500, 500);
+        w.hello(w.y, "y2");
+        await w.to(12_000);
+        w.release(held);
+        await w.to(31_000, 1_000);
+      },
+      { sessionCount: 1, windowMs: 10_000, sessionWaiting: 2 },
+    );
+    assert.deepEqual([out.A.y1, out.A.y2?.at(-1)], [["closed 4008"], "snapshot"]);
+    assert.deepEqual(out.A, out.B);
+  });
+
   test("a delayed request of a socket the room closes comes due as it would have: the same whichever room's queue is held", async (t) => {
     const out = await twins(
       t,

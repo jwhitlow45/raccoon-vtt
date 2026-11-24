@@ -5,7 +5,7 @@ import type { ServerMessage } from "#shared/protocol.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
 import { RoomActor, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
-import { Connection } from "./connection.ts";
+import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
@@ -526,22 +526,60 @@ describe("a snapshot's wait read from the hello's arrival", () => {
     assert.deepEqual([answers(gone.sent), answers(stays.sent)], [["wait 510"], ["wait 500", "snapshot"]]);
   });
 
+  test("requests of sockets the room closed count against their session's bound on requests waiting at once until each is answered", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 10_000 }, now) });
+    r.timers.enable();
+    // Twelve pages of P1's session ask while it is over budget, and the room closes each socket as its second hello
+    // would close it (ws.ts), once its wait is sent.
+    const pages: Array<ReturnType<typeof reconnect>> = [];
+    for (let i = 0; i < 12; i++) {
+      const page = reconnect(r, T0 + 500 + 40 * i, uuidv7());
+      pages.push(page);
+      await flush();
+      r.timers.move(T0 + 530 + 40 * i);
+      await flush();
+      page.conn.close(CLOSE.authFailure, "unexpected hello");
+      r.actor.detach(page.conn);
+    }
+    assert.deepEqual([r.actor.delayedRequests, r.actor.delayedSockets], [8, 0], "eight wait, and none holds its closed socket");
+    assert.deepEqual(
+      pages.map((p) => [answers(p.sent).length, p.conn.closedWith]),
+      [...Array.from({ length: 8 }, () => [1, CLOSE.authFailure]), ...Array.from({ length: 4 }, () => [0, CLOSE.abuse])],
+      "the first eight waited, and the rest closed as they arrived",
+    );
+    // At 10 s the first fits and the rest wait again, still counted, so the session has room for one more.
+    r.timers.move(T0 + 10_100);
+    await flush();
+    assert.equal(r.actor.delayedRequests, 7);
+    const more = reconnect(r, T0 + 10_100, uuidv7());
+    await flush();
+    const past = reconnect(r, T0 + 10_120, uuidv7());
+    await flush();
+    r.timers.move(T0 + 10_140);
+    await flush();
+    assert.deepEqual([answers(more.sent).length, more.conn.closed, past.conn.closedWith], [1, false, CLOSE.abuse]);
+  });
+
   test("sockets their clients close before their hellos are handled keep no delayed request and spend nothing", async (t) => {
     const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
     r.timers.enable();
     r.timers.move(T0 + 490);
     const step = heldStep(r.actor);
     await flush();
-    for (let i = 0; i < 5; i++) {
+    // More than the session's bound on requests waiting at once, which a closed one no longer counts against.
+    const closed: Array<ReturnType<typeof reconnect>> = [];
+    for (let i = 0; i < 10; i++) {
       const page = reconnect(r, T0 + 500 + 10 * i, uuidv7());
       await flush();
       clientCloses(r, page);
+      closed.push(page);
     }
     const kept = r.actor.delayedRequests;
     r.timers.move(T0 + 1_100);
     step.release();
     await flush();
     assert.equal(kept, 0);
+    assert.deepEqual(closed.map((p) => p.conn.closedWith), Array.from({ length: 10 }, () => null), "every one was let in");
     const page = reconnect(r, T0 + 1_100, uuidv7());
     await flush();
     r.timers.move(T0 + 1_120);

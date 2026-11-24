@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
-import { DEFAULT_SNAPSHOT_BUDGET, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket } from "./budgets.ts";
+import { DEFAULT_SNAPSHOT_BUDGET, DEFAULT_SOCKET_CAPS, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket } from "./budgets.ts";
 
 function clock(start = 0): { now: () => number; tick: (ms: number) => void } {
   let t = start;
@@ -262,6 +262,30 @@ describe("SnapshotBudget", () => {
     c.tick(31_000);
     assert.equal(b.request("s1", false), false);
     assert.equal(b.request("s1", true), false);
+  });
+
+  test("a session may have as many requests waiting at once as it may hold sockets, and an address likewise", () => {
+    assert.deepEqual([DEFAULT_SNAPSHOT_BUDGET.sessionWaiting, DEFAULT_SNAPSHOT_BUDGET.ipWaiting], [DEFAULT_SOCKET_CAPS.perSession, DEFAULT_SOCKET_CAPS.perIp]);
+    const c = clock(0);
+    const b = new SnapshotBudget({ sessionWaiting: 2, ipWaiting: 3 }, c.now);
+    const one = b.keys("s1", "ip-1", false);
+    const two = b.keys("s2", "ip-1", false);
+    const first = b.wait(one, 5_000);
+    b.wait(one, 8_000);
+    assert.equal(b.mayWait(one, 1_000), false, "the session's two");
+    assert.equal(b.mayWait(two, 1_000), true, "another session at the address, which holds two");
+    b.wait(two, 8_000);
+    assert.equal(b.mayWait(two, 1_000), false, "the address's three");
+    // A request counts until its due time, or until it is dropped: whichever the time it was moved to says.
+    assert.equal(b.mayWait(one, 5_000), true);
+    first.until = 2_000;
+    assert.equal(b.mayWait(one, 2_000), true);
+    assert.equal(b.mayWait(one, 1_999), false, "a time before it was dropped still counts it");
+    // The pinned room's second key counts per session.
+    assert.equal(b.mayWait(b.keys("s3", "ip-1", true), 1_000), true);
+    c.tick(130_000);
+    b.record(b.keys("later", "ip-later", false), 1_000);
+    assert.equal(b.size, 2, "the waiting lists went a window after their requests' times");
   });
 });
 

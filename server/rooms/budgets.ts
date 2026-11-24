@@ -216,7 +216,15 @@ export class SlidingWindow {
   }
 }
 
-export type BudgetKey = { key: string; maxCount: number; maxBytes: number };
+/**
+ * Socket caps (design 10.4): 8 per session, 64 per room, 16 per IP and 400
+ * on the whole server, checked before the upgrade completes.
+ */
+export type SocketCaps = { perSession: number; perRoom: number; perIp: number; total: number };
+
+export const DEFAULT_SOCKET_CAPS: SocketCaps = { perSession: 8, perRoom: 64, perIp: 16, total: 400 };
+
+export type BudgetKey = { key: string; maxCount: number; maxBytes: number; maxWaiting: number };
 
 export type SnapshotBudgetLimits = {
   windowMs: number;
@@ -226,7 +234,13 @@ export type SnapshotBudgetLimits = {
   ipBytes: number;
   /** How long a session may keep making new requests while over budget before its sockets close. */
   abuseMs: number;
+  /** How many delayed requests a session, and an address, may have waiting at once (SnapshotBudget.mayWait). */
+  sessionWaiting: number;
+  ipWaiting: number;
 };
+
+/** A delayed request counted against its keys' waiting bound until `until` (SnapshotBudget.wait). */
+export type Waiting = { until: number };
 
 /*
  * The byte budgets hold ten of the largest DM snapshot under the DM's own
@@ -245,6 +259,8 @@ export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   ipCount: 40,
   ipBytes: 120 * 1024 * 1024,
   abuseMs: 30_000,
+  sessionWaiting: DEFAULT_SOCKET_CAPS.perSession,
+  ipWaiting: DEFAULT_SOCKET_CAPS.perIp,
 };
 
 type Spent = { at: number; bytes: number };
@@ -259,12 +275,22 @@ type Spent = { at: number; bytes: number };
  * The 30 s abuse rule is tracked per session: a request that is delayed
  * starts the clock, a request that goes through stops it, and a delayed
  * request that is simply waiting never touches it.
+ *
+ * A session may have as many delayed requests waiting at once as it may
+ * hold sockets, and an address likewise (DEFAULT_SOCKET_CAPS). Each socket
+ * waits on at most one, from its own hello, and a client's new hello takes
+ * the place of its old request, so only requests left by sockets that are
+ * gone can reach the bound. A request counts from its arrival until it is
+ * answered at its due time or is dropped as its client closes its socket
+ * or sends a newer hello (Waiting).
  */
 export class SnapshotBudget {
   readonly limits: SnapshotBudgetLimits;
   #spent = new Map<string, Spent[]>();
   /** Sessions whose requests are being delayed: since when, and their latest request. */
   #overSince = new Map<string, { since: number; last: number }>();
+  /** The delayed requests counted against each key's waiting bound. */
+  #waiting = new Map<string, Waiting[]>();
   #now: Clock;
   #lastSweep: number;
 
@@ -276,7 +302,7 @@ export class SnapshotBudget {
 
   /** Keys still held, for tests. */
   get size(): number {
-    return this.#spent.size + this.#overSince.size;
+    return this.#spent.size + this.#overSince.size + this.#waiting.size;
   }
 
   /**
@@ -288,10 +314,10 @@ export class SnapshotBudget {
   keys(sessionId: string, ip: string, pinned: boolean): BudgetKey[] {
     const l = this.limits;
     return [
-      { key: `s:${sessionId}`, maxCount: l.sessionCount, maxBytes: l.sessionBytes },
+      { key: `s:${sessionId}`, maxCount: l.sessionCount, maxBytes: l.sessionBytes, maxWaiting: l.sessionWaiting },
       pinned
-        ? { key: `ps:${sessionId}`, maxCount: l.ipCount, maxBytes: l.ipBytes }
-        : { key: `ip:${ip}`, maxCount: l.ipCount, maxBytes: Infinity },
+        ? { key: `ps:${sessionId}`, maxCount: l.ipCount, maxBytes: l.ipBytes, maxWaiting: l.ipWaiting }
+        : { key: `ip:${ip}`, maxCount: l.ipCount, maxBytes: Infinity, maxWaiting: l.ipWaiting },
     ];
   }
 
@@ -343,6 +369,26 @@ export class SnapshotBudget {
     };
   }
 
+  /** Whether one more delayed request may wait under every key at `now`, with those that count then (Waiting). */
+  mayWait(keys: readonly BudgetKey[], now = this.#now()): boolean {
+    return keys.every((k) => this.#waitingAt(k.key, now).length < k.maxWaiting);
+  }
+
+  /**
+   * Counts a delayed request against every key from now until `until`, its
+   * due time. Its owner moves `until` on when it waits again at its due
+   * time, and back to the moment it is dropped.
+   */
+  wait(keys: readonly BudgetKey[], until: number): Waiting {
+    const waiting = { until };
+    for (const k of keys) {
+      const list = this.#waiting.get(k.key) ?? [];
+      list.push(waiting);
+      this.#waiting.set(k.key, list);
+    }
+    return waiting;
+  }
+
   /**
    * Notes a new request (a `hello` on a new socket or a `scene` message) and
    * whether the budget delayed it. True when the session has now been making
@@ -376,6 +422,7 @@ export class SnapshotBudget {
     if (now - this.#lastSweep < SWEEP_EVERY_MS) return;
     this.#lastSweep = now;
     for (const key of [...this.#spent.keys()]) this.#live(key, now);
+    for (const key of [...this.#waiting.keys()]) this.#waitingAt(key, now);
     for (const [sessionId, over] of this.#overSince) {
       if (now - over.last > this.limits.abuseMs) this.#overSince.delete(sessionId);
     }
@@ -399,15 +446,21 @@ export class SnapshotBudget {
     }
     return list.filter((s) => s.at > cutoff && s.at <= now);
   }
+
+  /**
+   * The delayed requests that count against a key at `now`: those still
+   * waiting then. Only those a window past their time are dropped, as
+   * #live drops spends.
+   */
+  #waitingAt(key: string, now: number): Waiting[] {
+    const list = this.#waiting.get(key);
+    if (!list) return [];
+    const kept = list.filter((w) => w.until > now - this.limits.windowMs);
+    if (kept.length === 0) this.#waiting.delete(key);
+    else if (kept.length < list.length) this.#waiting.set(key, kept);
+    return kept.filter((w) => w.until > now);
+  }
 }
-
-/**
- * Socket caps (design 10.4): 8 per session, 64 per room, 16 per IP and 400
- * on the whole server, checked before the upgrade completes.
- */
-export type SocketCaps = { perSession: number; perRoom: number; perIp: number; total: number };
-
-export const DEFAULT_SOCKET_CAPS: SocketCaps = { perSession: 8, perRoom: 64, perIp: 16, total: 400 };
 
 export class SocketRegistry {
   readonly caps: SocketCaps;
