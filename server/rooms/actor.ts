@@ -3816,11 +3816,10 @@ export class RoomActor {
     // The batch's view joins the ring at its tick, never below the newest view's, so a reader that arrived before a
     // batch's tick never takes it, behind a clock set back too. A batch that closed under a test's standing clock
     // before the clock reached its tick is viewed at the tick the clock read then, so a reader after its commit at that
-    // reading takes it. The frames held for it route against it before the next batch publishes.
+    // reading takes it. The frames held for it route once it leaves the pending list, as the drain serves the covered.
     const own = batch.standing ? Math.min(batch.tick, this.#readerTick(batch.closeAt)) : batch.tick;
     const tick = Math.max(own, this.#views.at(-1)?.view.tick ?? own);
     this.#keepView({ tick, state: this.#committed.state, seq: this.#committed.seq, pub: this.#committed.pub, through: this.#committed.through });
-    this.#releaseFrames();
     for (const s of batch.sys) s.resolve();
     this.#answerReads(batch);
     // After the batch and any snapshot it owed them, so each of these sockets was sent its last refusal (#closeOnPublish).
@@ -3835,6 +3834,8 @@ export class RoomActor {
     this.#inFlight = null;
     this.#inFlightDone = null;
     this.#nextCommit();
+    // The readers and frames this batch covered are served at once, even when the drain's turn waits for the next.
+    this.#serveCovered();
     this.#drain();
   }
 

@@ -227,6 +227,39 @@ describe("a batch closes once its tick's commands are handled", () => {
     assert.equal(answered.size, 100);
   });
 
+  test("a reader a landing batch covers is answered as it lands, while the drain waits for its next turn", async (t) => {
+    const r = await room(t, { options: { roomOpsPerSec: 100_000 } });
+    const step = heldStep(r.actor);
+    await flush();
+    // The first ask's tick: a reader then waits for its batch to land.
+    const asked = r.clock.now + 40;
+    for (let k = 1; k <= 40; k++) {
+      r.clock.now += 20;
+      r.actor.ids(r.dm.conn, { k, ids: [uuidv7()] });
+    }
+    let read = false;
+    void r.actor.asOf(asked).then(() => (read = true));
+    await flush();
+    assert.equal(read, false, "the first ask's batch has not landed");
+    let loopClock = 0;
+    const loop = t.mock.method(performance, "now", () => (loopClock += 2));
+    let readFirst: boolean | null = null;
+    let leftFirst = -1;
+    const first = new Promise<void>((resolve) =>
+      setImmediate(() => {
+        readFirst = read;
+        leftFirst = r.actor.queueLength;
+        resolve();
+      }),
+    );
+    step.release();
+    await first;
+    loop.mock.restore();
+    assert.ok(leftFirst > 0, "the drain waits for its next turn");
+    assert.equal(readFirst, true, "the reader was answered as the first ask's batch landed");
+    await flush();
+  });
+
   test("a timer that fires late closes the batch at its tick, and one an op arrives after is in the next batch", async (t) => {
     const r = await room(t);
     r.timers.enable();
