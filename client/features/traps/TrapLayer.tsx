@@ -19,7 +19,7 @@ import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
 import { areaOutline } from "../areas/placement.ts";
 import { findDoor } from "../doors/doors.ts";
-import { boxCoversOutline, cornersOf, outlineOf, type Outline } from "../floors/linkMarks.ts";
+import { boxCoversOutline, cornersOf, drawnBox, outlineOf, type DrawSpace, type Outline } from "../floors/linkMarks.ts";
 import { pillPlace } from "../measure/pillPlace.ts";
 import type { LayerProps } from "../layers.ts";
 import { BADGE_PX, trapBadgeBox } from "./badge.ts";
@@ -241,8 +241,14 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
   return tops.reduce((a, b) => (Math.abs(b.x - mid) < Math.abs(a.x - mid) - 1e-9 ? b : a));
 }
 
-/** Standing trap names use the same candidates in placement and its geometry tests. */
-export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean): PillSpec {
+/**
+ * Standing trap names use the same candidates in placement and its geometry tests.
+ * A candidate that covers a floor link's frame (`frames`) where it draws, in
+ * view units at `space`'s turn, is left out while any other candidate keeps
+ * off them all: Top-down's pick (`trapNamePill`) does not carry over, since
+ * the name stands upright and the frames lie on the turned ground.
+ */
+export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, frames: readonly Outline[] = [], space: DrawSpace = null): PillSpec {
   const zone = trap.zone;
   const candidates: PillSpec[] = [];
   const add = (x: number, y: number, above: boolean) => candidates.push({ ...original, x, y, above, below: !above });
@@ -289,6 +295,13 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
   // The original already passed the stand rule. If every sampled edge is
   // fogged, keep it rather than choosing an unpermitted first candidate.
   const permitted = candidates.filter(allowed);
+  const offFrames = (p: PillSpec) => {
+    const box = drawnBox(p, scale, space, true, true);
+    return frames.every((o) => !boxCoversOutline(box, cornersOf(o), space));
+  };
+  // Tested on the pushed spots isoNamePill tries too, so a nudge never lands on a frame.
+  const clear = frames.length ? permitted.filter(offFrames) : permitted;
+  if (frames.length > 0 && clear.length > 0) return isoNamePill(clear, names, scale, (p) => allowed(p) && offFrames(p));
   return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
 }
 
@@ -310,8 +323,8 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   const name = useMemo(() => {
     const allowed = (p: PillSpec) => !props.iso || pillStands(props.iso.fog, { ...p, scale });
     if (!original || !names || !allowed(original)) return original;
-    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed);
-  }, [original, names, props.iso, scale, grid, trap, props.chunks]);
+    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed, props.frames, props.iso);
+  }, [original, names, props.iso, scale, grid, trap, props.chunks, props.frames]);
   const nameKey = name ? JSON.stringify(name) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
   usePublishPills(`trap:${trap.id}`, useMemo(() => (name ? [name] : NO_PILLS), [nameKey]));

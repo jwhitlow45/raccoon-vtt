@@ -12,6 +12,7 @@ import { trap as makeTrap } from "#shared/testutil.ts";
 import { viewPill } from "../../canvas/relief/isoText.ts";
 import { isometric } from "../../lib/view.ts";
 import { pillInkReach, pillPlace } from "../measure/pillPlace.ts";
+import { boxCoversOutline, cornersOf, drawnBox, outlineOf } from "../floors/linkMarks.ts";
 
 const { trapNamePill, isoTrapNamePill } = await import("./TrapLayer.tsx");
 
@@ -108,3 +109,35 @@ for (const orient of ["rows", "columns"] as const) {
     }
   });
 }
+
+/*
+ * Isometric: the name stands upright over the turned ground, so a spot clear
+ * of a floor link's frame in Top-down can cover it on screen (QF-ASTRA-02).
+ * Frames are tried at every place round a trap, at all four turns: where the
+ * old pick covers one, the new pick must not, whenever another candidate is clear.
+ */
+for (const turn of [0, 1, 2, 3] as const) test(`QF-ASTRA-02: an isometric trap name keeps off the frame of a floor link beside it at turn ${turn}`, () => {
+  const trap = makeTrap("trap", { zone: { cells: [{ x: 6, y: 6, w: 3, h: 1 }] } });
+  const original = trapNamePill(SQUARES, trap, {}, scale, true)!;
+  const view = isometric(turn);
+  const space = { turn, ground };
+  const names = { view, ground, boxes: [] };
+  const covers = (p: PillSpec, frames: ReturnType<typeof outlineOf>[]) => frames.some((o) => boxCoversOutline(drawnBox(p, scale, space, true, true), cornersOf(o), space));
+  let tried = 0;
+  let fixed = 0;
+  for (let x = 2; x <= 12; x++) for (let y = 2; y <= 10; y++) for (const [w, h] of [[2, 1], [1, 2], [2, 2]] as const) {
+    if (x < 9 && x + w > 6 && y < 7 && y + h > 6) continue;
+    const frames = [outlineOf(SQUARES, { x, y, w, h })];
+    const before = isoTrapNamePill(original, SQUARES, trap, {}, names, scale, () => true);
+    if (!covers(before, frames)) continue;
+    tried++;
+    const after = isoTrapNamePill(original, SQUARES, trap, {}, names, scale, () => true, frames, space);
+    const spots: PillSpec[] = [];
+    isoTrapNamePill(original, SQUARES, trap, {}, names, scale, (p) => { spots.push(p); return false; });
+    if (spots.some((p) => !covers(p, frames))) {
+      assert.ok(!covers(after, frames), `frame ${JSON.stringify({ x, y, w, h })}: the name at ${JSON.stringify(after)} covers it though ${spots.length} spots were offered`);
+      fixed++;
+    }
+  }
+  assert.ok(tried > 0 && fixed > 0, `the old pick covered a frame in ${tried} places and the new one cleared ${fixed}`);
+});
