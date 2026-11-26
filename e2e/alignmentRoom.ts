@@ -4458,6 +4458,33 @@ export function helperTest(): void {
       // A mixed row is judged by the alignment most of its parts take.
       await caught("mixed-start", "row");
       await passes("mixed-center");
+      // Chrome 158 writes a computed flex-start as flow-start, and older Chrome writes flex-start. A row set either way is judged as before, and a keyword the helper does not know is an error: it once read as no vote and the row went unjudged.
+      const spellStartAs = (word: string | null) => page.evaluate((to) => {
+        type Style = Record<string, unknown> & { getPropertyValue(name: string): string };
+        type Win = { getComputedStyle(el: unknown, pseudo?: string): Style; realComputedStyle?: Win["getComputedStyle"] };
+        const win = globalThis as unknown as Win;
+        const real = (win.realComputedStyle ??= win.getComputedStyle);
+        win.getComputedStyle = to === null ? real : (el, pseudo) => {
+          const style = real.call(win, el, pseudo);
+          const spelled = (value: unknown) => (typeof value === "string" ? value.replace(/fl(?:ex|ow)-start/g, to) : value);
+          return new Proxy(style, {
+            get(target, key) {
+              if (key === "getPropertyValue") return (name: string) => (name === "align-items" || name === "align-self" ? spelled(target.getPropertyValue(name)) : target.getPropertyValue(name));
+              const value = Reflect.get(target, key, target);
+              return key === "alignItems" || key === "alignSelf" ? spelled(value) : typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        };
+      }, word);
+      try {
+        await spellStartAs("flow-start");
+        await caught("mixed-start", "row");
+        await passes("mixed-center");
+        await spellStartAs("sideways-start");
+        await assert.rejects(measureAlignment(page.locator('[data-case="mixed-start"]')), /"sideways-start" is a keyword it does not know/);
+      } finally {
+        await spellStartAs(null);
+      }
       // A part rounded only a quarter is no chip, so a row of them is no set of choices. Circles are.
       await caught("squares-25", "wrap-orphan");
       await passes("circles-50");
