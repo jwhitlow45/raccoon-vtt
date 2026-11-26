@@ -56,6 +56,11 @@ function step(prev: Loose, random: () => number, k: number): Loose {
     else next.clock = { at: k };
   }
   if (random() < 0.05) next.tokens = [1, 2, 3];
+  // A field that goes undefined, then absent, then holds a value again, in any order.
+  const r = random();
+  if (r < 0.15) next.opt = undefined;
+  else if (r < 0.3) delete next.opt;
+  else if (r < 0.4) next.opt = { x: k };
   return next;
 }
 
@@ -96,6 +101,17 @@ test("every kept view reads back as the state published, in its own key order, h
     for (const link of links.slice(0, -1)) assert.equal(link.whole, null, `run ${run}: R5`);
     assert.equal(stateOf(links.at(-1)!), published.at(-1), "the newest view is the state published");
   }
+});
+
+test("a field held as undefined that the next view lacks reads undefined, though a later view holds it again", () => {
+  const s0 = { meta: 1, f: undefined } as unknown as RoomState;
+  const s1 = { meta: 1 } as unknown as RoomState;
+  const s2 = { meta: 1, f: { x: 5 } } as unknown as RoomState;
+  const [l0, l1, l2] = [wholeLink(s0), wholeLink(s1), wholeLink(s2)];
+  const v0 = compactLink(l0, l1);
+  compactLink(l1, l2);
+  assert.deepEqual(Object.keys(v0), ["meta", "f"]);
+  assert.equal((v0 as unknown as Loose).f, undefined);
 });
 
 test("a view a batch moved one token of 2,000 in keeps that token alone", () => {

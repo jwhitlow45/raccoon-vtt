@@ -1623,7 +1623,8 @@ export class RoomActor {
     // keys its results by the state), outside those caches' byte caps. Readers and frames nearly always take the newest
     // view, so a view a newer one follows keeps only what it differs by from that one (viewRing.ts): the same room to
     // read, while the published state, what was worked out for it and its copies of the records a batch wrote go once
-    // nothing else holds them.
+    // nothing else holds them. A reader that holds an older view across an await keeps every newer view's delta alive
+    // through it, and its first read of each field rebuilds that field through each delta up to the newest view.
     const link = wholeLink(view.state);
     const newest = this.#views.at(-1);
     if (newest) this.#views[this.#views.length - 1] = { ...newest, view: { ...newest.view, state: compactLink(newest.link, link) } };

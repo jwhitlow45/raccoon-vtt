@@ -54,8 +54,9 @@ export function compactLink(link: ViewLink, newer: ViewLink): RoomState {
   for (const field of order) {
     const was = (older as Record<string, unknown>)[field];
     const now = (next as Record<string, unknown>)[field];
-    // The field's place comes from `order`, so one the newer view lacks reads as the undefined it held.
-    if (was === now) continue;
+    // A field left out is read from the newer view, and on through the views after it, so only one the newer view
+    // holds as the same value is left out. One it lacks is kept whole, even as undefined: a later view may hold it again.
+    if (was === now && Object.hasOwn(next, field)) continue;
     fields.set(field, recordDelta(was, now) ?? { kind: "whole", value: was });
   }
   link.delta = { order, fields };
