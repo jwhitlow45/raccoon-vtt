@@ -658,9 +658,21 @@ export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): 
   }
 }
 
-/** Creatures as a trap line names them: "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more". Empty for none. */
+/**
+ * Creatures as a trap line names them: "Thorn", "Thorn and Bree", "Thorn,
+ * Bree and 2 more". Empty for none. A character the copy holds by two
+ * tokens is one creature, named once, as a trap card names it (LP53).
+ */
 function creatureList(names: LogNames, ids: readonly string[], more = 0): string {
-  const parts = ids.map((id) => creatureName(names, { tokenId: id }));
+  const seen = new Set<string>();
+  const once = ids.filter((id) => {
+    const token = ownEntry(names.tokens, id);
+    const holder = token && "ref" in token.actor ? `character:${token.actor.ref}` : `token:${id}`;
+    if (seen.has(holder)) return false;
+    seen.add(holder);
+    return true;
+  });
+  const parts = once.map((id) => creatureName(names, { tokenId: id }));
   if (more > 0) parts.push(`${more} more`);
   if (parts.length <= 1) return parts[0] ?? "";
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;

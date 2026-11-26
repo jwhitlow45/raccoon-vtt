@@ -52,6 +52,17 @@ describe("teleport lines (docs/design/design-v1-maps-vision.md 4.1)", () => {
   });
 });
 
+describe("trap lines (docs/design/design-v1-traps.md 6.3)", () => {
+  test("name a character with two tokens once (LP53)", () => {
+    const rook = (id: string) => token(id, { name: "Rook", kind: "pc", actor: { ref: "c1" } });
+    const names: LogNames = room({ characters: { c1: character("c1", { name: "Rook" }) }, tokens: { r1: rook("r1"), r2: rook("r2"), snik: token("snik", { name: "Snik" }) } });
+    const trap: LogEvent = { type: "trap", trapId: "t1", sceneId: "s1", name: "Ember Plate", how: "enter", by: ["r1", "r2", "snik"], hits: 3, did: [] };
+    assert.equal(describeEvent(trap, names), "Ember Plate went off: Rook and Snik.");
+    assert.equal(describeEvent({ ...trap, how: "hand", by: ["r2", "snik", "r1"] }, names), "The DM set off Ember Plate: Rook and Snik.");
+    assert.equal(describeEvent({ type: "trapSeen", by: ["r1", "r2"], message: "Click." }, names), "Rook: Click.");
+  });
+});
+
 describe("merged log order and trimmed lines", () => {
   const line = (id: string, type: "chat" | "trap" | "trapSeen"): LogEntry =>
     type === "chat"
