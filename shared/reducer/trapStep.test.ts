@@ -199,6 +199,26 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(again.state.trapLog.length, 1);
   });
 
+  test("a partial Apply on a hidden occurrence ends its hold: the remnant waits as an acted one, and the trap's next private springing writes its occurrence and line", () => {
+    const familiar = token("imp", { name: "Imp", kind: "npc", ownerIds: ["p1"], visibility: "dm", x: 0, y: 6 });
+    const away = goblin({ sceneId: "s2", visibility: "dm" });
+    const plate = trap("plate", square(3, 6), { stops: false, actions: [{ show: { tokenId: "imp" } }], damage: [{ formula: "1d6", type: "fire" }] });
+    const r = applied(world([familiar, away], [plate]), { t: "token.moveMany", moves: [{ tokenId: "imp", x: 8, y: 6 }] }, P1);
+    // As if the goblin shared the springing and the DM then moved it to another scene.
+    const first = r.state.traps.plate!.rig!.due![0]!;
+    const shared = { ...r.state, traps: { plate: { ...r.state.traps.plate!, rig: { ...r.state.traps.plate!.rig!, due: [{ ...first, hits: ["gob", "imp"] }] } } } };
+    const cut = applied(shared, { t: "actor.outcome", plan: "p1", trap: { trapId: "plate", due: first.id, tokenIds: ["imp"] }, targets: [{ target: { tokenId: "imp" }, amount: 3 }] }, DM, 8);
+    assert.deepEqual(cut.state.traps.plate!.rig!.due!.map((d) => [d.id, d.hits, d.hidden, d.acted]), [[first.id, ["gob"], undefined, true]]);
+    assert.equal(cut.state.traps.plate!.state, "armed", "still armed for the players");
+    assert.equal(cut.state.tokens.imp!.visibility, "dm", "its effects never ran");
+    // Back over the plate.
+    const again = applied(cut.state, { t: "token.moveMany", moves: [{ tokenId: "imp", x: 0, y: 6 }] }, P1, 9);
+    const due = again.state.traps.plate!.rig!.due!;
+    assert.deepEqual(due.map((d) => [d.hits, d.hidden ?? false]), [[["gob"], false], [["imp"], true]]);
+    assert.equal(again.state.trapLog.length, 2, "the DM's line for the second");
+    assert.deepEqual(again.state.trapSeen, []);
+  });
+
   test("Do its effects then runs the actions and the players' line once, and a second is refused", () => {
     const familiar = token("imp", { name: "Imp", kind: "npc", ownerIds: ["p1"], visibility: "dm", x: 0, y: 6 });
     const state = world([familiar], [trap("plate", square(3, 6), { actions: [{ show: { tokenId: "imp" } }], damage: [{ formula: "1d6", type: "fire" }] })]);
@@ -366,9 +386,9 @@ describe("the DM's Set it off, and settling (6.2)", () => {
     const state = world([thorn()], [trap("plate", square(3, 5), { damage: [{ formula: "1d6", type: "fire" }] })]);
     const r = applied(state, { t: "token.move", tokenId: "thorn", x: 8, y: 5 });
     const due: TrapDue = r.state.traps.plate!.rig!.due![0]!;
-    const out = applied(r.state, { t: "actor.outcome", plan: "p1", trap: { trapId: "plate", due: due.id }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] }, DM, 8);
+    const out = applied(r.state, { t: "actor.outcome", plan: "p1", trap: { trapId: "plate", due: due.id, tokenIds: ["thorn"] }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] }, DM, 8);
     assert.equal(out.state.traps.plate!.rig!.due, undefined);
-    const twice = applyOp(out.state, { t: "actor.outcome", plan: "p2", trap: { trapId: "plate", due: due.id }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] }, DM, env(9));
+    const twice = applyOp(out.state, { t: "actor.outcome", plan: "p2", trap: { trapId: "plate", due: due.id, tokenIds: ["thorn"] }, targets: [{ target: { tokenId: "thorn" }, amount: 3 }] }, DM, env(9));
     assert.ok(!twice.ok && twice.message === SETTLED_MEANWHILE);
     const undone = applied(out.state, { t: "sys.restore", entries: out.inverse!, from: "undo" }, DM, 10);
     assert.deepEqual(undone.state.traps.plate!.rig!.due, [due]);

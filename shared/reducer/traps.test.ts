@@ -7,7 +7,7 @@ import { canApply, CHOOSE_OPENER } from "../permissions.ts";
 import { projectEntity, projectState } from "../project.ts";
 import { opSchema, type Op, type TrapInput } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { DM, P1, P2, apply, env, refused, reveal, room, token, trap } from "../testutil.ts";
+import { DM, P1, P2, apply, character, env, refused, reveal, room, token, trap } from "../testutil.ts";
 import { parseRoomState } from "#server/rooms/stateSchema.ts";
 import { DONE_MEANWHILE, GIVE_IT_USES, SETTLED_MEANWHILE, addDue, trapOwnBytes } from "./traps.ts";
 import { Tx } from "./tx.ts";
@@ -331,6 +331,138 @@ describe("doing a waiting springing's effects, and settling it (6.2)", () => {
     const ids = (id: string) => (tx.state.traps[id]!.rig!.due ?? []).map((d) => d.id);
     assert.deepEqual(ids("b"), ["16:0"]);
     assert.equal(Object.values(tx.state.traps).reduce((n, t) => n + (t.rig?.due?.length ?? 0), 0), LIMITS.trapDuePerRoom);
+  });
+});
+
+describe("Apply settles a springing per creature (6.2)", () => {
+  /**
+   * Hidden Pit hit Thorn, who has a second token Thorn2 of one character,
+   * Bree, whom the DM moved to another scene before Apply, and a goblin.
+   * A second springing waits after it, so a cut keeps its place.
+   */
+  function hit(over: Partial<TrapDue> = {}): RoomState {
+    const state = create(table(), input("pit"));
+    state.characters.c1 = character("c1", { name: "Thorn", ownerIds: ["p1"] });
+    state.tokens.thorn = token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"], actor: { ref: "c1" }, x: 4, y: 4 });
+    state.tokens.thorn2 = token("thorn2", { name: "Thorn", kind: "pc", ownerIds: ["p1"], actor: { ref: "c1" }, x: 5, y: 5 });
+    state.tokens.bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p2"], sceneId: "s2" });
+    state.tokens.gob = token("gob", { name: "Goblin", x: 4, y: 5 });
+    return withDue(state, "pit", [occurrence("5:0", { hits: ["bree", "gob", "thorn"], perceived: true, acted: true, ...over }), occurrence("6:0")]);
+  }
+  const outcome = (tokenIds: string[] | undefined, targets: string[], plan = "p1"): Op => ({
+    t: "actor.outcome",
+    plan,
+    trap: { trapId: "pit", due: "5:0", ...(tokenIds ? { tokenIds } : {}) },
+    targets: targets.map((tokenId) => ({ target: { tokenId }, amount: 3 })),
+  });
+  const run = (state: RoomState, op: Op, seq = 9, opVersion?: number) => applyOp(state, op, DM, { ...env(seq), ...(opVersion === undefined ? {} : { opVersion }) });
+  const waiting = (state: RoomState) => state.traps.pit!.rig!.due ?? [];
+  const hp = (state: RoomState, id: string) => {
+    const a = state.tokens[id]!.actor;
+    return "inline" in a ? a.inline.hp.cur : state.characters[a.ref]!.actor.hp.cur;
+  };
+
+  test("Apply that reaches every creature it names ends the occurrence, as a whole settle did", () => {
+    const state = apply(hit(), outcome(["bree", "gob", "thorn"], ["bree", "gob", "thorn"]), DM, 9);
+    assert.deepEqual(waiting(state).map((d) => d.id), ["6:0"]);
+  });
+
+  test("Apply that reaches Thorn and the goblin keeps Bree on the occurrence, in its place, with its id, flags and count", () => {
+    const state = apply(hit({ hitsMore: 2 }), outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9);
+    assert.deepEqual(waiting(state), [occurrence("5:0", { hits: ["bree"], hitsMore: 2, perceived: true, acted: true }), occurrence("6:0")]);
+    assert.deepEqual([hp(state, "thorn"), hp(state, "gob"), hp(state, "bree")], [17, 17, 20]);
+  });
+
+  test("a skipped or passed creature is settled as an applied one: named with no damage, it leaves the occurrence", () => {
+    const state = apply(hit(), outcome(["gob", "thorn"], ["thorn"]), DM, 9);
+    assert.deepEqual(waiting(state)[0]!.hits, ["bree"]);
+    assert.equal(hp(state, "gob"), 20);
+  });
+
+  test("a creature's other token leaves with it, whether the outcome names or only targets it", () => {
+    const named = withDue(hit(), "pit", [occurrence("5:0", { hits: ["bree", "thorn", "thorn2"] })]);
+    assert.deepEqual(waiting(apply(named, outcome(["thorn"], ["thorn"]), DM, 9))[0]!.hits, ["bree"]);
+    assert.deepEqual(waiting(apply(named, outcome([], ["thorn2"]), DM, 9))[0]!.hits, ["bree"], "targeted alone");
+  });
+
+  test("a deleted creature drops off at the next settle that names someone, and the occurrence goes once no other is left", () => {
+    const { gob: _gob, ...tokens } = hit().tokens;
+    const gone = { ...hit(), tokens };
+    assert.deepEqual(waiting(apply(gone, outcome(["thorn"], ["thorn"]), DM, 9))[0]!.hits, ["bree"]);
+    const { bree: _bree, ...fewer } = tokens;
+    assert.deepEqual(waiting(apply({ ...gone, tokens: fewer }, outcome(["thorn"], ["thorn"]), DM, 9)).map((d) => d.id), ["6:0"]);
+  });
+
+  test("an outcome that names and targets no one changes nothing, a deleted creature it names included", () => {
+    const { gob: _gob, ...tokens } = hit().tokens;
+    const gone = { ...hit(), tokens };
+    const r = run(gone, outcome([], []));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(r.state.traps, gone.traps);
+  });
+
+  test("a page that names a creature settled since, or one the occurrence never named, is refused, and nothing applies", () => {
+    const cut = apply(hit(), outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9);
+    for (const op of [outcome(["thorn"], ["thorn"], "p2"), outcome(["bree", "thorn"], ["bree"], "p3"), outcome(["imp"], ["imp"], "p4")]) {
+      const r = run(cut, op, 10);
+      assert.ok(!r.ok && r.message === SETTLED_MEANWHILE, JSON.stringify(op));
+    }
+    const done = apply(cut, outcome(["bree"], ["bree"], "p5"), DM, 10);
+    assert.deepEqual(waiting(done).map((d) => d.id), ["6:0"]);
+    assert.ok(!run(done, outcome(["bree"], ["bree"], "p6"), 11).ok, "one no longer waiting");
+  });
+
+  test("a whole Apply on an occurrence that names no one settles it, live and at 66: a pick page's count, and one that hits no one", () => {
+    for (const due of [{ hits: [], hitsMore: 51 }, { hits: [] }]) {
+      for (const opVersion of [undefined, 66, 65]) {
+        const r = run(hit(due), outcome(undefined, ["thorn"]), 9, opVersion);
+        assert.ok(r.ok, r.ok ? "" : r.message);
+        assert.deepEqual(waiting(r.state).map((d) => d.id), ["6:0"], `${JSON.stringify(due)} at ${opVersion ?? "live"}`);
+      }
+    }
+  });
+
+  test("past its list's count, an occurrence settles per creature on the ones it names and goes once none is left", () => {
+    const first = apply(hit({ hitsMore: 3 }), outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9);
+    assert.deepEqual([waiting(first)[0]!.hits, waiting(first)[0]!.hitsMore], [["bree"], 3]);
+    assert.deepEqual(waiting(apply(first, outcome(["bree"], ["bree"], "p2"), DM, 10)).map((d) => d.id), ["6:0"], "the count alone never keeps it");
+  });
+
+  test("a hidden occurrence's remnant drops hidden and takes acted, and one a whole Apply reaches goes as before", () => {
+    const hidden = withDue(hit(), "pit", [occurrence("5:0", { hits: ["bree", "gob", "thorn"], hidden: true }), occurrence("6:0")]);
+    const cut = waiting(apply(hidden, outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9))[0]!;
+    assert.deepEqual(cut, occurrence("5:0", { hits: ["bree"], acted: true }));
+    assert.equal(refused(apply(hidden, outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9), { t: "trap.act", trapId: "pit", due: "5:0" }, DM, 10).message, DONE_MEANWHILE, "Do its effects leaves the card");
+    assert.deepEqual(waiting(apply(hidden, outcome(["bree", "gob", "thorn"], ["thorn"]), DM, 9)).map((d) => d.id), ["6:0"]);
+  });
+
+  test("a remnant keeps one of its trap's and the room's places, so later springings push it out, oldest first", () => {
+    const cut = apply(hit(), outcome(["gob", "thorn"], ["gob", "thorn"]), DM, 9);
+    const tx = new Tx(cut, DM, env(20));
+    for (const id of ["20:0", "21:0"]) addDue(tx, "pit", occurrence(id));
+    assert.deepEqual((tx.state.traps.pit!.rig!.due ?? []).map((d) => d.id), ["6:0", "20:0", "21:0"], "the trap's fourth pushes out the remnant first");
+    // Later springings of other traps fill the room to its ten, and a fourth trap's springing is its eleventh.
+    const roomTx = new Tx(cut, DM, env(30));
+    for (const [id, n] of [["a", 3], ["b", 3], ["c", 2], ["d", 0]] as const) roomTx.write(keys.trap(id), { ...trap(id), rig: { ...trap(id).rig!, due: Array.from({ length: n }, (_, i) => occurrence(`${10 + i}:${id.charCodeAt(0)}`)) } });
+    assert.equal(Object.values(roomTx.state.traps).reduce((sum, t) => sum + (t.rig?.due?.length ?? 0), 0), LIMITS.trapDuePerRoom);
+    addDue(roomTx, "d", occurrence("30:0"));
+    const left = Object.values(roomTx.state.traps).flatMap((t) => (t.rig?.due ?? []).map((d) => d.id));
+    assert.equal(left.length, LIMITS.trapDuePerRoom);
+    assert.equal(left.includes("5:0"), false, "the room's oldest, the remnant, went");
+  });
+
+  test("undo of a partial Apply brings the occurrence back whole with the HP, and redo cuts it again", () => {
+    const before = hit();
+    const r = run(before, outcome(["gob", "thorn"], ["gob", "thorn"]));
+    assert.ok(r.ok && r.inverse);
+    const undone = run(r.state, { t: "sys.restore", entries: r.inverse, from: "undo", deps: true }, 10);
+    assert.ok(undone.ok && undone.inverse, undone.ok ? "" : undone.message);
+    assert.deepEqual(waiting(undone.state), waiting(before));
+    assert.deepEqual([hp(undone.state, "thorn"), hp(undone.state, "gob")], [20, 20]);
+    const redone = run(undone.state, { t: "sys.restore", entries: undone.inverse, from: "redo", deps: true }, 11);
+    assert.ok(redone.ok, redone.ok ? "" : redone.message);
+    assert.deepEqual(waiting(redone.state), waiting(r.state));
+    assert.deepEqual([hp(redone.state, "thorn"), hp(redone.state, "gob")], [17, 17]);
   });
 });
 

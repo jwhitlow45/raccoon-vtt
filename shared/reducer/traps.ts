@@ -1,8 +1,8 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { type LogEntry, type LogEvent, type RoomState, type Scene, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
+import { type LogEntry, type LogEvent, type RoomState, type Scene, type Token, type TokenId, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
-import type { OpOf } from "../protocol.ts";
+import type { ActorTarget, OpOf } from "../protocol.ts";
 import { cellWord, isHex, sceneGrid, shapeOfGrid, type Grid } from "../rules/grid.ts";
 import { hexInScene, sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
@@ -240,6 +240,55 @@ export function settleTrap(tx: Tx, trapId: string, dueId: string, sprung = false
   const trap = ownEntry(tx.state.traps, trapId);
   if (!dueOf(trap, dueId)) throw invalid(SETTLED_MEANWHILE);
   writeSettled(tx, trap!, dueId, sprung);
+}
+
+/**
+ * A group save's settle of a trap occurrence (6.2), from its Apply. With
+ * `tokenIds` it settles only the creatures the page reached, as a fall
+ * card's does (falls.ts settleFallOutcome): each id, and every other token
+ * the occurrence names that shows a creature the outcome settled or
+ * targeted, keyed as actorOutcome counts a creature, by its character, else
+ * its token. The occurrence keeps every other named creature the room
+ * still holds, such as one moved to another scene, and goes once none is
+ * left, so a creature past its `hitsMore` count never turns it into a pick
+ * page that could apply another twice. A settle that names no one and
+ * targets no one changes nothing, so a deleted creature it names stays
+ * until a settle that names someone. A hidden occurrence's remnant drops
+ * `hidden` and takes `acted`, as a public one carries, so the trap's later
+ * private springings write again as after a whole settle (trapStep.ts),
+ * and its effects never run.
+ *
+ * Without `tokenIds` an outcome settles the occurrence whole, as every op
+ * stored before change format 66 did and replays so.
+ */
+export function settleTrapOutcome(tx: Tx, settle: { trapId: string; due: string; tokenIds?: readonly TokenId[] }, targets: readonly { target: ActorTarget }[] = []): void {
+  const trap = ownEntry(tx.state.traps, settle.trapId);
+  const due = dueOf(trap, settle.due);
+  if (!trap || !due) throw invalid(SETTLED_MEANWHILE);
+  const ids = settle.tokenIds;
+  if (ids === undefined) {
+    writeSettled(tx, trap, due.id, false);
+    return;
+  }
+  if (ids.some((id) => !due.hits.includes(id))) throw invalid(SETTLED_MEANWHILE);
+  if (ids.length === 0 && targets.length === 0) return;
+  const creature = (target: ActorTarget): string | undefined => {
+    const resolved = tx.tryResolveActor(target);
+    return resolved && `${resolved.holder}:${resolved.id}`;
+  };
+  const settledCreatures = new Set([...ids.map((tokenId) => creature({ tokenId })), ...targets.map((t) => creature(t.target))]);
+  settledCreatures.delete(undefined);
+  const settled = (id: TokenId) => ids.includes(id) || settledCreatures.has(creature({ tokenId: id }));
+  const left = due.hits.filter((id) => !settled(id) && ownEntry(tx.state.tokens, id) !== undefined);
+  if (left.length === 0) {
+    writeSettled(tx, trap, due.id, false);
+    return;
+  }
+  if (left.length === due.hits.length) return;
+  const { hidden, ...kept } = due;
+  const remnant: TrapDue = { ...kept, hits: left, ...(hidden ? { acted: true as const } : {}) };
+  const rig = trap.rig!;
+  tx.write(keys.trap(trap.id), { ...trap, rig: { ...rig, due: (rig.due ?? []).map((d) => (d.id === due.id ? remnant : d)) } });
 }
 
 /** The trap with an occurrence settled: gone from its list, the trap sprung when asked. */

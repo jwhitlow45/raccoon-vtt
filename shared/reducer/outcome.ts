@@ -2,7 +2,7 @@ import type { OpOf } from "../protocol.ts";
 import { actorHp, effectAdd, effectRemove } from "./actors.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import { closeCast } from "./casts.ts";
-import { settleTrap } from "./traps.ts";
+import { settleTrapOutcome } from "./traps.ts";
 import { settleFallOutcome } from "./falls.ts";
 import { combatUses } from "../migrate.ts";
 import { Refuse, invalid, type Tx } from "./tx.ts";
@@ -37,8 +37,9 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
     if (!ask) throw new Refuse("gone", ASK_CLOSED);
     closeCast(tx, ask, "done");
   }
-  // A trap's group save settles its occurrence in the same op, so a trap applies at most once (docs/design/design-v1-traps.md 6.2).
-  if (op.trap !== undefined) settleTrap(tx, op.trap.trapId, op.trap.due);
+  // A trap's group save takes the creatures it settles off its occurrence in the same op, so each one's damage applies at
+  // most once (docs/design/design-v1-traps.md 6.2).
+  if (op.trap !== undefined) settleTrapOutcome(tx, op.trap, op.targets);
   // A fall's group save takes the creatures it settles off its card in the same op, so each one's damage applies at most once
   // (docs/design/design-v1-floors.md phase 4, 4.4).
   if (op.fall !== undefined) settleFallOutcome(tx, op.fall, op.targets);
