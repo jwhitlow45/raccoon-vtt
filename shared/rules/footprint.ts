@@ -259,8 +259,44 @@ export function placedOnHex(g: HexGrid, token: PlacedToken, ref: Hex): Point {
  * `[sx, sy]` raster indices: what the fog and sight tests read on hexes
  * (HX-D10). Each sub-cell belongs to one hex, so none repeats.
  */
-export function footprintSubcells(g: HexGrid, token: PlacedToken): [number, number][] {
-  return occupiedHexes(g, token).flatMap((h) => hexSubcells(g, h));
+export function footprintSubcells(g: HexGrid, token: PlacedToken): readonly (readonly [number, number])[] {
+  if (subcellMemo === null) return occupiedHexes(g, token).flatMap((h) => hexSubcells(g, h));
+  const kept = subcellMemo.get(token);
+  if (kept && kept.orient === g.orient && kept.size === token.size && kept.x === token.x && kept.y === token.y && kept.w === token.w && kept.h === token.h && kept.squeeze === token.squeeze) return kept.subs;
+  const subs = occupiedHexes(g, token).flatMap((h) => hexSubcells(g, h));
+  subcellMemo.set(token, { orient: g.orient, size: token.size, x: token.x, y: token.y, w: token.w, h: token.h, squeeze: token.squeeze, subs });
+  return subs;
+}
+
+/*
+ * One routing pass judges each creature for every receiver, and again by
+ * the shared class beside each player, and each judgement reads its
+ * sub-cells. A group frame of 100 creatures on a per-player hex scene
+ * rasterized the same hexes thousands of times a frame. An entry keeps
+ * every field the answer reads and answers only while they all still
+ * match, so it never answers for a moved or resized creature, even one
+ * whose object was written in place. Keying by the object, not a string
+ * of its fields, keeps a hit cheaper than the work it saves. The memo
+ * lives for one call of withFootprintMemo, which bounds what it holds.
+ */
+type KeptSubcells = Pick<PlacedToken, "size" | "x" | "y" | "w" | "h" | "squeeze"> & { orient: HexGrid["orient"]; subs: readonly (readonly [number, number])[] };
+let subcellMemo: WeakMap<PlacedToken, KeptSubcells> | null = null;
+let memoOff = false;
+
+/** Runs `run` with footprintSubcells kept by its inputs until it returns. A nested call shares the outer memo. */
+export function withFootprintMemo<T>(run: () => T): T {
+  if (subcellMemo !== null || memoOff) return run();
+  subcellMemo = new WeakMap();
+  try {
+    return run();
+  } finally {
+    subcellMemo = null;
+  }
+}
+
+/** Turns withFootprintMemo off, so a test can route the same frames with and without it. */
+export function setFootprintMemoOffForTests(off: boolean): void {
+  memoOff = off;
 }
 
 /** The cells sub-cells lie in. A footprint always holds some, so the range is never empty. */

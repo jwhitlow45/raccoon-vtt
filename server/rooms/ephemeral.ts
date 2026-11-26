@@ -4,7 +4,7 @@ import { mayMoveToken } from "#shared/permissions.ts";
 import { ownsToken, perPlayerScene, projectEntity, withheldFromViewer } from "#shared/project.ts";
 import { ownEntry } from "#shared/records.ts";
 import { startFloor } from "#shared/rules/floors.ts";
-import { canSqueeze } from "#shared/rules/footprint.ts";
+import { canSqueeze, withFootprintMemo } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { expandAt, expandGroup, isGroupFrame, loneEphSchema, outboundEph, type EphEvent, type EphEventOut, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
@@ -495,12 +495,12 @@ export class Outbox {
 /** Runs one pass into `out`, or into an outbox of its own that it delivers as the pass ends. */
 function pass(out: Outbox | undefined, run: (out: Outbox) => void): void {
   if (out) {
-    run(out);
+    withFootprintMemo(() => run(out));
     return;
   }
   const own = new Outbox();
   try {
-    run(own);
+    withFootprintMemo(() => run(own));
   } finally {
     own.deliver();
   }
