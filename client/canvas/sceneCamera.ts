@@ -82,6 +82,12 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
   pick(view: View, camera: Camera, size: Size): BoardPick;
   selected(): T | undefined;
   stands(pick: BoardPick, selected: T): boolean;
+  /**
+   * A map the viewer never moved from its fit stays a fit across the switch when the held camera would cut the
+   * map's corners: Isometric's diamond is wider than the same map seen from above, so a 14 x 9 map held at its
+   * Top-down zoom runs past a phone's edges. Null keeps the held camera.
+   */
+  refit?(before: Camera, held: Camera): { cam: Camera } | null;
   setCam(c: Camera): void;
 }): void {
   const before = a.viewSeen.current;
@@ -94,9 +100,11 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
   const now = a.pick(a.shown, c, s);
   const selected = a.selected();
   const held = heldPoint(was, now, selected, s, a.insets, (pick) => !selected || a.stands(pick, selected));
-  const next = holdStill(c, toView(before, held.at, held.before), toView(a.shown, held.at, held.after));
+  const still = holdStill(c, toView(before, held.at, held.before), toView(a.shown, held.at, held.after));
+  const refit = a.refit?.(c, still) ?? null;
+  const next = refit ? refit.cam : still;
   a.pendingCam.current = null;
-  a.fitted.current = null;
+  a.fitted.current = refit;
   a.cam.current = next;
   a.setCam(next);
 }
