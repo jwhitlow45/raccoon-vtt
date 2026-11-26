@@ -4,11 +4,12 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { Member } from "#shared/model.ts";
 import { clientMessageSchema, type EphEvent, type EphEventOut, type GroupFrame, type ServerMessage } from "#shared/protocol.ts";
 import { scene, token } from "#shared/testutil.ts";
-import { MAX_ROOM_HELD_SENDS, RETAIN_MS, RoomActor, type ActorDeps } from "./actor.ts";
+import { MAX_ROOM_HELD_SENDS, MEMBER_HELD_SHARE, RETAIN_MS, RoomActor, type ActorDeps } from "./actor.ts";
 import { PreviewPool, SnapshotBudget } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { heldSends, MAX_VERSIONS } from "./gestures.ts";
+import { MOST_PREVIEWS_SENT } from "./ephemeral.ts";
+import { CANCEL_SENDS, CANCELS_SENDS, heldSends, MAX_VERSIONS } from "./gestures.ts";
 import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
 /*
@@ -140,44 +141,52 @@ const ephs = (sent: readonly unknown[]): EphEventOut[] => (sent as ServerMessage
 const needs = (sent: readonly ServerMessage[]) => sent.filter((m) => m.t === "need");
 
 describe("group frames held for their tick", () => {
-  test("each held frame expands by the roster it bound: six drags 200 ms apart, floors A to B to A, and an end while its frames wait", async (t) => {
-    const r = await room(t);
+  test("each held frame expands by the roster it bound: drags 200 ms apart, floors A to B to A, and an end while its frames wait", async (t) => {
+    const r = await room(t, { prepare: (f) => {
+      for (let g = 1; g <= 3; g++) {
+        f.state.tokens[`p${g}`] = token(`p${g}`, { sceneId: f.sceneId, x: 10 + g, y: 14 });
+        f.state.tokens[`q${g}`] = token(`q${g}`, { sceneId: f.sceneId, x: 20 + g, y: 14 });
+      }
+    } });
+    // Two DM members' devices, each within its member's share of the room's count.
     const dm = socketOf(r, r.f.dm, "dm");
+    const other = socketOf(r, r.f.otherDm, "dm");
     await hello(r, dm, uuidv7());
+    await hello(r, other, uuidv7());
+    const A = r.f.sceneId;
+    // Each drag starts before the tick that waits, by a roster of its own.
+    for (let g = 1; g <= 3; g++) send(r, dm.conn, { k: "dragStart", tokenId: `p${g}`, g, x: 10 + g, y: 14, with: [{ tokenId: `q${g}`, x: 20 + g, y: 14 }], from: { x: 10 + g, y: 14 } });
+    send(r, other.conn, { k: "dragStart", tokenId: r.f.goblin, g: 6, x: 0, y: 0, with: [{ tokenId: "m0", x: 10, y: 10 }], from: { x: 0, y: 0 } });
     const T = T0 + 1_000;
     await heldBatch(t, r, T);
     const from = r.p1.sent.length;
-    const A = r.f.sceneId;
-    for (let g = 1; g <= 6; g++) {
+    for (let g = 1; g <= 3; g++) {
       moveTo(t, r.clock, T + 21 + (g - 1) * 200);
-      // Each drag's member is a different creature, starting where it stands.
-      send(r, dm.conn, { k: "dragStart", tokenId: r.f.goblin, g, x: 0, y: 0, with: [{ tokenId: `m${g % 5}`, x: 10 + (g % 5), y: 10 }], from: { x: 0, y: 0 } });
-      send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 1, y: 0 });
-      if (g === 6) {
-        // Floors A to B to A within the one gesture: the old floor's cancel and the new floor's roster, each in one flush.
-        send(r, dm.conn, { k: "dragCancel", tokenId: r.f.goblin, g }, A);
-        send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 2, y: 0, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 0, y: 0 } }, "vault");
-        send(r, dm.conn, { k: "dragCancel", tokenId: r.f.goblin, g }, "vault");
-        send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 3, y: 0, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 0, y: 0 } }, A);
-        send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 4, y: 0 }, A);
-      }
-      // The end comes while every frame before it still waits.
-      send(r, dm.conn, { k: "groupEnd", tokenId: r.f.goblin, g, at: [null, null] });
+      send(r, dm.conn, { k: "dragMove", tokenId: `p${g}`, g, x: 11 + g, y: 14 });
+      // The end comes while the move before it still waits.
+      send(r, dm.conn, { k: "groupEnd", tokenId: `p${g}`, g, at: [null, null] });
     }
-    assert.ok(r.actor.heldOf(dm.conn).frames > 20, "all held");
-    assert.ok(dm.conn.gestures.retained.versions <= MAX_VERSIONS);
+    // Floors A to B to A within the one gesture: the old floor's cancel and the new floor's roster, each in one flush.
+    send(r, other.conn, { k: "dragMove", tokenId: r.f.goblin, g: 6, x: 1, y: 0 }, A);
+    send(r, other.conn, { k: "dragCancel", tokenId: r.f.goblin, g: 6 }, A);
+    send(r, other.conn, { k: "dragMove", tokenId: r.f.goblin, g: 6, x: 2, y: 0, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 0, y: 0 } }, "vault");
+    send(r, other.conn, { k: "dragCancel", tokenId: r.f.goblin, g: 6 }, "vault");
+    send(r, other.conn, { k: "dragMove", tokenId: r.f.goblin, g: 6, x: 3, y: 0, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 0, y: 0 } }, A);
+    send(r, other.conn, { k: "dragMove", tokenId: r.f.goblin, g: 6, x: 4, y: 0 }, A);
+    send(r, other.conn, { k: "groupEnd", tokenId: r.f.goblin, g: 6, at: [null, null] });
+    assert.deepEqual([r.actor.heldOf(dm.conn).frames, r.actor.heldOf(other.conn).frames], [6, 7], "all held");
     r.gate.open();
     await flush();
     const got = ephs(r.p1.sent.slice(from));
-    for (let g = 1; g <= 5; g++) {
-      const m = `m${g % 5}`;
-      assert.ok(got.some((e) => e.k === "dragMove" && e.tokenId === m && e.x === 11 + (g % 5)), `drag ${g} moved ${m} by its own roster`);
+    for (let g = 1; g <= 3; g++) {
+      assert.ok(got.some((e) => e.k === "dragMove" && e.tokenId === `q${g}` && e.x === 21 + g), `drag ${g} moved q${g} by its own roster`);
+      assert.ok(got.some((e) => e.k === "dragCancel" && e.tokenId === `q${g}`), `drag ${g} ended with no landing`);
     }
-    // On the return to A the return's roster stands: m2 by its offset, never m6's first member.
+    // On the return to A the return's roster stands: m2 by its offset, never the gesture's first member.
     assert.ok(got.some((e) => e.k === "dragMove" && e.tokenId === "m2" && e.x === 15));
     assert.ok(got.some((e) => e.k === "dragMove" && e.tokenId === "m2" && e.x === 16), "the frame after the return expands by it too");
-    assert.deepEqual(needs(dm.sent), [], "no roster was asked for");
-    assert.deepEqual(dm.conn.gestures.retained, { versions: 0, bytes: 0 }, "every ended gesture's rosters went once their frames routed");
+    assert.deepEqual([...needs(dm.sent), ...needs(other.sent)], [], "no roster was asked for");
+    assert.deepEqual([dm.conn.gestures.retained, other.conn.gestures.retained], [{ versions: 0, bytes: 0 }, { versions: 0, bytes: 0 }], "every ended gesture's rosters went once their frames routed");
   });
 
   test("frames released at one tick go to each receiver together, once every one of them is routed", async (t) => {
@@ -203,24 +212,27 @@ describe("group frames held for their tick", () => {
     assert.deepEqual(order, ["dm", "dm", "dm", "dm", "p1", "p1", "p1", "p1"]);
   });
 
-  test("40 rosters while every version is pinned: retained charges stay within their cap, the excess frames drop, and their gestures recover by `need`", async (t) => {
+  test("rosters past the member's share: retained charges stay within their cap, the frames past it drop, and a gesture whose roster went recovers by `need`", async (t) => {
     const r = await room(t);
     const dm = socketOf(r, r.f.dm, "dm");
     await hello(r, dm, uuidv7());
     const T = T0 + 1_000;
     await heldBatch(t, r, T);
     moveTo(t, r.clock, T + 21);
+    const start = (g: number) => ({ k: "dragStart", tokenId: r.f.goblin, g, x: 0, y: 0, with: Array.from({ length: 99 }, (_, i) => ({ tokenId: `ghost-${g}-${i}`, x: i, y: 0 })), from: { x: 0, y: 0 } });
     for (let g = 1; g <= 40; g++) {
-      send(r, dm.conn, { k: "dragStart", tokenId: r.f.goblin, g, x: 0, y: 0, with: Array.from({ length: 99 }, (_, i) => ({ tokenId: `ghost-${g}-${i}`, x: i, y: 0 })), from: { x: 0, y: 0 } });
+      send(r, dm.conn, start(g));
       assert.ok(dm.conn.gestures.retained.versions <= MAX_VERSIONS && dm.conn.gestures.retained.bytes <= 448 * 1024);
     }
-    assert.equal(r.actor.heldOf(dm.conn).frames, MAX_VERSIONS, "a frame whose roster was refused is dropped");
+    const fit = Math.floor(MEMBER_HELD_SHARE / heldSends(start(1) as GroupFrame));
+    assert.equal(r.actor.heldOf(dm.conn).frames, fit, "a frame past its member's share is dropped");
     r.gate.open();
     await flush();
-    // The 40th gesture's roster was refused: its next frame expands its pressed token alone and asks again.
-    send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g: 40, x: 1, y: 0 });
-    assert.deepEqual(needs(dm.sent), [{ t: "need", id: r.f.goblin, g: 40 }]);
-    send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g: 40, x: 2, y: 0, with: [{ tokenId: "m0", x: 10, y: 10 }], from: { x: 0, y: 0 } });
+    // The first dropped gesture's roster went to make room for later ones: its next frame expands its pressed token alone and asks again.
+    const g = fit + 1;
+    send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 1, y: 0 });
+    assert.deepEqual(needs(dm.sent), [{ t: "need", id: r.f.goblin, g }]);
+    send(r, dm.conn, { k: "dragMove", tokenId: r.f.goblin, g, x: 2, y: 0, with: [{ tokenId: "m0", x: 10, y: 10 }], from: { x: 0, y: 0 } });
     assert.deepEqual(ephs(r.p1.sent).at(-1), { k: "dragMove", tokenId: "m0", x: 12, y: 10 });
   });
 
@@ -256,11 +268,12 @@ describe("group frames held for their tick", () => {
 });
 
 describe("held frames of one slot while their tick waits (D-261126-208)", () => {
-  /** A DM device of the test's own whose frames wait through a batch at T + 20 that commits once the gate opens. */
-  async function held(t: TestContext) {
+  /** A DM device of the test's own whose frames wait through a batch at T + 20 that commits once the gate opens, after `before` routes at once. */
+  async function held(t: TestContext, before?: (r: Room, dm: Connection) => void) {
     const r = await room(t);
     const dm = socketOf(r, r.f.dm, "dm");
     await hello(r, dm, uuidv7());
+    before?.(r, dm.conn);
     const T = T0 + 1_000;
     await heldBatch(t, r, T);
     moveTo(t, r.clock, T + 21);
@@ -276,19 +289,19 @@ describe("held frames of one slot while their tick waits (D-261126-208)", () => 
   const move = (g: number, x: number) => ({ k: "dragMove", tokenId: "m0", g, x, y: 10 });
 
   test("each newer move takes the older one's place, and starts and ends keep theirs, gesture by gesture", async (t) => {
-    const { r, dm, release } = await held(t);
-    send(r, dm.conn, start(1, 10));
+    // The first gesture's start goes before the tick waits, so its end waits after its moves.
+    const { r, dm, release } = await held(t, (r, dm) => send(r, dm, start(1, 10)));
     for (let x = 11; x <= 15; x++) send(r, dm.conn, move(1, x));
     send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 15, y: 10 }, { x: 16, y: 10 }] });
     send(r, dm.conn, start(2, 15));
     for (let x = 16; x <= 18; x++) send(r, dm.conn, move(2, x));
-    assert.equal(r.actor.heldOf(dm.conn).frames, 5, "a start, its latest move and its end, then a start and its latest move");
-    assert.equal(r.actor.heldOf(dm.conn).roomSends, 5 * heldSends(move(1, 0) as GroupFrame));
+    assert.equal(r.actor.heldOf(dm.conn).frames, 4, "the first gesture's latest move and its end, then a start and its latest move");
+    const sends = (e: unknown) => heldSends(e as GroupFrame);
+    const counted = 2 * sends(move(1, 0)) + sends({ k: "groupEnd", g: 1 }) + sends(start(2, 0));
+    assert.deepEqual([r.actor.heldOf(dm.conn).memberSends, r.actor.heldOf(dm.conn).roomSends], [counted, counted]);
     const got = await release();
-    assert.equal(r.actor.heldOf(dm.conn).roomSends, 0, "what routed counts no more");
+    assert.deepEqual([r.actor.heldOf(dm.conn).memberSends, r.actor.heldOf(dm.conn).roomSends], [0, 0], "what routed counts no more");
     assert.deepEqual(got, [
-      { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
-      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
       { k: "dragMove", tokenId: "m0", x: 15, y: 10 },
       { k: "dragMove", tokenId: "m1", x: 16, y: 10 },
       { k: "dragEnd", tokenId: "m0", x: 15, y: 10 },
@@ -310,6 +323,8 @@ describe("held frames of one slot while their tick waits (D-261126-208)", () => 
     send(r, dm.conn, move(1, 14));
     send(r, dm.conn, move(1, 15));
     assert.equal(r.actor.heldOf(dm.conn).frames, 3, "the start, the move with its roster, and the latest move");
+    const sends = (e: unknown) => heldSends(e as GroupFrame);
+    assert.equal(r.actor.heldOf(dm.conn).memberSends, sends(start(1, 0)) + sends(move(1, 0)) + CANCELS_SENDS + sends(move(1, 0)), "the new roster counts the cancels of the tokens it no longer names");
     assert.equal(dm.conn.gestures.retained.versions, 2);
     assert.deepEqual(await release(), [
       { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
@@ -342,17 +357,250 @@ describe("held frames of one slot while their tick waits (D-261126-208)", () => 
     assert.equal(r.actor.heldOf(dm.conn).frames, 5);
   });
 
-  test("past what the room's held frames may send one receiver, a frame drops, counted by its kind whatever its roster holds", async (t) => {
-    const most = Math.floor(MAX_ROOM_HELD_SENDS / heldSends({ k: "dragStart", tokenId: "m0", g: 1, x: 0, y: 0 } as GroupFrame));
+  test("past its member's share of the room's count, a frame drops, counted by its kind whatever its roster holds", async (t) => {
+    const most = Math.floor(MEMBER_HELD_SHARE / heldSends({ k: "dragStart", tokenId: "m0", g: 1, x: 0, y: 0 } as GroupFrame));
     for (const members of [0, 99]) {
       const { r, dm } = await held(t);
       const roster = Array.from({ length: members }, (_, i) => ({ tokenId: `x${i}`, x: i, y: 0 }));
       send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: roster, from: { x: 10, y: 10 } });
-      // Starts neither replace nor go, so each waits until the room's count is spent.
+      // Starts neither replace nor go, so each waits until the member's share is spent.
       for (let i = 0; i < most + 20; i++) send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10 + i / 8, y: 10 });
       assert.equal(r.actor.heldOf(dm.conn).frames, most, `${members} members`);
       t.mock.timers.reset();
     }
+  });
+
+  test("past what the room's held frames may send one receiver, a frame drops, whichever member sends it", async (t) => {
+    const r = await room(t);
+    const members = [socketOf(r, r.f.dm, "dm"), socketOf(r, r.f.otherDm, "dm"), socketOf(r, r.f.unrelated, "player")];
+    for (const s of members) await hello(r, s, uuidv7());
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 21);
+    // Each a gesture of its own, so none is charged for what an earlier one showed.
+    const start = (g: number) => ({ k: "dragStart", tokenId: "m0", g, x: 10, y: 10, with: [], from: { x: 10, y: 10 } });
+    const share = Math.floor(MEMBER_HELD_SHARE / heldSends(start(1) as GroupFrame));
+    const most = Math.floor(MAX_ROOM_HELD_SENDS / heldSends(start(1) as GroupFrame));
+    assert.ok(2 * share < most && most < 3 * share, "two members' shares leave the room's count unspent");
+    for (const { conn } of members) for (let g = 1; g <= share + 5; g++) send(r, conn, start(g));
+    assert.deepEqual(members.map((s) => r.actor.heldOf(s.conn).frames), [share, share, most - 2 * share]);
+  });
+
+  test("a move of another pressed token counts its gesture's cancels, and so does a newer move that takes its place", async (t) => {
+    const { r, dm, release } = await held(t);
+    send(r, dm.conn, start(1, 10));
+    send(r, dm.conn, { k: "dragMove", tokenId: "m2", g: 1, x: 12, y: 10 });
+    send(r, dm.conn, { k: "dragMove", tokenId: "m2", g: 1, x: 13, y: 10 });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2);
+    const sends = (e: unknown) => heldSends(e as GroupFrame);
+    assert.equal(r.actor.heldOf(dm.conn).memberSends, sends(start(1, 0)) + sends(move(1, 0)) + CANCELS_SENDS);
+    assert.deepEqual(await release(), [
+      { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
+      { k: "dragCancel", tokenId: "m0" },
+      { k: "dragMove", tokenId: "m2", x: 13, y: 10 },
+      { k: "dragMove", tokenId: "m1", x: 14, y: 10 },
+    ]);
+  });
+
+  test("a gesture whose start and end both wait leaves the queue whole, its moves and rosters with it, and another gesture's frames keep their places", async (t) => {
+    const { r, dm, release } = await held(t);
+    send(r, dm.conn, start(1, 10));
+    send(r, dm.conn, start(2, 20));
+    send(r, dm.conn, move(1, 11));
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 12, y: 10, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 10, y: 10 } });
+    send(r, dm.conn, move(2, 21));
+    send(r, dm.conn, move(1, 13));
+    assert.equal(r.actor.heldOf(dm.conn).frames, 5);
+    const kept = r.actor.heldOf(dm.conn).memberSends - (heldSends(start(1, 0) as GroupFrame) + heldSends(move(1, 0) as GroupFrame) + heldSends(move(1, 0) as GroupFrame) + CANCELS_SENDS);
+    send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 13, y: 10 }, { x: 15, y: 10 }] });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2, "the other gesture's start and move");
+    assert.deepEqual([r.actor.heldOf(dm.conn).memberSends, r.actor.heldOf(dm.conn).roomSends], [kept, kept]);
+    assert.equal(dm.conn.gestures.retained.versions, 1, "the ended gesture's rosters went with its frames");
+    assert.deepEqual(await release(), [
+      { k: "dragStart", tokenId: "m0", x: 20, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 21, y: 10 },
+      { k: "dragMove", tokenId: "m0", x: 21, y: 10 },
+      { k: "dragMove", tokenId: "m1", x: 22, y: 10 },
+    ]);
+  });
+
+  test("a gesture with a frame sent before its start waited keeps its start and end, which are sent", async (t) => {
+    const { r, dm, release } = await held(t, (r, dm) => send(r, dm, move(1, 11)));
+    send(r, dm.conn, start(1, 10));
+    send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 10, y: 10 }, { x: 11, y: 10 }] });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2);
+    assert.deepEqual(await release(), [
+      { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
+      { k: "dragEnd", tokenId: "m0", x: 10, y: 10 },
+      { k: "dragEnd", tokenId: "m1", x: 11, y: 10 },
+    ]);
+  });
+
+  test("a gesture whose start went before its tick waited still sends its end, after its latest move", async (t) => {
+    const { r, dm, release } = await held(t, (r, dm) => send(r, dm, start(1, 10)));
+    send(r, dm.conn, move(1, 11));
+    send(r, dm.conn, move(1, 12));
+    send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 12, y: 10 }, null] });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2);
+    assert.deepEqual(await release(), [
+      { k: "dragMove", tokenId: "m0", x: 12, y: 10 },
+      { k: "dragMove", tokenId: "m1", x: 13, y: 10 },
+      { k: "dragEnd", tokenId: "m0", x: 12, y: 10 },
+      { k: "dragCancel", tokenId: "m1" },
+    ]);
+  });
+});
+
+describe("what a held frame's routing may cancel (D-261126-265)", () => {
+  test("a frame that adds a preview past the socket's most counts the cancels of the one that goes: a drag's tokens, or one preview's", async (t) => {
+    for (const oldest of ["drag", "ruler"] as const) {
+      const r = await room(t);
+      const dm = socketOf(r, r.f.dm, "dm");
+      await hello(r, dm, uuidv7());
+      if (oldest === "drag") send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 10, y: 10 } });
+      const ruler = (i: number) => ({ k: "ruler", id: `r${i}`, points: [{ x: 10, y: 10 }, { x: 11, y: 10 }], shared: true });
+      for (let i = dm.conn.previewsSent.size; i < MOST_PREVIEWS_SENT - 1; i++) send(r, dm.conn, ruler(i));
+      assert.equal(dm.conn.previewsSent.size, MOST_PREVIEWS_SENT - 1);
+      const T = T0 + 1_000;
+      await heldBatch(t, r, T);
+      moveTo(t, r.clock, T + 21);
+      const from = r.p1.sent.length;
+      const each = heldSends(ruler(0) as EphEvent);
+      const ping = { k: "ping", x: 1, y: 1 };
+      send(r, dm.conn, ruler(100));
+      assert.equal(r.actor.heldOf(dm.conn).memberSends, each, "the socket's last free entry");
+      // A ping keeps no entry, and the ruler's newer frame takes its older one's place: still the last free entry.
+      send(r, dm.conn, ping);
+      send(r, dm.conn, { ...ruler(100), points: [{ x: 10, y: 10 }, { x: 12, y: 10 }] });
+      const pinged = each + heldSends(ping as EphEvent);
+      assert.equal(r.actor.heldOf(dm.conn).memberSends, pinged);
+      send(r, dm.conn, ruler(101));
+      assert.equal(r.actor.heldOf(dm.conn).memberSends, pinged + each + (oldest === "drag" ? CANCELS_SENDS : CANCEL_SENDS), `past the most, with a ${oldest} the oldest`);
+      r.gate.open();
+      await flush();
+      const ended = ephs(r.p1.sent.slice(from)).filter((e) => e.k === "dragCancel" || e.k === "rulerEnd");
+      assert.deepEqual(ended, oldest === "drag" ? [{ k: "dragCancel", tokenId: "m0" }, { k: "dragCancel", tokenId: "m1" }] : [{ k: "rulerEnd", id: "r0" }]);
+      t.mock.timers.reset();
+    }
+  });
+
+  test("a held frame counted for no cancels whose step before it did not route goes nowhere, where it would end the tokens that step left", async (t) => {
+    const r = await room(t);
+    const dm = socketOf(r, r.f.dm, "dm");
+    await hello(r, dm, uuidv7());
+    send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 10, y: 10 } });
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    const from = r.p1.sent.length;
+    moveTo(t, r.clock, T + 21);
+    // A new roster, counted for the cancels it may send, that waits past RETAIN_MS, then a move under it, counted for none.
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 11, y: 10, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 10, y: 10 } });
+    moveTo(t, r.clock, T + 1_500);
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 12, y: 10 });
+    const sends = heldSends({ k: "dragMove", tokenId: "m0", g: 1, x: 0, y: 0 } as GroupFrame);
+    assert.equal(r.actor.heldOf(dm.conn).memberSends, sends + CANCELS_SENDS + sends);
+    moveTo(t, r.clock, T + 22 + RETAIN_MS);
+    r.gate.open();
+    await flush();
+    assert.deepEqual(ephs(r.p1.sent.slice(from)), [], "the roster aged out, and the move under it would have ended m1");
+    assert.equal(r.actor.heldOf(dm.conn).frames, 0);
+    // The gesture's next roster is counted for its cancels, and sends them.
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 13, y: 10, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 10, y: 10 } });
+    assert.deepEqual(ephs(r.p1.sent.slice(from)), [{ k: "dragCancel", tokenId: "m1" }, { k: "dragMove", tokenId: "m0", x: 13, y: 10 }, { k: "dragMove", tokenId: "m2", x: 15, y: 10 }]);
+  });
+});
+
+describe("each member's share of the room's held frames (D-261126-265)", () => {
+  test("one member at its share, from two devices, leaves a second member's start and end held and sent", async (t) => {
+    const r = await room(t, { prepare: (f) => {
+      for (let i = 0; i < 20; i++) f.state.tokens[`h${i}`] = token(`h${i}`, { sceneId: f.sceneId, x: i, y: 30, visibility: "dm" });
+    } });
+    const devices = [socketOf(r, r.f.dm, "dm"), socketOf(r, r.f.dm, "dm")];
+    const second = socketOf(r, r.f.otherDm, "dm");
+    for (const s of [...devices, second]) await hello(r, s, uuidv7());
+    send(r, second.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: [], from: { x: 10, y: 10 } });
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 21);
+    const from = r.p1.sent.length;
+    const start = (g: number, i: number) => ({ k: "dragStart", tokenId: `h${i}`, g, x: i, y: 30, with: [], from: { x: i, y: 30 } });
+    const share = Math.floor(MEMBER_HELD_SHARE / heldSends(start(1, 0) as GroupFrame));
+    // Each device's hidden drags until the member's share is spent, and past it.
+    for (let i = 0; i < 20; i++) send(r, devices[i % 2]!.conn, start(i + 1, i));
+    assert.equal(r.actor.heldOf(devices[0]!.conn).frames + r.actor.heldOf(devices[1]!.conn).frames, share, "both devices count in one share");
+    assert.ok(r.actor.heldOf(devices[0]!.conn).memberSends <= MEMBER_HELD_SHARE);
+    // The second member's end of a drag already shown, and its next start.
+    send(r, second.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 11, y: 10 }] });
+    send(r, second.conn, { k: "dragStart", tokenId: "m1", g: 2, x: 11, y: 10, with: [], from: { x: 11, y: 10 } });
+    assert.equal(r.actor.heldOf(second.conn).frames, 2);
+    r.gate.open();
+    await flush();
+    assert.deepEqual(ephs(r.p1.sent.slice(from)), [
+      { k: "dragEnd", tokenId: "m0", x: 11, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
+    ]);
+  });
+
+  test("a DM's view as a player counts in the DM's share, never the player's", async (t) => {
+    const r = await room(t);
+    const device = socketOf(r, r.f.dm, "dm");
+    const preview = socketOf(r, r.f.dm, "dm", uuidv7(), { previewOf: r.f.player.id });
+    for (const s of [device, preview]) await hello(r, s, uuidv7());
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 21);
+    const start = { k: "dragStart", tokenId: r.f.pc, g: 1, x: 8, y: 0, with: [], from: { x: 8, y: 0 } };
+    send(r, preview.conn, start);
+    assert.equal(r.actor.heldOf(preview.conn).frames, 1);
+    assert.deepEqual([r.actor.heldOf(device.conn).memberSends, r.actor.heldOf(r.p1.conn).memberSends], [heldSends(start as GroupFrame), 0]);
+  });
+
+  test("3 DM devices' hidden drags 200 ms apart, short or still moving, leave a player's own drag through the stall the same as with none", async (t) => {
+    const seen: unknown[] = [];
+    for (const hidden of ["none", "short", "moving"] as const) {
+      const r = await room(t, { prepare: (f) => {
+        for (let i = 0; i < 24; i++) f.state.tokens[`h${i}`] = token(`h${i}`, { sceneId: f.sceneId, x: i, y: 30, visibility: "dm" });
+      } });
+      const devices = [0, 1, 2].map(() => socketOf(r, r.f.dm, "dm"));
+      const player = socketOf(r, r.f.player, "player");
+      const watcher = socketOf(r, r.f.unrelated, "player");
+      for (const s of [...devices, player, watcher]) await hello(r, s, uuidv7());
+      const T = T0 + 1_000;
+      await heldBatch(t, r, T);
+      const from = watcher.sent.length;
+      for (let k = 0; k < 8 && hidden !== "none"; k++) {
+        for (const [d, device] of devices.entries()) {
+          moveTo(t, r.clock, T + 21 + k * 200 + d);
+          const i = 8 * d + k;
+          const g = k + 1;
+          send(r, device.conn, { k: "dragStart", tokenId: `h${i}`, g, x: i, y: 30, with: [], from: { x: i, y: 30 } });
+          send(r, device.conn, { k: "dragMove", tokenId: `h${i}`, g, x: i + 0.5, y: 30 });
+          if (hidden === "short") send(r, device.conn, { k: "groupEnd", tokenId: `h${i}`, g, at: [{ x: i + 1, y: 30 }] });
+        }
+      }
+      moveTo(t, r.clock, T + 1_620);
+      send(r, player.conn, { k: "dragStart", tokenId: r.f.pc, g: 1, x: 8, y: 0, with: [], from: { x: 8, y: 0 } });
+      moveTo(t, r.clock, T + 1_650);
+      send(r, player.conn, { k: "dragMove", tokenId: r.f.pc, g: 1, x: 9, y: 0 });
+      assert.equal(r.actor.heldOf(player.conn).frames, 2, `${hidden}: the player's frames wait`);
+      moveTo(t, r.clock, T + 1_700);
+      r.gate.open();
+      await flush();
+      moveTo(t, r.clock, T + 1_750);
+      send(r, player.conn, { k: "groupEnd", tokenId: r.f.pc, g: 1, at: [{ x: 9, y: 0 }] });
+      // Each room has a token id of its own for the player's token.
+      seen.push(ephs(watcher.sent.slice(from)).map((e) => ("tokenId" in e && e.tokenId === r.f.pc ? { ...e, tokenId: "pc" } : e)));
+      t.mock.timers.reset();
+    }
+    assert.deepEqual(seen[0], [
+      { k: "dragStart", tokenId: "pc", x: 8, y: 0 },
+      { k: "dragMove", tokenId: "pc", x: 9, y: 0 },
+      { k: "dragEnd", tokenId: "pc", x: 9, y: 0 },
+    ]);
+    assert.deepEqual(seen[1], seen[0]);
+    assert.deepEqual(seen[2], seen[0]);
   });
 });
 
@@ -479,7 +727,7 @@ describe("a hello of a client whose socket is already open", () => {
     await flush();
     // Closed in the hello's own turn, while its frame still waited for the tick.
     assert.equal(old.closed(), CLOSE.replaced);
-    assert.equal(r.actor.heldOf(old.conn).frames, 0);
+    assert.deepEqual(r.actor.heldOf(old.conn), { frames: 0, bytes: 0, memberSends: 0, roomSends: 0 }, "its frames count no more");
     r.gate.open();
     await flush();
     moveTo(t, r.clock, T + 80);

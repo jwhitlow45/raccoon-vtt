@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { clientMessageSchema, ephCaps, expandGroup, MAX_EPH_BYTES, rosterOf, type EphEvent, type GroupFrame } from "#shared/protocol.ts";
+import { uuidv7 } from "#shared/ids.ts";
+import { clientMessageSchema, ephCaps, ephEventOutSchema, expandGroup, loneEphSchema, MAX_EPH_BYTES, outboundEph, rosterOf, type EphEvent, type GroupFrame } from "#shared/protocol.ts";
 import { serializedBytes } from "#shared/limits.ts";
-import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES } from "./actor.ts";
+import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES, MAX_ROOM_HELD_SENDS, MEMBER_HELD_SHARE } from "./actor.ts";
 import { FULL_ALLOWANCE_BYTES, OFF_ALLOWANCE_BYTES } from "./budgets.ts";
-import { GESTURE_STALE_MS, GestureVersions, heldCharge, heldForm, holdFrame, MAX_VERSION_BYTES, MAX_VERSIONS, NEED_EVERY_MS, routedForm, versionCharge, type HeldFrame } from "./gestures.ts";
+import { CANCEL_SENDS, GESTURE_STALE_MS, GestureVersions, heldCharge, heldForm, heldSends, holdFrame, HONEST_MEMBER_SENDS, MAX_VERSION_BYTES, MAX_VERSIONS, NEED_EVERY_MS, routedForm, versionCharge, WIDEST_EVENTS, type HeldFrame } from "./gestures.ts";
 
 /** A frame as the socket layer hands it over, through the client schema. */
 function frame(e: unknown): GroupFrame | EphEvent {
@@ -236,5 +237,67 @@ describe("what the server keeps, measured against its charges", () => {
     assert.equal(FULL_ALLOWANCE_BYTES, MAX_HELD_BYTES + MAX_VERSION_BYTES);
     // An off socket's camera, focus, laser and pings in 2 s: 60 laser, 34 camera and 20 ping frames.
     assert.ok(114 * ephCaps.charges.other <= MAX_HELD_BYTES_OFF && MAX_HELD_BYTES_OFF === OFF_ALLOWANCE_BYTES);
+  });
+});
+
+describe("what a held frame may send one receiver, at its widest (D-261126-265)", () => {
+  /** An id of 64 units JSON escapes to 6 characters each, apart for each `i`: unpaired surrogates and a control character. */
+  const escaped = (i: number) => String.fromCharCode(0xdc00 + (i % 1024), 0xdc00 + Math.floor(i / 1024)) + "\u0001".repeat(62);
+  const scene = "\u0002".repeat(64);
+  const C = -0.0000012345678901234567;
+  const FT = 0.0000012345678901234567;
+  const ids = Array.from({ length: 100 }, (_, i) => escaped(i));
+  const roster = { with: ids.slice(1).map((tokenId) => ({ tokenId, x: C, y: C })), from: { x: C, y: C } };
+  const route = Array.from({ length: 200 }, () => C);
+
+  /** What a DM receiver is sent for the frame's tokens, each a lone frame that stands, with the widest scene id and a member id. */
+  function sentToOne(e: GroupFrame, by: GroupFrame): number {
+    let bytes = 0;
+    for (const lone of expandGroup(e, rosterOf(by))) {
+      if (!loneEphSchema.safeParse(lone).success) continue;
+      bytes += Buffer.byteLength(JSON.stringify({ t: "eph", from: uuidv7(), sceneId: scene, e: outboundEph(lone) }));
+    }
+    return bytes;
+  }
+
+  test("each widest event names every field its kind's schema takes, at the widest id and number", () => {
+    const options = (ephEventOutSchema as unknown as { options: { shape: Record<string, { value?: string; unwrap?: () => { shape: object } }> }[] }).options;
+    for (const [k, e] of Object.entries(WIDEST_EVENTS)) {
+      const shape = options.find((o) => o.shape.k!.value === k)!.shape;
+      // A move's route is counted on its own.
+      assert.deepEqual(Object.keys(e).sort(), Object.keys(shape).filter((key) => !(k === "dragMove" && key === "path")).sort(), k);
+    }
+    const iso = (options.find((o) => o.shape.k!.value === "view")!.shape.iso!.unwrap!()).shape;
+    assert.deepEqual(Object.keys(WIDEST_EVENTS.view.iso).sort(), Object.keys(iso).sort());
+    assert.equal(JSON.stringify(WIDEST_EVENTS.dragStart.x).length, ephCaps.numberChars);
+    assert.equal(Buffer.byteLength(JSON.stringify(WIDEST_EVENTS.dragStart.tokenId)), ephCaps.idBytes);
+    assert.equal(uuidv7().length, 36, "the member ids the server mints");
+  });
+
+  test("a 100-token frame of escaped ids sends one receiver within its charge, kind by kind, and close to it", () => {
+    const start = group({ k: "dragStart", tokenId: ids[0], g: 1, x: C, y: C, ...roster });
+    const frames: [string, GroupFrame, GroupFrame][] = [
+      ["a start", start, start],
+      ["a move whose lead is a member", group({ k: "dragMove", tokenId: ids[0], g: 1, x: C, y: C, free: true, fts: ids.slice(1).map(() => FT), lead: { i: 0, x: C, y: C, path: route, ft: FT, squeeze: true } }), start],
+      ["a move of the pressed token's own route", group({ k: "dragMove", tokenId: ids[0], g: 1, x: C, y: C, path: route, ft: FT, squeeze: true, free: true, fts: ids.slice(1).map(() => FT) }), start],
+      ["an end that lands every token", group({ k: "groupEnd", tokenId: ids[0], g: 1, at: ids.map(() => ({ x: C, y: C, squeeze: true })) }), start],
+      ["an end that lands none", group({ k: "groupEnd", tokenId: ids[0], g: 1, at: ids.map(() => null) }), start],
+      ["a tagged cancel", group({ k: "dragCancel", tokenId: ids[0], g: 1 }), start],
+    ];
+    for (const [name, e, by] of frames) {
+      const sent = sentToOne(e, by);
+      assert.ok(sent <= heldSends(e), `${name}: ${sent} bytes against ${heldSends(e)}`);
+      assert.ok(sent > 0.9 * heldSends(e), `${name}: ${sent} bytes against ${heldSends(e)}`);
+    }
+    // A preview's cancels, which a frame's routing may send on top: each at most the widest cancel.
+    for (const e of [{ k: "dragCancel", tokenId: ids[1] }, { k: "rulerEnd", id: ids[1] }, { k: "aoeEnd", id: ids[1] }]) {
+      assert.ok(Buffer.byteLength(JSON.stringify({ t: "eph", from: uuidv7(), sceneId: scene, e })) <= CANCEL_SENDS);
+    }
+  });
+
+  test("a member's share sits above an honest member's devices through a stall, and two members' shares leave a third its drag's start and move", () => {
+    assert.ok(HONEST_MEMBER_SENDS <= MEMBER_HELD_SHARE, `${HONEST_MEMBER_SENDS} against ${MEMBER_HELD_SHARE}`);
+    const drag = heldSends(start(1, 0)) + heldSends(move(1));
+    assert.ok(2 * MEMBER_HELD_SHARE + drag <= MAX_ROOM_HELD_SENDS);
   });
 });
