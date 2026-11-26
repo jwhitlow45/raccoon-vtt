@@ -598,7 +598,7 @@ function isRace(code: RefusalCode): boolean {
  */
 const TAP_REFUSALS: ReadonlySet<string> = new Set([NO_TYPED_TOTALS, JOIN_CHANGED]);
 
-export function refusalWords(message: string): string {
+function tapRefusalWords(message: string): string {
   return TAP_REFUSALS.has(message) ? pointerWords(message) : message;
 }
 
@@ -608,7 +608,7 @@ export function refusalWords(message: string): string {
  * scene at one of its caps is not a full room.
  */
 export function refusalText(code: RefusalCode, message: string): string {
-  const detail = refusalWords(message).trim().replace(/\.$/, "");
+  const detail = tapRefusalWords(message).trim().replace(/\.$/, "");
   const sentence = detail ? detail[0]!.toUpperCase() + detail.slice(1) + "." : "";
   switch (code) {
     case "quota":
