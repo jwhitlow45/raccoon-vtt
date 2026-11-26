@@ -90,7 +90,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 ## Phones, tablets and connection
 
 - Every change shows on every device at once, and your own edits show before the server confirms them.
-- The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Music and background sounds that a server restart cut off load again on their own once the room reconnects. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
+- The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Music and background sounds that a server restart cut off load again on their own once the room reconnects, and the Sound panel reads the server's sound switch again, so a restart that turned sound files on or off shows without a reload. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
 - A small dot shows the connection. A banner appears only after a few seconds offline.
 - A page left open across an update of the server may refuse what it adds with "Not saved. This page is out of date. Reload it and try again." or "Not saved. This page is out of date. Reload it, then add that again.", and a reload sets it right.
 - Work made offline, or in an editor left open a long time, is saved once when it goes out. If the server still can't take it, the page says "Not saved. That could not be added. Try again."
@@ -578,6 +578,7 @@ Everyone, the DM and every player, picks how their own device shows the map.
   - On hex rows and hex columns a raised hex stands as a six-sided block with three sides showing, each side outlined, and a hex pit sinks the same way.
   - A map image's raised ground takes its sides' tone from the art on top, on a hex scene from the art wholly inside a hex the viewer sees whole.
   - **Turn left** and **Turn right** turn the map a quarter at a time, so a wall never hides the creature behind it for good.
+  - Switching a map that is still at its fit to Isometric fits it again where holding the zoom would cut its corners, as on a phone with a 14 by 9 map. A map the viewer has moved keeps its zoom.
 - **Depth up close**: from 24 px a square, or 48 px with Low power on, walls stand as stone slabs with a lighter top, and a long wall reads as one wall that meets the next cleanly at a corner.
   - Doors and windows stand in a stone frame. An open door stands upright on its hinge, swung back into the room as Top-down's swing shows, and tapping it opens the door's buttons, as tapping its doorway does.
   - Stairs with a direction climb in steps from the ground below them to the ground above, and their sides show the floor they are on. Creatures stand on the steps. Stairs that turn a corner keep a flat top with their marks.
@@ -1988,7 +1989,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Page Up, Page Down | Raise or lower the selected tokens 5 ft | anyone, on tokens they may change |
 | H | Hide or show the selected tokens | DM |
 | L | Lock or unlock the selected tokens | DM |
-| Delete, Backspace | Delete the selected tokens. Ctrl+Z brings them back | DM |
+| Delete, Backspace | Delete the selected tokens. Ctrl+Z brings them back while the room has space | DM |
 | 1 to 9 | Start an HP change of the selected tokens with that number. Enter applies it | DM, and anyone on tokens whose HP they may change |
 | C | Open the Conditions of the selected tokens | DM, and anyone on tokens they may change |
 | N | Next turn, or End turn on your own turn | DM, and players on their turn |
