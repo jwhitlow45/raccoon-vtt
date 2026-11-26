@@ -78,9 +78,11 @@ function rollName(page: Pick<Page, "fill" | "secret">): string {
 
 /** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature, or its last picks while nothing is selected. */
 export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
-  if (source.kind === "area") return area ? area(source.templateId) : [];
-  if (source.kind === "fall") return source.tokenIds;
-  if (!source.live || selected.length === 0) return source.tokenIds;
+  // What the room found, an area's catch or a trap's or a fall's creatures, comes in id order, so which of a creature's
+  // tokens stands for its row (rows.ts groupRows) never follows the order the room keeps them in.
+  if (source.kind === "area") return area ? [...area(source.templateId)].sort() : [];
+  if (source.kind === "fall") return [...source.tokenIds].sort();
+  if (!source.live || selected.length === 0) return source.kind === "trap" ? [...source.tokenIds].sort() : source.tokenIds;
   return source.kind === "trap" ? [...selected] : selected.filter((id) => id !== source.except);
 }
 

@@ -156,7 +156,7 @@ describe("a trap's group save", () => {
     const named = presetTrap("hidden-pit");
     const fixed = trapStart(named, named.rig!.due![0]!).source;
     assert.deepEqual(fixed, { kind: "trap", trapId: named.id, due: "20:0", tokenIds: ["thorn", "gob"] });
-    assert.deepEqual(sourceIds(fixed, ["c"]), ["thorn", "gob"]);
+    assert.deepEqual(sourceIds(fixed, ["c"]), ["gob", "thorn"], "in id order, as every list the room found");
     const none = trapStart(named, { id: "21:0", at: "", how: "hand", by: [], hits: [] }).source;
     assert.deepEqual(sourceIds(none, ["c"]), [], "it hits no one");
   });

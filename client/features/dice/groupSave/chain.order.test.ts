@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
 import type { RollRequest } from "#shared/model.ts";
+import { projectArchivedLog } from "#shared/project.ts";
 import type { OpOf } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import type { SaveOutcomeFields } from "#shared/saveOutcomeContract.ts";
+import { AT, character, DM, env, P1, room, token } from "#shared/testutil.ts";
+import type { DiceView } from "../creature.ts";
 import { targetKey } from "../../rolls/logic.ts";
-import { apply, newPage, roll, rollAgain, type Command, type Page, type ServerRoll } from "./chain.ts";
+import { apply, newPage, roll, rollAgain, sourceIds, type Command, type Page, type ServerRoll, type Source } from "./chain.ts";
 import { askAgain, rerollSaves } from "./reroll.ts";
-import type { RowBase } from "./rows.ts";
+import { groupRows, type RowBase } from "./rows.ts";
 
 /**
  * Every list a group save sends names its creatures by id, whatever order
@@ -115,4 +119,35 @@ test("Ask again past one request's targets splits its creatures by id", () => {
   const asks = creaturesIn(a.send);
   assert.equal(asks.length, 2);
   assert.deepEqual(asks.flat(), ordered(asks.flat()));
+});
+
+test("a creature two of whose tokens the room found rolls as the same token, whatever order the room keeps them in", () => {
+  const view = room({
+    characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+    tokens: Object.fromEntries(["bree1", "bree2"].map((id) => [id, token(id, { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } })])),
+  });
+  const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view, srd: { monsters: [], rolls: {} } };
+  const sources: Record<string, (found: string[]) => Source> = {
+    area: () => ({ kind: "area", templateId: "a" }),
+    trap: (found) => ({ kind: "trap", trapId: "trap", due: "d", tokenIds: found }),
+    fall: (found) => ({ kind: "fall", fallId: "fall", tokenIds: found }),
+  };
+  /** P1's copy of the line the server writes for the page's roll, from the creatures the room found in this order. */
+  const rolledFor = (kind: string, found: string[]) => {
+    const rows = groupRows(dice, sourceIds(sources[kind]!(found), [], () => found), { kind: "save", ability: "dex" }, false, new Map());
+    const p = page();
+    for (const r of rows) p.states[r.holder] = { way: "server" };
+    const step = roll(p, { rows, server: rows.map(serverOf), tag: "dice", requestIds: () => "ask", openRequests: 0, taken: [], at: AT });
+    const sent = step.send.find((c) => c.kind === "dice");
+    assert.ok(sent?.kind === "dice");
+    const asked: OpOf<"dice.roll"> = { t: "dice.roll", tag: "dice", to: sent.to, rolls: sent.rolls.map(({ sources: _s, modeEligible: _m, ...r }) => r) };
+    const out = applyOp(view, { t: "sys.dice", asked, batch: "AbCdEfGhIjKlMnOp", results: sent.rolls.map((r) => ({ formula: r.formula, faces: [10], total: 11 })) }, DM, env(1));
+    assert.ok(out.ok, out.ok ? "" : out.message);
+    return JSON.stringify(projectArchivedLog(out.state, out.state.log, P1, { sceneId: null }));
+  };
+  for (const kind of Object.keys(sources)) {
+    const [a, b] = [rolledFor(kind, ["bree1", "bree2"]), rolledFor(kind, ["bree2", "bree1"])];
+    assert.equal(a, b, kind);
+    assert.ok(a.includes("bree1"), `${kind}: P1 reads the roll, named by one token`);
+  }
 });
