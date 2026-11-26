@@ -459,7 +459,8 @@ function endSeatsApart(before: RoomState, holder: MovedToken, members: readonly 
     const end = squeezedSeatsApart(g, standing, holder.route[last]!, classes, env.opVersion);
     return (i) => (i === last ? end : null);
   }
-  const squeezedAt = walkSqueezes(before, standing, holder.route, holder.trace, holder.squeezed === true, env.opVersion);
+  // The build its op version reads, as `squeezedSeats` reads it: on hexes the lattice decides, so it changes nothing there today.
+  const squeezedAt = walkSqueezes(storedBuild(before, env.opVersion), standing, holder.route, holder.trace, holder.squeezed === true, env.opVersion);
   const known = new Map<number, Map<string, Point>>();
   return (i) => {
     if (i === 0 || squeezedAt[i] !== true) return null;
@@ -1095,7 +1096,9 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
   const scene = ownEntry(before.scenes, member.sceneId);
   const standing = ownEntry(before.tokens, holder.tokenId);
   if (!scene || !standing) return null;
-  const squeezedAt = walkSqueezes(before, standing, holder.route, holder.trace, holder.squeezed === true, env.opVersion);
+  // By the build its op version reads (movement.ts storedBuild): an op stored before 36 judges a point between the walk's ends by
+  // the narrow-space test, and one stored before 66 reads it without the scene's sides, so its seats replay as they were made.
+  const squeezedAt = walkSqueezes(storedBuild(before, env.opVersion), standing, holder.route, holder.trace, holder.squeezed === true, env.opVersion);
   const g = sceneGrid(scene);
   // From op version 41 a holder that starts off its snap grid carries its seats by its snapped box (attach.ts seatedAt), not its offset.
   if (!isHex(g) && !squeezedAt.some((s) => s) && !(seatsFromSnappedFull(env.opVersion) && offSnapGrid(g, standing))) return null;

@@ -5,7 +5,7 @@ import type { BuildState } from "../ruleHooks.ts";
 import { computeCoverage, creaturesInArea, defaultIncludeOrigin, type AreaTemplateInput } from "./aoe.ts";
 import { boxDistanceFt, tokenCellBox } from "./distance.ts";
 import { encodeHeights } from "./heights.ts";
-import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, pinches, previewChunks, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, stepTester, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
+import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, pinches, previewChunks, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, stepTester, storedBuild, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
 import { PIECE_BAND, sceneWalls } from "./walls.ts";
 import { SQUARES } from "./grid.ts";
 
@@ -434,6 +434,89 @@ describe("a squeeze needs a real narrow space (the owner's rule after the build,
     const s = world(walkway);
     assert.equal(squeezeFits(s, walkEnd(s, ownWalk(large(s, { x: 5, y: 4.5, elevation: 10, squeeze: true })), { x: 9.5, y: 4.5 })), true);
     assert.equal(squeezeFits(s, walkEnd(s, ownWalk(large(s, { x: 5, y: 1, elevation: 30 })), { x: 9.5, y: 4.5 })), false);
+  });
+});
+
+describe("the map's edge pinches a squeeze on squares, from change format 66 (D-261126-226, 227)", () => {
+  // A scene 30 by 20, so a side's length is never the other's. A corridor one square wide runs along each side, walled on its
+  // inner side alone: along the north side its wall is y = 1 from x = 10 to 25, and so on round.
+  const W = 30;
+  const H = 20;
+  const sides = [
+    { name: "north", edges: line("n", 1, 10, 25), at: { x: 13.5, y: -0.5 }, along: { x: 19.27, y: -0.5 } },
+    { name: "south", edges: line("n", H - 1, 10, 25), at: { x: 13.5, y: H - 1.5 }, along: { x: 19.27, y: H - 1.5 } },
+    { name: "west", edges: line("w", 1, 5, 15), at: { x: -0.5, y: 8.5 }, along: { x: -0.5, y: 11.61 } },
+    { name: "east", edges: line("w", W - 1, 5, 15), at: { x: W - 1.5, y: 8.5 }, along: { x: W - 1.5, y: 11.61 } },
+  ] as const;
+  const large = (st: { sceneId: string }, over: Partial<MovingToken> = {}) => tok(st, { size: "large", x: 3, y: 3, ...over });
+  const fitsAt = (st: BuildState & { sceneId: string }, t: MovingToken, at: { x: number; y: number }) => squeezeFits(st, walkEnd(st, ownWalk(t), at));
+  const previewAt = (st: BuildState & { sceneId: string }, t: MovingToken, at: { x: number; y: number }) => previewSqueezed(st, walkEnd(st, ownWalk(t), at));
+
+  test("a Large creature squeezes into a corridor one square wide along each side, live and at 66, and an op stored at 65 reads walls alone", () => {
+    for (const side of sides) {
+      const s = world({ w: W, h: H, edges: side.edges });
+      const t = large(s);
+      assert.equal(fitsAt(s, t, side.at), true, `${side.name}: live`);
+      assert.equal(fitsAt({ ...storedBuild(s, 66), sceneId: s.sceneId }, t, side.at), true, `${side.name}: at 66`);
+      assert.equal(fitsAt({ ...storedBuild(s, 65), sceneId: s.sceneId }, t, side.at), false, `${side.name}: at 65`);
+      // A drag's unsnapped point along the corridor, as a preview and a stored walk's seats read it.
+      assert.equal(previewAt(s, t, side.along), true, `${side.name}: a preview point`);
+      assert.equal(previewAt({ ...storedBuild(s, 35), sceneId: s.sceneId }, t, side.along), false, `${side.name}: a preview point at 35`);
+    }
+  });
+
+  test("a Huge creature squeezes to Large in a corridor two squares wide along the side, which gives a Large one room, and not in one square", () => {
+    const two = world({ w: W, h: H, edges: line("n", 2, 10, 25) });
+    assert.equal(fitsAt(two, tok(two, { size: "huge", x: 3, y: 3 }), { x: 13.5, y: -0.5 }), true);
+    assert.equal(fitsAt(two, large(two), { x: 13.5, y: -0.5 }), false, "a Large creature has room in 10 ft");
+    const one = world({ w: W, h: H, edges: line("n", 1, 10, 25) });
+    assert.equal(fitsAt(one, tok(one, { size: "huge", x: 3, y: 3 }), { x: 13.5, y: -0.5 }), false, "a Huge creature's core does not fit 5 ft");
+  });
+
+  test("open ground beside the side and an open corner never squeeze, since only one side pinches there", () => {
+    const open = world({ w: W, h: H });
+    const t = large(open);
+    for (const at of [{ x: 13.5, y: -0.5 }, { x: -0.5, y: 8.5 }, { x: -0.5, y: -0.5 }, { x: W - 1.5, y: H - 1.5 }, { x: W - 1.5, y: -0.5 }]) {
+      assert.equal(fitsAt(open, t, at), false, `${at.x},${at.y}`);
+      assert.equal(previewAt(open, t, at), false, `${at.x},${at.y} as a preview`);
+    }
+    // A corridor's wall that stops short of the corner leaves the corner open beyond it.
+    const stub = world({ w: W, h: H, edges: line("n", 1, 10, 25) });
+    assert.equal(fitsAt(stub, large(stub), { x: 4.5, y: -0.5 }), false);
+  });
+
+  test("the DM's drop and Teleport here land squeezed in the corridor, and a squeezed walk goes along it, as between two walls", () => {
+    const s = world({ w: W, h: H, edges: line("n", 1, 10, 25) });
+    // At the corridor's mouth, half past the side, so the DM's drop has its leg there. Teleport here needs none.
+    const t = large(s, { x: 6, y: -0.5 });
+    assert.deepEqual(landing(s, ownWalk(t), go(14, 0), "free"), { x: 13.5, y: -0.5, squeeze: true, stopped: null });
+    assert.deepEqual(landing(s, ownWalk(large(s, { x: 4, y: 8 })), go(20, 0), "teleport"), { x: 19.5, y: -0.5, squeeze: true, stopped: null });
+    const inside = large(s, { x: 11.5, y: -0.5, squeeze: true });
+    assert.equal(legStop(s, ownWalk(inside), go(20.5, -0.5)), null);
+    assert.deepEqual(landing(s, ownWalk(inside), go(20.5, -0.5), "walk"), { x: 20.5, y: -0.5, squeeze: true, stopped: null });
+    // As an op stored at 65 read it, the DM's drop found no squeeze and stayed where it was dropped.
+    assert.deepEqual(landing(storedBuild(s, 65), ownWalk(t), go(14, 0), "free"), { x: 14, y: 0, squeeze: false, stopped: null });
+  });
+
+  test("the sides are no walls: a leg and a core cross them freely, and the DM's drop past the edge stays there full size", () => {
+    const s = world({ w: W, h: H, edges: line("n", 1, 10, 25) });
+    const parked = tok(s, { x: -3, y: 5 });
+    assert.equal(legStop(s, ownWalk(parked), go(5, 5)), null, "a parked token walks back in");
+    assert.deepEqual(landing(s, ownWalk(parked), go(5, 5), "walk"), { x: 5, y: 5, squeeze: false, stopped: null });
+    assert.equal(coreBlocked(s, walkEnd(s, ownWalk(tok(s, { x: 5, y: 5 })), { x: -0.5, y: 5 })), false, "a core across the west side");
+    assert.deepEqual(landing(s, ownWalk(tok(s, { x: 5, y: 5 })), go(-4, -3), "free"), { x: -4, y: -3, squeeze: false, stopped: null });
+    // A Large creature half past the north side, its core clear of the corridor's wall, stands there full size when not squeezed.
+    assert.equal(coreBlocked(s, walkEnd(s, ownWalk(large(s)), { x: 13.5, y: -0.5 })), false);
+  });
+
+  test("a side is read exactly, never by a held piece's band: a core a hair across it is crossed and nothing pinches", () => {
+    const s = world({ w: W, h: H, edges: line("n", 1, 10, 25) });
+    const t = large(s);
+    // The core's north edge a quarter of a band past the side: by the band the side would block the north span and miss the core.
+    const y = -PIECE_BAND / 4 + coreSize(t).h / 2 - 1;
+    assert.equal(coreBlocked(s, walkEnd(s, ownWalk(t), { x: 13.37, y })), false);
+    assert.equal(previewAt(s, t, { x: 13.37, y }), false);
+    assert.equal(previewAt(s, t, { x: 13.37, y: -0.5 }), true, "on the corridor's middle it pinches");
   });
 });
 

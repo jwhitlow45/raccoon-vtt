@@ -16,6 +16,7 @@ import {
   onSqueezedLattice,
   ownWalk,
   squeezeFits,
+  storedBuild,
   walkEnd,
   WALL_IN_THE_WAY,
   type HexStand,
@@ -237,6 +238,26 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const held = landing(s, ownWalk(t), { ...placedOnHex(g, t, at(15, 2)), elevation: 0 }, "walk");
       assert.equal(held.stopped?.blocker, "wall");
       assert.equal(legStop(s, ownWalk(t), { x: held.x, y: held.y, elevation: 0 }), null, "where it is held, its leg is clear");
+    });
+
+    test("a corridor one row wide along the scene's first row squeezes at every op version: hexes count the edge by their stands (D-261126-226)", () => {
+      // Rock on every row but the first, from along 6 to 12: the corridor's other side is the scene's edge.
+      const s = hexWallRoom(shape, W, H, wallsRound(g, { w: W, h: H }, (h) => {
+        const along = g.orient === "rows" ? h.col : h.row;
+        const across = g.orient === "rows" ? h.row : h.col;
+        return along >= 6 && along <= 12 && across !== 0;
+      }));
+      const t = onHex(g, "big", "large", at(3, 3));
+      const inside: HexStand = { size: "medium", ref: at(9, 0), squeezed: true };
+      const placed = hexStandPlace(g, t, inside);
+      for (const v of [29, 35, 65, 66, undefined]) {
+        const build = storedBuild(s, v);
+        assert.equal(hexNarrow(hexWallsOf(build, t)!, t, inside), true, `narrow at ${v}`);
+        assert.equal(squeezeFits(build, walkEnd(build, ownWalk(t), placed)), true, `fits at ${v}`);
+      }
+      // Open ground along the first row never squeezes: a full footprint holding the hex fits there.
+      const open = hexWallRoom(shape, W, H, []);
+      assert.equal(squeezeFits(open, walkEnd(open, ownWalk(t), placed)), false);
     });
   });
 }

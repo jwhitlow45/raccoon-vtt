@@ -4,7 +4,7 @@ import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
 import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, isSqueezed, occupiedHexes, occupiedRange, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, oppositeFacing, standing, type Standing } from "./heights.ts";
-import { standsAcrossBands } from "../migrate.ts";
+import { edgePinches, standsAcrossBands } from "../migrate.ts";
 import { APART, contact, CROSS, heldPiece, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
 import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES } from "./grid.ts";
@@ -1124,6 +1124,15 @@ export function resizeLegStop(state: BuildState, token: MovingToken, to: PlacedT
  * the walls, no blocker passing through it. A drag preview's point is
  * unsnapped, so its squeezed footprint may overlap a corridor's wall by a
  * hair, and the core fitting is enough there.
+ *
+ * On squares the scene's four sides pinch as walls do, read exactly, from
+ * op version 66 (D-261126-226, 227): so a creature squeezes into a
+ * corridor along the map's edge as between two walls, and never on open
+ * ground beside the edge or in a corner, where only one side pinches. They
+ * are no movement walls: the core and fit tests and every leg leave them
+ * out, so a token still stands across the edge where it may. A build an
+ * older op reads (`storedBuild`'s `edgeOpen`) reads walls alone. Hexes
+ * count the edge already, by their stands (`hexNarrow`).
  */
 function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean): boolean {
   if (!canSqueeze(token)) return false;
@@ -1150,16 +1159,29 @@ function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean
   if (fit && segs.some((s, i) => through(s, pieces[i]!))) return false;
   const core = coreSize(token);
   const coreBox = { x0: c.x - core.w / 2, y0: c.y - core.h / 2, x1: c.x + core.w / 2, y1: c.y + core.h / 2 };
-  return pinches(segs, { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, coreBox, sq, w >= 2, h >= 2, test === "gate" ? pieces : []);
+  const sides = state.edgeOpen === true || isHex(sceneGrid(scene)) ? [] : sceneSides(scene.bounds);
+  return pinches([...segs, ...sides], { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, coreBox, sq, w >= 2, h >= 2, test === "gate" ? [...pieces, ...sides.map(() => false)] : []);
+}
+
+/** A scene's four sides as segments, clockwise from its north-west corner. */
+function sceneSides(bounds: { w: number; h: number }): (readonly [number, number, number, number])[] {
+  const { w, h } = bounds;
+  return [
+    [0, 0, w, 0],
+    [w, 0, w, h],
+    [w, h, 0, h],
+    [0, h, 0, 0],
+  ];
 }
 
 /**
  * Section 4.1's four checks for a move that stops the token squeezed at
  * `at`, its stored position: a side of at least 2 cells, the squeezed
  * footprint on cell boundaries, a real narrow space (walls, or ledges for a
- * token they stop, on both sides of the squeezed footprint along an axis it
- * shrinks, inside the full footprint, with the squeezed footprint fitting
- * between them), and a core touching no blocker. So the flag marks only a
+ * token they stop, or on squares the scene's edge from op version 66, on
+ * both sides of the squeezed footprint along an axis it shrinks, inside the
+ * full footprint, with the squeezed footprint fitting between them), and a
+ * core touching no blocker. So the flag marks only a
  * real squeeze: a corridor or a door frame, never open ground beside one
  * wall. The walker stands where the walk's last leg to the spot starts
  * (`WalkEnd`): where it stands then decides which ledges count, as for
@@ -1454,15 +1476,21 @@ export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: Wa
 
 /**
  * The build as an op stored at `opVersion` reads it on replay: the state
- * itself for today's rules, and for an op stored before version 30 its
- * scenes and build marked so a stand on hexes reads every raised side
- * between two of its hexes as a wall (migrate.ts standsAcrossBands), as
- * the op was written under. The reducer reads a hex stand through it
- * wherever it judges one: a trap's stop (traps.ts) and a dragged
- * creature's own leg (moveLeg.ts).
+ * itself for today's rules, and for an older op its scenes and build
+ * marked with the rules it was written under. Before version 30 a stand on
+ * hexes reads every raised side between two of its hexes as a wall
+ * (migrate.ts standsAcrossBands). Before version 66 the narrow-space test
+ * on squares reads walls alone, never the scene's sides (`edgeOpen`,
+ * migrate.ts edgePinches). The reducer reads a stand and a squeeze through
+ * it wherever it judges one: a trap's stop (traps.ts), a dragged
+ * creature's own leg and a rider's seats along its holder's walk
+ * (moveLeg.ts).
  */
 export function storedBuild<T extends BuildState>(state: T, opVersion: number | undefined): T | BuildState {
-  return standsAcrossBands(opVersion) ? state : { scenes: state.scenes, buildChunks: state.buildChunks, ledgedBands: true };
+  const bands = standsAcrossBands(opVersion);
+  const edge = edgePinches(opVersion);
+  if (bands && edge) return state;
+  return { scenes: state.scenes, buildChunks: state.buildChunks, ...(bands ? {} : { ledgedBands: true as const }), ...(edge ? {} : { edgeOpen: true as const }) };
 }
 
 /**

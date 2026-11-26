@@ -483,6 +483,8 @@ function standing(view: RoomState, token: Token, link: LinkEnd): Stand | null {
   const E = 1e-9;
   if (now.w <= link.rect.w + E && now.h <= link.rect.h + E) return null;
   if (!isSqueezed(token) && canSqueeze(token)) {
+    // The plain state's squeeze test, the scene's edge on squares included, at every op version: the reducer refuses a climb on
+    // "squeeze" and "tooBig" alike (reducer/floorLinks.ts tokenClimb), so which one this is changes only the words, never a state.
     const squeezed = { ...token, squeeze: true as const };
     const small = isHex(g) ? footprintRect(g, squeezed) : squeezedSize(token);
     if (small.w <= link.rect.w + E && small.h <= link.rect.h + E && placeOn(g, squeezed, link.rect).inside && squeezeFits(view, walkEnd(view, ownWalk(token), { x: token.x, y: token.y }))) return "squeeze";

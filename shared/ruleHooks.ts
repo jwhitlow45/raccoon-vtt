@@ -38,9 +38,11 @@ export type Blocker = "wall" | "ledge";
 /**
  * The state the movement test reads: the scene and its build, and for an
  * op stored before version 30 the mark that it reads every raised side
- * between two hexes of a stand as a wall (movement.ts storedBuild).
+ * between two hexes of a stand as a wall, and for one stored before
+ * version 66 the mark that the narrow-space test on squares reads walls
+ * alone, without the scene's sides (movement.ts storedBuild).
  */
-export type BuildState = Pick<RoomState, "scenes" | "buildChunks"> & { readonly ledgedBands?: true };
+export type BuildState = Pick<RoomState, "scenes" | "buildChunks"> & { readonly ledgedBands?: true; readonly edgeOpen?: true };
 
 export type MovementRules = {
   /**

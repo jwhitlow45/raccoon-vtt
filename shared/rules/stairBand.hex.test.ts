@@ -169,7 +169,7 @@ for (const [name, g] of [
       const s = b.band([[P, -5], [Q, -5]]);
       assert.ok(hexFitWall(wallsOf(storedBuild(s, 29)), b.holding(P, b.shoulder)) >= 0, "op 29");
       for (const v of [30, undefined]) assert.equal(hexFitWall(wallsOf(storedBuild(s, v)), b.holding(P, b.shoulder)), -1, `op ${v ?? "live"}`);
-      assert.equal(storedBuild(s, 30), s, "today's build is the room itself");
+      assert.equal(storedBuild(s, 66), s, "today's build is the room itself");
     });
   });
 
