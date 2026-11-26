@@ -6,7 +6,7 @@ import { ownEntry } from "#shared/records.ts";
 import { startFloor } from "#shared/rules/floors.ts";
 import { canSqueeze } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
-import { expandGroup, isGroupFrame, loneEphSchema, outboundEph, type EphEvent, type EphEventOut, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
+import { expandAt, expandGroup, isGroupFrame, loneEphSchema, outboundEph, type EphEvent, type EphEventOut, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
 import { heldBy, perPlayerClasses } from "./fanout.ts";
@@ -392,58 +392,101 @@ class Records {
   }
 }
 
+/** A group frame a pass sends tokens of, with the roster it expands by. */
+type Group = { readonly e: GroupFrame; readonly roster: GroupRoster | null; readonly origin: Origin };
+
+/**
+ * A record names a group frame's token by its slot and index together, the
+ * index under GROUP_SPAN, and an event the pass keeps whole by a number
+ * below 0. A pass holds at most 2^22 group frames, far past what every
+ * socket of a room may hold at once (actor.ts MAX_HELD_FRAMES).
+ */
+const GROUP_SPAN = 128;
+const MOST_GROUPS = 2 ** 22;
+
 /**
  * What one pass of routing or judging previews sends (design 7.6). The pass
- * judges every frame first, keeping each event it may send once (message)
- * and, for each receiver, one 4-byte record of which event and in which
- * form (post). Once the pass ends, each receiver's messages are built from
- * its records and sent together, receiver by receiver, in the order they
- * were judged. So nothing is judged between two messages to one receiver,
- * however many frames or tokens the pass reads, and what waits grows by 4
- * bytes a receiver for each message, never by a built message.
+ * judges every frame first, keeping each group frame whose tokens it sends
+ * once (group), each other event it may send once (message), and, for each
+ * receiver, one 4-byte record of which token or event and in which form
+ * (post). Once the pass ends, each receiver's messages are built from its
+ * records and sent together, receiver by receiver, in the order they were
+ * judged, a group frame's token made from the group frame as it goes
+ * (shared/protocol.ts expandAt). So nothing is judged between two messages
+ * to one receiver, however many frames or tokens the pass reads, and what
+ * waits grows by 4 bytes a receiver for each message, never by a built
+ * message or token frame.
  */
 export class Outbox {
   #events: EphEventOut[] = [];
   #origins: Origin[] = [];
+  #groups: Group[] = [];
   #origin: Origin | null = null;
   #records = new Map<Connection, Records>();
 
-  /** What the outbox holds until it delivers: its records, and a pointer to each event and its origin. */
-  get staged(): { events: number; records: number; bytes: number } {
+  /** What the outbox holds until it delivers: its records, and its group frames and events, each by a pointer to it and its origin. */
+  get staged(): { groups: number; events: number; records: number; bytes: number } {
     let records = 0;
     for (const list of this.#records.values()) records += list.length;
-    return { events: this.#events.length, records, bytes: 4 * records + 16 * this.#events.length };
+    return { groups: this.#groups.length, events: this.#events.length, records, bytes: 4 * records + 16 * (this.#events.length + this.#groups.length) };
+  }
+
+  #originOf(from: string, sceneId: string): Origin {
+    let origin = this.#origin;
+    if (origin === null || origin.from !== from || origin.sceneId !== sceneId) this.#origin = origin = { from, sceneId };
+    return origin;
   }
 
   /** An event for any number of receivers, kept once: the number posts name it by. */
   message(from: string, sceneId: string, e: EphEventOut): number {
-    let origin = this.#origin;
-    if (origin === null || origin.from !== from || origin.sceneId !== sceneId) this.#origin = origin = { from, sceneId };
     this.#events.push(e);
-    this.#origins.push(origin);
-    return this.#events.length - 1;
+    this.#origins.push(this.#originOf(from, sceneId));
+    return -this.#events.length;
   }
 
-  /** The event goes to the receiver in this form (playerForm), after what was posted to it before. */
-  post(receiver: Connection, event: number, form = 0): void {
+  /** A group frame for any number of receivers, kept once: its slot, which token names one of its tokens by. */
+  group(from: string, sceneId: string, e: GroupFrame, roster: GroupRoster | null): number {
+    if (this.#groups.length >= MOST_GROUPS) throw new Error("outbox: too many group frames in one pass");
+    this.#groups.push({ e, roster, origin: this.#originOf(from, sceneId) });
+    return this.#groups.length - 1;
+  }
+
+  /** The number posts name a group frame's token by: `j` 0 its pressed token, then its members (expandAt). */
+  token(slot: number, j: number): number {
+    return slot * GROUP_SPAN + j;
+  }
+
+  /** The token or event goes to the receiver in this form (playerForm), after what was posted to it before. */
+  post(receiver: Connection, item: number, form = 0): void {
     let list = this.#records.get(receiver);
     if (list === undefined) this.#records.set(receiver, (list = new Records()));
-    list.push(event * 4 + form);
+    list.push(item >= 0 ? item * 4 + form : item * 4 - form);
   }
 
   deliver(): void {
     const events = this.#events;
     const origins = this.#origins;
+    const groups = this.#groups;
     const records = this.#records;
     this.#events = [];
     this.#origins = [];
+    this.#groups = [];
     this.#origin = null;
     this.#records = new Map();
     for (const [receiver, list] of records) {
       list.each((record) => {
-        const i = record >> 2;
-        const { from, sceneId } = origins[i]!;
-        receiver.send({ t: "eph", from, sceneId, e: withForm(events[i]!, record & 3) });
+        if (record >= 0) {
+          const item = record >> 2;
+          const group = groups[Math.floor(item / GROUP_SPAN)]!;
+          const { from, sceneId } = group.origin;
+          receiver.send({ t: "eph", from, sceneId, e: withForm(expandAt(group.e, group.roster, item % GROUP_SPAN), record & 3) });
+          return;
+        }
+        // A kept event's record is -4 * n - form for its number -n, n from 1.
+        const n = Math.floor(-record / 4);
+        const form = -record - 4 * n;
+        const { from, sceneId } = origins[n - 1]!;
+        receiver.send({ t: "eph", from, sceneId, e: withForm(events[n - 1]!, form) });
       });
     }
   }
@@ -492,7 +535,7 @@ function routeInto(state: RoomState, sender: Connection, sceneId: string, e: Eph
     return;
   }
   if (e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd" || e.k === "dragCancel") {
-    routeDrags(state, sender, sceneId, dragKey(e.tokenId), [e], all, at, { ends: e.k === "dragEnd" || e.k === "dragCancel", members: null, checked: true }, box);
+    routeDrags(state, sender, sceneId, dragKey(e.tokenId), [e], all, at, { ends: e.k === "dragEnd" || e.k === "dragCancel", members: null, checked: true, group: null }, box);
     return;
   }
   const preview = previewOf(e);
@@ -533,7 +576,7 @@ function routeInto(state: RoomState, sender: Connection, sceneId: string, e: Eph
 function routeGroup(state: RoomState, sender: Connection, sceneId: string, e: GroupFrame, all: readonly Connection[], at: number, version: GroupRoster | null, box: Outbox): void {
   const ends = e.k === "dragCancel" || e.k === "groupEnd";
   if (version === null && !ends && sender.gestures.mayAsk(e.g, at)) sender.send({ t: "need", id: e.tokenId, g: e.g });
-  routeDrags(state, sender, sceneId, gestureKey(e.g), expandGroup(e, version), all, at, { ends, members: version?.ids ?? null, checked: false }, box);
+  routeDrags(state, sender, sceneId, gestureKey(e.g), expandGroup(e, version), all, at, { ends, members: version?.ids ?? null, checked: false, group: { e, roster: version } }, box);
 }
 
 /**
@@ -553,7 +596,7 @@ function routeDrags(
   frames: readonly EphEvent[],
   all: readonly Connection[],
   at: number,
-  step: { ends: boolean; members: readonly string[] | null; checked: boolean },
+  step: { ends: boolean; members: readonly string[] | null; checked: boolean; group: { e: GroupFrame; roster: GroupRoster | null } | null },
   box: Outbox,
 ): void {
   const pressed = frames[0];
@@ -563,12 +606,16 @@ function routeDrags(
   if (before) endLeft(sender, key, before, pressed.tokenId, ids, all, box);
   const points = ids === null ? null : pointsFor(ids, before);
   let last = before?.last ?? pressed;
+  let slot: number | undefined;
   for (const [j, frame] of frames.entries()) {
     if (!("tokenId" in frame)) continue;
     const tokenId = frame.tokenId;
     if (!mayAct(sender, key, tokenId)) continue;
     if (!step.checked && !loneEphSchema.safeParse(frame).success) continue;
-    routeDragFrame(state, sender, sceneId, frame, all, box);
+    // A group frame's token waits as its index in the group frame, made again from it as it is sent.
+    const group = step.group;
+    const item = group ? () => box.token((slot ??= box.group(sender.memberId, sceneId, group.e, group.roster)), j) : () => box.message(sender.memberId, sceneId, outboundEph(frame));
+    routeDragFrame(state, sender, sceneId, frame, all, box, item);
     const ended = frame.k === "dragEnd" || frame.k === "dragCancel";
     setOwner(sender, tokenId, ended ? null : key);
     if (ended || !("x" in frame)) continue;
@@ -633,7 +680,7 @@ function pointsFor(ids: readonly string[], before: SentPreview | undefined): Flo
  * everyone, and one already showing (the token was locked mid-drag, say)
  * is cancelled.
  */
-function routeDragFrame(state: RoomState, sender: Connection, sceneId: string, e: EphEvent, all: readonly Connection[], box: Outbox): void {
+function routeDragFrame(state: RoomState, sender: Connection, sceneId: string, e: EphEvent, all: readonly Connection[], box: Outbox, item: () => number): void {
   if (!("tokenId" in e)) return;
   const may = senderMay(state, sender, sceneId, e);
   const heldKey = `${sender.memberId}|drag:${e.tokenId}`;
@@ -649,11 +696,11 @@ function routeDragFrame(state: RoomState, sender: Connection, sceneId: string, e
     // A bare cancel names only what stopped, so it goes to those showing that preview. Sent to
     // everyone, a cancelled drag of a hidden or fogged token would hand players its id.
     if (e.k === "dragCancel") {
-      if (receiver.previewsHeld.delete(heldKey)) box.post(receiver, (bare ??= box.message(sender.memberId, sceneId, e)));
+      if (receiver.previewsHeld.delete(heldKey)) box.post(receiver, (bare ??= item()));
       continue;
     }
     if (may && allowed(state, receiver, e, withheld)) {
-      box.post(receiver, (shown ??= box.message(sender.memberId, sceneId, out)), playerForm(state, sceneId, out, receiver));
+      box.post(receiver, (shown ??= item()), playerForm(state, sceneId, out, receiver));
       if (ends) receiver.previewsHeld.delete(heldKey);
       else receiver.previewsHeld.set(heldKey, sender.id);
     } else if (receiver.previewsHeld.has(heldKey)) {
