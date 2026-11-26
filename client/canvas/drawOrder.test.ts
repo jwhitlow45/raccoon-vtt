@@ -20,7 +20,7 @@ test("a fill draws first, then strokes and unfilled shapes, then text, each by i
     drawing(ID(1), { kind: "ellipse", style: { ...style, fill: "#ff000055" } }),
     drawing(ID(0), { kind: "rect", style: { ...style, fill: "#ff000055" } }),
   ];
-  assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(1), ID(0), ID(3), ID(2), ID(4)]);
+  assert.deepEqual([...list].sort(drawingOrder).map((d) => d.id), [ID(1), ID(0), ID(2), ID(3), ID(4)], "the ellipse before the rectangle by kind, then the free line before the rectangle by kind");
 });
 
 test("drawings of one kind draw in board order, by the top, then the left, of their boxes, then by id", () => {
@@ -63,6 +63,46 @@ test("drawings that share a corner never order by id: the taller, then the wider
   const lone = (n: number, stroke: string) => drawing(ID(n), { kind: "rect", points: [1, 1, 2, 2], style: { stroke, width: 2, opacity: 1 } });
   assert.deepEqual([...differ].sort(drawingOrder).map((d) => d.id), [ID(0), ID(1)]);
   assert.deepEqual([lone(0, "#00ff00"), lone(1, "#ff0000")].sort(drawingOrder).map((d) => d.id), [ID(0), ID(1)], "the same box in two colors orders by color, here 00ff00 before ff0000");
+});
+
+test("drawings alike in box, points and colors still order by what shows: kind, width, opacity, dash and text, never by id first", () => {
+  const base = { stroke: "#ffffff", width: 2, opacity: 1 };
+  const same = { points: [1, 1, 3, 3] };
+  const of = (n: number, extra: Partial<Drawing>) => drawing(ID(n), { kind: "rect", ...same, style: base, ...extra });
+  // Each pair lists the one that must draw first with the higher-numbered id, which sorts last by id, so only the rule puts it first.
+  const pairs: [Drawing, Drawing][] = [
+    [of(0, { kind: "ellipse" }), of(1, { kind: "rect" })],
+    [of(0, { style: { ...base, width: 1 } }), of(1, {})],
+    [of(0, { style: { ...base, opacity: 0.5 } }), of(1, {})],
+    [of(0, { style: { ...base, dash: [1, 2] } }), of(1, { style: { ...base, dash: [3, 1] } })],
+    [of(0, { kind: "text", text: "a" }), of(1, { kind: "text", text: "b" })],
+  ];
+  for (const [first, second] of pairs) {
+    assert.deepEqual([second, first].sort(drawingOrder).map((d) => d.id), [first.id, second.id], JSON.stringify(first));
+    assert.deepEqual([first, second].sort(drawingOrder).map((d) => d.id), [first.id, second.id]);
+  }
+  assert.doesNotThrow(() => [of(0, { points: [] }), of(1, { points: [] }), of(2, {})].sort(drawingOrder));
+  assert.ok(Number.isFinite(drawingOrder(of(0, { points: [] }), of(1, {}))), "an empty points list sorts, with no NaN");
+});
+
+test("equal boxes read each drawing's points once however many drawings it is compared with", () => {
+  const style = { stroke: "#ffffff", width: 2, opacity: 1 };
+  let reads = 0;
+  const counted = (n: number, points: number[]) =>
+    drawing(ID(n % 10), {
+      kind: "free",
+      points: new Proxy(points, {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+          return Reflect.get(target, key, receiver);
+        },
+      }),
+      style,
+    });
+  // Every box is 0,0 to 9,9, so each comparison falls to the points.
+  const list = Array.from({ length: 40 }, (_, n) => counted(n, [0, 0, n % 7, n % 5, 9, 9]));
+  [...list].sort(drawingOrder);
+  assert.ok(reads <= 40 * 6 * 3, `read ${reads} values, three scans a drawing at most (low, high, key)`);
 });
 
 test("objects draw under creatures, a larger one under a smaller one, then by id", () => {

@@ -266,19 +266,25 @@ function drawingRank(d: Pick<Drawing, "kind" | "style">): number {
  * order alone would lay a new box under an older one as often as over it,
  * and differently in every room.
  */
-export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style" | "points">, b: Pick<Drawing, "id" | "kind" | "style" | "points">): number {
+export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style" | "points" | "text">, b: Pick<Drawing, "id" | "kind" | "style" | "points" | "text">): number {
   const rank = drawingRank(a) - drawingRank(b);
   if (rank !== 0) return rank;
   const ba = boxCorner(a.points);
   const bb = boxCorner(b.points);
   const box = ba.y0 - bb.y0 || ba.x0 - bb.x0 || bb.y1 - ba.y1 || bb.x1 - ba.x1;
   if (box !== 0) return box;
-  const n = Math.min(a.points.length, b.points.length);
-  for (let i = 0; i < n; i++) {
-    const d = a.points[i]! - b.points[i]!;
-    if (d !== 0) return d;
-  }
-  return a.points.length - b.points.length || compareText(a.style.stroke, b.style.stroke) || compareText(a.style.fill ?? "", b.style.fill ?? "") || compareText(a.id, b.id);
+  // Everything that shows, so the id decides only between drawings that look the same.
+  return (
+    compareText(ba.key, bb.key) ||
+    compareText(a.kind, b.kind) ||
+    a.style.width - b.style.width ||
+    a.style.opacity - b.style.opacity ||
+    compareText(a.style.stroke, b.style.stroke) ||
+    compareText(a.style.fill ?? "", b.style.fill ?? "") ||
+    compareText(a.style.dash?.join(",") ?? "", b.style.dash?.join(",") ?? "") ||
+    compareText(a.text ?? "", b.text ?? "") ||
+    compareText(a.id, b.id)
+  );
 }
 
 function compareText(a: string, b: string): number {
@@ -286,17 +292,21 @@ function compareText(a: string, b: string): number {
 }
 
 /**
- * A drawing's box, found once per points array. A sort
+ * A drawing's box and, only once boxes tie, its points as one string, each found once per points array. A sort
  * compares each drawing about log n times, and a drawing can hold tens of
  * thousands of point values, so scanning them in every comparison cost a
  * pass over every point per frame. State is never changed in place, so a
  * points array keeps its box for as long as it lives.
  */
-const corners = new WeakMap<readonly number[], { x0: number; y0: number; x1: number; y1: number }>();
-function boxCorner(points: readonly number[]): { x0: number; y0: number; x1: number; y1: number } {
+type Corner = { x0: number; y0: number; x1: number; y1: number; readonly key: string };
+const corners = new WeakMap<readonly number[], Corner>();
+function boxCorner(points: readonly number[]): Corner {
   let found = corners.get(points);
   if (!found) {
-    found = bounds(points);
+    // An empty list has no box, and Infinity less Infinity would make the comparator answer NaN.
+    const b = points.length >= 2 ? bounds(points) : { x0: 0, y0: 0, x1: 0, y1: 0 };
+    let key: string | null = null;
+    found = { ...b, get key() { return (key ??= points.join(",")); } };
     corners.set(points, found);
   }
   return found;
