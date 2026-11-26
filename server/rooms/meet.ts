@@ -3,7 +3,7 @@ import type { RoomState } from "#shared/model.ts";
 import { MEET_IDS_MOST } from "#shared/numbering.ts";
 import { changedSightKeys } from "#shared/project.ts";
 import type { OpOf } from "#shared/protocol.ts";
-import { meetCandidates } from "#shared/reducer/numbering.ts";
+import { meetCandidates, meetingRuns } from "#shared/reducer/numbering.ts";
 import { floorsOf } from "#shared/rules/floors.ts";
 
 /*
@@ -31,9 +31,10 @@ const STEP_KINDS: ReadonlySet<string> = new Set(["token", "scene", "character", 
  */
 export function meetOps(before: RoomState, after: RoomState, touched: readonly EntityKey[], opts: { skip?: boolean } = {}): OpOf<"sys.meet">[] {
   if (opts.skip !== false && !touched.some((key) => STEP_KINDS.has(parseKey(key)?.kind ?? "")) && !sightMoved(before, after)) return [];
-  const ids = meetCandidates(after, touched, {});
   const ops: OpOf<"sys.meet">[] = [];
-  for (let i = 0; i < ids.length; i += MEET_IDS_MOST) ops.push({ t: "sys.meet", tokenIds: ids.slice(i, i + MEET_IDS_MOST) });
+  for (const ids of meetingRuns(after, meetCandidates(after, touched, {}))) {
+    for (let i = 0; i < ids.length; i += MEET_IDS_MOST) ops.push({ t: "sys.meet", tokenIds: ids.slice(i, i + MEET_IDS_MOST) });
+  }
   return ops;
 }
 

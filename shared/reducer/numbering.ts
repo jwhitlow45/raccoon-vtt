@@ -1,7 +1,7 @@
 import { keys, parseKey, type EntityKey } from "../keys.ts";
 import { NUMBERING_OP_VERSION } from "../migrate.ts";
 import type { RoomState, Scene, Token, Viewer } from "../model.ts";
-import { NUMBER_NAMES_MOST, NUMBERS_MOST, memberOf, numberable, numberScope, numbersOf, shownName } from "../numbering.ts";
+import { NUMBER_NAMES_MOST, NUMBERS_MOST, meetingOrder, memberOf, numberable, numberScope, numbersOf, shownName } from "../numbering.ts";
 import { partyHolds } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { ownEntry } from "../records.ts";
@@ -74,6 +74,45 @@ export function meetCandidates(state: RoomState, touched: readonly EntityKey[], 
     }
   }
   return [...found].sort();
+}
+
+/**
+ * The lists a meeting's `sys.meet` ops name, in the order they apply: each
+ * in id order, as the op requires, and together meeting each name's
+ * creatures on each scene in meeting order (shared/numbering.ts
+ * meetingOrder). Creatures of other names or scenes never number against
+ * each other, so each name's creatures, in meeting order, are cut where an
+ * id falls, and the r-th list holds every name's r-th part. The reducer
+ * then applies stored ops as they ran, and a meeting in id order is one
+ * list. A creature the state does not hold is left out, as the rules would
+ * skip it.
+ */
+export function meetingRuns(state: RoomState, ids: readonly string[]): string[][] {
+  const groups = new Map<string, Map<string, Token[]>>();
+  for (const id of ids) {
+    const token = ownEntry(state.tokens, id);
+    if (!token) continue;
+    const scopeId = numberScope(state, token);
+    let names = groups.get(scopeId);
+    if (!names) groups.set(scopeId, (names = new Map()));
+    const name = shownName(token);
+    const list = names.get(name);
+    if (list) list.push(token);
+    else names.set(name, [token]);
+  }
+  const order = meetingOrder(state);
+  const runs: string[][] = [];
+  for (const names of groups.values()) {
+    for (const list of names.values()) {
+      list.sort(order);
+      let r = 0;
+      for (let i = 0; i < list.length; i++) {
+        if (i > 0 && list[i]!.id < list[i - 1]!.id) r++;
+        (runs[r] ??= []).push(list[i]!.id);
+      }
+    }
+  }
+  return runs.map((run) => run.sort());
 }
 
 /** `sys.meet`: each creature named, in order, by the meeting rules, skipping any the room no longer fits. */
@@ -174,11 +213,12 @@ export function keepNumbering(scenes: Pick<RoomState, "scenes">, stored: Token, 
  * scene players see and only with no blackout on. Each numberable
  * creature the party's copy holds with a number players were shown (its
  * name not hidden) keeps it as a member of its name's group, the name
- * counting to its highest kept number. Of two with one number the lower id
- * keeps it. At most NUMBER_NAMES_MOST names are kept, names in the id
- * order of their lowest creature the party holds. Every other numberable
- * creature the party holds is then met by the rules, in id order, so names
- * met alone follow in the same order until the scene's register is full.
+ * counting to its highest kept number. Of two with one number the first in
+ * meeting order (shared/numbering.ts meetingOrder) keeps it. At most
+ * NUMBER_NAMES_MOST names are kept, names in the meeting order of their
+ * first creature the party holds. Every other numberable creature the
+ * party holds is then met by the rules, in meeting order, so names met
+ * alone follow in the same order until the scene's register is full.
  * Every other old number counts for nothing from here (memberOf).
  *
  * A pure function of the state that reads sight by the rules of the op
@@ -189,20 +229,21 @@ export function keepNumbering(scenes: Pick<RoomState, "scenes">, stored: Token, 
 export function numberingUpgrade(state: RoomState): RoomState {
   if (state.meta.playerSceneId === null || state.meta.view?.blackout === true) return state;
   const holds = partyHolds(state, { opVersion: NUMBERING_OP_VERSION });
-  const held = Object.values(state.tokens).filter((t) => numberable(state, t) && holds(t)).sort(byId);
+  const order = meetingOrder(state);
+  const held = Object.values(state.tokens).filter((t) => numberable(state, t) && holds(t)).sort(order);
   if (held.length === 0) return state;
   const tx = new Tx(state, UPGRADE_ACTOR, { seq: 0, at: new Date(0).toISOString(), opVersion: NUMBERING_OP_VERSION, uncounted: true });
-  const lowest = new Map<string, string>();
+  const first = new Map<string, Token>();
   const shown = new Map<string, Token[]>();
   for (const token of held) {
     const name = shownName(token);
-    if (!lowest.has(name)) lowest.set(name, token.id);
+    if (!first.has(name)) first.set(name, token);
     if (token.number === undefined || token.nameHidden === true) continue;
     const list = shown.get(name);
     if (list) list.push(token);
     else shown.set(name, [token]);
   }
-  const kept = [...shown.keys()].sort((a, b) => byId({ id: lowest.get(a)! }, { id: lowest.get(b)! })).slice(0, NUMBER_NAMES_MOST);
+  const kept = [...shown.keys()].sort((a, b) => order(first.get(a)!, first.get(b)!)).slice(0, NUMBER_NAMES_MOST);
   for (const name of kept) {
     const g = newGroup(tx);
     const given = new Set<number>();

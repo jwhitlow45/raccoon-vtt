@@ -159,34 +159,68 @@ export function boardLabel(previews: ReadonlyMap<TokenId, number>, token: Number
   return labelText(labelParts(null, token, role === "dm" ? "board" : "own", previews));
 }
 
+/** The fields of a creature its place in a meeting reads. */
+export type MeetingToken = Pick<Token, "id" | "sceneId" | "x" | "y">;
+
+/**
+ * The order in which creatures met together take their numbers
+ * (docs/design/design-v1-creature-numbers-order.md). Only creatures of one
+ * shown name on one scene number against each other, and this ranks them.
+ * Creatures on a floor where the party shares its sight come first, the
+ * lowest floor first, then top to bottom, then left to right. The party
+ * meets a creature there only when every player's copy holds it, so every
+ * player can read this order off their own board. Creatures on a floor
+ * where players see for themselves follow, in id order: one may be a
+ * creature only another player was sent, and ranking it by its place would
+ * show a player where it stands. An id starts with a random nonce, so id
+ * order says nothing of where or when a creature was made. Ties go to the
+ * lower id.
+ */
+export function meetingOrder(state: Pick<RoomState, "scenes">): (a: MeetingToken, b: MeetingToken) => number {
+  const place = (token: MeetingToken): readonly [floor: number, y: number, x: number] | null => {
+    const floor = ownEntry(state.scenes, token.sceneId);
+    // shared/project.ts perPlayerScene, which imports this module.
+    if (floor?.vision?.perPlayer === true) return null;
+    return [floor?.floor?.level ?? 0, token.y, token.x];
+  };
+  return (a, b) => {
+    const pa = place(a);
+    const pb = place(b);
+    if (pa !== null && pb !== null) {
+      for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) return pa[i]! - pb[i]!;
+    } else if (pa !== null || pb !== null) return pa !== null ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+}
+
 /**
  * The numbers a DM's board previews on one scene, by creature: for each
  * shown name, the numberable creatures of the scene that are not members,
- * in id order, take the numbers after the last the name has given. That is
- * what the party's meeting them all now would give, since creatures met
- * together are numbered in id order. A name the party has not met gives a
- * preview only to two or more, since one met alone reads plain. No preview
- * passes a cap. Run on a DM's copy, which holds every floor of the scene
- * with every creature and the stored scene.
+ * in meeting order, take the numbers after the last the name has given.
+ * That is what the party's meeting them all now would give. A name the
+ * party has not met gives a preview only to two or more, since one met
+ * alone reads plain. No preview passes a cap. Run on a DM's copy, which
+ * holds every floor of the scene with every creature and the stored scene.
  */
 export function previewNumbers(view: NumberState & Pick<RoomState, "tokens">, scopeId: string): Map<TokenId, number> {
   const names = numbersOf(view, scopeId);
-  const unmet = new Map<string, TokenId[]>();
+  const unmet = new Map<string, MeetingToken[]>();
   for (const token of Object.values(view.tokens)) {
     if (numberScope(view, token) !== scopeId || !numberable(view, token) || memberOf(view, token)) continue;
     const name = shownName(token);
-    const ids = unmet.get(name);
-    if (ids) ids.push(token.id);
-    else unmet.set(name, [token.id]);
+    const list = unmet.get(name);
+    if (list) list.push(token);
+    else unmet.set(name, [token]);
   }
   const full = Object.keys(names).length >= NUMBER_NAMES_MOST;
+  const order = meetingOrder(view);
   const out = new Map<TokenId, number>();
-  for (const [name, ids] of unmet) {
+  for (const [name, list] of unmet) {
     const entry = ownEntry(names, name);
-    if (entry === undefined && (full || ids.length < 2)) continue;
+    if (entry === undefined && (full || list.length < 2)) continue;
     const given = entry?.[1] ?? 0;
-    ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    for (let i = 0; i < ids.length && given + i + 1 <= NUMBERS_MOST; i++) out.set(ids[i]!, given + i + 1);
+    list.sort(order);
+    for (let i = 0; i < list.length && given + i + 1 <= NUMBERS_MOST; i++) out.set(list[i]!.id, given + i + 1);
   }
   return out;
 }
