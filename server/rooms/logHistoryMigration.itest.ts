@@ -610,6 +610,29 @@ describe("the backfill", () => {
     await w.m.stop();
   });
 
+  test("a batch that waits past its bound on a row lock ends on the server by its own timeout, though the cancel request never lands", async () => {
+    const roomId = await newRoom();
+    await legacyInsert(pool, roomId, lines(rng(58), 0, 50).rows);
+    // A cancel that never lands, as one does that reaches the backend before it reads the statement.
+    const w = worker({ batchRows: 100, queryMs: 400, cancel: async () => undefined });
+    w.m.start();
+    await until(() => w.m.ready, "ready");
+    const holder = await pool.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("select 1 from room_log where room_id = $1 for update", [roomId]);
+      const outcome = w.outcome(roomId);
+      w.m.want(roomId);
+      assert.equal(await outcome, "failed");
+      // The row locks are still held, so only the backend's own timeout can end its wait.
+      await noLeftovers("with the row locks still held");
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
+    await w.m.stop();
+  });
+
   test("a stopped worker's backend can hold the room's lock past stop(): a new job reports locked and completes nothing, and the room completes once asked again", async () => {
     const roomId = await newRoom();
     const { rows } = lines(rng(56), 0, 300);

@@ -44,13 +44,15 @@ import { archiveAdmitted, completeLines, incompleteLines, storedKey, type Archiv
  * Every step on the worker's connection is bounded and stops at a cancel
  * (shutdown, or the deletion of the room it works on): connecting, waiting
  * for a lock (polled, between cancellable waits), and each query (its
- * query timeout). A cancelled step sends the backend PostgreSQL's cancel
- * request and then closes the connection, with no more SQL on it. The job's
- * turn and lease are given back only after that, and stop() resolves only
- * after that. The backend ends, and every lock it held with it, once it
- * reads the closed socket: a moment later, or once its statement ends when
- * the cancel missed it. A job that meets such a lock reports the room
- * locked, and the room's next read asks for it again.
+ * query timeout, and a statement_timeout of the same bound on the server).
+ * A cancelled step sends the backend PostgreSQL's cancel request and then
+ * closes the connection, with no more SQL on it. The job's turn and lease
+ * are given back only after that, and stop() resolves only after that. The
+ * backend ends, and every lock it held with it, once it reads the closed
+ * socket: a moment later, or once its statement ends when the cancel
+ * missed it, at the latest at the statement's bound. A job that meets such
+ * a lock reports the room locked, and the room's next read asks for it
+ * again.
  */
 
 export const UNINDEXED_INDEX = "room_log_unindexed_room";
@@ -397,6 +399,8 @@ class Dedicated {
   #dropping: Promise<void> | null = null;
   #onAbort: () => void;
   #signal: AbortSignal;
+  /** The session's statement_timeout, as the last statement set it: null before the first. */
+  #statementMs: number | null = null;
 
   constructor(client: pg.Client, opts: { cancel: (client: pg.Client) => Promise<void>; queryMs: number; closeMs: number }, signal: AbortSignal) {
     this.#client = client;
@@ -452,6 +456,15 @@ class Dedicated {
     if (this.#signal.aborted) throw new ScanCancelledError(this.#signal.reason);
     if (!this.usable) throw new Error("log metadata connection is gone");
     try {
+      // PostgreSQL stops the statement at its bound by itself, as guardedQueries has it do (logHistory.ts). The cancel
+      // request at the client's timeout is not enough alone: PostgreSQL discards one that reaches the backend before it
+      // starts the statement, and a closed socket does not stop a backend waiting on a lock. The connection is closed
+      // after its job and never reused, so the setting needs no reset.
+      const bound = Math.max(1, Math.ceil(ms));
+      if (this.#statementMs !== bound) {
+        await this.#client.query({ text: "select set_config('statement_timeout', $1, false)", values: [String(bound)], query_timeout: ms } as pg.QueryConfig);
+        this.#statementMs = bound;
+      }
       return await this.#client.query<R>({ text, values, query_timeout: ms } as pg.QueryConfig);
     } catch (err) {
       await this.close(true);

@@ -25,8 +25,12 @@ class FakeClient extends EventEmitter {
     this.answer = answer;
   }
 
-  query(config: { text: string }): Promise<{ rows: unknown[] }> {
+  query(config: { text: string; values?: unknown[] }): Promise<{ rows: unknown[] }> {
     const text = config.text.replace(/\s+/g, " ").trim();
+    if (text.includes("statement_timeout")) {
+      this.steps.push(`timeout ${String(config.values?.[0])}`);
+      return Promise.resolve({ rows: [] });
+    }
     this.steps.push(label(text));
     const a = this.answer(text);
     if (a === "hang") return new Promise((_resolve, reject) => this.#pending.push(reject));
@@ -306,6 +310,27 @@ describe("the log metadata worker", () => {
     await tick();
     await stopping;
     assert.equal(connects, 5, "a stop ends the wait without another attempt");
+  });
+
+  test("each statement runs under a server timeout of its own bound, set again only when the bound changes", async () => {
+    let valid: boolean | null = null;
+    const { m, steps, outcomes } = rig(
+      database(10, (text) => {
+        if (text.includes("indisvalid")) return { rows: valid === null ? [] : [{ valid }] };
+        if (text.startsWith("create index")) valid = true;
+        return undefined;
+      }),
+      { queryMs: 2_000, buildMs: 90_000 },
+    );
+    m.start();
+    await until(() => m.ready, "ready");
+    m.want("ROOM");
+    await until(() => outcomes.some((o) => o.kind === "room"), "the room done");
+    await m.stop();
+    assert.deepEqual(steps, [
+      ...["timeout 2000", "lock", "valid?", "timeout 90000", "create index", "timeout 2000", "valid?", "unlock", "end"],
+      ...["timeout 2000", "lock", "valid?", "unlock", "lock", "read", "complete", "unlock", "end"],
+    ]);
   });
 
   test("rooms are asked for once each, up to a bound, and a deleted one leaves the queue", async () => {
