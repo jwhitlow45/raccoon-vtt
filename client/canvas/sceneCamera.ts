@@ -85,9 +85,11 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
   /**
    * A map the viewer never moved from its fit stays a fit across the switch when the held camera would cut the
    * map's corners: Isometric's diamond is wider than the same map seen from above, so a 14 x 9 map held at its
-   * Top-down zoom runs past a phone's edges. Null keeps the held camera.
+   * Top-down zoom runs past a phone's edges. Leaving Isometric for Top-down (`leaving`) refits a map still at its
+   * fit whatever the held camera shows, since the Isometric zoom sits well under Top-down's fit. Null keeps the
+   * held camera.
    */
-  refit?(before: Camera, held: Camera): { cam: Camera } | null;
+  refit?(before: Camera, held: Camera, leaving: boolean): { cam: Camera } | null;
   setCam(c: Camera): void;
 }): void {
   const before = a.viewSeen.current;
@@ -101,7 +103,7 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
   const selected = a.selected();
   const held = heldPoint(was, now, selected, s, a.insets, (pick) => !selected || a.stands(pick, selected));
   const still = holdStill(c, toView(before, held.at, held.before), toView(a.shown, held.at, held.after));
-  const refit = a.refit?.(c, still) ?? null;
+  const refit = a.refit?.(c, still, before.kind === "isometric" && a.shown.kind === "topDown") ?? null;
   const next = refit ? refit.cam : still;
   a.pendingCam.current = null;
   a.fitted.current = refit;
@@ -113,12 +115,16 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
  * Stage's `refit` for holdViewStill: the fit to use in the new view, or null
  * to keep the held camera. It takes over only when the camera before the
  * switch was still the fit (the viewer never moved it) and the held camera
- * would cut the fitted box's corners in the clear part of the canvas. `box`
- * gives the fitted box in the new view at a zoom, with its height lift.
+ * would cut the fitted box's corners in the clear part of the canvas, or the
+ * switch leaves Isometric for Top-down, where the held zoom is the smaller
+ * Isometric fit and would leave the map small. `box` gives the fitted box in
+ * the new view at a zoom, with its height lift.
  */
 export function refitAcrossView<F extends { cam: Camera }>(a: {
   before: Camera;
   held: Camera;
+  /** The switch goes from Isometric to Top-down. */
+  leaving?: boolean;
   fitted: F | null;
   size: Size | null;
   clear: Insets;
@@ -126,6 +132,6 @@ export function refitAcrossView<F extends { cam: Camera }>(a: {
   fit(): F;
 }): F | null {
   if (!a.fitted || !a.size || !sameCamera(a.before, a.fitted.cam)) return null;
-  if (rectClear(a.held, a.box(a.held.scale), a.size, a.clear)) return null;
+  if (!a.leaving && rectClear(a.held, a.box(a.held.scale), a.size, a.clear)) return null;
   return a.fit();
 }

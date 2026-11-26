@@ -178,3 +178,48 @@ test("UIPOLISH: a map still at its fit stays a fit across a view switch that wou
   assert.equal(ask(topDown, null, held), null, "no fit stands");
   assert.equal(ask(topDown, { cam: topDown }, refitted), null, "a held camera that shows the whole box is kept");
 });
+
+test("LP52-ISO-BACK: Isometric back to Top-down refits a map still at its Isometric fit, and a camera the viewer moved keeps its place both ways", () => {
+  const size = { width: 390, height: 844 };
+  const rect = { x: 0, y: 0, width: 14, height: 9 };
+  const current = scene("hall", { bounds: { w: 14, h: 9 } });
+  const state = room({ scenes: { hall: current } });
+  const heights = new DrawnHeightsMemo();
+  const fitIn = (view: View): { cam: Camera } => ({ cam: fitRect(size, viewBox(view, rect), 24, NO_INSETS) });
+  const topFit = fitIn(TOP_DOWN);
+  const isoFit = fitIn(isometric(0));
+  assert.ok(topFit.cam.scale > isoFit.cam.scale, "Top-down's fit zooms in past the Isometric one");
+
+  // One switch, as Stage's effect runs it.
+  const switchTo = (from: View, to: View, start: Camera, fitted: { cam: Camera } | null) => {
+    const camRef = { current: start as Camera | null };
+    const fittedRef = { current: fitted as { cam: Camera } | null };
+    const viewSeen = { current: from };
+    holdViewStill({
+      shown: to, viewSeen, pendingCam: { current: null }, cam: camRef, size: { current: size }, fitted: fittedRef, insets: NO_INSETS,
+      pick: (view, camera, s) => boardPickFor({ room: state, scene: current, role: "dm", fog: false, view, camera, lowPower: false, canvasHeight: s.height }, heights),
+      selected: () => undefined,
+      stands: () => true,
+      refit: (before, held, leaving) =>
+        refitAcrossView({ before, held, leaving, fitted: fittedRef.current, size, clear: NO_INSETS, box: () => viewBox(to, rect), fit: () => fitIn(to) }),
+      setCam: () => {},
+    });
+    return { cam: camRef.current!, fitted: fittedRef.current };
+  };
+
+  const into = switchTo(TOP_DOWN, isometric(0), topFit.cam, topFit);
+  assert.deepEqual(into.cam, isoFit.cam, "into Isometric a map at its fit refits");
+  const back = switchTo(isometric(0), TOP_DOWN, into.cam, into.fitted);
+  assert.deepEqual(back.cam, topFit.cam, "back to Top-down the map refits instead of staying at the Isometric zoom");
+  assert.deepEqual(back.fitted, topFit);
+
+  const moved = { ...topFit.cam, x: topFit.cam.x + 5, scale: topFit.cam.scale * 1.5 };
+  const movedIn = switchTo(TOP_DOWN, isometric(0), moved, topFit);
+  assert.equal(movedIn.cam.scale, moved.scale, "a moved camera keeps its zoom into Isometric");
+  const movedBack = switchTo(isometric(0), TOP_DOWN, movedIn.cam, movedIn.fitted);
+  assert.equal(movedBack.cam.scale, moved.scale, "and back to Top-down");
+  assert.equal(movedBack.fitted, null);
+
+  const turned = switchTo(isometric(0), isometric(1), isoFit.cam, isoFit);
+  assert.equal(turned.cam.scale, isoFit.cam.scale, "a turn inside Isometric is not a way out and keeps the zoom");
+});

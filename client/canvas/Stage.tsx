@@ -468,13 +468,13 @@ export function MapStage(props: {
         boardPickFor({ room: store.getState().floorView, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera, lowPower: lowPowerRef.current, canvasHeight: s.height }, heightsMemoRef.current),
       selected: () => tokensByIdRef.current.get(store.getState().local.selectedId ?? ""),
       stands: (pick, selected) => standsFor(pick, aboveFogRef.current)(selected),
-      refit: (before, held) => {
+      refit: (before, held, leaving) => {
         const f = fittedRef.current;
         const current = sceneRef.current;
         const s = sizeRef.current;
         const box = f?.target ?? sceneRect(current);
         return refitAcrossView({
-          before, held, fitted: f, size: s,
+          before, held, leaving, fitted: f, size: s,
           clear: largerEach(insetsRef.current, f?.cover ?? NO_INSETS),
           box: (scale) => viewBox(shownRef.current, box, liftRef.current(box, scale)),
           fit: () => fitScene(s!, current, insetsRef.current, shownRef.current, f!.target, f!.cover, liftRef.current),
