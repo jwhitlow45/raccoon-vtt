@@ -478,6 +478,9 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   return startFor(liveStarts(room), viewer);
 }
 
+/** How many of the older lines holdsOp asks about first. */
+const READ_RUN = 8;
+
 /**
  * Whether the log in memory still holds every line of op `seq` the viewer
  * reads, and one at least. Each ring drops its own oldest, so an op's lines
@@ -486,27 +489,44 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
  * starts (liveStart) and, once the shared lines are full, past their floor.
  * Otherwise the archive has them.
  *
- * It reads only lines the viewer reads (readsLine) and where their live log
- * starts, which reads no other, so the lines others read never decide
- * whether a lookup of the viewer's own op reads the archive. An op that
- * wrote none the viewer reads always goes to the archive, so a line it
- * wrote for someone else decides nothing either.
+ * `readable` names which of some lines the viewer reads now. A lookup
+ * passes the projection its answer reads by (server/rooms/logHistory.ts
+ * heldOpLines), since a shared line goes unread once its creature is out
+ * of sight, and so does a line from before op version 19 that only some
+ * could read. Left out, every line of the viewer's audience counts
+ * (readsLine). Either way it reads only the lines the viewer reads and
+ * where their live log starts, which reads no other, so the lines others
+ * read never decide whether a lookup of the viewer's own op reads the
+ * archive. An op that wrote none the viewer reads always goes to the
+ * archive, so a line it wrote for someone else decides nothing either.
  */
-export function holdsOp(room: LogRoom, viewer: Viewer, seq: number): boolean {
+export function holdsOp(room: LogRoom, viewer: Viewer, seq: number, readable: (lines: readonly LogEntry[]) => ReadonlySet<string> = everyLine): boolean {
   // A viewer who is no member, a table display, reads no line (projectLogEntry).
   if (viewer.role !== "dm" && !Object.hasOwn(room.members, viewer.memberId)) return false;
   const start = liveStart(room, viewer);
-  let oldest = true;
+  const older: LogEntry[] = [];
+  const own: LogEntry[] = [];
   for (const e of room.log) {
     if ((start !== null && compareLogIds(e.id, start) < 0) || !readsLine(viewer, e)) continue;
     const at = seqOf(e.id);
-    if (oldest) {
-      // The oldest op the viewer's live log holds may have lost lines to a ring or the floor.
-      if (at >= seq) return false;
-      oldest = false;
-    } else if (at >= seq) return at === seq;
+    if (at > seq) break;
+    (at < seq ? older : own).push(e);
+  }
+  // The oldest op the viewer's live log holds may have lost lines to a ring or the floor, so a line older than the op's must be read.
+  if (older.length === 0 || own.length === 0) return false;
+  // The op's lines and the oldest few others in one read, then wider runs only while none of those is read.
+  let size = READ_RUN;
+  let read = readable([...older.slice(0, size), ...own]);
+  if (!own.some((e) => read.has(e.id))) return false;
+  for (let from = 0; from < older.length; from += size, size *= 2) {
+    if (from > 0) read = readable(older.slice(from, from + size));
+    if (older.slice(from, from + size).some((e) => read.has(e.id))) return true;
   }
   return false;
+}
+
+function everyLine(lines: readonly LogEntry[]): ReadonlySet<string> {
+  return new Set(lines.map((e) => e.id));
 }
 
 /** Whether a line is one the viewer may read by its audience, as projectLogEntry first sorts lines: a DM reads every line but players' copies, a player the shared lines and their own copies, and each their own whispers. */

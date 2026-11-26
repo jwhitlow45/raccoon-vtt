@@ -1051,9 +1051,14 @@ function checkout(pool: Pick<pg.Pool, "connect">, signal: AbortSignal, ms: numbe
   });
 }
 
-/** The lines op `seq` wrote that the in-memory log of `state` still holds for the viewer, or null once some may have left it. */
+/**
+ * The lines op `seq` wrote that the in-memory log of `state` still holds for
+ * the viewer, or null once some may have left it or none is one they read.
+ * Which lines they read is the receipt answer's own rule, its projection
+ * (server/http/receipts.ts), whose scene changes no line a DM reads.
+ */
 export function heldOpLines(state: RoomState, viewer: Viewer, seq: number): LogEntry[] | null {
-  if (!holdsOp(state, viewer, seq)) return null;
+  if (!holdsOp(state, viewer, seq, (lines) => new Set(projectArchivedLog(state, lines, viewer, { sceneId: null }).map((e) => e.id)))) return null;
   const prefix = `${seq}:`;
   const lines = state.log.filter((e) => e.id.startsWith(prefix));
   return lines.length > 0 ? lines : null;

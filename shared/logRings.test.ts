@@ -164,6 +164,9 @@ const bytesOf = (lines: readonly LogEntry[]) => lines.reduce((n, e) => n + seria
 
 const seqOf = (id: string) => Number(id.slice(0, id.indexOf(":")));
 
+/** The lines a lookup's answer would give the viewer, by its projection, as the server's lookup reads them (logHistory.ts heldOpLines). */
+const readBy = (state: RoomState, viewer: Viewer) => (lines: readonly LogEntry[]) => new Set(projectArchivedLog(state, lines, viewer, { sceneId: null }).map((e) => e.id));
+
 /**
  * The ops whose lookup the random run asks about: those just before and
  * after every room's oldest line, where the viewer's live log starts and
@@ -325,7 +328,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
           // 7. Lookups: whether memory holds an op of theirs reads only lines they receive.
           if (step % 50 === 49 || step === steps - 1) {
             const own = alone.get(viewer)!;
-            for (const s of lookupSeqs([state, own], viewer, seq)) assert.equal(holdsOp(state, viewer, s), holdsOp(own, viewer, s), `${name}: op ${s} read from memory in one room and the archive in the other`);
+            for (const s of lookupSeqs([state, own], viewer, seq)) assert.equal(holdsOp(state, viewer, s, readBy(state, viewer)), holdsOp(own, viewer, s, readBy(own, viewer)), `${name}: op ${s} read from memory in one room and the archive in the other`);
           }
           // 4. No gap.
           const readable = projectArchivedLog(state, history, viewer, { sceneId: "s1" }).sort((a, b) => compareLogIds(a.id, b.id));
@@ -432,6 +435,24 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.equal(holdsOp(state, P2, 2), true, "P2 reads only the chat line, which is here");
     assert.equal(holdsOp(state, P1, 2 + keep), true);
     assert.equal(holdsOp(state, P2, 1), false, "the oldest op the log holds may have lost lines to the shared lines' floor");
+  });
+
+  test("a lookup reads which lines the viewer reads in a few widening runs, past many they no longer read", () => {
+    const chat = (seq: number): LogEntry => ({ id: `${seq}:0`, at: AT, kind: "chat", from: "dm1", text: `c${seq}` });
+    const state = { ...base(), log: Array.from({ length: 40 }, (_, i) => chat(i + 1)) };
+    const asked: number[] = [];
+    const reader = (read: ReadonlySet<string>) => (lines: readonly LogEntry[]) => {
+      asked.push(lines.length);
+      return new Set(lines.filter((e) => read.has(e.id)).map((e) => e.id));
+    };
+    // Only line 35 of the older ones is still read, and the op's own.
+    assert.equal(holdsOp(state, P1, 40, reader(new Set(["35:0", "40:0"]))), true);
+    assert.deepEqual(asked, [9, 16, 15], "the op's line with the oldest 8, then runs of 16 and the rest");
+    asked.length = 0;
+    assert.equal(holdsOp(state, P1, 40, reader(new Set(["40:0"]))), false, "none older is read: the op may have lost lines");
+    asked.length = 0;
+    assert.equal(holdsOp(state, P1, 40, reader(new Set(["1:0"]))), false, "the op wrote none the viewer reads");
+    assert.deepEqual(asked, [9], "one read decides it");
   });
 
   test("each log a room brings out of id order is put in order, and one in order is kept as it is", () => {

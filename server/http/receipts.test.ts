@@ -6,7 +6,8 @@ import { asJsonb } from "#shared/keyOrderTestutil.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
-import { AT, rng, room } from "#shared/testutil.ts";
+import { Tx } from "#shared/reducer/tx.ts";
+import { AT, DM, rng, room, token } from "#shared/testutil.ts";
 import { setupAuth } from "../auth/plugin.ts";
 import { loadConfig } from "../config.ts";
 import { ReceiptLines } from "../rooms/logHistory.ts";
@@ -245,8 +246,8 @@ describe("twin rooms apart only in lines P1 cannot read", () => {
     { id: `${seq}:900001`, at: AT, kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 2 } },
     p2Copy(seq),
   ] satisfies LogEntry[]).sort((a, b) => compareLogIds(a.id, b.id));
-  const ask = async (seq: number, log: LogEntry[], archived: LogEntry[]) => {
-    const r = await routeRig("", { held: { seq, state: room({ log }), archived: archived.map(asJsonb), sorted: true } });
+  const ask = async (seq: number, log: LogEntry[], archived: LogEntry[], base: RoomState = room()) => {
+    const r = await routeRig("", { held: { seq, state: { ...base, log }, archived: archived.map(asJsonb), sorted: true } });
     try {
       const result = await r.request();
       assert.equal(result.statusCode, 200, result.body);
@@ -275,5 +276,37 @@ describe("twin rooms apart only in lines P1 cannot read", () => {
     assert.deepEqual([a.archive, b.archive], [true, true]);
     assert.equal(a.body, b.body);
     assert.deepEqual(JSON.parse(a.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [] }] });
+  });
+
+  /** A room whose goblin P1 cannot see, and P1's public roll at seq 2, which P1 reads. */
+  const hidden = () => room({ tokens: { gob: token("gob", { visibility: "dm" }) } });
+  const roll: LogEntry = { id: "2:0", at: AT, kind: "event", data: { type: "dice", by: "p1", to: "all", rolls: [{ formula: "1d20", faces: [7], total: 7 }] } };
+
+  test("a shared line about a creature since hidden, which P1 no longer reads, decides nothing either", async () => {
+    // Every player read it when it was written, so it is shared. The goblin is out of their sight now.
+    const hit: LogEntry = { id: "1:0", at: AT, kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 3, seen: true } };
+    const [a, b] = [await ask(2, [hit, roll], [roll], hidden()), await ask(2, [roll], [roll], hidden())];
+    assert.deepEqual([a.archive, b.archive], [true, true]);
+    assert.equal(a.body, b.body);
+    assert.deepEqual(JSON.parse(a.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [roll] }] });
+  });
+
+  test("a line from before op version 19 about a creature P1 never saw decides nothing either", async () => {
+    const tx = new Tx(hidden(), DM, { seq: 1, at: AT, opVersion: 18 });
+    tx.addEvent({ type: "hp", tokenId: "gob", change: "damage", amount: 3 });
+    tx.finish();
+    const [old] = tx.state.log;
+    assert.equal(old?.id, "1:0", "numbered with the shared lines, as every line then was");
+    const [a, b] = [await ask(2, [old!, roll], [roll], hidden()), await ask(2, [roll], [roll], hidden())];
+    assert.deepEqual([a.archive, b.archive], [true, true]);
+    assert.equal(a.body, b.body);
+  });
+
+  test("a line P1 still reads before their op holds both in memory, the same answer", async () => {
+    const hit: LogEntry = { id: "1:0", at: AT, kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 3, seen: true } };
+    const shown = room({ tokens: { gob: token("gob") } });
+    const [a, b] = [await ask(2, [hit, roll], [roll], shown), await ask(2, [hit, roll], [roll], hidden())];
+    assert.deepEqual([a.archive, b.archive], [false, true], "a line P1 reads now is one their live log holds");
+    assert.equal(JSON.parse(a.body).parts[0].lines.length, 1);
   });
 });
