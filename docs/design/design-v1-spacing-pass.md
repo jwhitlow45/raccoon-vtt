@@ -8,7 +8,7 @@ Screenshots: `screenshots/spacing-audit/`, kept outside the repository, one clip
 
 ## 1. How it was measured
 
-Not by eye. A measuring script walked the DOM of every root the alignment sweep measures, and the scroller each root sits in, through all five sweep files (alignment, alignment-wide, alignment-icons, alignment-followups, alignment-settings). That covers the DM's and Pat's screens at 390 x 844, 360 x 740, 320 x 568, 844 x 390, 820 x 1180 and 1440 x 900, each at 100% and 130%. For each pair it recorded two numbers:
+Not by eye. A measuring script walked the DOM of every root the alignment sweep measures, and the scroller each root sits in, through all six sweep files (alignment, alignment-wide, alignment-icons, alignment-followups, alignment-settings, alignment-confirms). That covers the DM's and Pat's screens at 390 x 844, 360 x 740, 320 x 568, 844 x 390, 820 x 1180 and 1440 x 900, each at 100% and 130%. For each pair it recorded two numbers:
 
 - **The layout gap**: from the bottom of one box to the top of the next, as CSS lays them out.
 - **The visible gap**: from the bottom of the first part's words, or painted box, to the top of the next part's first words or painted box. A switch row's own padding is in the visible gap and not in the layout gap.

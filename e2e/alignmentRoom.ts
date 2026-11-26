@@ -111,7 +111,7 @@ import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
  * open (docs/design/design-v1-map-discovery.md 9), beside every other page with
  * the shared radio cards: Room settings, This device and Show a handout.
  *
- * The sweep runs as five files, each with its own server, browsers and
+ * The sweep runs as six files, each with its own server, browsers and
  * room, so the CI shards run them side by side: alignment.e2e.ts has the
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
@@ -121,7 +121,8 @@ import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
  * alignment-followups.e2e.ts has follow-up batches 30 and 32, the app
  * icon's places and This device's Sheet handle. alignment-settings.e2e.ts
  * has the builder's note and forget question, the scene settings page
- * and the view choice.
+ * and the view choice. alignment-confirms.e2e.ts has the armed confirms
+ * behind a tool's More.
  * This module holds every step, from alignmentFile on, and each file lists
  * the ones it runs, so a step keeps its id whichever file runs it.
  *

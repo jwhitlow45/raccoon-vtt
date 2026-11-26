@@ -293,11 +293,12 @@ through `gh`. The list holds CI seconds, the largest of the runs given, and
 the longest of the 14 shards plans about 16 minutes. A 15th shard would save
 about one minute of that, so the count stays. A run is 22 jobs and peaks at 20
 at once, of the account's 20 Linux jobs, so a second run that overlaps it
-queues part of its shards.
+queues part of its shards, and so do the jobs of other workflows while a run
+is at its peak.
 
 A file that takes much over 5 minutes in CI holds its shard up, so a long
 one is split into files that each build their own room from a module they
-share, as `e2e/alignmentRoom.ts` does for the alignment sweep's five files,
+share, as `e2e/alignmentRoom.ts` does for the alignment sweep's six files,
 `e2e/barrestRoom.ts` for the resting bar's four and `e2e/tokenpanelRoom.ts`
 for the token panel's four. The new alignment and token-panel splits have
 initial planning estimates in `e2e/durations.json`, pending measured CI
