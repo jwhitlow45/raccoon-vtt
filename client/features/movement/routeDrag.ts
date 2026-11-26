@@ -239,26 +239,11 @@ export class RouteDrag {
   #overLedge(closed: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
     const world = closed.world;
     if (this.#flat?.from !== world) {
-      if (budget.spent) return "paused";
-      const flat = routeWorld(flattened(world.input));
-      budget.charge(routeWorldUnits(flat) + Math.ceil((flat.nx * flat.ny) / 400));
-      this.#flat = { from: world, search: routeSearch(flat) };
+      const flat = flatSearchOf(world, budget);
+      if (flat === "paused") return "paused";
+      this.#flat = { from: world, search: flat };
     }
-    const search = this.#flat.search;
-    const result = search.settle(to, budget);
-    if (result === "paused") return "paused";
-    const way = result === "settled" ? search.traceTo(to, budget) : null;
-    if (way === "paused") return "paused";
-    if (!way) return null;
-    const step = snapStep(world.input.token);
-    const onGrid = (v: number, from: number) => Math.abs((v - from) / step - Math.round((v - from) / step)) < 1e-9;
-    const start = world.input.token;
-    const spots = spotsAlong(closed, way.points);
-    const from = startLevel(closed);
-    const aim = spots.at(-1)?.elevation ?? from;
-    const between = (e: number) => e >= Math.min(from, aim) && e <= Math.max(from, aim);
-    const foot = spots.findLast((s) => s.reached && s.open && between(s.elevation) && (closed instanceof HexWalkSearch || (onGrid(s.at.x, start.x) && onGrid(s.at.y, start.y))));
-    return foot ? closed.traceTo(foot.at, budget) : null;
+    return ledgeHold(closed, this.#flat.search, to, budget);
   }
 
   /**
@@ -388,6 +373,44 @@ export class RouteDrag {
     this.#flat = null;
     this.#check = null;
   }
+}
+
+/** A search of `world`'s ground with every height flattened, built on `budget` as one step that cannot stop partway, or "paused" when the budget is spent. */
+export function flatSearchOf(world: RouteWorld, budget: WorkBudget): RouteSearch | "paused" {
+  if (budget.spent) return "paused";
+  const flat = routeWorld(flattened(world.input));
+  budget.charge(routeWorldUnits(flat) + Math.ceil((flat.nx * flat.ny) / 400));
+  return routeSearch(flat);
+}
+
+/**
+ * The walk `closed` finds to the foot of the ledge that closes the way to `to`, given `flat`, a search of the same ground with
+ * every height flattened (RouteDrag `#overLedge` says which spot is a foot): null where flat ground has no way either. Of the
+ * spots along the flat way that qualify, the one nearest the drop is held at, and the earliest along the way on a tie, so the
+ * walk does not run on along a platform's edge to a wall's end that is no nearer the drop (LP43-POLISH-LEDGE).
+ */
+export function ledgeHold(closed: RouteSearch, flat: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
+  const world = closed.world;
+  const result = flat.settle(to, budget);
+  if (result === "paused") return "paused";
+  const way = result === "settled" ? flat.traceTo(to, budget) : null;
+  if (way === "paused") return "paused";
+  if (!way) return null;
+  const step = snapStep(world.input.token);
+  const onGrid = (v: number, from: number) => Math.abs((v - from) / step - Math.round((v - from) / step)) < 1e-9;
+  const start = world.input.token;
+  const spots = spotsAlong(closed, way.points);
+  const from = startLevel(closed);
+  const aim = spots.at(-1)?.elevation ?? from;
+  const between = (e: number) => e >= Math.min(from, aim) && e <= Math.max(from, aim);
+  const away = (s: { at: Point }) => (s.at.x - to.x) ** 2 + (s.at.y - to.y) ** 2;
+  let foot: (typeof spots)[number] | null = null;
+  for (const s of spots) {
+    if (!s.reached || !s.open || !between(s.elevation)) continue;
+    if (!(closed instanceof HexWalkSearch || (onGrid(s.at.x, start.x) && onGrid(s.at.y, start.y)))) continue;
+    if (!foot || away(s) < away(foot) - 1e-9) foot = s;
+  }
+  return foot ? closed.traceTo(foot.at, budget) : null;
 }
 
 /**

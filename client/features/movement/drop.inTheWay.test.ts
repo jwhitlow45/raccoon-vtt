@@ -219,13 +219,13 @@ describe("squares: a ledge that closes the way holds the walk at its foot (D-261
     return s;
   };
 
-  test("across the platform's wall onto its east half, which no stairs reach: Thorn holds at the wall's end on the platform's edge, 10 ft up, stair or none, where with the stair he walked down it and round to the ground under the east half (D-261115-030)", () => {
+  test("across the platform's wall onto its east half, which no stairs reach: Thorn holds on the platform's edge 10 ft up, at the spot of the flat way nearest the drop, stair or none, where with the stair he walked down it and round to the ground under the east half (D-261115-030, LP43-POLISH-LEDGE)", () => {
     const down = dropThorn(vault(true), { x: 4, y: 14 });
     assert.deepEqual([down.note, down.drag.plan.moves.map((m) => [m.x, m.y, m.elevation])], [null, [[4, 14, 0]]], "the stair takes him down to the ground");
     for (const stair of [true, false]) {
       for (const [to, edge] of [
-        [{ x: 10, y: 14 }, [8, 12]],
-        [{ x: 10, y: 16 }, [8, 17]],
+        [{ x: 10, y: 14 }, [8, 13]],
+        [{ x: 10, y: 16 }, [8, 16]],
       ] as const) {
         const where = `onto ${to.x}, ${to.y} ${stair ? "with" : "without"} the stair`;
         const { drag, note } = dropThorn(vault(stair), to);
@@ -327,7 +327,7 @@ for (const [name, g] of [
     assert.deepEqual(drag.plan.moves, []);
   });
 
-  test(`${name}: across a wall onto a platform's far half, which no stairs reach, Thorn holds at the wall's end on the platform's edge, 10 ft up, stair or none, where with the stair he walked down it and round to the ground under the far half (D-261115-030)`, () => {
+  test(`${name}: across a wall onto a platform's far half, which no stairs reach, Thorn holds on the platform's edge 10 ft up, at the spot of the flat way nearest the drop, stair or none, where with the stair he walked down it and round to the ground under the far half (D-261115-030, LP43-POLISH-LEDGE)`, () => {
     /** A platform 10 ft up on 6 to 11 along and 12 to 17 across, walls between its hexes up to 8 along and those past it, Thorn on 7, 14, and with `stair` a stair up onto it from 5, 14. */
     const vault = (stair: boolean): RoomState => {
       const alongOf = (h: Hex) => (g.orient === "rows" ? h.col : h.row);
@@ -354,7 +354,7 @@ for (const [name, g] of [
     assert.deepEqual([down.note, down.drag.plan.moves.map((m) => [m.x, m.y, m.elevation])], [null, [[onto(at(4, 14)).x, onto(at(4, 14)).y, 0]]], "the stair takes him down to the ground");
     for (const stair of [true, false]) {
       for (const [to, edge] of [
-        [at(10, 14), at(8, 12)],
+        [at(10, 14), at(7, 13)],
         [at(10, 16), at(8, 17)],
       ] as const) {
         const where = `onto ${to.col}, ${to.row} ${stair ? "with" : "without"} the stair`;
