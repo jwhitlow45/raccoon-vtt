@@ -86,11 +86,11 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const turn = useStore(useScoped(boardPillsSlot), (s) => s.pills.turnStart ?? NO_PILLS);
   const traps = useTreeShownView((s) => s.floorView?.traps ?? NO_TRAPS);
   const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
-  // The traps' names keep off the ends' frames as the trap layers place them, and the ends' pills keep off the traps' squares, neither off the other's pills.
+  // The traps' names keep off the ends' frames as the trap layers place them, and the ends' pills keep off the traps' squares. In Top-down neither keeps off the other's pills. In Isometric the ends' pills keep off the trap names placed with no creature near (isoTrapNameMarkers), and the drawn names keep off the ends' published pills (TrapLayer.tsx isoTrapNames).
   const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
   // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
   const view = useRestView();
-  // Top-down places a name in cells. Isometric stands it where isoTrapNamePill picks, before the nudge off token text (F11-6), and takes the rest view, in view units, by what it draws.
+  // Top-down places a name in cells. Isometric stands it where isoTrapNames places it with no token text (F11-6), and takes the rest view, in view units, by what it draws.
   const trapNames = useMemo(
     () => (iso ? isoTrapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view) : trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, view)),
     [grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view],
