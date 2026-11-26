@@ -4,7 +4,8 @@ import { describe, test, type TestContext } from "node:test";
 import { idKeyOf, idTime, isSealedShape, isUuidv7, sealedId, sealedTime, type IdKey } from "#shared/ids.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
-import { projectState } from "#shared/project.ts";
+import { projectArchivedLog, projectState } from "#shared/project.ts";
+import { sortedJson } from "#shared/sortedJson.ts";
 import { derivedId } from "#shared/reducer/duplicate.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
 import { RoomIdKeys } from "./idKeys.ts";
@@ -84,11 +85,21 @@ function framesOf(room: Room, labels: Labels): string[] {
   return room.p1Frames().map((f) => labels.normalize(f));
 }
 
-/** P1's and the display's frames are the same in both twins, byte for byte with each id as its label. */
+/**
+ * P1's and the display's log history pages: every line the room holds,
+ * as the archive's pages project and send it (logHistory.ts, sortedReplies),
+ * each id as its label.
+ */
+function pagesOf(room: Room, labels: Labels): string[] {
+  return [{ memberId: "p1", role: "player" as const }, { memberId: "display:abcdefghijkl", role: "player" as const }].map((viewer) => labels.normalize(sortedJson(projectArchivedLog(room.state, room.state.log, viewer, { sceneId: null }))));
+}
+
+/** P1's and the display's frames and log pages are the same in both twins, byte for byte with each id as its label. */
 function sameFrames(pair: Twins, labels: [Labels, Labels], what: string): void {
   const [a, b] = [framesOf(pair[0], labels[0]), framesOf(pair[1], labels[1])];
   const at = a.findIndex((f, i) => f !== b[i]);
   assert.ok(at < 0 && a.length === b.length, `${what}: the same frames${at < 0 ? "" : `, first apart at ${at}:\nA ${a[at]}\nB ${b[at]}`}`);
+  assert.deepEqual(pagesOf(pair[0], labels[0]), pagesOf(pair[1], labels[1]), `${what}: the same log pages`);
 }
 
 /**
@@ -130,10 +141,14 @@ describe("twins apart only in when or in what order the DM made what P1 does not
     sameFrames(pair, labels, "made");
     await each(pair, (room) => room.apply("dm", move(goblins[pair.indexOf(room)]!, inR(2))));
     sameFrames(pair, labels, "shown");
+    // A line P1 reads names it, so P1's log page holds its id too.
+    await each(pair, (room) => room.apply("dm", { t: "actor.hp", target: { tokenId: goblins[pair.indexOf(room)]! }, change: { kind: "damage", amount: 2 } } as Op));
+    sameFrames(pair, labels, "hit");
     await each(pair, (room) => room.reloadP1());
     sameFrames(pair, labels, "after a reload");
     for (const [i, room] of pair.entries()) {
       assert.ok(JSON.stringify(room.pages[0]!.sent).includes(goblins[i]!), `${room.name}: P1 holds the Goblin`);
+      assert.ok(pagesOf(room, labels[i]!)[0]!.includes("<goblin>"), `${room.name}: P1's log page names the Goblin`);
       assert.equal(sealedTime(DM_KEY, goblins[i]!), labels[i]!.madeAt(goblins[i]!), "the DM's key reads when it was made");
       apart(room, labels[i]!, "C2");
     }
