@@ -51,6 +51,12 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - LP46FIX-3: four creatures that fall in one op toast once, "4
  *   creatures fell to Ground floor.", in line on a 390 x 844 phone at 100%
  *   and 130%.
+ * - s67-1: both tokens of Shade, the DM's character, stand on Upper floor
+ *   where the DM places an opening under them: one toast, one card naming
+ *   Shade once, "fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.", the
+ *   card and the fall's group save page in line at the three sizes and both
+ *   scales, and Apply hurts Shade once, lays Shade Prone once and removes
+ *   the card, both tokens settled.
  * - fl4o-6: the bat in the air over the hole: its bar leads with Fly down,
  *   named "Fly down to Ground floor" and tipped "Fly down to Ground floor
  *   ({)", in line at the three sizes and both scales. { flies it down to 5
@@ -112,6 +118,8 @@ const RAT_AT = { x: 12, y: 8 };
 const TRAPDOOR = { x: 16, y: 4, w: 2, h: 2 };
 /** The hidden stairs' square on Ground floor and Upper floor. */
 const STAIRS = { x: 20, y: 10 };
+/** Where the DM places an opening under both of Shade's tokens on Upper floor, clear of every other end and creature. */
+const SHADE_HOLE = { x: 4, y: 11, w: 2, h: 2 };
 /** A second hole on Upper floor, clear of every end on both floors, for the window's own steps. */
 const WINDOW_HOLE = { x: 16, y: 10, w: 2, h: 2 };
 
@@ -149,6 +157,11 @@ const run = {
   bat: uuidv7(),
   pony: uuidv7(),
   kobold: uuidv7(),
+  shade: uuidv7(),
+  shade1: uuidv7(),
+  shade2: uuidv7(),
+  shadeHole: uuidv7(),
+  shadeHoleBelow: uuidv7(),
   trapdoor: uuidv7(),
   hole: "",
   holeBelow: "",
@@ -602,6 +615,86 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
       await deskAgain(dm);
     }
     assert.deepEqual(lines, [], "the crowd's toast out of line");
+  });
+
+  test("s67-1. both tokens of one character on an opening placed under them make one fall card, and Apply takes the fall once", async () => {
+    await ops.send({ t: "character.create", character: { id: run.shade, name: "Shade", size: "medium", ownerIds: [], actor: actor(HP) } });
+    const shown = { kind: "pc", name: "Shade", actor: { ref: run.shade }, disposition: "hostile", size: "medium", visibility: "all" } as const;
+    await ops.send({ t: "token.create", token: { id: run.shade1, sceneId: run.upper, x: SHADE_HOLE.x, y: SHADE_HOLE.y, ...shown } });
+    await ops.send({ t: "token.create", token: { id: run.shade2, sceneId: run.upper, x: SHADE_HOLE.x + 1, y: SHADE_HOLE.y + 1, ...shown } });
+    await waitFor("Shade's tokens upstairs", () => (tokenOf(run.shade1)?.sceneId === run.upper && tokenOf(run.shade2)?.sceneId === run.upper ? true : null));
+    const toasts0 = await dm.locator("[data-toast]").filter({ hasText: /fell/ }).count();
+    await ops.send({ t: "floorLink.put", link: { id: run.shadeHole, pairId: run.shadeHoleBelow, sceneId: run.upper, to: run.ground, rect: SHADE_HOLE, kind: "opening" } });
+    await waitFor("both of Shade's tokens below", () => (tokenOf(run.shade1)?.sceneId === run.ground && tokenOf(run.shade2)?.sceneId === run.ground ? true : null));
+    const cards = Object.values(state()?.falls ?? {});
+    assert.equal(cards.length, 1, "one card");
+    assert.deepEqual(new Set([cards[0]!.tokenId, ...(cards[0]!.riders ?? [])]), new Set([run.shade1, run.shade2]), "naming both tokens");
+    const note = dm.locator("[data-toast]").filter({ hasText: /^Shade[^,]* fell 10 ft to Ground floor\./ });
+    await note.first().waitFor();
+    await sleep(500);
+    assert.equal((await dm.locator("[data-toast]").filter({ hasText: /fell/ }).count()) - toasts0, 1, "one toast");
+    const region = dm.getByRole("region", { name: /^Fall: Shade/ });
+    await region.waitFor();
+    assert.equal(await region.count(), 1, "one card on the desk");
+    const name = ((await region.getAttribute("aria-label")) ?? "").slice("Fall: ".length);
+    assert.ok(!name.includes(" and "), `the card names Shade once: ${name}`);
+    await region.getByText(`${name} fell 10 ft to Ground floor: 1d6 Bludgeoning, Prone.`, { exact: true }).waitFor();
+    await shots.take(dm, "s67-1-one-card");
+
+    const page = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(dm.getByRole("tabpanel", { name: /Dice/ }));
+    const lines: string[] = [];
+    try {
+      for (const size of SIZES) {
+        for (const scale of SCALES) {
+          await sizeTo(dm, size, scale);
+          // On a phone the desk folds into its summary, whose sheet holds the card.
+          if (!(await fallCard(dm).isVisible().catch(() => false))) {
+            const fold = dm.getByRole("button", { name: /fell/ }).first();
+            if (await fold.isVisible().catch(() => false)) await fold.click();
+          }
+          const card = fallCard(dm);
+          await card.waitFor();
+          const toggle = card.getByRole("button", { expanded: false });
+          if ((await toggle.count()) > 0) await toggle.first().click();
+          await card.getByRole("button", { name: `Apply ${name}'s fall` }).waitFor();
+          lines.push(...alignmentLines(await measureAlignment(card), `${at(size, scale)} Shade's fall card`));
+          await shots.take(dm, `s67-1-card-${at(size, scale)}`);
+          await card.getByRole("button", { name: `Apply ${name}'s fall` }).click();
+          await page.getByLabel("Damage", { exact: true }).waitFor();
+          lines.push(...alignmentLines(await measureAlignment(page), `${at(size, scale)} Shade's fall page`));
+          await shots.take(dm, `s67-1-page-${at(size, scale)}`);
+          await page.getByRole("button", { name: "Discard", exact: true }).first().click();
+          const sheet = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+          if (await sheet.isVisible().catch(() => false)) {
+            await sheet.getByRole("button", { name: "Close Dice", exact: true }).click();
+            await sheet.waitFor({ state: "hidden" });
+          }
+        }
+      }
+    } finally {
+      await deskAgain(dm);
+    }
+    assert.deepEqual(lines, [], "Shade's fall card or page out of line");
+
+    const hp = () => state()?.characters[run.shade]?.actor.hp.cur ?? null;
+    await dm.getByRole("region", { name: `Fall: ${name}` }).getByRole("button", { name: `Apply ${name}'s fall` }).click();
+    const damage = dm.getByLabel("Damage", { exact: true });
+    await damage.waitFor();
+    const lines0 = state()?.log.length ?? 0;
+    await damage.press("Enter");
+    const rolled = await waitFor("the fall's roll", () => state()?.log.slice(lines0).find((e) => e.data?.type === "dice" && e.data.rolls.some((r) => r.formula === "1d6")) ?? null);
+    const amount = rolled.data?.type === "dice" ? rolled.data.rolls.find((r) => r.formula === "1d6")!.total : 0;
+    const apply = dm.getByRole("button", { name: /^Apply/ }).last();
+    await apply.waitFor();
+    await shots.take(dm, "s67-1-fall-page");
+    await apply.click();
+    await waitFor("the card gone", () => (Object.keys(state()?.falls ?? {}).length === 0 ? true : null));
+    await sleep(500);
+    assert.equal(hp(), HP - amount, "Shade hurt once");
+    assert.equal((state()?.characters[run.shade]?.actor.effects ?? []).filter((e) => e.key === "prone").length, 1, "Prone once");
+    await dm.getByRole("region", { name: `Fall: ${name}` }).waitFor({ state: "detached" });
+    await ops.send({ t: "token.deleteMany", tokenIds: [run.shade1, run.shade2] });
+    await ops.send({ t: "floorLink.delete", linkId: run.shadeHole });
   });
 
   test("fl4o-6. the bat over the hole leads its bar with Fly down, named and tipped for Ground floor, in line, { flies it down 5 ft over the ground and } back up", async () => {
