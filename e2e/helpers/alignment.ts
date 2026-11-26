@@ -1306,11 +1306,18 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     return down.endsWith("%") ? (parseFloat(down) / 100) * height : parseFloat(down) || 0;
   }
 
+  /**
+   * How a part is placed across its row. Chrome 158 writes the computed
+   * flex-start and flex-end as flow-start and flow-end, so both spellings
+   * count. A keyword this does not know throws: reading it as "other" once
+   * dropped a row's vote without a sound.
+   */
   function modeOf(align: string): Item["mode"] {
     if (align.includes("baseline")) return "baseline";
     if (/(^|\s)center$/.test(align)) return "center";
-    if (/(^|\s)(flex-start|start|self-start)$/.test(align)) return "start";
-    return "other";
+    if (/(^|\s)(flex-start|flow-start|start|self-start)$/.test(align)) return "start";
+    if (/(^|\s)(normal|stretch|end|flex-end|flow-end|self-end|left|right|anchor-center)$/.test(align)) return "other";
+    throw new Error(`measureAlignment: the row's alignment "${align}" is a keyword it does not know, so the row would go unjudged`);
   }
 
   /**
