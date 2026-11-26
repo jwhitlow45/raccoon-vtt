@@ -300,7 +300,9 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
     return frames.every((o) => !boxCoversOutline(box, cornersOf(o), space));
   };
   // Tested on the pushed spots isoNamePill tries too, so a nudge never lands on a frame.
-  const clear = frames.length ? permitted.filter(offFrames) : permitted;
+  let clear = frames.length ? permitted.filter(offFrames) : permitted;
+  // A name wider than its trap can meet a frame from every spot on the trap's edges, as Top-down's does: it then leans to a side, as there.
+  if (frames.length > 0 && clear.length === 0) clear = permitted.flatMap((p) => [{ ...p, side: "right" as const }, { ...p, side: "left" as const }]).filter((p) => allowed(p) && offFrames(p));
   if (frames.length > 0 && clear.length > 0) return isoNamePill(clear, names, scale, (p) => allowed(p) && offFrames(p));
   return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
 }

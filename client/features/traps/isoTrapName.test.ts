@@ -117,7 +117,7 @@ for (const orient of ["rows", "columns"] as const) {
  * old pick covers one, the new pick must not, whenever another candidate is clear.
  */
 for (const turn of [0, 1, 2, 3] as const) test(`QF-ASTRA-02: an isometric trap name keeps off the frame of a floor link beside it at turn ${turn}`, () => {
-  const trap = makeTrap("trap", { zone: { cells: [{ x: 6, y: 6, w: 3, h: 1 }] } });
+  const trap = makeTrap("Hidden Pit by the stairs", { zone: { cells: [{ x: 6, y: 6, w: 2, h: 1 }] } });
   const original = trapNamePill(SQUARES, trap, {}, scale, true)!;
   const view = isometric(turn);
   const space = { turn, ground };
@@ -125,19 +125,27 @@ for (const turn of [0, 1, 2, 3] as const) test(`QF-ASTRA-02: an isometric trap n
   const covers = (p: PillSpec, frames: ReturnType<typeof outlineOf>[]) => frames.some((o) => boxCoversOutline(drawnBox(p, scale, space, true, true), cornersOf(o), space));
   let tried = 0;
   let fixed = 0;
-  for (let x = 2; x <= 12; x++) for (let y = 2; y <= 10; y++) for (const [w, h] of [[2, 1], [1, 2], [2, 2]] as const) {
-    if (x < 9 && x + w > 6 && y < 7 && y + h > 6) continue;
-    const frames = [outlineOf(SQUARES, { x, y, w, h })];
+  let leant = 0;
+  const cases: { x: number; y: number; w: number; h: number }[][] = [];
+  for (let x = 2; x <= 12; x++) for (let y = 2; y <= 10; y++) for (const [w, h] of [[2, 1], [1, 2], [2, 2]] as const) if (!(x < 8 && x + w > 6 && y < 7 && y + h > 6)) cases.push([{ x, y, w, h }]);
+  // A pair on either side of the trap, as a hole and stairs beside a pit are.
+  for (let a = 3; a <= 5; a++) for (let b = 9; b <= 10; b++) for (let dy = -2; dy <= 1; dy++) cases.push([{ x: a, y: 6 + dy, w: 2, h: 2 }, { x: b, y: 6 + dy, w: 2, h: 2 }]);
+  for (let a = 3; a <= 5; a++) for (let b = 7; b <= 8; b++) for (let dx = -2; dx <= 1; dx++) cases.push([{ x: 6 + dx, y: a, w: 2, h: 2 }, { x: 6 + dx, y: b, w: 2, h: 2 }]);
+  for (const rects of cases) {
+    const frames = rects.map((r) => outlineOf(SQUARES, r));
     const before = isoTrapNamePill(original, SQUARES, trap, {}, names, scale, () => true);
     if (!covers(before, frames)) continue;
     tried++;
     const after = isoTrapNamePill(original, SQUARES, trap, {}, names, scale, () => true, frames, space);
     const spots: PillSpec[] = [];
     isoTrapNamePill(original, SQUARES, trap, {}, names, scale, (p) => { spots.push(p); return false; });
-    if (spots.some((p) => !covers(p, frames))) {
-      assert.ok(!covers(after, frames), `frame ${JSON.stringify({ x, y, w, h })}: the name at ${JSON.stringify(after)} covers it though ${spots.length} spots were offered`);
+    const leaning = spots.flatMap((p) => [{ ...p, side: "right" as const }, { ...p, side: "left" as const }]);
+    if (spots.some((p) => !covers(p, frames)) || leaning.some((p) => !covers(p, frames))) {
+      assert.ok(!covers(after, frames), `frames ${JSON.stringify(rects)}: the name at ${JSON.stringify(after)} covers it though ${spots.length} spots were offered`);
       fixed++;
+      if (spots.every((p) => covers(p, frames))) leant++;
     }
   }
   assert.ok(tried > 0 && fixed > 0, `the old pick covered a frame in ${tried} places and the new one cleared ${fixed}`);
+  assert.ok(leant > 0, "some frame is met from every spot on the trap's edges and only a leaning name clears it");
 });
