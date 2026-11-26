@@ -2,7 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { LogEntry, TrapDue } from "#shared/model.ts";
+import type { LogEntry, TrapDue, TrapRig } from "#shared/model.ts";
 import { room, token, trap } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
 import { tokenPattern } from "../../components/testing/tokenPattern.ts";
@@ -21,8 +21,8 @@ const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
 
-function card(d: TrapDue): string {
-  const base = trap("pit", { name: "Hidden Pit", rig: { ...trap("x").rig!, due: [d], actions: [{ show: { tokenId: "imp" } }, { light: "gone", on: false }] } });
+function card(d: TrapDue, rig: Partial<TrapRig> = {}): string {
+  const base = trap("pit", { name: "Hidden Pit", rig: { ...trap("x").rig!, due: [d], actions: [{ show: { tokenId: "imp" } }, { light: "gone", on: false }], ...rig } });
   const line: LogEntry = { id: d.id, at: "", kind: "event", data: { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [{ action: 0, ok: true }, { action: 1, ok: false }] } };
   const state = { ...room({ tokens: { thorn: token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"] }), imp: token("imp", { name: "Imp", visibility: "dm" }) }, traps: { pit: base } }), trapLog: [line] };
   const store = createStore(() => ({ view: state, you: { role: "dm" } }));
@@ -49,5 +49,19 @@ describe("the trap card's lines", () => {
   test("a springing out of the players' sight is a warning, not muted help", () => {
     const markup = card(due("15:1", { by: ["imp"], hits: ["imp"], hidden: true }));
     assert.match(holder(markup, "Imp set it off, out of the players&#x27; sight. The trap is still armed for them."), new RegExp(tokenPattern(theme.color.warning)));
+  });
+
+  test("a creature it hits on another scene stays named, and Save and damage shows only while one it names is here (D-261126-237)", () => {
+    const pit = { damage: [{ formula: "1d6", type: "bludgeoning" as const }] };
+    const button = />Save and damage</;
+    const here = card(due("16:0", { hits: ["bree", "thorn"] }), pit);
+    assert.match(here, button);
+    assert.match(here, />It hits Thorn\. It also hits a creature, not on this scene now\.</);
+    const away = card(due("16:0", { hits: ["bree"] }), pit);
+    assert.doesNotMatch(away, button);
+    assert.match(away, />It hits a creature, not on this scene now\.</);
+    assert.match(away, />Dismiss</, "Dismiss stays");
+    assert.match(card(due("16:0", { hits: [], hitsMore: 3 }), pit), button, "a page that takes the room's selection");
+    assert.match(card(due("16:0", { hits: [] }), pit), button, "one that hits no one");
   });
 });

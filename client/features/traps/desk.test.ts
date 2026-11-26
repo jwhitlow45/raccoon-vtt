@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, room, token, trap } from "#shared/testutil.ts";
+import { DM, P1, character, room, token, trap } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
 import { dmAlerts, linesAfter, metTrap, offersAfterTrap, playerAlerts, shownAlert, trapMoveWatch, watchOf } from "./alerts.ts";
-import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines } from "./desk.ts";
+import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines, type FallNames } from "./desk.ts";
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
 
@@ -36,11 +36,11 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
 
   test("who set it off and who it hits, a hidden springing in words of its own, and what it did", () => {
     const s = world();
-    assert.deepEqual(whoLines(s, due("1:0"), new Map()), { by: "Thorn set it off.", hits: "It hits Thorn." });
-    assert.deepEqual(whoLines(s, s.traps.net!.rig!.due![0]!, new Map()), { by: "You set it off for Thorn, Bree and 2 more.", hits: "It hits no one." });
+    assert.deepEqual(whoLines(s, due("1:0"), new Map()), { by: "Thorn set it off.", hits: "It hits Thorn.", reaches: true });
+    assert.deepEqual(whoLines(s, s.traps.net!.rig!.due![0]!, new Map()), { by: "You set it off for Thorn, Bree and 2 more.", hits: "It hits no one.", reaches: true });
     assert.equal(hiddenLine(s, due("1:0", { by: ["imp"] }), new Map()), "Imp set it off, out of the players' sight. The trap is still armed for them.");
     // One that counts its creatures and names none, as one past its lists' bounds.
-    assert.deepEqual(whoLines(s, due("2:0", { by: [], more: 11, hits: [], hitsMore: 51 }), new Map()), { by: "11 creatures set it off.", hits: "It hits 51 creatures." });
+    assert.deepEqual(whoLines(s, due("2:0", { by: [], more: 11, hits: [], hitsMore: 51 }), new Map()), { by: "11 creatures set it off.", hits: "It hits 51 creatures.", reaches: true });
     assert.equal(hiddenLine(s, due("2:0", { by: [], more: 1 }), new Map()), "1 creature set it off, out of the players' sight. The trap is still armed for them.");
     assert.deepEqual(didLines(s.traps.pit!, [{ action: 0, ok: true }, { action: 1, ok: false }, { action: -1, ok: false }], s, new Map()), ["Showed Imp.", "Could not put out a light: it was deleted.", "Could not open the pit: the scene is at its wall limit."]);
     const shrunk = { ...s, scenes: { ...s.scenes, s1: { ...s.scenes.s1!, bounds: { w: 2, h: 2 } } } };
@@ -49,6 +49,30 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
     const log: LogEntry[] = [{ id: "12:0", at: "", kind: "event", data: { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [{ action: 0, ok: true }] } }];
     assert.deepEqual(lineOf(log, "12:0")?.did, [{ action: 0, ok: true }]);
     assert.equal(lineOf(log, "13:0"), null, "a line the DM's log no longer holds");
+  });
+
+  test("a creature it hits that left the scene shown stays named as this device last read it, and Save and damage reaches only where one is here (D-261126-237)", () => {
+    const s = world();
+    const known: FallNames = new Map();
+    const hits = (over: Partial<TrapDue>, view = s) => whoLines(view, due("3:0", over), new Map(), known);
+    // Read while every one of them is on the scene shown, which the device keeps.
+    assert.deepEqual(hits({ hits: ["bree", "thorn"] }), { by: "Thorn set it off.", hits: "It hits Bree and Thorn.", reaches: true });
+    const { bree: _bree, ...rest } = s.tokens;
+    const left = { ...s, tokens: rest };
+    assert.deepEqual(hits({ hits: ["bree", "thorn"] }, left), { by: "Thorn set it off.", hits: "It hits Thorn. It also hits Bree, not on this scene now.", reaches: true });
+    assert.deepEqual(hits({ hits: ["bree", "thorn"], hitsMore: 2 }, left).hits, "It hits Thorn and 2 more. It also hits Bree, not on this scene now.");
+    assert.deepEqual(hits({ hits: ["bree"] }, left), { by: "Thorn set it off.", hits: "It hits Bree, not on this scene now.", reaches: false });
+    // Past its list's count with every named one away, the count still reads, and the page would hold no row.
+    assert.deepEqual(hits({ hits: ["bree"], hitsMore: 2 }, left), { by: "Thorn set it off.", hits: "It hits 2 creatures. It also hits Bree, not on this scene now.", reaches: false });
+    // One this device never read, as after a reload, and two.
+    assert.equal(hits({ hits: ["bree", "ogre", "thorn"] }, left).hits, "It hits Thorn. It also hits Bree and a creature, not on this scene now.");
+    assert.equal(whoLines(left, due("3:0", { hits: ["ogre", "troll"] }), new Map()).hits, "It hits 2 creatures, not on this scene now.");
+    assert.equal(whoLines(left, due("3:0", { hits: ["ogre"] }), new Map()).hits, "It hits a creature, not on this scene now.");
+    // A character's two tokens are named once, and one that names no one reaches the room's selection.
+    const twice = { ...s, characters: { c1: character("c1", { name: "Mira" }) }, tokens: { ...s.tokens, m1: token("m1", { name: "Mira", kind: "pc", actor: { ref: "c1" } }), m2: token("m2", { name: "Mira", kind: "pc", actor: { ref: "c1" } }) } };
+    hits({ hits: ["m1", "m2"] }, twice);
+    assert.equal(hits({ hits: ["m1", "m2", "thorn"] }, left).hits, "It hits Thorn. It also hits Mira, not on this scene now.");
+    assert.equal(hits({ hits: [], hitsMore: 3 }, left).reaches, true);
   });
 
   test("the folded button counts the trap cards it folds, first", () => {

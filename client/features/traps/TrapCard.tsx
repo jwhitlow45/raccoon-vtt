@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { LogEntry, Trap, TrapDue } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -8,7 +8,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { cardStyle } from "../rolls/parts.tsx";
 import { Note as Caution } from "../../components/Panel.tsx";
 import { Note } from "../tokens/ui.tsx";
-import { didLines, hiddenLine, lineOf, whoLines } from "./desk.ts";
+import { didLines, hiddenLine, KNOWN, lineOf, whoLines } from "./desk.ts";
 import { TrapSaveStart } from "./TrapSaveStart.tsx";
 import { useLabels } from "../../state/labels.ts";
 
@@ -20,8 +20,15 @@ const NO_LOG: LogEntry[] = [];
  * went off, what it did and could not do, and the DM note. One that went
  * off out of the players' sight in a player's op says so, and offers Do its
  * effects and Mark sprung. Save and damage opens the group save on the
- * creatures it hits, whose Apply settles it, and Dismiss settles it unapplied. A second DM device's answer
+ * creatures it hits, whose Apply settles those it reached, and Dismiss settles it unapplied. A second DM device's answer
  * that came first is refused, "It was settled meanwhile.", and said here.
+ *
+ * A creature it hits that is on another scene stays on the card, named as
+ * this device last read it, until Apply reaches it there (6.2). With every
+ * one it names away, Save and damage hides, since its page would hold no
+ * row, and shows again once one is back. Hidden while it held keyboard
+ * focus, as when another device moved the last one away, it hands focus to
+ * the card's toggle, so focus never falls to the page.
  */
 export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
   const labels = useLabels();
@@ -32,12 +39,20 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  if (!view) return null;
+  const saveButton = useRef<HTMLButtonElement | null>(null);
+  const toggle = useRef<HTMLButtonElement | null>(null);
+  const who = view ? whoLines(view, due, labels, KNOWN) : null;
   const rig = trap.rig;
   // With no save the page opens on No save, so conditions with no save apply in one tap.
   const effects = rig?.save !== undefined || rig?.damage !== undefined || rig?.conditions !== undefined;
+  const offersSave = effects && who?.reaches === true;
+  // Read as this render takes the button away, while the page still holds it and its focus: after, focus is on the page.
+  const lostFocus = !offersSave && saveButton.current !== null && saveButton.current.ownerDocument.activeElement === saveButton.current;
+  useLayoutEffect(() => {
+    if (lostFocus) toggle.current?.focus();
+  }, [lostFocus]);
+  if (!view || !who) return null;
   const applyWord = rig?.save || rig?.damage ? "Save and damage" : "Apply";
-  const who = whoLines(view, due, labels);
   const line = lineOf(trapLog, due.id);
   const did = line ? didLines(trap, line.did, view, labels) : [];
   const title = `${trap.name} went off`;
@@ -62,7 +77,10 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
   return (
     <section role="group" aria-label={title} style={{ ...cardStyle, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <button
-        ref={props.toggleRef}
+        ref={(el) => {
+          toggle.current = el;
+          props.toggleRef(el);
+        }}
         type="button"
         onClick={props.onToggle}
         aria-expanded={props.open}
@@ -104,8 +122,8 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
           {trap.rig?.note ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, whiteSpace: "pre-wrap" }}>{trap.rig.note}</span> : null}
           {saving ? <TrapSaveStart trap={trap} due={due} onDone={() => setSaving(false)} /> : null}
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-            {effects ? (
-              <Button size="sm" variant="primary" onClick={() => setSaving(true)}>
+            {offersSave ? (
+              <Button ref={saveButton} size="sm" variant="primary" onClick={() => setSaving(true)}>
                 {applyWord}
               </Button>
             ) : null}

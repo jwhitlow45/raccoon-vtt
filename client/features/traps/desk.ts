@@ -41,12 +41,50 @@ export function nameList(names: Names, ids: readonly string[], labels: Labels, m
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
-/** The card's lines on who: who set it off and who it hits (5.6, frozen when it went off). */
-export function whoLines(names: Names, due: TrapDue, labels: Labels): { by: string; hits: string } {
+/**
+ * The card's lines on who (5.6): who set it off, frozen when it went off,
+ * and who it hits that still waits (6.2). Those the DM's copy holds read
+ * as before, "It hits Thorn and 2 more.", with the count past its list's
+ * bound. Those it does not, on another scene, follow by the names `known`
+ * last read for them (FallNames), else "a creature": "It hits Thorn. It
+ * also hits Bree, not on this scene now.", or alone "It hits Bree, not on
+ * this scene now." `reaches` is whether Save and damage reaches anyone:
+ * where the occurrence names no one, its page takes the room's selection,
+ * and else only a creature the copy holds gets a row, so a page with every
+ * named creature away would open with none (D-261126-237).
+ */
+export function whoLines(names: Names, due: TrapDue, labels: Labels, known?: FallNames): { by: string; hits: string; reaches: boolean } {
   const by = nameList(names, due.by, labels, due.more ?? 0);
-  const hits = nameList(names, due.hits, labels, due.hitsMore ?? 0);
   const set = due.how === "hand" ? (by ? `You set it off for ${by}.` : "You set it off.") : by ? `${by} set it off.` : "It went off.";
-  return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one." };
+  const here = due.hits.filter((id) => ownEntry(names.tokens, id) !== undefined);
+  const away = due.hits.filter((id) => ownEntry(names.tokens, id) === undefined);
+  if (known) for (const id of here) keepName(known, id, nameOf(names, id, labels), holderIdOf(names, id));
+  const hits = nameList(names, here, labels, due.hitsMore ?? 0);
+  const reaches = due.hits.length === 0 || here.length > 0;
+  if (away.length === 0) return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one.", reaches };
+  const elsewhere = `${awayNames(known, away)}, not on this scene now.`;
+  return { by: set, hits: hits ? `It hits ${hits}. It also hits ${elsewhere}` : `It hits ${elsewhere}`, reaches };
+}
+
+/**
+ * "Bree", "Bree and Thorn", "Bree and a creature", "2 creatures": the
+ * creatures an occurrence names that the copy does not hold, by the names
+ * `known` last read, each holder once, and the rest counted.
+ */
+function awayNames(known: FallNames | undefined, ids: readonly string[]): string {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  let unnamed = 0;
+  for (const id of ids) {
+    const entry = known?.get(id);
+    if (entry === undefined) unnamed++;
+    else if (!seen.has(entry.holder)) {
+      seen.add(entry.holder);
+      names.push(entry.name);
+    }
+  }
+  if (unnamed > 0) names.push(unnamed === 1 ? "a creature" : `${unnamed} creatures`);
+  return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 /** A hidden springing's line (5.5): "Imp set it off, out of the players' sight. The trap is still armed for them." */
@@ -207,22 +245,29 @@ export function fallNames(view: Pick<RoomState, "tokens">, ids: readonly string[
   return nameList(view, ids.slice(0, FALL_NAMES_SHOWN), labels, Math.max(0, ids.length - FALL_NAMES_SHOWN));
 }
 
-/** The most creatures' names a device keeps for fall cards whose creature left the scene shown: a room's cards name at most 10 times 20. */
-const FALL_NAMES_KEPT = 200;
+/**
+ * The most creatures' names a device keeps for cards whose creature left the scene shown: a room's fall cards name at
+ * most 10 times 20, and its trap cards 10 times 50.
+ */
+const CARD_NAMES_KEPT = 700;
 
 /**
- * The names a device last read off the creatures its fall cards name, so a
- * card whose creature left the scene shown, as one the DM moved to another
- * scene, still names it (LP46A-FALL-2). The DM's copy holds the shown
- * scene's tokens alone and no room-wide list of where each one is, so
- * nothing else names it, and after a reload such a card reads "A creature".
+ * The names a device last read off the creatures its fall and trap cards
+ * name, so a card whose creature left the scene shown, as one the DM moved
+ * to another scene, still names it (LP46A-FALL-2, D-261126-237). The DM's
+ * copy holds the shown scene's tokens alone and no room-wide list of where
+ * each one is, so nothing else names it, and after a reload such a card
+ * reads "A creature".
  */
 export type FallNames = Map<string, { name: string; holder: string }>;
+
+/** The one memory both cards read and fill on this device, so a creature named on one stays named on the other. */
+export const KNOWN: FallNames = new Map();
 
 function keepName(known: FallNames, id: string, name: string, holder: string): void {
   known.delete(id);
   known.set(id, { name, holder });
-  if (known.size > FALL_NAMES_KEPT) known.delete(known.keys().next().value!);
+  if (known.size > CARD_NAMES_KEPT) known.delete(known.keys().next().value!);
 }
 
 /** "Giant", "Horse and Thorn": a gone card's names as `known` last read them, a holder named once as the card names it while its tokens are on the scene. */

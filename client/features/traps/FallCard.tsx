@@ -15,10 +15,7 @@ import { useStartGroupSave, type StartInput } from "../dice/groupSave/start.ts";
 import { FALL_CARD_ATTR } from "../floors/ids.ts";
 import { cardStyle } from "../rolls/parts.tsx";
 import { Note } from "../tokens/ui.tsx";
-import { fallRead, type FallNames } from "./desk.ts";
-
-/** The names this device read off fall cards' creatures, so one moved to another scene stays named (desk.ts FallNames). */
-const KNOWN: FallNames = new Map();
+import { fallRead, KNOWN } from "./desk.ts";
 
 /**
  * The group save a fall card's Apply starts (docs/design/design-v1-floors.md
