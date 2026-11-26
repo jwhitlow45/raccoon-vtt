@@ -255,3 +255,25 @@ test("the creature numbers row's room hides its Goblins behind a closed door, mo
     assert.equal(Object.values(view.tokens).filter((t) => t.name === "Goblin").length, 0, "the party holds none of them");
   }
 });
+
+test("a queue row times each op from its due time, so a long task that holds the timers back shows in its latency and backlog", async () => {
+  const { sustained } = await import("./bench-server4.ts");
+  const { member, room, scene, token } = await import("../shared/testutil.ts");
+  const state = room();
+  state.meta.playerSceneId = "bench";
+  state.members = { dm: member("dm", "dm"), ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`p${i + 1}`, member(`p${i + 1}`)])) };
+  state.scenes = { bench: scene("bench", { bounds: { w: 20, h: 20 } }) };
+  for (let i = 1; i <= 6; i++) state.tokens[`pc${i}`] = token(`pc${i}`, { sceneId: "bench", kind: "pc", ownerIds: [`p${i}`], x: 2 + i, y: 5 });
+  // A 300 ms task in the middle of the second of input, and another as the input ends.
+  const stall = () => {
+    const end = performance.now() + 300;
+    while (performance.now() < end);
+  };
+  const m = await sustained({ state, seconds: 1, every: 0 }, undefined, () => {
+    setTimeout(stall, 300);
+    setTimeout(stall, 1_040);
+  });
+  assert.ok(m.latency.length > 100, `${m.latency.length} ops answered`);
+  assert.ok(Math.max(...m.latency) >= 250, `the longest op took ${Math.max(...m.latency).toFixed(1)} ms from its due time`);
+  assert.ok(m.backlogMs >= 250, `the backlog cleared ${m.backlogMs.toFixed(0)} ms after the input was due to end`);
+});

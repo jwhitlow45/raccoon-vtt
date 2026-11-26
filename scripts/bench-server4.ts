@@ -60,6 +60,8 @@ import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type
 import { FAR, LIMITS } from "../shared/limits.ts";
 import { MAX_ASK_OPS, type Op, type ServerMessage } from "../shared/protocol.ts";
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import WebSocket from "ws";
 import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
 import { openingJoins } from "../shared/rules/openingSight.ts";
@@ -1387,6 +1389,13 @@ export function formatServerBench(rows: Row[], onServer: boolean, revision?: str
  * Rows that gate "against main" print what main's tree prints with this
  * file copied in: run both on one quiet machine and compare.
  *
+ * Each op's latency counts from its due time, not from when its timer ran:
+ * a long task on the loop delays the timers, and a socket's message would
+ * have arrived on time and waited in the queue. The backlog likewise counts
+ * from the moment the input was due to end. QB-3's sockets run in a worker
+ * of their own (qb3Sockets), so the server's tasks delay none of its sends
+ * or the reading of its answers.
+ *
  *   node scripts/bench-server4.ts --queue          (every row)
  *   node scripts/bench-server4.ts --queue QB-7     (one row)
  *
@@ -1420,7 +1429,7 @@ type Sustained = {
   publishMs: number[];
 };
 
-type Load = {
+export type Load = {
   state: RoomState;
   seconds: number;
   /** Ticks between each player's ops: 0 is the full rate, two ticks in five, else one op every `every` ticks. */
@@ -1432,11 +1441,12 @@ type Load = {
 };
 
 /** Runs a load on a table sat down at the queue's options, and what it measured. */
-async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIONS, keep?: (table: Table) => void): Promise<Sustained> {
+export async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIONS, keep?: (table: Table) => void): Promise<Sustained> {
   clearVisionCache();
   queueDb.commits = [];
   const table = await sitDown(load.state, undefined, options);
   keep?.(table);
+  /** Each op still owed an answer, by its due time. */
   const sentAt = new Map<string, number>();
   const latency: number[] = [];
   const frames: number[] = [];
@@ -1519,6 +1529,7 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
     for (const [idx, p] of table.players.entries()) {
       if (load.every === 0 ? (k + idx) % 5 >= 2 : (k + idx * 2) % load.every !== 0) continue;
       for (let j = 0; j < (load.chat ? 2 : 1); j++) {
+        const opDue = due + 1 + idx;
         setTimeout(() => {
           const ids = mine.get(p) ?? [];
           if (ids.length === 0) return;
@@ -1527,10 +1538,10 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
           const n = nextN(p);
           if (n === null) return;
           const op = (j === 1 ? { t: "log.chat", text: `tick ${k}` } : { t: "token.move", tokenId: id, x: tok.x + (k % 2 === 0 ? 1 : -1), y: tok.y }) as Op;
-          sentAt.set(`${p.memberId}:${n}`, performance.now());
+          sentAt.set(`${p.memberId}:${n}`, opDue);
           sentTick.set(`${p.memberId}:${n}`, Date.now());
           void table.actor.op(p, n, op);
-        }, Math.max(0, due + 1 + idx - performance.now()));
+        }, Math.max(0, opDue - performance.now()));
       }
     }
     for (let j = 0; j < (load.dmPerTick ?? 0); j++) {
@@ -1541,8 +1552,8 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
       }, Math.max(0, due + 2 - performance.now()));
     }
   }
-  await pause(start + ticks * TICK_MS - performance.now() + 5);
-  const inputEnd = performance.now();
+  const inputEnd = start + ticks * TICK_MS;
+  await pause(inputEnd - performance.now() + 5);
   while (sentAt.size > 0 && performance.now() - inputEnd < 60_000) await pause(TICK_MS);
   const backlogMs = performance.now() - inputEnd;
   if (load.quietSeconds) await pause(load.quietSeconds * 1000);
@@ -1573,7 +1584,7 @@ async function sustained(load: Load, options: ActorDeps["options"] = QUEUE_OPTIO
 function report(row: string, what: string, m: Sustained): string {
   return [
     `${row} ${what}`,
-    `  send to ack ms ${spread(m.latency)}, first ${m.firstAck.toFixed(1)}, last ${m.lastAck.toFixed(1)} | frames answering two ticks ${m.spans} | retries ${m.retries} | ops held to send again ${m.held}`,
+    `  due to ack ms ${spread(m.latency)}, first ${m.firstAck.toFixed(1)}, last ${m.lastAck.toFixed(1)} | frames answering two ticks ${m.spans} | retries ${m.retries} | ops held to send again ${m.held}`,
     `  backlog cleared ${m.backlogMs.toFixed(0)} ms after the input | loop busy ${m.activeMsPerSec.toFixed(0)} ms a second | longest loop task ${m.loopMaxMs.toFixed(1)} ms | heap peak ${mib(m.heapPeak)}, kept ${Number.isNaN(m.heapKept) ? "unread (run with --expose-gc)" : mib(m.heapKept)} | publish ms ${spread(m.publishMs)}`,
   ].join("\n");
 }
@@ -1590,50 +1601,116 @@ function roomOfBytes(bytes: number): RoomState {
   return { ...state, log };
 }
 
+/** A QB-3 socket as its worker opens it: the room's address and the headers its client's cookie and address go in. */
+type Qb3Socket = { url: string; headers: Record<string, string>; clientId: string };
+type Qb3Answer = { ms: number; frames: number; seqs: number[]; retried: boolean };
+const QB3_OPS = 60;
+
 async function qb3(): Promise<string> {
   const { startEngine } = await import("../server/rooms/testing.ts");
   const engine = await startEngine({ rooms: { actor: { roomOpsPerSec: 10_000, queueCap: 20_000 } } });
   try {
     const dm = engine.client();
     const { roomId } = await dm.createRoom("QB-3");
-    const sockets = [await engine.connect(roomId, dm), await engine.connect(roomId, dm)];
-    for (const [i, s] of sockets.entries()) await s.snapshot(`dm${i}`);
+    const url = `${engine.url}/ws?room=${roomId}`;
+    const headers = (token: string | undefined, ip: string) => ({ origin: engine.config.publicOrigin, cookie: token ? `rvtt=${token}` : "", "cf-connecting-ip": ip, "user-agent": "raccoon-bench-qb3" });
+    const sockets: Qb3Socket[] = [0, 1].map((i) => ({ url, headers: headers(dm.token, dm.ip), clientId: `dm${i}` }));
     for (let p = 0; p < 49; p++) {
-      const c = engine.client(`198.51.100.${p + 1}`);
+      const ip = `198.51.100.${p + 1}`;
+      const c = engine.client(ip);
       await c.join(roomId, `Player ${p}`);
-      const s = await engine.connect(roomId, c, { ip: `198.51.100.${p + 1}` });
-      await s.snapshot(`p${p}`);
-      sockets.push(s);
+      sockets.push({ url, headers: headers(c.token, ip), clientId: `p${p}` });
     }
-    const loop = monitorEventLoopDelay({ resolution: 1 });
-    loop.enable();
-    const heapBefore = process.memoryUsage().heapUsed;
-    // Starts just past a tick's edge on the rooms' clock, so the whole burst arrives in that tick.
-    while (Date.now() % TICK_MS !== 1) await new Promise((resolve) => setImmediate(resolve));
-    const t0 = performance.now();
-    const sent = sockets.map((s) => Array.from({ length: 60 }, (_, k) => s.op({ t: "log.chat", text: `burst ${k}` })));
-    const acked = await Promise.all(
-      sockets.map(async (s, i) => {
-        const last = sent[i]![sent[i]!.length - 1]!;
-        const answered = () => s.received.find((m) => (m.t === "ev" && Boolean(m.acks?.includes(last) || m.rejects?.some((r) => r.n === last))) || (m.t === "retry" && m.n === last));
-        const until = performance.now() + 30_000;
-        while (!answered() && performance.now() < until) await pause(2);
-        const ev = answered();
-        if (!ev) throw new Error("a socket's burst went unanswered");
-        const frames = s.received.filter((m) => m.t === "ev" && (m.acks ?? []).some((n) => sent[i]!.includes(n)));
-        return { ms: performance.now() - t0, frames: frames.length, seqs: frames.map((m) => (m as { seq: number }).seq), retried: ev.t === "retry" };
-      }),
-    );
-    loop.disable();
-    const seqs = new Set(acked.flatMap((a) => a.seqs));
-    return [
-      `QB-3 3,060 answers in one tick (49 players and the DM's two sockets at 60 each), small room, test database`,
-      `  batches ${seqs.size} | sockets acked in one frame ${acked.filter((a) => a.frames === 1).length} of ${acked.length} | sockets turned away at the end ${acked.filter((a) => a.retried).length}`,
-      `  send to last ack ms ${spread(acked.map((a) => a.ms))} | heap gain ${mib(process.memoryUsage().heapUsed - heapBefore)} | longest loop task ${(loop.max / 1e6).toFixed(1)} ms`,
-    ].join("\n");
+    const worker = new Worker(new URL(import.meta.url), { workerData: { qb3: sockets } });
+    const next = <T,>(): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        worker.once("message", resolve);
+        worker.once("error", reject);
+      });
+    try {
+      await next<"ready">();
+      const loop = monitorEventLoopDelay({ resolution: 1 });
+      loop.enable();
+      const heapBefore = process.memoryUsage().heapUsed;
+      const answered = next<Qb3Answer[] | { error: string }>();
+      worker.postMessage("go");
+      const acked = await answered;
+      loop.disable();
+      if ("error" in acked) throw new Error(acked.error);
+      const seqs = new Set(acked.flatMap((a) => a.seqs));
+      return [
+        `QB-3 3,060 answers in one tick (49 players and the DM's two sockets at 60 each), small room, test database, sockets in a worker`,
+        `  batches ${seqs.size} | sockets acked in one frame ${acked.filter((a) => a.frames === 1).length} of ${acked.length} | sockets turned away at the end ${acked.filter((a) => a.retried).length}`,
+        `  send to last ack ms ${spread(acked.map((a) => a.ms))} | server heap gain ${mib(process.memoryUsage().heapUsed - heapBefore)} | server's longest loop task ${(loop.max / 1e6).toFixed(1)} ms`,
+      ].join("\n");
+    } finally {
+      await worker.terminate();
+    }
   } finally {
     await engine.close();
   }
+}
+
+/**
+ * QB-3's load generator, on a worker thread: it opens every socket and
+ * takes its snapshot, then on the parent's go sends each socket's burst
+ * just past a tick's edge on the rooms' clock, and times each socket to the
+ * frame that answers its last op, all on its own loop.
+ */
+async function qb3Sockets(sockets: readonly Qb3Socket[]): Promise<void> {
+  const port = parentPort!;
+  const open = await Promise.all(
+    sockets.map(
+      (s) =>
+        new Promise<{ ws: WebSocket; frames: ServerMessage[]; onFrame: ((m: ServerMessage) => void) | null; spec: Qb3Socket }>((resolve, reject) => {
+          const ws = new WebSocket(s.url, { headers: s.headers });
+          const socket = { ws, frames: [] as ServerMessage[], onFrame: null as ((m: ServerMessage) => void) | null, spec: s };
+          ws.on("message", (data) => {
+            const m = JSON.parse(data.toString()) as ServerMessage;
+            socket.frames.push(m);
+            socket.onFrame?.(m);
+          });
+          ws.once("open", () => resolve(socket));
+          ws.once("error", reject);
+        }),
+    ),
+  );
+  const until = (socket: (typeof open)[number], check: (m: ServerMessage) => boolean, what: string): Promise<ServerMessage> =>
+    new Promise((resolve, reject) => {
+      const found = socket.frames.find(check);
+      if (found) return resolve(found);
+      const timer = setTimeout(() => reject(new Error(`${socket.spec.clientId}: ${what}`)), 30_000);
+      socket.onFrame = (m) => {
+        if (!check(m)) return;
+        clearTimeout(timer);
+        socket.onFrame = null;
+        resolve(m);
+      };
+    });
+  for (const s of open) {
+    s.ws.send(JSON.stringify({ t: "hello", clientId: s.spec.clientId, resumeFrom: 1 }));
+    await until(s, (m) => m.t === "snapshot", "no snapshot");
+    s.frames.length = 0;
+  }
+  await new Promise<void>((resolve) => {
+    port.once("message", () => resolve());
+    port.postMessage("ready");
+  });
+  // Starts just past a tick's edge on the rooms' clock, so the whole burst arrives in that tick.
+  while (Date.now() % TICK_MS !== 1) await new Promise((resolve) => setImmediate(resolve));
+  const t0 = performance.now();
+  for (const s of open) for (let n = 1; n <= QB3_OPS; n++) s.ws.send(JSON.stringify({ t: "op", n, op: { t: "log.chat", text: `burst ${n - 1}` } }));
+  const answers = await Promise.all(
+    open.map(async (s): Promise<Qb3Answer> => {
+      const answers = (m: ServerMessage) => (m.t === "ev" && Boolean(m.acks?.includes(QB3_OPS) || m.rejects?.some((r) => r.n === QB3_OPS))) || (m.t === "retry" && m.n === QB3_OPS);
+      const last = await until(s, answers, "its burst went unanswered");
+      const ms = performance.now() - t0;
+      const frames = s.frames.filter((m) => m.t === "ev" && (m.acks ?? []).some((n) => n >= 1 && n <= QB3_OPS));
+      return { ms, frames: frames.length, seqs: frames.map((m) => (m as { seq: number }).seq), retried: last.t === "retry" };
+    }),
+  );
+  for (const s of open) s.ws.close();
+  port.postMessage(answers);
 }
 
 /*
@@ -1789,8 +1866,12 @@ export async function runQueueBench(only: string | null): Promise<string[]> {
   return out;
 }
 
+if (!isMainThread && (workerData as { qb3?: Qb3Socket[] } | null)?.qb3) {
+  await qb3Sockets((workerData as { qb3: Qb3Socket[] }).qb3).catch((err: unknown) => parentPort!.postMessage({ error: String(err) }));
+}
+
 const argv = process.argv;
-if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
+if (isMainThread && argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   const revision = benchRevision(argv);
   if (argv.includes("--queue")) {
     const only = argv[argv.indexOf("--queue") + 1];
