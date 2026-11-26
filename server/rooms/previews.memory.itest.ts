@@ -8,6 +8,7 @@ import { token } from "#shared/testutil.ts";
 import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES, RoomActor } from "./actor.ts";
 import { FULL_ALLOWANCE_BYTES, OFF_ALLOWANCE_BYTES, PreviewPool, SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
+import { MAX_STAGED_BYTES, Outbox } from "./ephemeral.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { MAX_VERSIONS } from "./gestures.ts";
 import { fullRoom } from "./limitsTesting.ts";
@@ -17,8 +18,10 @@ import { scopeFixture, StoredRoomDb } from "./undoScopeTesting.ts";
  * The preview pool at its worst at once (design 7.6, a build measurement):
  * 154 sockets at full pace and the rest of 400 off, every one at its caps
  * through an uncovered tick, beside every receiver's preview state, measured
- * in the process. A container of 1,536 MiB holds that with the loaded rooms
- * and a map upload's peak, or the default pool comes down.
+ * in the process. A container of 1,536 MiB holds that with the loaded rooms,
+ * a map upload's peak and what a tick's release holds to send, or the
+ * default pool comes down. That release is measured apart, the frames of
+ * 10 sockets dragging 100 tokens each to a full room.
  */
 
 const MiB = 1024 * 1024;
@@ -28,6 +31,10 @@ const UPLOAD_PEAK_MIB = 750;
 const CONTAINER_MIB = 1_536;
 /** The fewest rooms 400 sockets fill, at 64 a room (budgets.ts DEFAULT_SOCKET_CAPS). */
 const ROOMS = Math.ceil(400 / 64);
+/** One frame's messages: at most 100 frames, 99 ends and 100 drops, each made at most three ways and posted to 63 receivers. */
+const ONE_FRAME = 300 * 3 * (320 + 8 * 200) + 300 * 63 * 8;
+/** The most a tick's release holds to send at once, as its outbox counts it (ephemeral.ts MAX_STAGED_BYTES). */
+const STAGED_MOST = MAX_STAGED_BYTES + ONE_FRAME;
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -121,11 +128,92 @@ test("154 full sockets and 246 off, each at its caps through an uncovered tick, 
   const rooms = Array.from({ length: ROOMS }, () => structuredClone(room));
   const perRoom = (used() - r0) / ROOMS;
   assert.equal(rooms.length, ROOMS);
-  const total = process.memoryUsage().rss / MiB + (ROOMS * perRoom) / MiB + UPLOAD_PEAK_MIB;
+  // A tick's release stages its messages in the same process, at most STAGED_MOST at once.
+  const total = process.memoryUsage().rss / MiB + (ROOMS * perRoom) / MiB + UPLOAD_PEAK_MIB + STAGED_MOST / MiB;
   t.diagnostic(`held previews and rosters: ${(held / MiB).toFixed(1)} MiB, charged ${(charged / MiB).toFixed(1)} MiB`);
   t.diagnostic(`receivers' preview state: ${(receivers / MiB).toFixed(1)} MiB`);
   t.diagnostic(`a full room's state: ${(perRoom / MiB).toFixed(1)} MiB, ${ROOMS} rooms`);
-  t.diagnostic(`process ${(process.memoryUsage().rss / MiB).toFixed(0)} MiB, with ${ROOMS} full rooms and an upload's peak: ${total.toFixed(0)} MiB of ${CONTAINER_MIB}`);
+  t.diagnostic(`process ${(process.memoryUsage().rss / MiB).toFixed(0)} MiB, with ${ROOMS} full rooms, an upload's peak and a release's staging: ${total.toFixed(0)} MiB of ${CONTAINER_MIB}`);
   assert.ok(held <= charged, `held ${held} against ${charged} charged`);
   assert.ok(total < CONTAINER_MIB, `${total} MiB`);
+});
+
+test("a release of 10 sockets' 60 held moves of 100 tokens each to 63 receivers holds at most MAX_STAGED_BYTES and a frame's messages at once", { timeout: 600_000 }, async (t: TestContext) => {
+  const f = scopeFixture();
+  const ids = Array.from({ length: 100 }, (_, i) => `t-${i}`);
+  for (const [i, id] of ids.entries()) f.state.tokens[id] = token(id, { sceneId: f.sceneId, x: i % 40, y: 10 + Math.floor(i / 40) });
+  const clock = { now: T0 };
+  const now = () => clock.now;
+  const db = new StoredRoomDb(f.state);
+  let gate: (() => void) | null = null;
+  const actor = await RoomActor.load({
+    pool: db.pool(),
+    info: { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false },
+    log: { info() {}, warn() {}, error() {}, debug() {} },
+    budget: new SnapshotBudget({ sessionCount: 10_000, ipCount: 10_000, sessionBytes: Infinity, ipBytes: Infinity }, now),
+    previews: new PreviewPool(),
+    gateway: {} as RoomGateway,
+    options: { batchMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, roomOpsPerSec: 100_000, now, numberClock: null, standingClock: true, previewSweepMs: null },
+  });
+  assert.ok(actor);
+  const deliver = Outbox.prototype.deliver;
+  t.after(() => {
+    Outbox.prototype.deliver = deliver;
+    gate?.();
+    return actor.shutdown({ code: 1012, snapshot: false });
+  });
+  // A room's 64 sockets, 10 of them DM devices that drag and the rest players, whose pages keep nothing they are sent.
+  let sent = 0;
+  const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => void (text.startsWith('{"t":"eph"') && sent++), close() {}, terminate() {} };
+  const conns: Connection[] = [];
+  for (let i = 0; i < 64; i++) {
+    const dm = i < 10;
+    const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", memberId: dm ? f.dm.id : f.player.id, role: dm ? "dm" : "player" }, "203.0.113.9", { now });
+    actor.attach(conn);
+    conns.push(conn);
+    void actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
+  }
+  for (let i = 0; i < 200 && conns.some((c) => c.held === null); i++) await flush();
+  assert.ok(conns.every((c) => c.held !== null && c.pace === "full"));
+  const senders = conns.slice(0, 10);
+  const send = (conn: Connection, e: unknown) => {
+    const parsed = clientMessageSchema.parse({ t: "eph", sceneId: f.sceneId, e });
+    actor.ephemeral(conn, { sceneId: f.sceneId, e: (parsed as { e: EphEvent | GroupFrame }).e });
+  };
+
+  // An uncovered tick, through which every sender's 60 frames wait.
+  db.beforeCommit = () => new Promise<void>((resolve) => (gate = resolve));
+  clock.now = T0 + 5;
+  void actor.op(conns[10]!, 1, { t: "log.chat", text: "held" });
+  await flush();
+  clock.now = T0 + 25;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await flush();
+  for (const [s, conn] of senders.entries()) {
+    send(conn, { k: "dragStart", tokenId: ids[0], g: 1, x: 0, y: 10, with: ids.slice(1).map((id, i) => ({ tokenId: id, x: (i + 1) % 40, y: 10 + Math.floor((i + 1) / 40) })), from: { x: 0, y: 10 } });
+    for (let m = 1; m < 60; m++) send(conn, { k: "dragMove", tokenId: ids[0], g: 1, x: (m + s) / 8, y: 10 });
+    assert.equal(actor.heldOf(conn).frames, 60);
+  }
+
+  // Each delivery's staged count and heap, measured as it starts, when everything it is about to send is held.
+  const base = used();
+  const runs: { staged: number; heap: number }[] = [];
+  Outbox.prototype.deliver = function (this: Outbox) {
+    if (this.staged > 1024 * 1024) runs.push({ staged: this.staged, heap: used() - base });
+    deliver.call(this);
+  };
+  clock.now = T0 + 200;
+  gate!();
+  for (let i = 0; i < 400 && senders.some((c) => actor.heldOf(c).frames > 0); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await flush();
+  }
+  assert.ok(senders.every((c) => actor.heldOf(c).frames === 0), "every frame released");
+  const peak = Math.max(...runs.map((r) => r.heap));
+  const stagedPeak = Math.max(...runs.map((r) => r.staged));
+  t.diagnostic(`${sent} messages in ${runs.length} runs: staged at most ${(stagedPeak / MiB).toFixed(1)} MiB as counted, ${(peak / MiB).toFixed(1)} MiB on the heap`);
+  assert.equal(sent, 10 * 60 * 100 * 63, "every token's frame reached every other socket");
+  assert.ok(runs.length > 1, "the release went in runs");
+  assert.ok(stagedPeak <= STAGED_MOST, `${stagedPeak}`);
+  assert.ok(peak <= stagedPeak, `the count holds what the heap does: ${peak} against ${stagedPeak}`);
 });

@@ -42,7 +42,7 @@ import { reidDue, reidRoom, renamedOp } from "./reid.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
-import { cancelLost, cancelPreviews, holdsPreview, Outbox, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, holdsPreview, MAX_STAGED_BYTES, Outbox, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
 import { heldCharge, heldForm, routedForm, type HeldFrame, type RosterVersion } from "./gestures.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
@@ -1705,7 +1705,9 @@ export class RoomActor {
   /**
    * Routes each socket's held frames, in order, whose ticks are covered,
    * dropping those past RETAIN_MS. What they send goes once every frame is
-   * routed, each receiver's together (ephemeral.ts Outbox).
+   * routed, each receiver's together (ephemeral.ts Outbox), unless what
+   * waits passes MAX_STAGED_BYTES: then it goes after the frame that passed
+   * it, and the release goes on into an empty outbox.
    */
   #releaseFrames(): void {
     if (this.#held.size === 0) return;
@@ -1732,6 +1734,7 @@ export class RoomActor {
         frames.list.shift();
         frames.bytes -= frame.bytes;
         this.#routeFrame(conn, frame, out);
+        if (out.staged > MAX_STAGED_BYTES) out.deliver();
       }
       if (frames.list.length === 0) this.#held.delete(conn);
     }
