@@ -578,7 +578,7 @@ Everyone, the DM and every player, picks how their own device shows the map.
   - On hex rows and hex columns a raised hex stands as a six-sided block with three sides showing, each side outlined, and a hex pit sinks the same way.
   - A map image's raised ground takes its sides' tone from the art on top, on a hex scene from the art wholly inside a hex the viewer sees whole.
   - **Turn left** and **Turn right** turn the map a quarter at a time, so a wall never hides the creature behind it for good.
-  - Switching a map that is still at its fit to Isometric fits it again where holding the zoom would cut its corners, as on a phone with a 14 by 9 map. A map the viewer has moved keeps its zoom.
+  - Switching a map that is still at its fit to Isometric fits it again where holding the zoom would cut its corners, as on a phone with a 14 by 9 map, and switching back to Top-down fits it again too. A map the viewer has moved keeps its zoom both ways.
 - **Depth up close**: from 24 px a square, or 48 px with Low power on, walls stand as stone slabs with a lighter top, and a long wall reads as one wall that meets the next cleanly at a corner.
   - Doors and windows stand in a stone frame. An open door stands upright on its hinge, swung back into the room as Top-down's swing shows, and tapping it opens the door's buttons, as tapping its doorway does.
   - Stairs with a direction climb in steps from the ground below them to the ground above, and their sides show the floor they are on. Creatures stand on the steps. Stairs that turn a corner keep a flat top with their marks.
@@ -932,7 +932,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - A player's token always lands on the map. A drop, an arrow key, a group drag or a rider's drag of its mount aimed past the scene's edge lands the token on the nearest spot with its whole space inside, so a Large creature stands against the edge and not over it.
   - On a hex scene it lands on the nearest hex whose whole footprint lies inside the scene.
   - A group dragged past an edge keeps its shape: the whole group stops where its first member meets the edge, and slides along it. A member that already stands past the edge is pulled in on its own.
-  - It holds with the setting "Walls and ledges block players' moves" on or off. A squeeze past the edge is no opening, so the creature lands full size inside, and a token held outside by a wall on the edge line stays where it is, with the note.
+  - It holds with the setting "Walls and ledges block players' moves" on or off. A squeeze past the edge is no opening, so the creature lands full size inside, except where a corridor one square wide ends at the edge: a drop past it lands where a drop on the corridor's last square does. A token held outside by a wall on the edge line stays where it is, with the note.
   - The server refuses a player's move, seat or Get off that ends past the edge ("a move ends inside the map"), as it refuses a teleport, so a changed page cannot place a token there either.
   - The DM's drops are not held to it, so the DM can still park a token off the map, and the server takes the DM's moves as they are sent.
   - A token that already stands past the edge, because the DM left it there or the scene was made smaller, can still change its height or facing and can be dragged back in, but a player can't move it to another spot past the edge.
