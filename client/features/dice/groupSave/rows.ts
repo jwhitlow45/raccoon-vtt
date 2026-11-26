@@ -56,6 +56,14 @@ export function d20Of(test: GroupTest, spell: boolean): D20Test | null {
 }
 
 /**
+ * How many creatures a selection holds: two tokens of one character are one,
+ * as the rows count them (groupRows). A token not in the view stands for itself.
+ */
+export function distinctCreatures(tokenIds: readonly string[], tokens: Readonly<Record<string, Token | undefined>>): number {
+  return new Set(tokenIds.map((id) => { const token = tokens[id]; return token ? holderOf(token) : `token:${id}`; })).size;
+}
+
+/**
  * The rows for these tokens, as hpTargets holds them (client/features/tokens/groupHp.ts):
  * a token of a character stands for its character, so two tokens of one
  * character are one row. The living first by name, then objects and the

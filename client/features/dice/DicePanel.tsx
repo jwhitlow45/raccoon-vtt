@@ -141,6 +141,7 @@ export default function DicePanel(props: PanelProps) {
         {group && role === "dm" ? (
           <OpenGroupSave
             page={group}
+            tokens={tokens}
             onOpen={() => {
               // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design/design-v1-split-panel.md 5.1).
               const panel = group.source.kind === "area" ? "areas" : "dice";

@@ -104,6 +104,19 @@ describe("the open group save's notice (7.8)", () => {
     assert.ok(open > words, "Open after the words, as the notice's action");
   });
 
+  test("a setup's count is creatures: one character's two tokens and two goblins read 3 in the notice, the title and the discard question", () => {
+    const tokens = {
+      a1: token("a1", { kind: "pc", name: "Thorn", actor: { ref: "a" } }),
+      a2: token("a2", { kind: "pc", name: "Thorn", actor: { ref: "a" } }),
+      g1: token("g1", { name: "Goblin", actor: { inline: actor({}) } }),
+      g2: token("g2", { name: "Goblin", actor: { inline: actor({}) } }),
+    };
+    const page = { ...PAGE, source: { kind: "selection" as const, tokenIds: ["a1", "a2", "g1", "g2"] } };
+    assert.match(renderToStaticMarkup(createElement(OpenGroupSave, { page, tokens, onOpen() {} })), /Dexterity save for 3: set up\./);
+    assert.equal(groupSave.pageTitle(page, tokens), "Dexterity save for 3");
+    assert.equal(groupSave.discardQuestion(page, tokens), "Discard the Dexterity save for 3?");
+  });
+
   test("the words follow the page as it goes: waiting rows once rolled", () => {
     const rolled = { ...PAGE, phase: "rolled" as const };
     const markup = renderToStaticMarkup(createElement(OpenGroupSave, { page: rolled, onOpen() {} }));

@@ -4,6 +4,7 @@ import { nearInScrollBox } from "../../../lib/reveal.ts";
 import { theme } from "../../../lib/theme.ts";
 import { APPLYING } from "./chain.ts";
 import { AskAnswers, discardQuestion } from "./GroupSave.tsx";
+import { useRoomView } from "../../../state/view.ts";
 import { useGroupSave } from "./store.ts";
 
 /**
@@ -19,6 +20,7 @@ import { useGroupSave } from "./store.ts";
  */
 export function ReplaceConfirm(props: { onDiscard(): void; onKeep(): void }) {
   const open = useGroupSave((s) => s.page);
+  const tokens = useRoomView((s) => s.view?.tokens);
   const applying = open?.phase === "applying";
   const box = useRef<HTMLDivElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
@@ -28,7 +30,7 @@ export function ReplaceConfirm(props: { onDiscard(): void; onKeep(): void }) {
   }, []);
   return (
     <div ref={box} role="alert" style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
-      <span>{applying ? APPLYING : open ? discardQuestion(open) : "Discard the group save?"}</span>
+      <span>{applying ? APPLYING : open ? discardQuestion(open, tokens) : "Discard the group save?"}</span>
       <AskAnswers>
         {applying ? null : (
           <Button variant="danger" onClick={props.onDiscard}>

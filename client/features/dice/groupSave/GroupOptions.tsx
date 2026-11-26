@@ -34,7 +34,7 @@ import { attackResults } from "./outcome.ts";
 import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
-import { d20Of, groupRows, type GroupTest } from "./rows.ts";
+import { d20Of, distinctCreatures, groupRows, type GroupTest } from "./rows.ts";
 import { quickRollNow } from "./start.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
 import type { RollModeOverride, RollModeCapability } from "../rollMode.ts";
@@ -92,7 +92,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     return token ? [token] : [];
   });
   const names = tokens.map((t) => displayName(t, labels));
-  const n = names.length;
+  const n = distinctCreatures(props.tokenIds, view.tokens);
   const pictures = tokens.slice(0, CARD_PICTURES).flatMap((token) => creatureLook({ view, creature: { tokenId: token.id }, labels })?.picture ?? []);
 
   const go = (input: StartInput) => {

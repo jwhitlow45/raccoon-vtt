@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
 import type { ActorTarget, OpOf } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import type { Proficiency } from "#shared/rules/proficiency.ts";
@@ -84,7 +84,7 @@ import {
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
 import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, NOTHING_TO_APPLY, openSaveState, pageBound, rowOutcome, rowWords, SETTLE_WORDS } from "./plan.ts";
-import { countWords, creatureCount, d20Of, groupRows, rowBonus, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
+import { countWords, creatureCount, distinctCreatures, d20Of, groupRows, rowBonus, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
 import { castFill } from "../cast/castStart.ts";
@@ -175,10 +175,10 @@ export function withDamageWords(saves: string): string {
   return `${parts.join(", ")} and roll damage`;
 }
 
-/** The page's title: "Fireball's save", "Dexterity save for 6". */
-export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">): string {
+/** The page's title: "Fireball's save", "Dexterity save for 6". The tokens turn a setup's selection into creatures. */
+export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">, tokens: Readonly<Record<string, Token | undefined>> = {}): string {
   if (page.fill) return page.test.kind === "none" ? page.fill.name : `${page.fill.name}'s ${page.test.kind}`;
-  const n = page.rows.length || (page.source.kind === "selection" ? page.source.tokenIds.length : 0);
+  const n = page.rows.length || (page.source.kind === "selection" ? distinctCreatures(page.source.tokenIds, tokens) : 0);
   if (page.test.kind === "none") return `Damage for ${n}`;
   const what = page.test.kind === "save" ? `${ABILITY_NAMES[page.test.ability]} save` : page.test.skill ? `${SKILLS[page.test.skill].name} check` : `${ABILITY_NAMES[page.test.ability]} check`;
   return `${what} for ${n}`;
@@ -199,10 +199,10 @@ export function AskAnswers(props: { children: ReactNode }) {
  * title already names whose save it is. An unfilled damage page reads
  * "Discard the damage for 3?".
  */
-export function discardQuestion(page: Pick<Page, "fill" | "test" | "rows" | "source">): string {
-  if (page.fill) return `Discard ${pageTitle(page)}?`;
+export function discardQuestion(page: Pick<Page, "fill" | "test" | "rows" | "source">, tokens: Readonly<Record<string, Token | undefined>> = {}): string {
+  if (page.fill) return `Discard ${pageTitle(page, tokens)}?`;
   // Only "Damage for 3" starts with a common word. The ability and skill names of the other titles stay capitalized.
-  const title = pageTitle(page);
+  const title = pageTitle(page, tokens);
   return `Discard the ${page.test.kind === "none" ? title.charAt(0).toLowerCase() + title.slice(1) : title}?`;
 }
 
@@ -327,7 +327,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     if (next !== pageRef.current) update(next);
   }, [confirmedView?.casts, confirmedView?.log, page.phase, page.apply, page.cast?.ask.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const title = pageTitle(shown);
+  const title = pageTitle(shown, view?.tokens);
   usePanelHeader({ title, parent: props.parent, onBack: props.onBack });
   const rollNowRef = useRef<() => void>(() => undefined);
   // A quick tap waits for the stat blocks, so a monster whose bonus is still loading is never left to be typed.
@@ -832,7 +832,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       {page.phase !== "applying" && page.phase !== "applied" || stranded ? (
         confirmDiscard ? (
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
-            <span>{discardQuestion(shown)}</span>
+            <span>{discardQuestion(shown, view?.tokens)}</span>
             <AskAnswers>
               <Button variant="danger" onClick={close}>
                 Discard
@@ -1289,7 +1289,7 @@ export { DAMAGE_TYPES, type DamageType };
  * creature card, so the DM reads an unfinished group save as a status
  * rather than one more line of the panel (docs/design/design-v1-dice-pass.md 7.8).
  */
-export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
+export function OpenGroupSave(props: { page: Page; tokens?: Readonly<Record<string, Token | undefined>> | undefined; onOpen(): void }) {
   const { page } = props;
   const waiting = page.phase === "setup" ? 0 : [...results(page).values()].filter((r) => r === null).length;
   const state = openSaveState(page, waiting);
@@ -1304,7 +1304,7 @@ export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
           </Button>
         }
       >
-        {`${pageTitle(page)}: ${state}.`}
+        {`${pageTitle(page, props.tokens)}: ${state}.`}
       </Notice>
     </div>
   );

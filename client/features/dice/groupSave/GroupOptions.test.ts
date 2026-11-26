@@ -156,6 +156,19 @@ describe("several selected: the card and the groups (5.3)", () => {
     assert.match(markup, /<h4[^>]*>Checks for 2<\/h4>/);
   });
 
+  test("one character's two tokens and two goblins read 3 in the card's labels and cell names", () => {
+    const s = setup();
+    const view = structuredClone(s.view);
+    view.tokens.ta2 = token("ta2", { kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "a" } });
+    for (const id of ["g1", "g2"]) view.tokens[id] = token(id, { name: "Goblin", actor: { inline: actor({}) } });
+    const markup = render({ ...s, view }, ["ta", "ta2", "g1", "g2"]);
+    const named = cells(markup);
+    assert.equal(named.get("DEX save for 3"), "DEX");
+    assert.equal(named.get("DEX save for 4"), undefined, "tokens are not counted");
+    assert.match(markup, /<h4[^>]*>Saves for 3<\/h4>/);
+    assert.match(markup, /<h4[^>]*>Checks for 3<\/h4>/);
+  });
+
   test("the cells take a creature's option look: the control outline on the raised fill, a touch target tall", () => {
     const tag = /<button type="button" aria-label="DEX save for 2"[^>]*style="([^"]*)"/.exec(render(setup(), ["ta", "tb"]));
     assert.ok(tag);
