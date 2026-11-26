@@ -88,18 +88,21 @@ function framesOf(room: Room, labels: Labels): string[] {
 /**
  * P1's and the display's log history pages: every line the room holds,
  * as the archive's pages project and send it (logHistory.ts, sortedReplies),
- * each id as its label.
+ * each id as its label. A display reads no line, so its page is empty.
  */
-function pagesOf(room: Room, labels: Labels): string[] {
-  return [{ memberId: "p1", role: "player" as const }, { memberId: "display:abcdefghijkl", role: "player" as const }].map((viewer) => labels.normalize(sortedJson(projectArchivedLog(room.state, room.state.log, viewer, { sceneId: null }))));
+function pagesOf(room: Room, labels: Labels): { p1: string; display: string } {
+  const page = (memberId: string) => labels.normalize(sortedJson(projectArchivedLog(room.state, room.state.log, { memberId, role: "player" }, { sceneId: null })));
+  return { p1: page("p1"), display: page("display:abcdefghijkl") };
 }
 
-/** P1's and the display's frames and log pages are the same in both twins, byte for byte with each id as its label. */
+/** P1's and the display's frames, and P1's log pages, are the same in both twins, byte for byte with each id as its label. The display's pages are empty. */
 function sameFrames(pair: Twins, labels: [Labels, Labels], what: string): void {
   const [a, b] = [framesOf(pair[0], labels[0]), framesOf(pair[1], labels[1])];
   const at = a.findIndex((f, i) => f !== b[i]);
   assert.ok(at < 0 && a.length === b.length, `${what}: the same frames${at < 0 ? "" : `, first apart at ${at}:\nA ${a[at]}\nB ${b[at]}`}`);
-  assert.deepEqual(pagesOf(pair[0], labels[0]), pagesOf(pair[1], labels[1]), `${what}: the same log pages`);
+  const [pageA, pageB] = pair.map((room, i) => pagesOf(room, labels[i]!));
+  assert.equal(pageA!.p1, pageB!.p1, `${what}: the same log pages`);
+  assert.deepEqual([pageA!.display, pageB!.display], ["[]", "[]"], `${what}: the display's pages hold no line`);
 }
 
 /**
@@ -148,7 +151,7 @@ describe("twins apart only in when or in what order the DM made what P1 does not
     sameFrames(pair, labels, "after a reload");
     for (const [i, room] of pair.entries()) {
       assert.ok(JSON.stringify(room.pages[0]!.sent).includes(goblins[i]!), `${room.name}: P1 holds the Goblin`);
-      assert.ok(pagesOf(room, labels[i]!)[0]!.includes("<goblin>"), `${room.name}: P1's log page names the Goblin`);
+      assert.ok(pagesOf(room, labels[i]!).p1.includes("<goblin>"), `${room.name}: P1's log page names the Goblin`);
       assert.equal(sealedTime(DM_KEY, goblins[i]!), labels[i]!.madeAt(goblins[i]!), "the DM's key reads when it was made");
       apart(room, labels[i]!, "C2");
     }
