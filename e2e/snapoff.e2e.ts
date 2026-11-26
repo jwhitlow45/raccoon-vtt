@@ -26,6 +26,8 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - Privacy: a hidden imp placed freely never reaches Pat's or Sam's frames,
  *   and Sam receives the nudge on a token he sees.
  * - A reload draws the placement from the snapshot.
+ * - The map's edge pinches a squeeze on squares: a Large creature Pat drags
+ *   by touch into a corridor along the west side squeezes in.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty-six, one file after
  * another. The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -721,6 +723,45 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
       await closeBars(dm);
     }
     if (misplaced.length > 0) throw misplaced[0];
+  });
+
+  /*
+   * The s66- step: on square maps the map's edge pinches a squeeze, from
+   * change format 66. A corridor one square wide runs down the west side,
+   * walled on its inner side alone at x = 1 from y = 4 to the south side,
+   * and walls stop moves. Pat drags his Large bear down into it by touch on
+   * the phone: it squeezes in, half a square past the side with its
+   * squeezed square inside, and every page holds it squeezed there.
+   */
+  test("s66-2. a Large creature dragged by touch into a one-square corridor along the map's edge squeezes in", async () => {
+    await closeBars(pat);
+    const bear = uuidv7();
+    // The west column clear for the corridor and the bear's way into it.
+    await ops.send({ t: "token.move", tokenId: run.bree, x: 3, y: 0 });
+    await ops.send({ t: "token.move", tokenId: run.sam, x: 3, y: 10 });
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { blockMovement: true } });
+    // A player's copy holds walls cut from the ground they hold, under ids of its own, so Pat's is counted rather than named.
+    const wallsIn = (socket: SocketWatch) => Object.values((socket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === run.sceneId ? (c.walls?.length ?? 0) : 0), 0);
+    const patWalls = wallsIn(patSocket);
+    await ops.send({ t: "build.walls", sceneId: run.sceneId, put: [{ id: "s66b2w000001", a: [1, 4], b: [1, 12], f: { kind: "wall" } }] });
+    await ops.send(tokenOp(bear, { kind: "npc", name: "Bear", size: "large", x: 0, y: 0, disposition: "ally", ownerIds: [run.patId] }));
+    await waitFor("the bear on Pat's page", () => token(patSocket, bear));
+    await waitFor("the corridor's wall in Pat's copy", () => (wallsIn(patSocket) > patWalls ? true : null));
+    await waitFor("the bear drawn", () => nodeOf(pat, bear));
+    // Grabbed by its middle and let go over the corridor: the drop aims its box half a square past the side, where it squeezes.
+    const from = await pagePoint(pat, BOUNDS, { x: 1, y: 1 });
+    const to = await pagePoint(pat, BOUNDS, { x: 0.6, y: 7.8 });
+    await touchSwipe(patCdp, from, to, { steps: 16, everyMs: 20 });
+    const landed = await waitFor("the bear squeezed in the corridor", () => (token(dmSocket, bear)?.squeeze === true ? token(dmSocket, bear) : null));
+    assert.deepEqual([landed.x, landed.y], [-0.5, 6.5], "half a square past the west side, its squeezed square at 0, 7");
+    for (const [who, socket] of [
+      ["Pat", patSocket],
+      ["Sam", samSocket],
+    ] as const) {
+      await waitFor(`${who}'s copy holds it squeezed`, () => (token(socket, bear)?.squeeze === true && token(socket, bear)?.x === -0.5 ? true : null));
+    }
+    await shots.take(pat, "s66-bear-squeezed-along-the-west-side");
+    await closeBars(pat);
   });
 
   test("so-13. no page logged an error", () => {
