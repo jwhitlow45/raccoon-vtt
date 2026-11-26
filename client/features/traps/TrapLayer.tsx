@@ -15,6 +15,7 @@ import { markStands, pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { IsoNamesContext, isoNamePill, type IsoNames } from "../../canvas/relief/isoText.ts";
 import { boardTheme } from "../../lib/theme.ts";
+import { isometric } from "../../lib/view.ts";
 import { useScoped } from "../../state/scope.ts";
 import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
@@ -183,6 +184,23 @@ export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record
     .filter((t) => t.sceneId === sceneId)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .flatMap((t) => trapNamePill(g, t, chunks, scale, dm, ends, view) ?? []);
+}
+
+/**
+ * The trap names of a scene as Isometric stands them, before the nudge off token text and only where the stand rule lets them stand: isoTrapNamePill with
+ * no token text to keep off, so it picks the spot the board would take on a floor with no creature near the name. A floor link's pills keep off these, and the
+ * nudge, which keeps off token text that keeps off the link pills, can still move one (F11-6).
+ */
+export function isoTrapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[], iso: IsoGround, view: Box | null): PillSpec[] {
+  const allowed = (p: PillSpec) => pillStands(iso.fog, { ...p, scale });
+  const names: IsoNames = { view: isometric(iso.turn), ground: iso.ground, boxes: [] };
+  return Object.values(traps)
+    .filter((t) => t.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .flatMap((t) => {
+      const original = trapNamePill(g, t, chunks, scale, dm, ends);
+      return original && allowed(original) ? [isoTrapNamePill(original, g, t, chunks, names, scale, allowed, ends, iso, view)] : [];
+    });
 }
 
 /** The frames of the floor link ends a scene's board draws, which a trap's name keeps off (trapNamePill). */

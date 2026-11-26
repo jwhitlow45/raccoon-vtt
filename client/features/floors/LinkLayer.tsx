@@ -13,7 +13,7 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
-import { linkFrames, trapNameMarkers, trapSquares } from "../traps/TrapLayer.tsx";
+import { isoTrapNameMarkers, linkFrames, trapNameMarkers, trapSquares } from "../traps/TrapLayer.tsx";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
@@ -90,9 +90,11 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
   const view = useRestView();
   const iso = useIsoGround();
-  // The names as Top-down places them, in cells: the rest view is in view units in Isometric, where the markers' drawn boxes take it instead (placeEnds).
-  const cellView = iso ? null : view;
-  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, cellView), [grid, props.scene.id, traps, chunks, scale, dm, frames, cellView]);
+  // Top-down places a name in cells. Isometric stands it where isoTrapNamePill picks, before the nudge off token text (F11-6), and takes the rest view, in view units, by what it draws.
+  const trapNames = useMemo(
+    () => (iso ? isoTrapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view) : trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, view)),
+    [grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view],
+  );
   const squares = useMemo(() => trapSquares(grid, props.scene.id, traps), [grid, props.scene.id, traps]);
   const trapKey = JSON.stringify(trapNames);
   const markers = useMemo(() => (trapNames.length === 0 ? turn : [...turn, ...trapNames]), [turn, trapKey]);

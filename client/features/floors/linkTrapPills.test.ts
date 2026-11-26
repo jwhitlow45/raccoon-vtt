@@ -4,10 +4,11 @@ import { before, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { trap as makeTrap } from "#shared/testutil.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
+import { isometric } from "../../lib/view.ts";
 import { pillPlace } from "../measure/pillPlace.ts";
-import { boxCoversOutline, cornersOf, nameAnchor, outlineOf, placeEnds, type EndPills, type Outline } from "./linkMarks.ts";
+import { boxCoversOutline, cornersOf, drawnBox, nameAnchor, outlineOf, placeEnds, type EndPills, type Outline } from "./linkMarks.ts";
 
-const { linkFrames, trapNameMarkers, trapNamePill, trapSquares } = await import("../traps/TrapLayer.tsx");
+const { isoTrapNameMarkers, isoTrapNamePill, linkFrames, trapNameMarkers, trapNamePill, trapSquares } = await import("../traps/TrapLayer.tsx");
 
 before(() => {
   const context = { font: "", measureText: (text: string) => ({ width: text.length * 7 }) };
@@ -84,4 +85,23 @@ test("a trap's name is judged where the screen's edge slides it, so it takes the
   const seen = trapNamePill(SQUARES, trap, {}, scale, true, frames, view)!;
   assert.ok(off(seen, view), `the name at ${JSON.stringify(seen)} covers the frame once slid`);
   assert.deepEqual(trapNameMarkers(SQUARES, "s1", { t: trap }, {}, scale, true, frames, view), [seen], "the link layer keeps off the name where it is drawn");
+});
+
+test("in Isometric a hole's pills keep off the trap name as isoTrapNamePill stands it with no token text (F11-6)", () => {
+  const trap = makeTrap("t", { zone: { cells: [{ x: 3, y: 2, w: 2, h: 1 }] } });
+  const links = {
+    h: { id: "h", sceneId: "s1", rect: { x: 1, y: 2, w: 2, h: 1 } },
+    s: { id: "s", sceneId: "s1", rect: { x: 5, y: 1, w: 2, h: 2 } },
+  };
+  const frames = linkFrames(SQUARES, "s1", links);
+  const iso = { turn: 0 as const, ground: () => 0, fog: { all: true } } as unknown as Parameters<typeof isoTrapNameMarkers>[7];
+  const marks = isoTrapNameMarkers(SQUARES, "s1", { t: trap }, {}, SCALE, true, frames, iso, null);
+  assert.equal(marks.length, 1);
+  const original = trapNamePill(SQUARES, trap, {}, SCALE, true, frames)!;
+  const standing = isoTrapNamePill(original, SQUARES, trap, {}, { view: isometric(0), ground: () => 0, boxes: [] }, SCALE, () => true, frames, iso);
+  assert.deepEqual(marks[0], standing, "the marker is the pick with no token text");
+  const space = { turn: 0 as const, ground: () => 0 };
+  const covered = (p: PillSpec) => frames.filter((o) => boxCoversOutline(drawnBox(p, SCALE, space, true, true), cornersOf(o), space)).length;
+  assert.equal(covered(original), 1, "Top-down's pick covers a frame on the turned ground");
+  assert.equal(covered(marks[0]!), 0, "the marker is clear of every frame where it stands");
 });

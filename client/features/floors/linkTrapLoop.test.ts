@@ -11,7 +11,7 @@ import { isometric, type Turn } from "../../lib/view.ts";
 import { pillInkReach } from "../measure/pillPlace.ts";
 import { nameAnchor, outlineOf, placeEnds, type EndPills } from "./linkMarks.ts";
 
-const { isoTrapNamePill, trapNameMarkers, trapNamePill } = await import("../traps/TrapLayer.tsx");
+const { isoTrapNamePill, trapNamePill } = await import("../traps/TrapLayer.tsx");
 
 before(() => {
   const context = { font: "", measureText: (text: string) => ({ width: text.length * 7 }) };
@@ -22,7 +22,7 @@ before(() => {
  * In Isometric the layers read each other in one direction: token text keeps
  * off a floor link's pills, a trap's name keeps off token text, and so a link
  * pill that kept off the trap's nudged name would close a loop. A floor link
- * keeps off the name as trapNamePill places it instead (trapNameMarkers).
+ * keeps off the name as trapNamePill places it instead.
  */
 
 const SCALE = 40;
@@ -53,7 +53,8 @@ function round(turn: Turn, seed: { trapX: number; trapY: number; textX: number; 
   const hit = pills.some((b) => meet(b, base));
   const text: Box = hit ? { ...base, y0: base.y0 - 1.2, y1: base.y1 - 1.2 } : base;
   const nudged = isoTrapNamePill(original, SQUARES, trap, {}, { view, ground, boxes: [text] }, SCALE, () => true);
-  const markers = read === "fixed" ? trapNameMarkers(SQUARES, trap.sceneId, { t: trap }, {}, SCALE, true) : [nudged];
+  // What the link layer reads (isoTrapNameMarkers): the pick with no token text to keep off.
+  const markers = read === "fixed" ? [isoTrapNamePill(original, SQUARES, trap, {}, { view, ground, boxes: [] }, SCALE, () => true)] : [nudged];
   const placed = placeEnds([hole()], markers, SCALE, { turn, ground }, () => true);
   return [placed.get("h")!.pill!, placed.get("h")!.chip!];
 }
@@ -86,8 +87,7 @@ test("reading the nudged name instead would not always settle, so the test above
   assert.ok(loops.length > 0, "no layout in the search loops when the nudged name is read");
 });
 
-test("the floor link layer reads trapNameMarkers and never the published trap names (F11-1)", () => {
+test("the floor link layer never reads the published trap names (F11-1)", () => {
   const source = readFileSync(new URL("./LinkLayer.tsx", import.meta.url), "utf8");
-  assert.match(source, /trapNameMarkers\(/);
   assert.doesNotMatch(source, /["'`]trap:/);
 });
