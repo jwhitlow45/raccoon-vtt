@@ -1,6 +1,6 @@
 import type { Scene } from "#shared/model.ts";
-import { cameraForView, holdStill, type Camera, type Insets, type Size } from "../lib/camera.ts";
-import { toView, type View } from "../lib/view.ts";
+import { cameraForView, holdStill, rectClear, sameCamera, type Camera, type Insets, type Size } from "../lib/camera.ts";
+import { toView, type View, type ViewBox } from "../lib/view.ts";
 import { heldPoint, type BoardPick } from "./boardPick.ts";
 
 type Ref<T> = { current: T };
@@ -107,4 +107,25 @@ export function holdViewStill<T extends NonNullable<Selected>>(a: {
   a.fitted.current = refit;
   a.cam.current = next;
   a.setCam(next);
+}
+
+/**
+ * Stage's `refit` for holdViewStill: the fit to use in the new view, or null
+ * to keep the held camera. It takes over only when the camera before the
+ * switch was still the fit (the viewer never moved it) and the held camera
+ * would cut the fitted box's corners in the clear part of the canvas. `box`
+ * gives the fitted box in the new view at a zoom, with its height lift.
+ */
+export function refitAcrossView<F extends { cam: Camera }>(a: {
+  before: Camera;
+  held: Camera;
+  fitted: F | null;
+  size: Size | null;
+  clear: Insets;
+  box(scale: number): ViewBox;
+  fit(): F;
+}): F | null {
+  if (!a.fitted || !a.size || !sameCamera(a.before, a.fitted.cam)) return null;
+  if (rectClear(a.held, a.box(a.held.scale), a.size, a.clear)) return null;
+  return a.fit();
 }

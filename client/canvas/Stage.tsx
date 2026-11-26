@@ -92,7 +92,7 @@ import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragN
 import { settleFollowers } from "./dropSettle.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
-import { holdViewStill } from "./sceneCamera.ts";
+import { holdViewStill, refitAcrossView } from "./sceneCamera.ts";
 import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, drawnRing, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
@@ -466,6 +466,18 @@ export function MapStage(props: {
         boardPickFor({ room: store.getState().floorView, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera, lowPower: lowPowerRef.current, canvasHeight: s.height }, heightsMemoRef.current),
       selected: () => tokensByIdRef.current.get(store.getState().local.selectedId ?? ""),
       stands: (pick, selected) => standsFor(pick, aboveFogRef.current)(selected),
+      refit: (before, held) => {
+        const f = fittedRef.current;
+        const current = sceneRef.current;
+        const s = sizeRef.current;
+        const box = f?.target ?? sceneRect(current);
+        return refitAcrossView({
+          before, held, fitted: f, size: s,
+          clear: largerEach(insetsRef.current, f?.cover ?? NO_INSETS),
+          box: (scale) => viewBox(shownRef.current, box, liftRef.current(box, scale)),
+          fit: () => fitScene(s!, current, insetsRef.current, shownRef.current, f!.target, f!.cover, liftRef.current),
+        });
+      },
       setCam,
     });
   }, [shown]);

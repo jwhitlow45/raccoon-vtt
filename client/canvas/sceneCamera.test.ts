@@ -6,7 +6,7 @@ import { RoomScope } from "../state/scope.ts";
 import { isometric, TOP_DOWN, toView, viewBox, type View } from "../lib/view.ts";
 import { boardPickFor, DrawnHeightsMemo } from "./boardPick.ts";
 import { fitSlot, openFramed } from "./fitSlot.ts";
-import { holdViewStill, openSceneCamera } from "./sceneCamera.ts";
+import { holdViewStill, openSceneCamera, refitAcrossView } from "./sceneCamera.ts";
 
 // Run the scene and view effects in their real commit order (the scene's
 // first, as Stage declares them). Camera math and ground picking stay real,
@@ -163,33 +163,18 @@ test("a switch to another floor of the same scene keeps the camera, and another 
   assert.equal(run([floor("ground", 0, "ground"), scene("cave")]).opened, 2);
 });
 
-test("UIPOLISH: a map still at its fit stays a fit across a view switch that would cut its corners", () => {
+test("UIPOLISH: a map still at its fit stays a fit across a view switch that would cut its corners, and a moved camera keeps its zoom", () => {
   const size = { width: 390, height: 844 };
-  const current = scene("hexes", { bounds: { w: 14, h: 9 } });
-  const state = room({ scenes: { hexes: current } });
   const box = { x: 0, y: 0, width: 14, height: 9 };
-  const topDown = fitRect(size, viewBox(TOP_DOWN, box), 24, NO_INSETS);
   const iso = isometric(0);
+  const topDown = fitRect(size, viewBox(TOP_DOWN, box), 24, NO_INSETS);
   const refitted = fitRect(size, viewBox(iso, box), 24, NO_INSETS);
-  const run = (refit: boolean) => {
-    const camRef = { current: topDown as Camera | null };
-    const fittedRef = { current: { cam: topDown } as { cam: Camera } | null };
-    const viewSeen = { current: TOP_DOWN as View };
-    const cameras: Camera[] = [];
-    holdViewStill({
-      shown: iso, viewSeen, pendingCam: { current: null }, cam: camRef, size: { current: size }, fitted: fittedRef, insets: NO_INSETS,
-      pick: (view, camera, s) => boardPickFor({ room: state, scene: current, role: "dm", fog: false, view, camera, lowPower: false, canvasHeight: s.height }, new DrawnHeightsMemo()),
-      selected: () => undefined,
-      stands: () => true,
-      ...(refit ? { refit: (before: Camera, held: Camera) => (before === topDown && !rectClear(held, viewBox(iso, box), size, NO_INSETS) ? { cam: refitted } : null) } : {}),
-      setCam: (c) => cameras.push(c),
-    });
-    return { cam: camRef.current!, fitted: fittedRef.current, cameras };
-  };
-  const held = run(false);
-  assert.ok(!rectClear(held.cam, viewBox(iso, box), size, NO_INSETS), "held at its top-down zoom, the diamond runs past the phone's edges");
-  const fit = run(true);
-  assert.deepEqual(fit.cam, refitted);
-  assert.deepEqual(fit.fitted, { cam: refitted });
-  assert.ok(rectClear(fit.cam, viewBox(iso, box), size, NO_INSETS));
+  const held = fitRect(size, viewBox(TOP_DOWN, box), 24, NO_INSETS);
+  const ask = (before: Camera, fitted: { cam: Camera } | null, held: Camera) =>
+    refitAcrossView({ before, held, fitted, size, clear: NO_INSETS, box: () => viewBox(iso, box), fit: () => ({ cam: refitted }) });
+  assert.ok(!rectClear(held, viewBox(iso, box), size, NO_INSETS), "held at its top-down zoom, the diamond runs past the phone's edges");
+  assert.deepEqual(ask(topDown, { cam: topDown }, held), { cam: refitted });
+  assert.equal(ask({ ...topDown, x: topDown.x + 5 }, { cam: topDown }, held), null, "a camera the viewer moved is held");
+  assert.equal(ask(topDown, null, held), null, "no fit stands");
+  assert.equal(ask(topDown, { cam: topDown }, refitted), null, "a held camera that shows the whole box is kept");
 });
