@@ -3,6 +3,8 @@ import { describe, test } from "node:test";
 import { EventEmitter } from "node:events";
 import Fastify from "fastify";
 import { asJsonb } from "#shared/keyOrderTestutil.ts";
+import { compareLogIds } from "#shared/keys.ts";
+import { partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
 import { AT, rng, room } from "#shared/testutil.ts";
 import { setupAuth } from "../auth/plugin.ts";
@@ -225,4 +227,53 @@ test("a receipt's reply is the same text whether its lines come from memory or t
   assert.equal(read.body, held.body);
   assert.deepEqual(JSON.parse(read.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [line] }] });
   assert.notEqual((await ask([line], false)).body, (await ask([earlier, line], false)).body, "JSON.stringify's text differs between the two");
+});
+
+/*
+ * Twin rooms alike but for lines P1 cannot read: a line of the DM's, a
+ * whisper between others and another player's copy, older than P1's op or
+ * written by it. Whether P1's lookup reads the archive, and what it answers,
+ * is the same in both.
+ */
+describe("twin rooms apart only in lines P1 cannot read", () => {
+  const seen: LogEntry = { id: "1:0", at: AT, kind: "chat", from: "dm1", text: "welcome" };
+  const p2Copy = (seq: number): LogEntry => ({ id: `${seq}:${partyIndex(rosterRanks(room().members).get("p2")!, 0)}`, at: AT, kind: "event", to: ["p2"], copyOf: `${seq}:900001`, data: { type: "hp", tokenId: "pet", change: "damage", amount: 2 } });
+  /** Lines of op `seq` no line of which P1 reads: a whisper from the DM to P2, a DM line, and a party line P2 alone read, with its copy. */
+  const unseen = (seq: number): LogEntry[] => ([
+    { id: `${seq}:0`, at: AT, kind: "whisper", from: "dm1", to: ["p2"], text: "psst" },
+    { id: `${seq}:900000`, at: AT, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } },
+    { id: `${seq}:900001`, at: AT, kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 2 } },
+    p2Copy(seq),
+  ] satisfies LogEntry[]).sort((a, b) => compareLogIds(a.id, b.id));
+  const ask = async (seq: number, log: LogEntry[], archived: LogEntry[]) => {
+    const r = await routeRig("", { held: { seq, state: room({ log }), archived: archived.map(asJsonb), sorted: true } });
+    try {
+      const result = await r.request();
+      assert.equal(result.statusCode, 200, result.body);
+      return { body: result.body, archive: r.sql.some((q) => q.text.includes("from room_log")) };
+    } finally { await r.app.close(); }
+  };
+
+  test("lines before P1's op: P1's line is the oldest they read in both, so both read the archive", async () => {
+    const mine: LogEntry = { id: "2:0", at: AT, kind: "chat", from: "p1", text: "ready" };
+    const [a, b] = [await ask(2, [...unseen(1), mine], [mine]), await ask(2, [mine], [mine])];
+    assert.deepEqual([a.archive, b.archive], [true, true]);
+    assert.equal(a.body, b.body);
+    assert.deepEqual(JSON.parse(a.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [mine] }] });
+  });
+
+  test("lines between: an older line P1 reads holds both in memory", async () => {
+    const mine: LogEntry = { id: "3:0", at: AT, kind: "chat", from: "p1", text: "ready" };
+    const [a, b] = [await ask(3, [seen, ...unseen(2), mine], [mine]), await ask(3, [seen, mine], [mine])];
+    assert.deepEqual([a.archive, b.archive], [false, false]);
+    assert.equal(a.body, b.body);
+  });
+
+  test("P1's op wrote only lines P1 cannot read, or none: both read the archive and answer no line", async () => {
+    const wrote = unseen(2).filter((e) => e.kind !== "whisper");
+    const [a, b] = [await ask(2, [seen, ...wrote], wrote), await ask(2, [seen], [])];
+    assert.deepEqual([a.archive, b.archive], [true, true]);
+    assert.equal(a.body, b.body);
+    assert.deepEqual(JSON.parse(a.body), { parts: [{ part: 0, state: "committed", seq: 2, lines: [] }] });
+  });
 });

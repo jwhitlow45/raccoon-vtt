@@ -480,15 +480,41 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
 
 /**
  * Whether the log in memory still holds every line of op `seq` the viewer
- * reads. Each ring drops its own oldest, so an op's lines leave memory a
- * ring at a time: they are all here while the op is newer than the log's
- * oldest line, which the shared lines' floor keeps, and than where the
- * viewer's live log starts (liveStart). Otherwise the archive has them.
+ * reads, and one at least. Each ring drops its own oldest, so an op's lines
+ * leave memory a ring at a time: they are all here while the op is newer
+ * than the oldest line of the viewer's live log, which lies past where it
+ * starts (liveStart) and, once the shared lines are full, past their floor.
+ * Otherwise the archive has them.
+ *
+ * It reads only lines the viewer reads (readsLine) and where their live log
+ * starts, which reads no other, so the lines others read never decide
+ * whether a lookup of the viewer's own op reads the archive. An op that
+ * wrote none the viewer reads always goes to the archive, so a line it
+ * wrote for someone else decides nothing either.
  */
 export function holdsOp(room: LogRoom, viewer: Viewer, seq: number): boolean {
-  const oldest = room.log[0];
+  // A viewer who is no member, a table display, reads no line (projectLogEntry).
+  if (viewer.role !== "dm" && !Object.hasOwn(room.members, viewer.memberId)) return false;
   const start = liveStart(room, viewer);
-  return oldest !== undefined && seqOf(oldest.id) < seq && (start === null || seqOf(start) < seq);
+  let oldest = true;
+  for (const e of room.log) {
+    if ((start !== null && compareLogIds(e.id, start) < 0) || !readsLine(viewer, e)) continue;
+    const at = seqOf(e.id);
+    if (oldest) {
+      // The oldest op the viewer's live log holds may have lost lines to a ring or the floor.
+      if (at >= seq) return false;
+      oldest = false;
+    } else if (at >= seq) return at === seq;
+  }
+  return false;
+}
+
+/** Whether a line is one the viewer may read by its audience, as projectLogEntry first sorts lines: a DM reads every line but players' copies, a player the shared lines and their own copies, and each their own whispers. */
+function readsLine(viewer: Viewer, e: LogEntry): boolean {
+  if (e.kind === "whisper") return e.from === viewer.memberId || e.to?.includes(viewer.memberId) === true;
+  const audience = lineAudience(e);
+  if (audience === "party") return viewer.role !== "dm" && e.to![0] === viewer.memberId;
+  return audience === "shared" || viewer.role === "dm";
 }
 
 /** Whether a line is in a viewer's live log by where it starts (liveStart). Each line's own rules still apply. */

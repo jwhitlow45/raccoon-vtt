@@ -54,6 +54,8 @@ import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, t
  * 6. Fan-out: each viewer's copy kept by the ev changes (touched keys,
  *    their dependents and the lines a live log's start passed) is their
  *    fresh projection.
+ * 7. Lookups: whether the log in memory holds an op for a viewer (holdsOp)
+ *    is the same as in the room never written a line they do not receive.
  */
 
 const DM2: Viewer = { memberId: "dm2", role: "dm" };
@@ -160,6 +162,27 @@ const index = (id: string) => Number(id.slice(id.indexOf(":") + 1));
 
 const bytesOf = (lines: readonly LogEntry[]) => lines.reduce((n, e) => n + serializedBytes(e), 0);
 
+const seqOf = (id: string) => Number(id.slice(0, id.indexOf(":")));
+
+/**
+ * The ops whose lookup the random run asks about: those just before and
+ * after every room's oldest line, where the viewer's live log starts and
+ * its oldest line, the newest ops, and every fifth op between.
+ */
+function lookupSeqs(rooms: readonly RoomState[], viewer: Viewer, newest: number): number[] {
+  const out = new Set<number>([newest, newest + 1]);
+  for (const r of rooms) {
+    const start = liveStart(r, viewer);
+    const first = liveLog(r, viewer)[0]?.id;
+    for (const id of [r.log[0]?.id, start ?? undefined, first]) {
+      if (id === undefined) continue;
+      for (const d of [-1, 0, 1, 2]) out.add(seqOf(id) + d);
+    }
+  }
+  for (let s = newest; s > 0 && s > newest - 300; s -= 5) out.add(s);
+  return [...out].filter((s) => s > 0);
+}
+
 /** A member's ring of `lines`, theirs in id order: the newest while their count and bytes stay inside `bound`. */
 function ringOf(lines: readonly LogEntry[], bound: MemberRing): LogEntry[] {
   const out: LogEntry[] = [];
@@ -213,7 +236,9 @@ describe("the log's rings (shared/logRings.ts)", () => {
       for (let step = 0; step < steps; step++) {
         const seq = step + 1;
         const before = state;
-        const plan = randomStep(r, state);
+        const drawn = randomStep(r, state);
+        // The run opens on a line only the DM reads, so until the shared lines fill, the room's oldest line is one no player gets.
+        const plan: Step = step === 0 ? { lines: [{ kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } }] } : drawn;
         let out: { state: RoomState; touched: EntityKey[]; written: LogEntry[] };
         if ("lines" in plan) {
           const wrote = write(state, plan.lines, seq);
@@ -297,6 +322,11 @@ describe("the log's rings (shared/logRings.ts)", () => {
           assert.equal(stableStringify(copy.view.log), stableStringify(live), `${name}: the ev stream keeps the live log`);
           // 3. Audience.
           assert.deepEqual(live, liveLog(alone.get(viewer)!, viewer), `${name}: lines they never receive changed their log`);
+          // 7. Lookups: whether memory holds an op of theirs reads only lines they receive.
+          if (step % 50 === 49 || step === steps - 1) {
+            const own = alone.get(viewer)!;
+            for (const s of lookupSeqs([state, own], viewer, seq)) assert.equal(holdsOp(state, viewer, s), holdsOp(own, viewer, s), `${name}: op ${s} read from memory in one room and the archive in the other`);
+          }
           // 4. No gap.
           const readable = projectArchivedLog(state, history, viewer, { sceneId: "s1" }).sort((a, b) => compareLogIds(a.id, b.id));
           if (viewer.role !== "dm") assert.ok([...live, ...readable].every((e) => e.parts === undefined && e.copyOf === undefined), `${name}: a DM's field reached a player`);
