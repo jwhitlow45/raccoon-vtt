@@ -31,6 +31,41 @@ const frame = (head = 1, seq = 0, serial = 0, watermark = 0, epoch = id(100)): H
   setup: { undo: { head: { id: id(head + 1000), label: "changing Bree's AC" }, depth: 1 }, redo: empty() },
 });
 
+test("a history tap while a resync waits for its snapshot goes out once the snapshot and its summary are in", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  const out = new FakeOutbox();
+  room.setOutbox(out);
+  room.setConnection("open");
+  const snapshot = () => room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  snapshot();
+  room.applyHistory(frame());
+  const actions = createRoomActions(room, { sendEph() {}, switchScene() {} });
+  // The server's resync, as after an undo takes away the scene the DM stands on: the socket stays open.
+  room.suspend();
+  actions.undo({ scope: "setup" });
+  assert.equal(room.store.getState().history?.pending, 1, "the tap waits, busy, rather than doing nothing");
+  const undos = () => out.sent.flatMap((m) => (m.t === "op" && (m.op as HistoryCommand).t === "undo" ? [m.op as HistoryCommand] : []));
+  assert.equal(undos().length, 0, "no head is known until the summary");
+  snapshot();
+  room.applyHistory(frame());
+  assert.deepEqual(undos().map((c) => [c.scope, c.head]), [["setup", id(1001)]]);
+  assert.equal(room.store.getState().history?.pending, 1, "busy until its answer");
+  room.dispose();
+});
+
+test("a history tap while the socket is closed is still refused", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  room.setOutbox(new FakeOutbox());
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  room.applyHistory(frame());
+  room.suspend();
+  room.setConnection("reconnecting");
+  assert.equal(room.activateHistory("undo", { scope: "setup" }), false);
+  assert.equal(room.store.getState().history?.pending, 0);
+  room.dispose();
+});
+
 test("a retained summary arriving before its state event offers Review step after coverage", () => {
   const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
   room.setConnection("open");
@@ -59,7 +94,7 @@ test("a retained summary arriving before its state event offers Review step afte
 
 function harness() {
   const clock = new FakeClock();
-  const context = { seq: 0, terminal: 0, issued: 0, enabled: true, dm: true };
+  const context = { seq: 0, terminal: 0, issued: 0, enabled: true, live: true, dm: true };
   const sent: { command: HistoryCommand; answer: OnAnswer; n: number }[] = [];
   const notes: string[] = [];
   let view: HistoryView = EMPTY_HISTORY;
@@ -215,6 +250,7 @@ test("offline, player setup, and empty play never dispatch or fall back to setup
   h.context.dm = false;
   assert.equal(h.controller.activate("undo", { scope: "setup" }), false);
   h.context.enabled = false;
+  h.context.live = false;
   assert.equal(h.controller.activate("undo"), false);
   assert.equal(h.sent.length, 0);
   assert.equal(h.view().pending, 0);

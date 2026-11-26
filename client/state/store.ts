@@ -903,7 +903,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const retainedNotices = new Map<string, string>();
   const historyRefusals = new Map<string, { head: string; toast: number | null }>();
   const history = new HistoryController({
-    context: () => ({ seq: get().seq, terminal, issued: nextN - 1, enabled: ready && get().connection === "open" && !get().ended, dm: get().you?.role === "dm" }),
+    context: () => ({ seq: get().seq, terminal, issued: nextN - 1, enabled: ready && get().connection === "open" && !get().ended, live: get().connection === "open" && !get().ended, dm: get().you?.role === "dm" }),
     send: (command, opts) => room.dispatch(command, opts),
     changed: (value) => {
       store.setState({ history: value });

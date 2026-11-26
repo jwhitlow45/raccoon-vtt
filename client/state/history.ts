@@ -26,7 +26,11 @@ export const EMPTY_HISTORY: HistoryView = { summary: null, ready: false, pending
 export const HISTORY_LOADING = "Loading undo history…";
 export const HISTORY_WAIT_MS = 200;
 
-type Context = { seq: number; terminal: number; issued: number; enabled: boolean; dm: boolean };
+/**
+ * `live`: the socket is open and the room goes on, though a resync may still
+ * wait for its snapshot. `enabled`: live, with that snapshot in.
+ */
+type Context = { seq: number; terminal: number; issued: number; enabled: boolean; live: boolean; dm: boolean };
 type Request = { direction: HistoryDirection; options: HistoryActivation };
 type Ports = {
   context(): Context;
@@ -118,7 +122,9 @@ export class HistoryController {
 
   activate(direction: HistoryDirection, options: HistoryActivation = {}): boolean {
     const context = this.ports.context();
-    if (options.repeat || !context.enabled || (options.scope === "setup" && !context.dm)) return false;
+    // A tap while a resync waits for its snapshot, as after an undo takes away the scene the DM stands on, waits
+    // as one before a summary does, busy until it drains. Refused, it did nothing and said nothing.
+    if (options.repeat || !context.live || (options.scope === "setup" && !context.dm)) return false;
     const control = options.control;
     if (control && (options.detail ?? 0) > 1 && this.clicks.has(control)) return false;
     if (control && (options.detail ?? 0) > 0) this.clicks.add(control);
