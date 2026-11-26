@@ -3,23 +3,24 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { ANA, ATTIC, GROUND, UPPER, fallCard, onThornsTurn, thornToken, tower, trapdoor, withFalls, withOpening, withStairs, withTrapdoor } from "./floorLinksTestutil.ts";
 import { LIMITS } from "./limits.ts";
-import type { FallRecord, RoomState, Token, Viewer } from "./model.ts";
+import type { Fall, FallRecord, RoomState, Token, Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
 import { inSightOfNonOwners, stableStringify } from "./project.ts";
 import { isPoseOp, opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
 import { isCreature, onHolder } from "./rules/attach.ts";
-import { isHole, linksOn, spaceOn } from "./rules/floorLinks.ts";
+import { fallDice, isHole, linksOn, spaceOn } from "./rules/floorLinks.ts";
 import { floorProblem } from "./rules/floors.ts";
 import { footprintGround } from "./rules/heights.ts";
-import { DM, env, template, token } from "./testutil.ts";
-import { climbOf, type ClimbRecord } from "#server/rooms/undo.ts";
+import { DM, actor, character, env, template, token } from "./testutil.ts";
+import { climbOf, fallsRestored, type ClimbRecord } from "#server/rooms/undo.ts";
 
 /*
  * Openings between floors as a state machine (docs/design/design-v1-floors.md
  * phase 4, 15): stairs, ladders and openings placed, moved, resized,
  * hidden, locked and removed, the DM's and Ana's walks onto and past
- * holes, group moves, heights, resizes, seats taken and left, flights and
+ * holes, group moves (two tokens of Ana's character and two of a DM
+ * character among them, so they drop and fall together and apart), heights, resizes, seats taken and left, flights and
  * climbs, trapdoors made, sprung by the DM and walked onto, floors shown
  * and hidden, blackouts, vision, fall cards dismissed, deletes, and the
  * undo and redo of both the DM's steps and Ana's falls, built as the actor
@@ -34,8 +35,10 @@ import { climbOf, type ClimbRecord } from "#server/rooms/undo.ts";
  *    squares the op wrote, ends on the ground wholly over an opening's
  *    upper end while nothing holds it up by 4.1's rule (no fall for a
  *    restore, which never falls).
- * 3. Every card's creature exists, or a player's op deleted it.
- * 4. At most LIMITS.fallsPerRoom cards, each id "<made>:<n>".
+ * 3. Every card names a creature that exists, or one a player's op
+ *    deleted.
+ * 4. At most LIMITS.fallsPerRoom cards, each id "<made>:<n>", each naming
+ *    a token once.
  * 5. Each fall record names an opening's upper end as it stood before the
  *    op, at its rev and `made`, from its floor to the floor below, or one
  *    the op itself placed.
@@ -51,6 +54,15 @@ import { climbOf, type ClimbRecord } from "#server/rooms/undo.ts";
  * 10. A redo writes back only a card its record carries.
  * 11. A walk takes no creature it names that was in the air off its floor.
  * 12. An op that makes cards drops only the oldest past a full room.
+ * 13. Two cards an op made that name one creature share a token of it,
+ *     unless one deals damage and the other none, a token counting as on
+ *     a card when the card names it or one of its landings took that card
+ *     (Applied.cardsTook), so a full card and a token's second fall pass.
+ *     Two records of the op share a card only where the later root's
+ *     creature was already on it by another token.
+ * 14. After Ana's undo, every creature on a record's card with a token the
+ *     restore left in place is still on it whole, and a redo right after
+ *     gives back each card's named set, `ft` and `sceneId`.
  *
  * What players are sent (no key of an unheld floor, a hidden end or a
  * hidden creature, joined sight) is the projection's, which its own
@@ -69,6 +81,7 @@ type Act =
   | { k: "rim"; link: number; dm: boolean }
   | { k: "gone"; link: number }
   | { k: "settled"; link: number }
+  | { k: "ridden"; link: number; detach: boolean }
   | { k: "many"; link: number; dx: number }
   | { k: "height"; who: number; up: boolean; dm: boolean }
   | { k: "size"; who: number; size: number; dm: boolean }
@@ -102,6 +115,7 @@ const ACT: fc.Arbitrary<Act> = fc.oneof(
   { weight: 2, arbitrary: fc.record({ k: fc.constant("rim" as const), link: n, dm: fc.boolean() }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("gone" as const), link: n }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("settled" as const), link: n }) },
+  { weight: 2, arbitrary: fc.record({ k: fc.constant("ridden" as const), link: n, detach: fc.boolean() }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("many" as const), link: n, dx: fc.integer({ min: 0, max: 1 }) }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("height" as const), who: n, up: fc.boolean(), dm: fc.boolean() }) },
   { weight: 2, arbitrary: fc.record({ k: fc.constant("size" as const), who: n, size: n, dm: fc.boolean() }) },
@@ -144,14 +158,17 @@ type World = {
 };
 
 const FLOORS = [GROUND, UPPER, ATTIC] as const;
-/** Every creature of the room: Thorn and Pip are Ana's, the rest the DM's, the shade hidden. */
-const WHO = ["thorn", "pip", "goblin", "ogre", "bat", "horse", "shade"] as const;
+/**
+ * Every creature of the room: Thorn and Pip are Ana's, the rest the DM's, the shade hidden. Thorn has a second token,
+ * and the wight, the DM's character, two, one of them hidden.
+ */
+const WHO = ["thorn", "pip", "goblin", "ogre", "bat", "horse", "shade", "thorn2", "wight1", "wight2"] as const;
 const SIZES = ["tiny", "small", "medium", "large", "huge"] as const;
 const ATTACH = ["ride", "perch", "carry", "drag"] as const;
 
 const pickOf = <T>(list: readonly T[], i: number): T | undefined => (list.length === 0 ? undefined : list[i % list.length]);
 const linkIds = (s: RoomState) => Object.keys(s.floorLinks ?? {}).sort();
-const mine = (id: string) => id === "thorn" || id === "pip";
+const mine = (id: string) => id === "thorn" || id === "pip" || id === "thorn2";
 
 function opFor(w: World, a: Act): { op: Op; who: Viewer } | null {
   const s = w.state;
@@ -210,15 +227,20 @@ function opFor(w: World, a: Act): { op: Op; who: Viewer } | null {
       return t && end ? { op: { t: "token.move", tokenId: t.id, x: end.rect.x, y: end.rect.y }, who: ANA } : null;
     }
     case "many": {
-      // The goblin and the ogre onto two holes, or the same one, in one group move, as one floor's creatures.
-      const g = s.tokens.goblin;
-      const o = s.tokens.ogre;
+      // The goblin and the ogre, the wight's two tokens, or Thorn's two by Ana, onto two holes, or the same one, in one group
+      // move, as one floor's creatures.
+      const [first, second] = pickOf([["goblin", "ogre"], ["wight1", "wight2"], ["thorn", "thorn2"]] as const, Math.floor(a.link / 3))!;
+      const g = s.tokens[first];
+      const o = s.tokens[second];
       if (!g || !o || g.sceneId !== o.sceneId) return null;
       const holes = linksOn(s, g.sceneId).filter((l) => isHole(s, l));
       const h1 = pickOf(holes, a.link);
       const h2 = pickOf(holes, a.link + a.dx);
       if (!h1 || !h2) return null;
-      return dm({ t: "token.moveMany", moves: [{ tokenId: "goblin", x: h1.rect.x, y: h1.rect.y }, { tokenId: "ogre", x: h2.rect.x, y: h2.rect.y }] });
+      // Two tokens of one creature, both Medium, go to the second hole's far corner, so on one hole both stand wholly over it.
+      const far = first === "goblin" ? { x: h2.rect.x, y: h2.rect.y } : { x: h2.rect.x + h2.rect.w - 1, y: h2.rect.y + h2.rect.h - 1 };
+      const op: Op = { t: "token.moveMany", moves: [{ tokenId: first, x: h1.rect.x, y: h1.rect.y }, { tokenId: second, ...far }] };
+      return first === "thorn" ? { op, who: ANA } : dm(op);
     }
     case "height": {
       const id = pickOf(WHO, a.who)!;
@@ -333,6 +355,7 @@ function opFor(w: World, a: Act): { op: Op; who: Viewer } | null {
     case "rim":
     case "gone":
     case "settled":
+    case "ridden":
       // Scenes of several ops (opsFor).
       return null;
     case "anaUndo": {
@@ -392,6 +415,33 @@ function opsFor(a: Act): ((w: World) => Next | null)[] {
       },
       () => (rect ? { op: { t: "token.move", tokenId: "thorn", x: rect.x, y: rect.y }, who: ANA } : null),
       (w) => opFor(w, { k: "undo" }),
+    ];
+  }
+  if (a.k === "ridden") {
+    // The bat perches on Thorn, who falls with it, and the DM hides the bat or takes it off him: her undo leaves it below, and
+    // its card stays for it, her redo putting Thorn back after it.
+    return [
+      (w) => {
+        const thorn = w.state.tokens.thorn;
+        return thorn && w.state.tokens.bat ? { op: { t: "token.attach", tokenId: "bat", to: "thorn", kind: "perch", x: thorn.x, y: thorn.y, elevation: thorn.elevation }, who: DM } : null;
+      },
+      (w) => opFor(w, { k: "anaHole", who: 0, link: a.link }),
+      (w) => {
+        const bat = w.state.tokens.bat;
+        if (!bat || bat.attached?.to !== "thorn" || w.state.tokens.thorn?.sceneId !== bat.sceneId) return null;
+        return { op: a.detach ? { t: "token.detach", tokenId: "bat" } : { t: "token.update", tokenId: "bat", patch: { visibility: "dm" } }, who: DM };
+      },
+      (w) => {
+        // The actor's undo leaves out a passenger hidden since or no longer under the group (server/rooms/undo.ts poseRestore).
+        const next = opFor(w, { k: "anaUndo" });
+        if (!next || next.op.t !== "sys.restore") return null;
+        if (w.ana) w.ana = { ...w.ana, entries: w.ana.entries.filter((e) => e.key !== "token:bat") };
+        return { ...next, op: { ...next.op, entries: next.op.entries.filter((e) => e.key !== "token:bat") }, as: "anaUndo" };
+      },
+      (w) => {
+        const next = opFor(w, { k: "anaRedo" });
+        return next && { ...next, as: "anaRedo" };
+      },
     ];
   }
   if (a.k === "settled") {
@@ -497,7 +547,9 @@ function cardsHold(w: World, before: RoomState, r: Applied, op: Op): void {
   for (const card of cards) {
     assert.match(card.id, /^\d+:\d+$/);
     assert.equal(card.id.slice(0, card.id.indexOf(":")), String(card.made), `${card.id} starts with its made`);
-    assert.ok(r.state.tokens[card.tokenId] !== undefined || w.playerDeleted.has(card.tokenId), `${card.id}'s creature ${card.tokenId} is there or a player deleted it`);
+    assert.equal(new Set(namesOf(card)).size, namesOf(card).length, `${card.id} names each token once`);
+    // A DM's delete keeps a card while another creature it names stands (4.4), the mount's rider or another token of a folded creature.
+    assert.ok(namesOf(card).some((id) => r.state.tokens[id] !== undefined || w.playerDeleted.has(id)), `${card.id} names a creature that is there or a player deleted`);
   }
   for (const record of r.falls ?? []) {
     const was = before.floorLinks?.[record.linkId];
@@ -509,15 +561,94 @@ function cardsHold(w: World, before: RoomState, r: Applied, op: Op): void {
     }
     assert.ok(r.state.falls?.[record.fallId] !== undefined || cards.length === LIMITS.fallsPerRoom, `${record.fallId} written`);
   }
-  // Each root's fall has a card of its own.
-  const ids = (r.falls ?? []).map((f) => f.fallId);
-  assert.equal(new Set(ids).size, ids.length, "one card a fall");
+  fallsOnceHold(w.seq, r);
   // A move that makes cards drops only the oldest past a full room, and none sooner.
   if (MAKES_CARDS.has(op.t)) {
     const had = Object.keys(before.falls ?? {}).length;
     const made = cards.filter((c) => before.falls?.[c.id] === undefined).length;
     assert.equal(cards.length, Math.min(LIMITS.fallsPerRoom, had + made), `${op.t} keeps ${Math.min(LIMITS.fallsPerRoom, had + made)} cards`);
   }
+}
+
+/** The names a card holds: the one that fell, then its riders. */
+const namesOf = (card: Fall | undefined): string[] => (card ? [card.tokenId, ...(card.riders ?? [])] : []);
+
+/** The key a card counts a creature once by: its character, else its token (reducer/falls.ts creatureOf). */
+function creatureKey(state: RoomState, id: string): string {
+  const t = state.tokens[id];
+  const ref = t && "ref" in t.actor ? t.actor.ref : undefined;
+  return ref !== undefined && state.characters[ref] !== undefined ? `character:${ref}` : `token:${id}`;
+}
+
+/** Invariant 13, on the cards the op itself made, where they stand as it made them. */
+function fallsOnceHold(seq: number, r: Applied): void {
+  const made = Object.values(r.state.falls ?? {}).filter((c) => c.made === seq);
+  // A token is on a card it is named on, or that took one of its landings: a full card leaves one off and still takes its fall.
+  const on = (card: Fall, id: string) => namesOf(card).includes(id) || (r.cardsTook ?? []).some((t) => t.tokenId === id && t.fallId === card.id);
+  const tokensOn = (card: Fall) => new Set([...namesOf(card), ...(r.cardsTook ?? []).filter((t) => t.fallId === card.id).map((t) => t.tokenId)]);
+  const key = (id: string) => creatureKey(r.state, id);
+  const damages = (card: Fall) => fallDice(card.ft) > 0;
+  for (const [i, a] of made.entries()) {
+    for (const b of made.slice(i + 1)) {
+      if (damages(a) !== damages(b)) continue;
+      for (const id of tokensOn(a)) {
+        const creature = key(id);
+        if (![...tokensOn(b)].some((other) => key(other) === creature)) continue;
+        assert.ok([...tokensOn(a)].some((t) => key(t) === creature && on(b, t)), `${a.id} and ${b.id} name ${creature} by no token they share`);
+      }
+    }
+  }
+  const records = r.falls ?? [];
+  for (const [j, later] of records.entries()) {
+    if (!records.slice(0, j).some((f) => f.fallId === later.fallId)) continue;
+    const card = r.state.falls?.[later.fallId];
+    if (!card) continue;
+    assert.ok([...tokensOn(card)].some((id) => id !== later.tokenId && key(id) === key(later.tokenId)), `${later.tokenId}'s record shares ${card.id}, which held its creature by no other token`);
+  }
+  for (const card of made) {
+    const named = namesOf(card);
+    if (new Set(named.map(key)).size < named.length) counts13.folds++;
+  }
+}
+
+/** How often the machine reaches the one-card rule's parts. */
+const counts13 = { folds: 0, trims: 0, redoneWhole: 0 };
+
+/**
+ * Invariant 14: Ana's undo took off a record's card only creatures it moved back whole, and a redo right after gives back
+ * each card as it stood before the undo, its named set, `ft` and `sceneId`.
+ */
+function undoKeepsCreatures(w: World, before: RoomState, applied: Applied, step: AnaStep, redoFalls: FallRecord[]): void {
+  const after = applied.state;
+  const placeOf = (s: RoomState, id: string) => {
+    const t = s.tokens[id];
+    return t && `${t.sceneId} ${t.x} ${t.y}`;
+  };
+  const cards = new Map<string, Fall>();
+  for (const f of step.falls) {
+    const was = before.falls?.[f.fallId];
+    if (was) cards.set(was.id, was);
+  }
+  for (const was of cards.values()) {
+    const now = after.falls?.[was.id];
+    for (const id of namesOf(was)) {
+      const stayed = placeOf(before, id) !== undefined && placeOf(before, id) === placeOf(after, id);
+      if (!stayed) continue;
+      for (const other of namesOf(was)) if (creatureKey(after, other) === creatureKey(after, id)) assert.ok(namesOf(now).includes(other), `the undo left ${id} in place and took ${other} of its creature off ${was.id}`);
+    }
+    if (now && namesOf(now).length < namesOf(was).length) counts13.trims++;
+  }
+  if (cards.size === 0 || !applied.inverse) return;
+  // The redo right after, as a probe the world does not keep.
+  const redo = opSchema.safeParse({ t: "sys.restore", entries: applied.inverse.filter((e) => !e.key.startsWith("fall:")), from: "redo", deps: true, ...(step.climb ? { climb: step.climb } : {}), ...(redoFalls.length > 0 ? { falls: redoFalls } : {}) });
+  if (!redo.success || !canApply(redo.data, ANA, after, { canUseAsset: () => true }).ok) return;
+  const again = applyOp(after, redo.data, ANA, env(w.seq + 1));
+  if (!again.ok || Object.keys(again.state.falls ?? {}).length === LIMITS.fallsPerRoom) return;
+  for (const was of cards.values()) {
+    const back: Fall | undefined = again.state.falls?.[was.id];
+    assert.deepEqual([new Set(namesOf(back)), back?.ft, back?.sceneId], [new Set(namesOf(was)), was.ft, was.sceneId], `the redo right after gives back ${was.id}`);
+  }
+  counts13.redoneWhole++;
 }
 
 /** The ops that make cards and take none away but by eviction: moves, landings, ends placed and trapdoors sprung. */
@@ -582,7 +713,7 @@ function counted(): Counts {
 function startRoom(): RoomState {
   // Thorn on Upper floor with an opening to Ground floor beside him, an opening from the Attic onto Upper floor, stairs up from
   // Ground floor, a trapdoor on Upper floor, a goblin, a Large ogre and a horse to sit on, a flying bat, a shade the DM hid, Pip
-  // (Ana's), and Spirit Guardians on Ground floor, on Thorn's turn.
+  // (Ana's), Thorn's second token, the wight's two, one hidden, and Spirit Guardians on Ground floor, on Thorn's turn.
   const base = withTrapdoor(withOpening(withOpening(withStairs(tower({ tokens: {} }), { rect: { x: 10, y: 3, w: 1, h: 1 } })), { id: "o3", pairId: "o4", upper: ATTIC, lower: UPPER, rect: { x: 14, y: 14, w: 2, h: 2 } }));
   const creatures: Token[] = [
     thornToken({ sceneId: UPPER, x: 3, y: 3 }),
@@ -592,11 +723,15 @@ function startRoom(): RoomState {
     token("bat", { sceneId: UPPER, name: "Bat", size: "tiny", x: 6, y: 9, elevation: 10 }),
     token("horse", { sceneId: UPPER, name: "Horse", size: "large", x: 2, y: 8 }),
     token("shade", { sceneId: UPPER, name: "Shade", visibility: "dm", x: 8, y: 7 }),
+    thornToken({ id: "thorn2", sceneId: UPPER, x: 5, y: 3 }),
+    token("wight1", { sceneId: UPPER, name: "Wight", kind: "pc", actor: { ref: "wight" }, x: 9, y: 4 }),
+    token("wight2", { sceneId: UPPER, name: "Wight", kind: "pc", actor: { ref: "wight" }, visibility: "dm", x: 11, y: 9 }),
   ];
   const guardians = template("sg", { sceneId: GROUND, shape: "sphere", size: 10, origin: { x: 7, y: 7, z: 0 }, ownerId: "dm1", spell: "Spirit Guardians", triggers: ["enter"] });
   // Eight cards from earlier falls, so a few more fill the room and eviction comes into play.
-  const old = WHO.slice(0, 8).map((id, i) => fallCard({ made: 10 + i, tokenId: id, from: UPPER, sceneId: GROUND }));
-  return onThornsTurn(withFalls({ ...base, tokens: Object.fromEntries(creatures.map((t) => [t.id, t])), templates: { sg: guardians } }, ...old, fallCard({ made: 18, tokenId: "goblin" })));
+  const old = WHO.slice(0, 7).map((id, i) => fallCard({ made: 10 + i, tokenId: id, from: UPPER, sceneId: GROUND }));
+  const characters = { ...base.characters, wight: character("wight", { name: "Wight", ownerIds: [], actor: actor() }) };
+  return onThornsTurn(withFalls({ ...base, characters, tokens: Object.fromEntries(creatures.map((t) => [t.id, t])), templates: { sg: guardians } }, ...old, fallCard({ made: 18, tokenId: "goblin" })));
 }
 
 /** One sequence of acts, each op checked against every invariant above. */
@@ -639,13 +774,11 @@ function play(start: RoomState, acts: readonly Act[], counts: Counts): void {
     counts.drops += Object.keys(applied.state.falls ?? {}).filter((id) => before.falls?.[id] === undefined && !recorded.has(id)).length;
     if (k === "anaUndo") {
       counts.anaUndos++;
-      // Her redo carries the card each undo removed, as the actor puts it on the redo step's record (4.5).
+      // Her redo carries the part of each card the undo took off, as the actor puts it on the redo step's record (4.5).
       const step = w.ana!;
-      const falls = step.falls.map((f) => {
-        const card = before.falls?.[f.fallId];
-        return card && applied.state.falls?.[f.fallId] === undefined ? { ...f, card } : f;
-      });
-      for (const f of step.falls) assert.equal(applied.state.falls?.[f.fallId], undefined, `the undo removes ${f.fallId}`);
+      const falls = fallsRestored(step.falls, "undo", before, applied.state) ?? [];
+      // Invariant 14.
+      undoKeepsCreatures(w, before, applied, step, falls);
       w.redo = applied.inverse ? { entries: applied.inverse.filter((e) => !e.key.startsWith("fall:")), falls, ...(step.climb ? { climb: step.climb } : {}) } : null;
       w.ana = null;
       continue;
@@ -686,7 +819,7 @@ test("openings, falls and trapdoors keep their invariants over random sequences"
     fc.property(fc.array(ACT, { minLength: 5, maxLength: 40 }), (acts) => play(start, acts, counts)),
     { numRuns: Number(process.env.OPENINGS_RUNS ?? 3000), seed: Number(process.env.OPENINGS_SEED ?? 2611191) },
   );
-  if (process.env.OPENINGS_COUNTS) console.log(JSON.stringify(counts));
+  if (process.env.OPENINGS_COUNTS) console.log(JSON.stringify({ ...counts, ...counts13 }));
   // The sequences reach what they test.
   assert.ok(counts.falls > 3000, `${counts.falls} cards made`);
   assert.ok(counts.records > 2500, `${counts.records} fall records`);
@@ -695,6 +828,9 @@ test("openings, falls and trapdoors keep their invariants over random sequences"
   assert.ok(counts.anaUndos > 250, `${counts.anaUndos} undos of Ana's`);
   assert.ok(counts.cardsBack > 20, `${counts.cardsBack} cards a redo wrote back`);
   assert.ok(counts.overHeld > 0, `${counts.overHeld} creatures held up over a hole`);
+  assert.ok(counts13.folds > 200, `${counts13.folds} cards naming two tokens of one creature`);
+  assert.ok(counts13.trims > 200, `${counts13.trims} cards an undo trimmed`);
+  assert.ok(counts13.redoneWhole > 150, `${counts13.redoneWhole} undos whose redo right after gave each card back`);
 });
 
 test("a DM's undo of a delete that puts its creature's cards back keeps the room to LIMITS.fallsPerRoom", () => {
@@ -702,7 +838,7 @@ test("a DM's undo of a delete that puts its creature's cards back keeps the room
   // DM's undo of the delete puts the goblin's cards back beside Thorn's.
   const acts: Act[] = [
     { k: "many", link: 0, dx: 0 },
-    { k: "delete", who: 9 },
+    { k: "delete", who: 2 },
     { k: "anaHole", who: 0, link: 0 },
     { k: "undo" },
   ];
