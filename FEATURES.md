@@ -1170,6 +1170,7 @@ A scene can have weather over its map: rain, snow, fog, falling leaves, ash or s
     - **Save and damage** hides while every creature the card names is away, since its page would have no rows, and Dismiss stays. It shows again once one is back on the trap's scene or one of its floors, and Apply then ends the card. Where the button held keyboard focus when it hid, focus moves to the card's toggle.
     - A page that names creatures, reached none of them and targets no one builds no plan, and Apply reads "Nothing would change."
     - A creature deleted meanwhile drops off the card at the next Apply that names someone, and the card goes once no creature it names is left, however many more it counted.
+    - Until then the card names a deleted creature as away, since the DM's copy cannot tell it from one on another scene, so a card with only deleted creatures left hides Save and damage, and Dismiss ends it.
     - A private springing's card that a partial Apply leaves behind drops "The trap is still armed for them." and its Do its effects and Mark sprung, as a whole Apply does, and the trap's later private springings write again.
     - A card waiting for a creature keeps one of its trap's 3 places and one of the room's 10 for waiting springings, so later springings push it out, oldest first, without a word.
     - A DM page left open across the update to change format 66 answers "It was settled meanwhile." to an Apply on a card that names creatures until it reloads, so nobody takes the damage twice.
