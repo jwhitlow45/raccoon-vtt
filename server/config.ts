@@ -77,6 +77,13 @@ const Env = z.object({
    * built-in effects still play, since each device makes them.
    */
   ROOM_SOUND: emptyAsUnset(z.enum(["0", "1"]).default("0")),
+  /**
+   * The memory every socket's drag, ruler and area previews may hold at
+   * once, in MiB (server/rooms/budgets.ts PreviewPool, docs/self-hosting.md):
+   * 848 KiB a socket at full pace, 154 sockets at the default 128. A socket
+   * past them still shows its camera, laser and pings.
+   */
+  PREVIEW_POOL_MB: emptyAsUnset(z.coerce.number().int().min(1).max(4_096).default(128)),
 });
 
 /** Whether the server takes, serves and lets ops add videos. Off, every map shows its still. */
