@@ -1454,8 +1454,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     // Only this step's card waits, so the column holds it whole at every size.
     for (const t of Object.values(state(dmSocket)?.traps ?? {})) for (const d of t.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: t.id, due: d.id });
     const vault = uuidv7();
-    const brute = uuidv7();
-    const bree = uuidv7();
+    // An occurrence keeps its hits in id order, and two ids made in one millisecond fall in either order, so Brute takes the lower.
+    const [brute, bree] = [uuidv7(), uuidv7()].sort() as [string, string];
     const plateId = uuidv7();
     await ops.send({ t: "scene.create", scene: { id: vault, name: "Vault", bounds: BOUNDS } });
     for (const [id, name, x] of [
