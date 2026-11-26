@@ -12,7 +12,7 @@ import { Outbox } from "./ephemeral.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { MAX_VERSIONS } from "./gestures.ts";
 import { fullRoom } from "./limitsTesting.ts";
-import { scopeFixture, StoredRoomDb } from "./undoScopeTesting.ts";
+import { scopeFixture, StoredRoomDb, turnsUntil } from "./undoScopeTesting.ts";
 
 /*
  * The preview pool at its worst at once (design 7.6, a build measurement):
@@ -92,8 +92,7 @@ test("154 full sockets and 246 off, each at its caps, its member's share or the 
     conns.push(conn);
     void actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
   }
-  for (let i = 0; i < 200 && conns.some((c) => c.held === null); i++) await flush();
-  assert.ok(conns.every((c) => c.held !== null), "every socket has its snapshot");
+  await turnsUntil(() => conns.every((c) => c.held !== null), "snapshot for every socket", 60_000);
   // The pool of one room keeps only that room's DM share, so the paces are set as 154 full shares across rooms would give them.
   for (const [i, conn] of conns.entries()) conn.pace = i < 154 ? "full" : "off";
   const send = (conn: Connection, e: unknown) => {
@@ -228,8 +227,8 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
     conns.push(conn);
     void actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
   }
-  for (let i = 0; i < 200 && conns.some((c) => c.held === null); i++) await flush();
-  assert.ok(conns.every((c) => c.held !== null && c.pace === "full"));
+  await turnsUntil(() => conns.every((c) => c.held !== null), "snapshot for every socket", 60_000);
+  assert.ok(conns.every((c) => c.pace === "full"));
   const send = (conn: Connection, e: unknown) => {
     const parsed = clientMessageSchema.parse({ t: "eph", sceneId, e });
     actor.ephemeral(conn, { sceneId, e: (parsed as { e: EphEvent | GroupFrame }).e });
