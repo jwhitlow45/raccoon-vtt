@@ -113,6 +113,9 @@ services:
       # (docs/self-hosting.md), off unless 1. Each device that plays music
       # downloads about 60 MB an hour of it.
       - ROOM_SOUND
+      # The memory every device's live previews may hold on the server, in MiB
+      # (docs/self-hosting.md). Unset, the app keeps 128.
+      - PREVIEW_POOL_MB
       # Abuse limits. The defaults match server/config.ts. They are spelled
       # out because an empty value would otherwise reach the app as 0 and
       # stop it booting.
