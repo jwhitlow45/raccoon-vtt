@@ -3529,7 +3529,7 @@ export const handoutDocInputSchema = handoutDocInput;
 
 const point = z.strictObject({ x: coord, y: coord });
 /** The most numbers a drag frame's route corners hold, x then y. */
-const MAX_PATH_NUMBERS = 200;
+export const MAX_PATH_NUMBERS = 200;
 /**
  * A ruler stop. A free one carries `z`, the ground the measurer saw under
  * it, left out at 0, so every receiver reads the measurer's distance. A

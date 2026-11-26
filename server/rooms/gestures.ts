@@ -1,4 +1,6 @@
-import { ephCaps, isGroupFrame, MAX_DRAG_TOKENS, type EphEvent, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
+import { ephCaps, isGroupFrame, MAX_DRAG_TOKENS, MAX_EPH_BYTES, MAX_PATH_NUMBERS, type EphEvent, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
+import type { SentPreview } from "./connection.ts";
+import { dragKey, gestureKey, MOST_PREVIEWS_SENT } from "./ephemeral.ts";
 
 /*
  * What a socket's group drag frames keep on the server (design 7.6): each
@@ -63,29 +65,146 @@ export function heldCharge(e: EphEvent | GroupFrame): number {
 }
 
 /*
- * What one receiver may be sent for a held message at the most, by its kind
- * alone (RoomActor's room budget, MAX_ROOM_HELD_SENDS): a group frame's at
- * the most tokens one drag moves, 256 bytes a token's message with ids of
- * 64 characters and numbers of 24, and the longest route on its lead,
- * never its roster's count. A lone drag, ruler or area at its wire cap and
- * a header, anything else at its held charge.
+ * What one receiver may be sent for a held message at the most (RoomActor's
+ * room count and member shares, MAX_ROOM_HELD_SENDS), as JSON on the wire:
+ * each message its kind's widest, never what the frame names. Its scene's
+ * and its tokens' ids are 64 units that JSON escapes to 6 characters each,
+ * every number 25 characters, every optional field present, and the
+ * sender's member id 36 characters, as the server mints it
+ * (auth/roomRecords.ts). A group frame sends each of its at most 100 tokens such a message, one of
+ * them with the longest route. A lone drag, ruler or area is at its wire
+ * cap (MAX_EPH_BYTES), anything else at its widest.
  */
-const SENDS_PER_TOKEN = 256;
-/** A route's 200 numbers (shared/protocol.ts MAX_PATH_NUMBERS), each 24 characters and a comma at the most. */
-const SENDS_ROUTE = 200 * 25;
+const WIDEST_ID = "\u0001".repeat(64);
+const WIDEST_NUMBER = -0.0000012345678901234567;
+const MEMBER_ID = "0".repeat(36);
 
+/** The widest event of each kind a held frame's routing may send but a capped one, every field its schema takes present (shared/protocol.ts ephUnion). */
+export const WIDEST_EVENTS = {
+  dragStart: { k: "dragStart", tokenId: WIDEST_ID, x: WIDEST_NUMBER, y: WIDEST_NUMBER },
+  dragMove: { k: "dragMove", tokenId: WIDEST_ID, x: WIDEST_NUMBER, y: WIDEST_NUMBER, ft: WIDEST_NUMBER, squeeze: true, free: true },
+  dragEnd: { k: "dragEnd", tokenId: WIDEST_ID, x: WIDEST_NUMBER, y: WIDEST_NUMBER, squeeze: true },
+  dragCancel: { k: "dragCancel", tokenId: WIDEST_ID },
+  rulerEnd: { k: "rulerEnd", id: WIDEST_ID },
+  aoeEnd: { k: "aoeEnd", id: WIDEST_ID },
+  ping: { k: "ping", x: WIDEST_NUMBER, y: WIDEST_NUMBER },
+  laser: { k: "laser", x: WIDEST_NUMBER, y: WIDEST_NUMBER, on: false },
+  focus: { k: "focus", x: WIDEST_NUMBER, y: WIDEST_NUMBER, zoom: WIDEST_NUMBER },
+  view: { k: "view", x: WIDEST_NUMBER, y: WIDEST_NUMBER, w: WIDEST_NUMBER, h: WIDEST_NUMBER, iso: { turn: WIDEST_NUMBER, vw: WIDEST_NUMBER, vh: WIDEST_NUMBER } },
+} as const;
+
+/** One message's bytes as a receiver is sent it (ephemeral.ts Outbox.deliver). */
+function sentBytes(e: object): number {
+  return Buffer.byteLength(JSON.stringify({ t: "eph", from: MEMBER_ID, sceneId: WIDEST_ID, e }));
+}
+
+const WIDE = Object.fromEntries(Object.entries(WIDEST_EVENTS).map(([k, e]) => [k, sentBytes(e)])) as Record<keyof typeof WIDEST_EVENTS, number>;
+/** What the longest route adds to the one token's message that carries it. */
+const ROUTE = sentBytes({ ...WIDEST_EVENTS.dragMove, path: new Array<number>(MAX_PATH_NUMBERS).fill(WIDEST_NUMBER) }) - WIDE.dragMove;
+/** A message whose event is at its wire cap: the envelope, less the `{}` of an empty event, and the cap. */
+const CAPPED = sentBytes({}) - 2 + MAX_EPH_BYTES;
+
+/** A preview's one cancel, a drag token's, a ruler's or an area's. */
+export const CANCEL_SENDS = Math.max(WIDE.dragCancel, WIDE.rulerEnd, WIDE.aoeEnd);
+/** Every token of a drag's entry cancelled at once: as a step names other tokens (ephemeral.ts endLeft), or as an entry goes to make room (keepSent). */
+export const CANCELS_SENDS = MAX_DRAG_TOKENS * CANCEL_SENDS;
+
+const GROUP_SENDS: Record<GroupFrame["k"], number> = {
+  dragStart: MAX_DRAG_TOKENS * WIDE.dragStart,
+  dragMove: MAX_DRAG_TOKENS * WIDE.dragMove + ROUTE,
+  // A token with no landing ends as a cancel.
+  groupEnd: MAX_DRAG_TOKENS * Math.max(WIDE.dragEnd, WIDE.dragCancel),
+  dragCancel: MAX_DRAG_TOKENS * WIDE.dragCancel,
+};
+
+/** What one receiver may be sent for a held message's own tokens or event, by its kind alone. */
 export function heldSends(e: EphEvent | GroupFrame): number {
-  if (isGroupFrame(e)) return MAX_DRAG_TOKENS * SENDS_PER_TOKEN + SENDS_ROUTE;
+  if (isGroupFrame(e)) return GROUP_SENDS[e.k];
   switch (e.k) {
     case "dragStart":
     case "dragMove":
     case "dragEnd":
     case "ruler":
     case "aoe":
-      return ephCaps.charges.measure;
+      return CAPPED;
     default:
-      return ephCaps.charges.other;
+      return WIDE[e.k];
   }
+}
+
+/**
+ * What a member's devices hold through a stall of RETAIN_MS at the most
+ * when every frame they send is a device's own (D-261126-265), by the
+ * charges above: a drag that changes floor and ends (its latest move on
+ * the old floor, its cancel there, the new floor's move with its roster
+ * and the latest one after it, and its end), the next drag started (its
+ * start and latest move), a ruler and its end, and a laser and a camera
+ * each sent 30 times a second, as a device sends a preview at the most.
+ */
+export const HONEST_MEMBER_SENDS =
+  GROUP_SENDS.dragMove + GROUP_SENDS.dragCancel + GROUP_SENDS.dragMove + GROUP_SENDS.dragMove + GROUP_SENDS.groupEnd +
+  GROUP_SENDS.dragStart + GROUP_SENDS.dragMove +
+  CAPPED + WIDE.rulerEnd +
+  60 * (WIDE.laser + WIDE.view);
+
+/**
+ * What a held frame's routing may send one receiver beyond its own
+ * messages, added to its sends, read from its socket's entries and held
+ * frames alone, never from the room: every token of its gesture's entry
+ * cancelled when its pressed token or roster differs from the step before
+ * it (ephemeral.ts endLeft), and an older entry's cancels when it may add
+ * an entry past the socket's most (keepSent), a drag's tokens or one
+ * preview's. `skip` is a held frame it takes the place of.
+ */
+export function chargeCancels(frame: HeldFrame, held: readonly HeldFrame[], entries: ReadonlyMap<string, SentPreview>, skip: HeldFrame | null): void {
+  frame.leaves = frame.slot !== null && frame.slot.key.startsWith("drag#") && mayLeave(frame, held, entries.get(frame.slot.key), skip);
+  frame.sends += (frame.leaves ? CANCELS_SENDS : 0) + mayEvict(frame, held, entries, skip);
+}
+
+/*
+ * The step before a group frame's is its gesture's last held frame, or its
+ * entry as it stands when none waits. A frame differs from a step by its
+ * pressed token, or by its roster when it binds one, since a frame that
+ * binds none keeps the step's. A step that ends its gesture leaves no entry
+ * to differ from. Should that step not route, the entry may differ where
+ * the step did not, and the router then sends the frame nowhere
+ * (ephemeral.ts routeDrags), so what it sends stays within its charge.
+ */
+function mayLeave(frame: HeldFrame, held: readonly HeldFrame[], entry: SentPreview | undefined, skip: HeldFrame | null): boolean {
+  const key = frame.slot!.key;
+  for (let i = held.length - 1; i >= 0; i--) {
+    const last = held[i]!;
+    if (last === skip || last.slot?.key !== key) continue;
+    return !last.slot.closes && (last.names !== frame.names || (frame.version !== null && last.version !== frame.version));
+  }
+  return entry !== undefined && (entry.id !== frame.names || (frame.version !== null && entry.members?.ids !== frame.version.ids));
+}
+
+/*
+ * An entry goes to make room only when a frame adds one to a socket whose
+ * entries are at their most. The entries as the frame routes are at most
+ * those the socket has now and those its held frames before it may add.
+ * The one that goes is never the frame's own, so it cancels a drag's
+ * tokens only when one of the others is a group drag's.
+ */
+function mayEvict(frame: HeldFrame, held: readonly HeldFrame[], entries: ReadonlyMap<string, SentPreview>, skip: HeldFrame | null): number {
+  const own = keptEntry(frame);
+  if (own === null || entries.size + held.length + 1 <= MOST_PREVIEWS_SENT) return 0;
+  const keys = new Set(entries.keys());
+  for (const h of held) {
+    const key = h === skip ? null : keptEntry(h);
+    if (key !== null) keys.add(key);
+  }
+  keys.add(own);
+  if (keys.size <= MOST_PREVIEWS_SENT) return 0;
+  for (const key of keys) if (key !== own && key.startsWith("drag#")) return CANCELS_SENDS;
+  return CANCEL_SENDS;
+}
+
+/** The entry a held frame keeps on its socket once it routes (Connection.previewsSent): its slot's unless it ends it, or a lone drag's token's. */
+function keptEntry(h: HeldFrame): string | null {
+  if (h.slot !== null) return h.slot.closes ? null : h.slot.key;
+  return "k" in h.e && (h.e.k === "dragStart" || h.e.k === "dragMove") ? dragKey(h.e.tokenId) : null;
 }
 
 /**
@@ -93,25 +212,26 @@ export function heldSends(e: EphEvent | GroupFrame): number {
  * its gesture's, ruler's or area's slot, whether it is a newer frame of the
  * kind that replaces (a move, a ruler, an area), and whether a newer one
  * may replace it. A group move that carries a roster replaces but stays,
- * and starts, ends and cancels neither replace nor go. Read from the
- * message's kind, gesture, id and whether it carries a roster, never from
- * its roster's members.
+ * and starts, ends and cancels neither replace nor go. `opens` marks a
+ * gesture's start and `closes` an end or a cancel that ends its slot's
+ * preview. Read from the message's kind, gesture, id and whether it
+ * carries a roster, never from its roster's members.
  */
-export type HeldSlot = { readonly key: string; readonly replaces: boolean; readonly replaceable: boolean };
+export type HeldSlot = { readonly key: string; readonly replaces: boolean; readonly replaceable: boolean; readonly opens: boolean; readonly closes: boolean };
 
 export function heldSlot(e: EphEvent | GroupFrame): HeldSlot | null {
   if (isGroupFrame(e)) {
     const move = e.k === "dragMove";
-    return { key: `drag#${e.g}`, replaces: move, replaceable: move && e.with === undefined };
+    return { key: gestureKey(e.g), replaces: move, replaceable: move && e.with === undefined, opens: e.k === "dragStart", closes: e.k === "groupEnd" || e.k === "dragCancel" };
   }
   switch (e.k) {
     case "ruler":
     case "aoe":
-      return { key: `${e.k}:${e.id}`, replaces: true, replaceable: true };
+      return { key: `${e.k}:${e.id}`, replaces: true, replaceable: true, opens: false, closes: false };
     case "rulerEnd":
-      return { key: `ruler:${e.id}`, replaces: false, replaceable: false };
+      return { key: `ruler:${e.id}`, replaces: false, replaceable: false, opens: false, closes: true };
     case "aoeEnd":
-      return { key: `aoe:${e.id}`, replaces: false, replaceable: false };
+      return { key: `aoe:${e.id}`, replaces: false, replaceable: false, opens: false, closes: true };
     default:
       return null;
   }
@@ -270,14 +390,16 @@ export type HeldFrame = {
   /** Its pressed token or id, which a newer frame of its slot must name to take its place. */
   names: string;
   slot: HeldSlot | null;
-  /** What one receiver may be sent for it at the most (heldSends). */
+  /** What one receiver may be sent for it at the most: its own messages (heldSends), and what its routing may cancel (chargeCancels). */
   sends: number;
+  /** Whether its sends cover the cancels of its gesture's tokens it no longer names (chargeCancels). One whose do not, and that would send them, routes nowhere. */
+  leaves: boolean;
 };
 
 /** A frame as it is put in its socket's held queue (RoomActor.ephemeral): its kept form, its charges and its slot. */
 export function holdFrame(sceneId: string, e: EphEvent | GroupFrame, version: RosterVersion | null, arrived: number, a: number, at: number): HeldFrame {
   const names = "tokenId" in e ? e.tokenId : "id" in e ? e.id : "";
-  return { sceneId, e: heldForm(e), version, arrived, a, at, bytes: heldCharge(e), names, slot: heldSlot(e), sends: heldSends(e) };
+  return { sceneId, e: heldForm(e), version, arrived, a, at, bytes: heldCharge(e), names, slot: heldSlot(e), sends: heldSends(e), leaves: false };
 }
 
 const absent = (v: number | undefined): number => v ?? Number.NaN;

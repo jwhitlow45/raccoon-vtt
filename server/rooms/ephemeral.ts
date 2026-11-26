@@ -300,9 +300,9 @@ function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: 
 }
 
 /** A lone drag's entry on its socket, one token's, as a device sends it one token at a time. */
-const dragKey = (tokenId: string) => `drag:${tokenId}`;
+export const dragKey = (tokenId: string) => `drag:${tokenId}`;
 /** A group drag's entry on its socket, all its tokens', by its gesture number. */
-const gestureKey = (g: number) => `drag#${g}`;
+export const gestureKey = (g: number) => `drag#${g}`;
 
 /**
  * The tokens a drag entry framed: its pressed token, then its members. A
@@ -520,22 +520,23 @@ export function routeEphemeral(
   at = sender.now(),
   version: GroupRoster | null = null,
   out?: Outbox,
+  leaves = true,
 ): void {
-  pass(out, (box) => routeInto(state, sender, sceneId, e, receivers, at, version, box));
+  pass(out, (box) => routeInto(state, sender, sceneId, e, receivers, at, version, box, leaves));
 }
 
-function routeInto(state: RoomState, sender: Connection, sceneId: string, e: EphEvent | GroupFrame, receivers: Iterable<Connection>, at: number, version: GroupRoster | null, box: Outbox): void {
+function routeInto(state: RoomState, sender: Connection, sceneId: string, e: EphEvent | GroupFrame, receivers: Iterable<Connection>, at: number, version: GroupRoster | null, box: Outbox, leaves: boolean): void {
   if (!state.scenes[sceneId]) return;
   // A player previews only on a floor they hold, or the start floor as before floors, which reaches nobody behind a
   // blackout but the DM. The DM may be anywhere.
   if (sender.role === "player" && startFloor(state) !== sceneId && !holds(state, sender, sceneId)) return;
   const all = [...receivers];
   if (isGroupFrame(e)) {
-    routeGroup(state, sender, sceneId, e, all, at, version, box);
+    routeGroup(state, sender, sceneId, e, all, at, version, box, leaves);
     return;
   }
   if (e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd" || e.k === "dragCancel") {
-    routeDrags(state, sender, sceneId, dragKey(e.tokenId), [e], all, at, { ends: e.k === "dragEnd" || e.k === "dragCancel", members: null, checked: true, group: null }, box);
+    routeDrags(state, sender, sceneId, dragKey(e.tokenId), [e], all, at, { ends: e.k === "dragEnd" || e.k === "dragCancel", members: null, checked: true, group: null, leaves: true }, box);
     return;
   }
   const preview = previewOf(e);
@@ -573,10 +574,10 @@ function routeInto(state: RoomState, sender: Connection, sceneId: string, e: Eph
  * frame whose gesture had no roster open expands to the pressed token's
  * alone, and the device is asked for the roster (`need`).
  */
-function routeGroup(state: RoomState, sender: Connection, sceneId: string, e: GroupFrame, all: readonly Connection[], at: number, version: GroupRoster | null, box: Outbox): void {
+function routeGroup(state: RoomState, sender: Connection, sceneId: string, e: GroupFrame, all: readonly Connection[], at: number, version: GroupRoster | null, box: Outbox, leaves: boolean): void {
   const ends = e.k === "dragCancel" || e.k === "groupEnd";
   if (version === null && !ends && sender.gestures.mayAsk(e.g, at)) sender.send({ t: "need", id: e.tokenId, g: e.g });
-  routeDrags(state, sender, sceneId, gestureKey(e.g), expandGroup(e, version), all, at, { ends, members: version?.ids ?? null, checked: false, group: { e, roster: version } }, box);
+  routeDrags(state, sender, sceneId, gestureKey(e.g), expandGroup(e, version), all, at, { ends, members: version?.ids ?? null, checked: false, group: { e, roster: version }, leaves }, box);
 }
 
 /**
@@ -596,14 +597,18 @@ function routeDrags(
   frames: readonly EphEvent[],
   all: readonly Connection[],
   at: number,
-  step: { ends: boolean; members: readonly string[] | null; checked: boolean; group: { e: GroupFrame; roster: GroupRoster | null } | null },
+  step: { ends: boolean; members: readonly string[] | null; checked: boolean; group: { e: GroupFrame; roster: GroupRoster | null } | null; leaves: boolean },
   box: Outbox,
 ): void {
   const pressed = frames[0];
   if (pressed === undefined || !("tokenId" in pressed)) return;
   const before = sender.previewsSent.get(key);
   const ids = step.members ?? before?.members?.ids ?? null;
-  if (before) endLeft(sender, key, before, pressed.tokenId, ids, all, box);
+  if (before && namesOther(before, pressed.tokenId, ids)) {
+    // A held frame whose charge leaves out what this step would end goes nowhere (gestures.ts chargeCancels).
+    if (!step.leaves) return;
+    endLeft(sender, key, before, pressed.tokenId, ids, all, box);
+  }
   const points = ids === null ? null : pointsFor(ids, before);
   let last = before?.last ?? pressed;
   let slot: number | undefined;
@@ -635,6 +640,11 @@ function routeDrags(
   keepSent(sender, key, { kind: "drag", id: pressed.tokenId, sceneId, last, at, ...(ids && points ? { members: { ids, points } } : {}) }, all, box);
 }
 
+/** Whether a step names other tokens than its entry did: another pressed token, or a roster other than the one the entry keeps. */
+function namesOther(before: SentPreview, pressedId: string, ids: readonly string[] | null): boolean {
+  return before.id !== pressedId || (before.members?.ids ?? null) !== ids;
+}
+
 /**
  * A step that names other tokens than its entry did, by a new roster or
  * another pressed token, ends each token the entry still owns that it no
@@ -643,7 +653,6 @@ function routeDrags(
  * passes what they name, however many rosters a gesture sends.
  */
 function endLeft(sender: Connection, key: string, before: SentPreview, pressedId: string, ids: readonly string[] | null, receivers: readonly Connection[], box: Outbox): void {
-  if (before.id === pressedId && (before.members?.ids ?? null) === ids) return;
   const named = new Set(ids);
   named.add(pressedId);
   for (const id of entryTokens(before)) {
