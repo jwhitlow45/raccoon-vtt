@@ -105,3 +105,15 @@ test("in Isometric a hole's pills keep off the trap name as isoTrapNamePill stan
   assert.equal(covered(original), 1, "Top-down's pick covers a frame on the turned ground");
   assert.equal(covered(marks[0]!), 0, "the marker is clear of every frame where it stands");
 });
+
+test("a trap's name between a hole and stairs hangs over its own squares where no spot on its edges is clear, so it covers no frame at any turn (ISO-1-MORE-SPOTS)", () => {
+  const trap = makeTrap("t", { zone: { cells: [{ x: 3, y: 2, w: 2, h: 1 }] } });
+  const frames = linkFrames(SQUARES, "s1", { h: { id: "h", sceneId: "s1", rect: { x: 1, y: 2, w: 2, h: 1 } }, s: { id: "s", sceneId: "s1", rect: { x: 5, y: 1, w: 2, h: 2 } } });
+  for (const scale of [36, 48]) for (const turn of [0, 1, 2, 3] as const) {
+    const space = { turn, ground: () => 0 };
+    const original = trapNamePill(SQUARES, trap, {}, scale, true)!;
+    const chosen = isoTrapNamePill(original, SQUARES, trap, {}, { view: isometric(turn), ground: () => 0, boxes: [] }, scale, () => true, frames, space);
+    const drawn = drawnBox(chosen, scale, space, true, true);
+    assert.deepEqual(frames.filter((o) => boxCoversOutline(drawn, cornersOf(o), space)).length, 0, `scale ${scale} turn ${turn}: the name at ${JSON.stringify(chosen)} covers a frame`);
+  }
+});

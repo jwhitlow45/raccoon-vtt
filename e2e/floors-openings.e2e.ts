@@ -78,7 +78,7 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   the stairs' frame, and the stairs' name off the pit's squares, measured
  *   on the page from the pills Konva draws and the cells' page points.
  *   QF-ASTRA-02: then in Isometric at each turn the pit's name keeps off the
- *   frames of the stairs and the hole at the turns where a clear spot exists (0 and 3), measured against the frames' corners
+ *   frames of the stairs and the hole at every turn (over its own squares where no spot on its edges is clear), measured against the frames' corners
  *   where the ground plane puts them on the page.
  * - fl4o-10: no page logged an error.
  *
@@ -924,11 +924,6 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
         const seen = await pills();
         const a = seen.find((p) => p.text.startsWith("Hidden Pit"));
         assert.ok(a, `the pit's name drawn in Isometric at turn ${turn}`);
-        // At turns 1 and 2 the stairs or the hole stand between the pit's name and every spot it could take, on the trap's edges or leaning, so no clear spot exists (checked in isoTrapName.test.ts) and only turns 0 and 3 are held.
-        if (turn === 1 || turn === 2) {
-          await shots.take(dm, `qf-astra-02-iso-pit-turn-${turn}`);
-          continue;
-        }
         if (meets(a, quads[0]!)) lines.push(`Isometric turn ${turn}: the pit's name ${JSON.stringify(a)} covers the stairs' frame`);
         if (meets(a, quads[1]!)) lines.push(`Isometric turn ${turn}: the pit's name ${JSON.stringify(a)} covers the hole's frame`);
         await shots.take(dm, `qf-astra-02-iso-pit-turn-${turn}`);

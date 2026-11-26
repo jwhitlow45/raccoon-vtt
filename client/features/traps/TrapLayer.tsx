@@ -267,13 +267,16 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
  * A candidate that covers a floor link's frame (`frames`) where it draws, in
  * view units at `space`'s turn, is left out while any other candidate keeps
  * off them all: Top-down's pick (`trapNamePill`) does not carry over, since
- * the name stands upright and the frames lie on the turned ground. The spots are
+ * the name stands upright and the frames lie on the turned ground. Where no
+ * spot on the zone's edges is clear, centered or leaning, one over the zone's
+ * own squares from its far edge is tried (ISO-1-MORE-SPOTS). The spots are
  * judged where the name draws, slid back from the edge of `view`, the clear
  * screen at the camera's rest.
  */
 export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, frames: readonly Outline[] = [], space: DrawSpace = null, view: Box | null = null): PillSpec {
   const zone = trap.zone;
   const candidates: PillSpec[] = [];
+  const within: PillSpec[] = [];
   const add = (x: number, y: number, above: boolean) => candidates.push({ ...original, x, y, above, below: !above });
   const fractions = [0.5, 0.25, 0.75, 0, 1];
   if ("cells" in zone) {
@@ -299,6 +302,8 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
       if (ys.length === 0) continue;
       add(x, Math.min(...ys), true);
       add(x, Math.max(...ys), false);
+      // Last choices, over the trap's own squares from its far edge, for a layout where a floor link's frames meet every spot along the edges (ISO-1-MORE-SPOTS).
+      within.push({ ...original, x, y: Math.max(...ys), above: true, below: false }, { ...original, x, y: Math.min(...ys), above: false, below: true });
     }
   } else {
     const line = "wire" in zone
@@ -326,6 +331,8 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
   let clear = frames.length ? permitted.filter(offFrames) : permitted;
   // A name wider than its trap can meet a frame from every spot on the trap's edges, as Top-down's does: it then leans to a side, as there.
   if (frames.length > 0 && clear.length === 0) clear = permitted.flatMap((p) => [{ ...p, side: "right" as const }, { ...p, side: "left" as const }]).filter((p) => allowed(p) && offFrames(p));
+  // A name that no spot on the edges, centered or leaning, keeps clear of the frames hangs over its own squares instead, where one does.
+  if (frames.length > 0 && clear.length === 0) clear = within.flatMap((p) => [p, { ...p, side: "right" as const }, { ...p, side: "left" as const }]).filter((p) => allowed(p) && offFrames(p));
   if (frames.length > 0 && clear.length > 0) return isoNamePill(clear, names, scale, (p) => allowed(p) && offFrames(p));
   return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
 }
