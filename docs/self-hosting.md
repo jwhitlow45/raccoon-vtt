@@ -118,6 +118,22 @@ Then open `.env` in an editor and fill in:
   that name a sound file, and the Sound panel keeps only its built-in
   effects. Read [If you use Cloudflare](#6-if-you-use-cloudflare) before you
   turn it on behind Cloudflare.
+- `PREVIEW_POOL_MB`: optional, 128 unless set. It is the memory, in MiB,
+  that every device's live drag, ruler and area previews may hold on the
+  server at once. Each device takes a share of 848 KiB when it connects,
+  enough for 400 KiB of previews waiting on the room and 448 KiB of the
+  groups it drags, so 128 MiB holds 154 shares. Fifty of them are kept for
+  the first DM device of each room, and the rest go to any device in the
+  order they connect. A device that finds no share left still sends its
+  camera, laser and pings, but its drags, rulers and areas show only on its
+  own screen, and the log says `preview pool: a socket admitted off` with
+  its role. When a device disconnects, its share goes to the device that
+  has waited longest. The default comes from need: 13 rooms of six players
+  and a DM take 91 shares, 75 MiB, and 128 MiB is 1.7 times that. Below
+  106 MiB the pool no longer holds the 50 DM shares and 78 others that
+  sizing counts on. Raise it only if the container's memory limit has room
+  for it beside the loaded rooms and an image upload, which peaks near 750
+  MiB.
 
 To get the Turnstile keys, open the Cloudflare dashboard, then Turnstile,
 then Add widget:
