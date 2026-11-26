@@ -265,6 +265,31 @@ describe("the first load on this build", () => {
     assert.deepEqual(again.actor.committed.state.tokens[goblin], h.actor.committed.state.tokens[goblin]);
   });
 
+  test("an edit the DM's page queued before the update names a renamed thing by its old id and is taken as naming its new one, and a player's op is not", async (t) => {
+    const { state, ids } = oldRoom();
+    const db = new StoredRoomDb(state, { version: SEALED_IDS_SNAPSHOT_VERSION - 1, seq: 9 });
+    let now = T0 + 60 * MINUTE;
+    const h = await storedActor(t, db, { idGate: false, now: () => now });
+    const after = h.actor.committed.state;
+    assert.equal(after.tokens[ids.dmGoblin], undefined, "the DM's Goblin was renamed");
+    const goblin = Object.keys(after.tokens).find((id) => state.tokens[id] === undefined && after.tokens[id]!.sceneId === ids.mat)!;
+    const dm = await h.connect(state.members[ids.dm]!);
+    const moved = await dm.apply({ t: "token.update", tokenId: ids.dmGoblin, patch: { x: 9 } });
+    assert.equal(moved.rejects, undefined);
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 9, "the renamed Goblin moved");
+    assert.equal(h.actor.committed.state.tokens[ids.dmGoblin], undefined, "and no thing took the old id");
+    // A player who names the old id is told it is not there, as for any id they never held.
+    const p1 = await h.connect(state.members[ids.p1]!);
+    const asked = await p1.send({ t: "token.update", tokenId: ids.dmGoblin, patch: { x: 2 } });
+    assert.equal(asked.rejects?.[0]?.code, "gone");
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 9);
+    // Past the age of the oldest edit a page still sends, the old id names nothing.
+    now += 12 * 60 * MINUTE + 1;
+    const late = await dm.send({ t: "token.update", tokenId: ids.dmGoblin, patch: { x: 4 } });
+    assert.equal(late.rejects?.[0]?.code, "gone");
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 9);
+  });
+
   test("C31: a room whose replay fails renames nothing and stores nothing", async (t) => {
     const { state, ids } = oldRoom();
     const db = new StoredRoomDb(state, { version: SEALED_IDS_SNAPSHOT_VERSION - 1, seq: 9, rows: [{ seq: 10, at, actorMemberId: ids.dm, actorRole: "dm", op: { t: "token.update", tokenId: "nothing-here", patch: { x: 1 } }, opVersion: 65, pub: 10 }] });

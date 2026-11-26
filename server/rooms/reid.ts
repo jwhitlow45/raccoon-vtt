@@ -174,6 +174,20 @@ export function renamedText(text: string, renames: ReadonlyMap<string, string>):
 }
 
 /**
+ * An op as sent, with every renamed id in it written as its new one, as
+ * renamedState writes the room: an edit the DM's page queued before the
+ * load gave ids anew names a thing only the DM held by its old id. The
+ * same op when it names none.
+ */
+export function renamedOp(raw: unknown, renames: ReadonlyMap<string, string>): unknown {
+  if (renames.size === 0) return raw;
+  const text = JSON.stringify(raw);
+  if (text === undefined) return raw;
+  const named = renamedText(text, renames);
+  return named === text ? raw : (JSON.parse(named) as unknown);
+}
+
+/**
  * The state with each renamed id written as its new one in every string,
  * keys included and in their places, so maps keep their order. A sync
  * record follows its rolls' and resources' new ids, the lists the reducer
@@ -228,8 +242,8 @@ async function storedMemberIds(pool: Pool, roomId: string): Promise<string[]> {
   return rows.map((r) => r.member_id);
 }
 
-/** What the first load on this build did: the room as loaded from its new snapshot, how many ids it gave anew, and how many archived rows it rewrote. */
-export type Reid = { loaded: LoadedRoom; renamed: number; rows: number };
+/** What the first load on this build did: the room as loaded from its new snapshot, each id it gave anew by its old one, and how many archived rows it rewrote. */
+export type Reid = { loaded: LoadedRoom; renamed: number; rows: number; renames: ReadonlyMap<string, string> };
 
 /**
  * Gives a loaded room's ids anew (ReidPlan) and stores the result: the
@@ -287,5 +301,5 @@ export async function reidRoom(pool: Pool, roomId: string, loaded: LoadedRoom, n
   } finally {
     client.release(broken);
   }
-  return { loaded: { ...loaded, state, snapshotSeq: loaded.seq, stateBytes: Buffer.byteLength(json) }, renamed: renames.size, rows: touched.length };
+  return { loaded: { ...loaded, state, snapshotSeq: loaded.seq, stateBytes: Buffer.byteLength(json) }, renamed: renames.size, rows: touched.length, renames };
 }

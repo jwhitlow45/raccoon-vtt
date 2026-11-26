@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { idTime, isSealedShape, sealedId, type IdKey } from "#shared/ids.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
+import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { admitLimits, exploredReserve, BLOCK_SAVES_TOO_FAST, blocksAtQuota, blocksRoomTooFull, HARD, LIMITS, ROLLING_TOO_FAST, roomAtQuota, sizeRemedy, SOUND_LIMITS, type LimitCheck, type LimitKind, type LimitSender } from "#shared/limits.ts";
 import { FAR_TREATMENT, opKind as limitKind, restoresToggles } from "#shared/farLine.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
@@ -37,7 +38,7 @@ import { counted } from "./counted.ts";
 import { DEVELOPMENT_ROOM_SECRET_KEY } from "../config.ts";
 import { heldIds, idRow, IdGate, idsSince, loadIdRows, pruneIds, recordedRow, recordIds, seedRows, SERVER_MEMBER, type IdRow } from "./createIds.ts";
 import { RoomIdKeys } from "./idKeys.ts";
-import { reidDue, reidRoom } from "./reid.ts";
+import { reidDue, reidRoom, renamedOp } from "./reid.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
@@ -756,6 +757,13 @@ export class RoomActor {
    * map step measured every layer (#remember) clears it.
    */
   #capsPending = false;
+  /**
+   * The ids this load gave anew (reid.ts), by their old ones, until the
+   * oldest edit a page still sends could be: a DM's op naming an old one is
+   * answered as naming the new one (#named). Only things no player could
+   * name are renamed, so a player's op is never read through it.
+   */
+  #renamed: { ids: ReadonlyMap<string, string>; until: number } | null = null;
   /** The owed measure as the stored snapshot row holds it (caps_pending), so a stop stores the room once a batch that stored no op cleared it (#writeNow). */
   #storedCapsPending = false;
   #snapshotSeq: number;
@@ -1002,6 +1010,7 @@ export class RoomActor {
     let loaded = stored;
     const reid = opts.reidAtLoad && reidDue(stored);
     let capsPending = stored.capsPending === true;
+    let renamed: ReadonlyMap<string, string> = new Map();
     if (reid) {
       const serverKey = new RoomIdKeys(opts.idSecret, roomId).server.key;
       // The load stores the room at today's version, which a later load takes as having its memory layers within their
@@ -1013,6 +1022,7 @@ export class RoomActor {
       // What to keep is read from the room as stored: an id players held only in a layer the measure forgot keeps it.
       const done = await reidRoom(deps.pool, roomId, capped ?? stored, () => sealedId(serverKey, opts.now()), stored.state, capsPending);
       loaded = done.loaded;
+      renamed = done.renames;
       deps.log.info({ roomId, renamed: done.renamed, rows: done.rows, capsPending }, "room ids given anew at its first load on this build");
     }
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design/design-v1-dice.md 1.2).
@@ -1029,6 +1039,7 @@ export class RoomActor {
     // version decides, as whether the caps were measured, still goes by the version it had, but for a room that owes
     // its measure: its first batch measures every layer.
     if (reid) actor.#countSnapshotDue = false;
+    if (renamed.size > 0) actor.#renamed = { ids: renamed, until: opts.now() + MAX_OP_AGE_MS };
     if (capsPending) {
       actor.#capsPending = true;
       actor.#storedCapsPending = true;
@@ -1264,11 +1275,12 @@ export class RoomActor {
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
-  async op(conn: Connection, n: number, raw: unknown, group?: string, groupScope?: "setup"): Promise<void> {
+  async op(conn: Connection, n: number, sent: unknown, group?: string, groupScope?: "setup"): Promise<void> {
     if (this.#queue.length >= this.#opts.queueCap || this.#closed) {
       conn.send({ t: "retry", n, code: "busy" });
       return;
     }
+    const raw = this.#named(conn, sent);
     const ids = [...new Set([...assetIdsOf(raw), ...this.#restoreAssetIds(conn, raw)])];
     let facts = NO_FACTS;
     let lookup: Lookup | null = null;
@@ -1297,6 +1309,17 @@ export class RoomActor {
       return;
     }
     this.#enqueue({ t: "op", conn, n, raw, group, groupScope, facts, lookup });
+  }
+
+  /** A DM's op as the room names its things now, through the ids its load gave anew (#renamed) while they last. */
+  #named(conn: Connection, raw: unknown): unknown {
+    const renamed = this.#renamed;
+    if (renamed === null || conn.role !== "dm" || conn.previewBy !== null) return raw;
+    if (this.#opts.now() > renamed.until) {
+      this.#renamed = null;
+      return raw;
+    }
+    return renamedOp(raw, renamed.ids);
   }
 
   /**
