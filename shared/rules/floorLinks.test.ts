@@ -11,6 +11,7 @@ import {
   LINK_WORDS,
   climbCost,
   climbKeepsSqueeze,
+  fullLeavesFloor,
   climbLabel,
   isStairsRefusal,
   linkDir,
@@ -147,11 +148,33 @@ describe("standing on an end (6.1)", () => {
   test("a squeezed climber keeps its squeeze only where its full space would leave the squares", () => {
     const squeezed = thornToken({ size: "large", x: 2.5, y: 2.5, squeeze: true });
     const narrow = withStairs(tower({ tokens: { thorn: squeezed } }), { rect: { x: 3, y: 3, w: 1, h: 2 } });
-    assert.equal(climbKeepsSqueeze(narrow, squeezed, end(narrow)), true);
+    assert.equal(climbKeepsSqueeze(narrow, squeezed, end(narrow), squeezed, undefined), true);
     const full = { ...squeezed, x: 3, y: 3 };
     const wide = withStairs(tower({ tokens: { thorn: full } }), { rect: { x: 3, y: 3, w: 2, h: 2 } });
-    assert.equal(climbKeepsSqueeze(wide, full, end(wide)), false);
-    assert.equal(climbKeepsSqueeze(wide, thornToken(), end(wide)), false);
+    assert.equal(climbKeepsSqueeze(wide, full, end(wide), full, undefined), false);
+    assert.equal(climbKeepsSqueeze(wide, thornToken(), end(wide), thornToken(), undefined), false);
+  });
+
+  test("from change format 67 a squeeze along the map's edge stays where the full space unsnapped would leave the far floor (LP53-FALL-1)", () => {
+    // Squeezed on 0, 7, its full space -0.5 to 1.5, which the snap rounds onto the end's 0 to 2.
+    const edge = thornToken({ size: "large", x: -0.5, y: 6.5, squeeze: true });
+    const stairs = withStairs(tower({ tokens: { thorn: edge } }), { rect: { x: 0, y: 7, w: 2, h: 2 } });
+    assert.equal(climbKeepsSqueeze(stairs, edge, end(stairs), edge, undefined), true);
+    assert.equal(climbKeepsSqueeze(stairs, edge, end(stairs), edge, 66), false, "an op stored at 66 landed it full size");
+    // The far floor is judged where it lands: shifted a square in, its full space stays on it.
+    assert.equal(climbKeepsSqueeze(stairs, edge, end(stairs), { x: 0.5, y: 6.5 }, undefined), false);
+    // The north edge alike.
+    const north = thornToken({ size: "large", x: 6.5, y: -0.5, squeeze: true });
+    const top = withStairs(tower({ tokens: { thorn: north } }), { rect: { x: 7, y: 0, w: 2, h: 2 } });
+    assert.deepEqual([climbKeepsSqueeze(top, north, end(top), north, undefined), climbKeepsSqueeze(top, north, end(top), north, 66)], [true, false]);
+    // On the east and south sides the snap rounds the full space out past the end already, so it kept its squeeze at 66 too.
+    const east = thornToken({ size: "large", x: 18.5, y: 18.5, squeeze: true });
+    const corner = withStairs(tower({ tokens: { thorn: east } }), { rect: { x: 18, y: 18, w: 2, h: 2 } });
+    assert.deepEqual([climbKeepsSqueeze(corner, east, end(corner), east, undefined), climbKeepsSqueeze(corner, east, end(corner), east, 66)], [true, true]);
+    // A hex floor's stand never lies off it.
+    const hex = { ...stairs, scenes: { ...stairs.scenes, [UPPER]: { ...stairs.scenes[UPPER]!, gridShape: "hexRows" as const } } };
+    assert.equal(fullLeavesFloor(hex.scenes[UPPER]!, edge), false);
+    assert.equal(fullLeavesFloor(stairs.scenes[UPPER]!, edge), true);
   });
 });
 

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ANA, ATTIC, GROUND, UPPER, applied, fallCard, fallRecord, nextSeq, onThornsTurn, putOpeningOp, run, thornToken, tower, trapdoor, withFalls, withOpening, withStairs, withTrapdoor } from "../floorLinksTestutil.ts";
+import { ANA, ATTIC, BREE, GROUND, UPPER, applied, fallCard, fallRecord, nextSeq, onThornsTurn, putOpeningOp, run, thornToken, tower, trapdoor, withFalls, withOpening, withStairs, withTrapdoor } from "../floorLinksTestutil.ts";
 import { FALL_RIDERS_MOST, type FallRecord, type RoomState, type Token } from "../model.ts";
 import { LIMITS } from "../limits.ts";
 import { opSchema, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { byFallAge } from "../rules/fallCards.ts";
 import { DM, actor, character, env, token } from "../testutil.ts";
+import { wall } from "../discoveryTestutil.ts";
+import { projectState } from "../project.ts";
 import { FALL_SETTLED } from "./falls.ts";
 
 /*
@@ -667,3 +669,65 @@ describe("a creature falls once a step (change format 67, fallsOnce)", () => {
   });
 });
 
+
+describe("a creature squeezed along the map's edge lands squeezed (change format 67, fallsOnce, LP53-FALL-1)", () => {
+  // Ana's Large bear squeezed on Upper floor's 0, 7 against the west edge: its full space, -0.5 to 1.5, lies half past it.
+  const EDGE = { x: 0, y: 7, w: 2, h: 2 };
+  const bear = (over: Partial<Token> = {}) => up("bear", { name: "Bear", size: "large", ownerIds: ["p1"], x: -0.5, y: 6.5, ...over });
+  const squeezed = (over: Partial<Token> = {}) => bear({ squeeze: true, ...over });
+  /** A corridor along the west edge, walled on x 1, with the bear full size at 3, 1 to walk it in. */
+  const corridor = (state: RoomState): RoomState => {
+    const walled = { ...state, buildChunks: {} };
+    wall(walled, "edgewall0001", [1, 4], [1, 10], { kind: "wall" }, UPPER);
+    return withTokens(walled, bear({ x: 3, y: 1 }));
+  };
+  const walk: Op = { t: "token.move", tokenId: "bear", x: -0.5, y: 6.5, squeeze: true };
+  const spring: Op = { t: "trap.spring", trapId: "td1", tokenIds: ["bear"] };
+  const edgeDoor = trapdoor("td1", { zone: { cells: [{ x: 0, y: 7, w: 1, h: 2 }] } });
+  const cases: { name: string; state: RoomState; op: Op; who: typeof DM }[] = [
+    { name: "the DM's hole under it", state: tower({ tokens: { bear: squeezed() } }), op: putOpeningOp({ rect: EDGE }), who: DM },
+    { name: "Ana's walk into a hole", state: corridor(withOpening(tower({ tokens: {} }), { rect: EDGE })), op: walk, who: ANA },
+    { name: "the DM's springing of a trapdoor", state: withTrapdoor(tower({ tokens: { bear: squeezed() } }), edgeDoor), op: spring, who: DM },
+    { name: "Ana's walk onto a trapdoor", state: corridor(withTrapdoor(tower({ tokens: {} }), edgeDoor)), op: walk, who: ANA },
+  ];
+  const pose = (t: Token) => [t.sceneId, t.x, t.y, t.squeeze ?? null];
+
+  test("a hole and a trapdoor land it on Ground floor's same squares squeezed, where an op stored at 66 landed it full size, half off", () => {
+    for (const c of cases) {
+      assert.deepEqual(pose(applied(c.state, c.op, c.who).state.tokens.bear!), [GROUND, -0.5, 6.5, true], c.name);
+      assert.deepEqual(pose(applied(c.state, c.op, c.who, 66).state.tokens.bear!), [GROUND, -0.5, 6.5, null], `${c.name} at 66`);
+    }
+  });
+
+  test("its full space inside the floor below, it still lands full size", () => {
+    const inside = withTrapdoor(tower({ tokens: { bear: squeezed({ x: 0.5 }) } }), trapdoor("td1", { zone: { cells: [{ x: 1, y: 7, w: 1, h: 2 }] } }));
+    assert.deepEqual(pose(applied(inside, spring).state.tokens.bear!), [GROUND, 0.5, 6.5, null]);
+    const hole = applied(tower({ tokens: { bear: squeezed({ x: 0.5 }) } }), putOpeningOp({ rect: { x: 1, y: 7, w: 2, h: 2 } }));
+    assert.deepEqual(pose(hole.state.tokens.bear!), [GROUND, 0.5, 6.5, null]);
+  });
+
+  test("stairs on the edge land it squeezed too, and at 66 full size", () => {
+    const stairs = withTokens(withStairs(tower({ tokens: {} }), { rect: EDGE }), squeezed({ sceneId: GROUND }));
+    const climb: Op = { t: "token.climb", tokenId: "bear", linkId: "l1" };
+    assert.deepEqual(pose(applied(stairs, climb, ANA).state.tokens.bear!), [UPPER, -0.5, 6.5, true]);
+    assert.deepEqual(pose(applied(stairs, climb, ANA, 66).state.tokens.bear!), [UPPER, -0.5, 6.5, null]);
+  });
+
+  test("a player's copy differs from the one an op stored at 66 makes by the bear's squeeze alone", () => {
+    for (const c of cases) {
+      for (const who of [ANA, BREE]) {
+        const copy = (opVersion?: number) => {
+          const p = projectState(applied(c.state, c.op, c.who, opVersion).state, who, { sceneId: null });
+          const t = p.tokens.bear;
+          assert.ok(t, `${c.name}: ${who.memberId} sees the bear`);
+          const { squeeze, ...rest } = t;
+          return { squeeze: squeeze ?? null, rest: { ...p, tokens: { ...p.tokens, bear: rest } } };
+        };
+        const live = copy();
+        const old = copy(66);
+        assert.deepEqual([live.squeeze, old.squeeze], [true, null], `${c.name}: ${who.memberId}`);
+        assert.deepEqual(live.rest, old.rest, `${c.name}: ${who.memberId}'s copy is otherwise the same`);
+      }
+    }
+  });
+});
