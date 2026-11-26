@@ -3528,6 +3528,8 @@ export const handoutDocInputSchema = handoutDocInput;
 // Ephemeral events (design 7.6). Never stored, forwarded per scene.
 
 const point = z.strictObject({ x: coord, y: coord });
+/** The most numbers a drag frame's route corners hold, x then y. */
+const MAX_PATH_NUMBERS = 200;
 /**
  * A ruler stop. A free one carries `z`, the ground the measurer saw under
  * it, left out at 0, so every receiver reads the measurer's distance. A
@@ -3600,7 +3602,7 @@ function ephUnion<R extends typeof rulerIn | typeof rulerOut>(ruler: R) {
       tokenId: id,
       x: coord,
       y: coord,
-      path: z.array(coord).max(200).optional(),
+      path: z.array(coord).max(MAX_PATH_NUMBERS).optional(),
       ft: z.number().min(0).max(100_000).optional(),
       squeeze: z.literal(true).optional(),
       free: z.literal(true).optional(),
@@ -3672,6 +3674,234 @@ function withinEphBytes(e: unknown): boolean {
   return serializedBytes(e) <= MAX_EPH_BYTES;
 }
 
+/**
+ * An event as a device sends it one token at a time, and as every frame the
+ * server expands from a group frame must still stand before it routes.
+ */
+export const loneEphSchema = ephEventSchema.refine(withinEphBytes, { message: "ephemeral payload too large" });
+
+// Group drag frames (design 7.6). Inbound only: the server expands each into every token's own frame.
+
+/**
+ * The most tokens one drag moves: the pressed token and every token that
+ * moves with it. A device refuses a larger drag before it sends anything.
+ */
+export const MAX_DRAG_TOKENS = 100;
+/** The most members a gesture's roster names beside its pressed token. */
+export const MAX_GROUP_MEMBERS = MAX_DRAG_TOKENS - 1;
+
+/**
+ * A number a group frame carries for one of its tokens. It is bounded here
+ * only as transport: any finite double, which JSON writes in at most 24
+ * characters. Each frame the server expands is checked against a lone
+ * frame's own bounds, and one that fails is dropped alone, so one token
+ * past the map's edge never takes the other tokens' frames with it. Zod
+ * refuses a number that is not finite, such as the one JSON.parse makes of
+ * an overflowing literal.
+ */
+const carried = z.number();
+/** A socket's gesture number: each drag it sends takes a new one. */
+const gesture = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A gesture's roster: each member's start spot as drawn, in the order the
+ * drag moves them, and the pressed token's own start (`from`). A member's
+ * point is its start plus the pressed token's offset from `from`. A
+ * gesture's first message on a socket carries it, whatever its kind, and
+ * so do its first message on a new floor and its next message after
+ * `need`. A roster moves no token by itself.
+ */
+const rosterFields = {
+  with: z.array(z.strictObject({ tokenId: id, x: carried, y: carried })).max(MAX_GROUP_MEMBERS).optional(),
+  from: z.strictObject({ x: carried, y: carried }).optional(),
+};
+
+/**
+ * The movement lead's own fields when it is a member, as when a press on a
+ * rider moves its mount: its index in the roster, and a point of its own
+ * where its walk stops short, which replaces its offset point.
+ */
+const groupLead = z.strictObject({
+  i: z.number().int().min(0).max(MAX_GROUP_MEMBERS - 1),
+  x: carried.optional(),
+  y: carried.optional(),
+  path: z.array(carried).max(MAX_PATH_NUMBERS).optional(),
+  ft: carried.optional(),
+  squeeze: z.literal(true).optional(),
+});
+
+/**
+ * One frame per gesture step for all its tokens, sent as the pressed
+ * token's own frame tagged with the gesture (`g`), on a socket the server
+ * told it `takes` groups. `x`, `y` is the pressed token's point and the
+ * anchor every member moves by. A move's route fields sit on the frame when
+ * the pressed token leads, else in `lead`. `free` is the pressed token's
+ * alone. `fts` holds each member's cost in roster order, null for a member
+ * whose frame has none. A gesture ends with `groupEnd`: a landing for each
+ * token, the pressed token's first, or null for one that ends as a
+ * cancel. A tagged `dragCancel` ends every token of the gesture.
+ */
+const groupFrames = z.discriminatedUnion("k", [
+  z.strictObject({ k: z.literal("dragStart"), tokenId: id, g: gesture, x: carried, y: carried, ...rosterFields }),
+  z.strictObject({
+    k: z.literal("dragMove"),
+    tokenId: id,
+    g: gesture,
+    x: carried,
+    y: carried,
+    path: z.array(carried).max(MAX_PATH_NUMBERS).optional(),
+    ft: carried.optional(),
+    squeeze: z.literal(true).optional(),
+    free: z.literal(true).optional(),
+    fts: z.array(carried.nullable()).max(MAX_GROUP_MEMBERS).optional(),
+    lead: groupLead.optional(),
+    ...rosterFields,
+  }),
+  z.strictObject({ k: z.literal("dragCancel"), tokenId: id, g: gesture, ...rosterFields }),
+  z.strictObject({
+    k: z.literal("groupEnd"),
+    tokenId: id,
+    g: gesture,
+    at: z.array(z.strictObject({ x: carried, y: carried, squeeze: z.literal(true).optional() }).nullable()).min(1).max(MAX_DRAG_TOKENS),
+    ...rosterFields,
+  }),
+]);
+type GroupFrameShape = z.infer<typeof groupFrames>;
+
+/** A frame that carries its roster lines up with it: one cost per member, a lead among them, one landing per token. */
+function matchesOwnRoster(e: GroupFrameShape): boolean {
+  if (e.with === undefined) return true;
+  const members = e.with.length;
+  if (e.k === "dragMove") return (e.fts === undefined || e.fts.length === members) && (e.lead === undefined || e.lead.i < members);
+  if (e.k === "groupEnd") return e.at.length === members + 1;
+  return true;
+}
+
+/**
+ * The sizes a group frame is held to and the memory a server charges for
+ * what it keeps of one, from the schema's bounds: an id is at most 64
+ * UTF-16 units, each written as at most a 6-byte escape, and a finite
+ * double is counted at 25 characters. At those widths the widest bare move
+ * is about 8.4 KB and the widest roster message about 54 KB
+ * (shared/protocol.group.test.ts builds both), so neither cap refuses a
+ * frame the grammar takes. Charges go by parsed shape, never by the bytes
+ * a frame was sent in.
+ */
+export const ephCaps = {
+  /** An id's widest JSON, quotes included. */
+  idBytes: 64 * 6 + 2,
+  numberChars: 25,
+  /** A group frame without a roster. */
+  bare: 8.5 * 1024,
+  /** A group frame that carries one. */
+  roster: 53 * 1024,
+  /** Every other ephemeral event, a lone drag frame included. */
+  other: MAX_EPH_BYTES,
+  charges: {
+    /** A stored roster member: its id with header and slot, and its start's two doubles. */
+    member: 176,
+    version: 512,
+    /** A held move or group end. */
+    move: 3 * 1024,
+    /** A held ruler or area, their wire cap. */
+    measure: 4 * 1024,
+    /** Any other held message. */
+    other: 512,
+  },
+} as const;
+
+export const groupFrameSchema = groupFrames
+  .refine((e) => (e.with === undefined) === (e.from === undefined), { message: "a roster carries the pressed token's start with its members" })
+  .refine((e) => e.k !== "dragMove" || e.lead === undefined || (e.path === undefined && e.ft === undefined && e.squeeze === undefined), {
+    message: "a frame whose lead is a member carries no route of its own",
+  })
+  .refine((e) => e.with === undefined || unique([e.tokenId, ...e.with.map((m) => m.tokenId)]), { message: "a roster names each token once, the pressed token apart" })
+  .refine(matchesOwnRoster, { message: "a frame does not line up with its roster" })
+  .refine((e) => serializedBytes(e) <= (e.with === undefined ? ephCaps.bare : ephCaps.roster), { message: "group frame too large" });
+export type GroupFrame = z.infer<typeof groupFrameSchema>;
+
+/**
+ * How a socket may send previews, which `takes` tells it. `full` sends every
+ * kind. `off` sends only the camera, focus, laser and pings.
+ */
+export const PREVIEW_PACES = ["full", "off"] as const;
+export type PreviewPace = (typeof PREVIEW_PACES)[number];
+
+/** Whether an inbound event is a group frame. Only those carry a gesture number. */
+export function isGroupFrame(e: EphEvent | GroupFrame): e is GroupFrame {
+  return "g" in e;
+}
+
+/**
+ * A gesture's roster as a server stores it or a device keeps it: the
+ * pressed token's start, each member's id, and their starts, member i's at
+ * 2i and 2i + 1.
+ */
+export type GroupRoster = { readonly from: { readonly x: number; readonly y: number }; readonly ids: readonly string[]; readonly starts: ArrayLike<number> };
+
+/** The roster a frame carries, in its stored form, or null for a frame that carries none. */
+export function rosterOf(e: GroupFrame): GroupRoster | null {
+  if (e.with === undefined || e.from === undefined) return null;
+  const starts = new Float64Array(e.with.length * 2);
+  for (const [i, m] of e.with.entries()) {
+    starts[2 * i] = m.x;
+    starts[2 * i + 1] = m.y;
+  }
+  return { from: { x: e.from.x, y: e.from.y }, ids: e.with.map((m) => m.tokenId), starts };
+}
+
+type LoneMove = Extract<EphEvent, { k: "dragMove" }>;
+
+function loneMove(tokenId: string, x: number, y: number, fields: { path?: number[]; ft?: number | null; squeeze?: true; free?: true }): LoneMove {
+  return {
+    k: "dragMove",
+    tokenId,
+    x,
+    y,
+    ...(fields.path !== undefined ? { path: fields.path } : {}),
+    ...(fields.ft !== undefined && fields.ft !== null ? { ft: fields.ft } : {}),
+    ...(fields.squeeze ? { squeeze: true as const } : {}),
+    ...(fields.free ? { free: true as const } : {}),
+  };
+}
+
+/**
+ * Every token's own frame from a group frame, the pressed token's first and
+ * then the roster's in order, as a device sends them one token at a time
+ * (client/canvas/Stage.tsx): a member's point is its start plus the pressed
+ * token's offset, added in that order, unless the lead gives its own. A
+ * member takes `ft` only from `fts` or the lead, never `free`, and ends as a
+ * cancel where it has no landing. With no roster only the pressed token's
+ * frame comes out. Nothing here checks the frames: each must still pass
+ * `loneEphSchema`, and one that fails is dropped alone.
+ */
+export function expandGroup(e: GroupFrame, roster: GroupRoster | null): EphEvent[] {
+  const ids = roster?.ids ?? [];
+  if (e.k === "dragCancel") return [e.tokenId, ...ids].map((tokenId) => ({ k: "dragCancel", tokenId }));
+  if (e.k === "groupEnd") {
+    return [e.tokenId, ...ids].map((tokenId, i): EphEvent => {
+      const at = e.at[i] ?? null;
+      return at ? { k: "dragEnd", tokenId, x: at.x, y: at.y, ...(at.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId };
+    });
+  }
+  const frames: EphEvent[] = [e.k === "dragStart" ? { k: "dragStart", tokenId: e.tokenId, x: e.x, y: e.y } : loneMove(e.tokenId, e.x, e.y, e)];
+  if (roster === null) return frames;
+  const dx = e.x - roster.from.x;
+  const dy = e.y - roster.from.y;
+  for (const [i, tokenId] of ids.entries()) {
+    // A start the roster lacks reads as NaN, which no lone frame passes.
+    const x = (roster.starts[2 * i] ?? Number.NaN) + dx;
+    const y = (roster.starts[2 * i + 1] ?? Number.NaN) + dy;
+    if (e.k === "dragStart") {
+      frames.push({ k: "dragStart", tokenId, x, y });
+      continue;
+    }
+    const lead = e.lead?.i === i ? e.lead : undefined;
+    frames.push(loneMove(tokenId, lead?.x ?? x, lead?.y ?? y, { path: lead?.path, ft: lead?.ft ?? e.fts?.[i], squeeze: lead?.squeeze }));
+  }
+  return frames;
+}
+
 // Client to server messages (design 7.1).
 
 /** The most ids one `ids` frame asks about. A device with more uncertain creates asks in several. */
@@ -3706,7 +3936,7 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
     g: id.optional(),
     groupScope: z.literal("setup").optional(),
   }).refine((m) => m.groupScope === undefined || m.g !== undefined, { message: "a setup gesture needs a group", path: ["groupScope"] }),
-  z.strictObject({ t: z.literal("eph"), sceneId: id, e: ephEventSchema.refine(withinEphBytes, { message: "ephemeral payload too large" }) }),
+  z.strictObject({ t: z.literal("eph"), sceneId: id, e: z.union([loneEphSchema, groupFrameSchema]) }),
   z.strictObject({ t: z.literal("scene"), sceneId: id }),
   z.strictObject({ t: z.literal("ping"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
   /** A probe of the server's time (docs/design/design-v1-music.md 5.1), sent only while sound plays. */
@@ -3845,6 +4075,20 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    * an older page's strict schema would drop a new field and reconnect over it.
    */
   z.strictObject({ t: z.literal("build"), opVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) }),
+  /**
+   * Sent right after `build`, to a hello that carried `opVersion`: this
+   * socket sends drag previews as group frames, at the pace the server gave
+   * it. A socket at `off` sends no drag, ruler or area previews. A later
+   * one, which only raises the pace, starts from the page's next frame.
+   * A page on an older build drops it and sends each token's own frames.
+   */
+  z.strictObject({ t: z.literal("takes"), groups: z.literal(true), pace: z.enum(PREVIEW_PACES) }),
+  /**
+   * The server holds no roster for this socket's gesture `g`, whose
+   * pressed token is `id`, so the gesture's next message carries its
+   * roster again. Sent at most once a second for a gesture.
+   */
+  z.strictObject({ t: z.literal("need"), id, g: gesture }),
   /**
    * The answer to a `time` probe: `at` is the server's clock in ms since
    * 1970, the clock every op's time reads (docs/design/design-v1-music.md

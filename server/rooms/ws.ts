@@ -4,7 +4,7 @@ import type { RawData, WebSocket } from "ws";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { HARD } from "#shared/limits.ts";
 import { OP_VERSION } from "#shared/migrate.ts";
-import { clientMessageSchema, type ClientMessage } from "#shared/protocol.ts";
+import { clientMessageSchema, isGroupFrame, type ClientMessage } from "#shared/protocol.ts";
 import { clientIp } from "../auth/clientIp.ts";
 import { renewClosedDisplay } from "../auth/displaySessions.ts";
 import { ipKey } from "../auth/ipKey.ts";
@@ -296,8 +296,10 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             chain(() => room.ids(conn, msg));
             return;
           case "eph":
+            // No socket is told it `takes` group frames yet, so one that sends them anyway has them dropped.
+            if (isGroupFrame(msg.e)) return;
             // The frame's moment is read as it arrives, before anything waits, and the room routes it as of then.
-            room.ephemeral(conn, msg, room.serverTime());
+            room.ephemeral(conn, { sceneId: msg.sceneId, e: msg.e }, room.serverTime());
             return;
           case "scene":
             if (conn.role !== "dm") {
