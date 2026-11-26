@@ -99,6 +99,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-creature-numbers.md](design-v1-creature-numbers.md): creature
   numbers the table gives as the party sees creatures, and the bracketed
   numbers on the DM's board.
+- [design-v1-creature-numbers-order.md](design-v1-creature-numbers-order.md):
+  the order creatures met together take their numbers in, by place where
+  the party shares its sight and by id where players see for themselves.
 - [design-v1-ddb-resources.md](design-v1-ddb-resources.md): class resources
   imported from D&D Beyond.
 - [design-v1-resync.md](design-v1-resync.md): syncing a character from D&D
