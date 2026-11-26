@@ -69,7 +69,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
-import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
+import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
@@ -89,6 +89,8 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { dragLineSlot, placeFreelySlot } from "../state/store.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
+import { dragCapRefusal, draggedIds, groupMove, type FrameFields } from "./dragFrames.ts";
+import type { DragMember, OutgoingDrag } from "../state/socket.ts";
 import { settleFollowers } from "./dropSettle.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
@@ -972,6 +974,14 @@ export function MapStage(props: {
     node: Konva.Node;
     tokenId: string;
     cancelled: boolean;
+    /**
+     * Refused before it began, for moving more tokens than one drag may.
+     * Apart from a cancel: nothing was sent for it, so no way it ends sends
+     * anything either, and its tokens only go back where they stood here.
+     */
+    refused: boolean;
+    /** The previews others see, from the moment the drag began, or null for a drag that never began. */
+    outgoing: OutgoingDrag | null;
     /** Everything else that moves with this token, by the same offset: the rest of the selection (lib/group.ts) and what each carries. */
     followers: { token: ViewToken; node: Konva.Node }[];
     /** In Isometric, where each node the drag moved into the drag layer stood (dragLayer.ts). */
@@ -1461,14 +1471,15 @@ export function MapStage(props: {
   const lastMove = scope.get(lastMoveSlot);
   useEffect(() => followOps(store, lastMove), [store, lastMove]);
 
-  // A drag in progress when the scene or the stage goes away ends as a cancel for everyone watching.
+  /** A dropped drag whose route is still searched: its previews end when it lands, or here if the board goes first. */
+  const droppingRef = useRef<OutgoingDrag | null>(null);
+  // A drag in progress when the scene or the stage goes away ends as a cancel for everyone watching. A refused one sent nothing to end.
   useEffect(
     () => () => {
       const drag = dragRef.current;
-      if (drag) {
-        actions.sendEph({ k: "dragCancel", tokenId: drag.tokenId });
-        for (const f of drag.followers) actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
-      }
+      if (drag && !drag.refused) drag.outgoing?.cancel();
+      droppingRef.current?.cancel();
+      droppingRef.current = null;
       clearSpots();
       const line = scope.get(dragLineSlot);
       if (line.getState().line !== null) line.setState({ line: null });
@@ -1562,19 +1573,19 @@ export function MapStage(props: {
       node.dragBoundFunc(undefined as unknown as (pos: Konva.Vector2d) => Konva.Vector2d);
       returnHome(homes);
     };
-    /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move. */
-    const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[]) => {
+    /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move, where it began. */
+    const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], outgoing: OutgoingDrag | null) => {
       node.position(drawnSpot(sceneGrid(sceneRef.current), token));
-      actions.sendEph({ k: "dragCancel", tokenId: token.id });
       for (const f of followers) {
         f.node.position(drawnSpot(sceneGrid(sceneRef.current), f.token));
         f.node.getLayer()?.batchDraw();
-        actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
       }
+      if (droppingRef.current === outgoing) droppingRef.current = null;
+      outgoing?.cancel();
       clearSpots();
     };
     /** Puts the dropped tokens where the plan lands them, each carried one by its named holder's offset, and sends the moves and the drag's end. */
-    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, plan: DropPlan, free: { place: ClientOp | null; placed: boolean } = { place: null, placed: false }) => {
+    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, outgoing: OutgoingDrag | null, plan: DropPlan, free: { place: ClientOp | null; placed: boolean } = { place: null, placed: false }) => {
       const group = parts.named;
       const moves = plan.moves;
       const landed = new Map(moves.map((m) => [m.tokenId, m]));
@@ -1586,7 +1597,7 @@ export function MapStage(props: {
         const at = { ...parts.lead, x: lands.x, y: lands.y, elevation: lands.elevation ?? parts.lead.elevation };
         const holder = reseat as Token;
         if (!linkHolds(sceneGrid(sceneRef.current), links.settings ?? DEFAULT_SETTINGS, parts.lead.attached.kind, at, holder)) {
-          putBack(node, token, followers);
+          putBack(node, token, followers, outgoing);
           uiRef.current.notify(reseatText(parts.lead, holder, labelsOf(store.getState())));
           return;
         }
@@ -1653,12 +1664,15 @@ export function MapStage(props: {
       watch?.sent(sent.length);
       const note = intoFogText(swallowed.map((t) => displayName(t, labelsOf(store.getState()))));
       if (note) uiRef.current.notify(note);
-      for (const t of [token, ...followers.map((f) => f.token)]) {
+      // One end for the whole drag: each token's landing, or none for one that stays where it stood.
+      const ends = [token, ...followers.map((f) => f.token)].map((t) => {
         const m = landed.get(t.id);
         // Frames carry the drawn spot (docs/design/design-v1-snap-off.md 5.6): the landing with its new placement.
         const at = landing(t) ? drawnAfter(t) : null;
-        actions.sendEph(at ? { k: "dragEnd", tokenId: t.id, x: at.x, y: at.y, ...(m?.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
-      }
+        return at ? { x: at.x, y: at.y, ...(m?.squeeze ? { squeeze: true as const } : {}) } : null;
+      });
+      if (droppingRef.current === outgoing) droppingRef.current = null;
+      outgoing?.end(ends);
       clearSpots();
     };
     return {
@@ -1681,16 +1695,15 @@ export function MapStage(props: {
         const stage = node.getStage() ?? stageRef.current;
         const parts = dragPartsRef.current(token, selectedIdsRef.current);
         const named = new Set(parts.named.map((t) => t.id));
+        const moved = draggedIds([...named], (id) => groupMembers(linksRef.current.allTokens, id, named));
         const followers: { token: ViewToken; node: Konva.Node }[] = [];
-        for (const t of parts.named) {
-          for (const id of [t.id, ...groupMembers(linksRef.current.allTokens, t.id, named)]) {
-            if (id !== t.id) parts.rootOf.set(id, t.id);
-            const member = id === token.id ? undefined : tokensByIdRef.current.get(id);
-            const n = member ? stage?.findOne(`#${id}`) : undefined;
-            if (member && n) followers.push({ token: member, node: n });
-          }
+        for (const { id, rootId } of moved) {
+          if (id !== rootId) parts.rootOf.set(id, rootId);
+          const member = id === token.id ? undefined : tokensByIdRef.current.get(id);
+          const n = member ? stage?.findOne(`#${id}`) : undefined;
+          if (member && n) followers.push({ token: member, node: n });
         }
-        dragRef.current = { node, tokenId: token.id, cancelled: false, followers, homes: [], ...parts };
+        dragRef.current = { node, tokenId: token.id, cancelled: false, refused: false, outgoing: null, followers, homes: [], ...parts };
         // Place freely waits for its own token's drag: a drag of another token ends it.
         if (placing.getState().tokenId !== null && placing.getState().tokenId !== token.id) endPlacing();
         if (parts.refusal) {
@@ -1703,6 +1716,15 @@ export function MapStage(props: {
           stopTokenDrag();
           return;
         }
+        // Counted here, past every token the drag carries, those this board draws no node for included, and before anything is
+        // lifted or sent. Not in dragPartsRef, which the arrow keys share: they move by ops, sent in parts, and preview nothing.
+        const capped = dragCapRefusal(token.id, moved);
+        if (capped) {
+          dragRef.current.refused = true;
+          uiRef.current.notify(capped);
+          stopTokenDrag();
+          return;
+        }
         if (shownRef.current.kind === "isometric") dragRef.current.homes = gripIso(node, token, parts.lead, followers);
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
@@ -1710,8 +1732,7 @@ export function MapStage(props: {
         localDrags.setState({ group: parts.named.length > 1 });
         // Frames carry the drawn spot (docs/design/design-v1-snap-off.md 5.6).
         const grid = sceneGrid(sceneRef.current);
-        actions.sendEph({ k: "dragStart", tokenId: token.id, ...drawnSpot(grid, token) });
-        for (const f of followers) actions.sendEph({ k: "dragStart", tokenId: f.token.id, ...drawnSpot(grid, f.token) });
+        dragRef.current.outgoing = actions.startDrag(token.id, drawnSpot(grid, token), followers.map((f) => ({ tokenId: f.token.id, ...drawnSpot(grid, f.token) })));
       },
       dragMove(node, token) {
         const drag = dragRef.current;
@@ -1733,19 +1754,19 @@ export function MapStage(props: {
         const landsBy = lone ? asked : dragStopsRef.current.groupOffset(drag.named, asked.dx, asked.dy);
         const fieldsOf = (t: ViewToken, x: number, y: number) =>
           lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x: x + landsBy.dx - asked.dx, y: y + landsBy.dy - asked.dy }) : {};
-        // A free drag's frames say so, so every device reads the box the drop counts it in as this one does (SNAPBUILD-ASTRA-02).
-        actions.sendEph(moveFrame(token.id, { x: node.x(), y: node.y() }, free, fieldsOf(token, node.x(), node.y())));
+        const own = fieldsOf(token, node.x(), node.y());
         // What follows a token reads the box it counts in: under where it is drawn for a free drag, else back in rules coordinates.
         // A lone drag's lead lands where its plan does, squeezed or not, which the drag's stops write as its line ends (SNAPBUILD-ASTRA-04).
         const planned = lone ? drag.lead.id : null;
         const here = dragAim(token, { x: node.x(), y: node.y() }, free);
         if (token.id !== planned) setSpot(token, here.x + landsBy.dx - asked.dx, here.y + landsBy.dy - asked.dy);
-        if (drag.followers.length === 0) return;
         // Every follower moves by the pressed node's offset from where it was drawn, each from where it is drawn itself.
         const grid = sceneGrid(sceneRef.current);
         const dx = asked.dx;
         const dy = asked.dy;
         const layers = new Set<Konva.Layer>();
+        const members: DragMember[] = [];
+        const memberFields: FrameFields[] = [];
         for (const f of drag.followers) {
           const was = drawnSpot(grid, f.token);
           const x = was.x + dx;
@@ -1753,10 +1774,14 @@ export function MapStage(props: {
           f.node.position({ x, y });
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
-          actions.sendEph(moveFrame(f.token.id, { x, y }, false, fieldsOf(f.token, x, y)));
+          members.push({ tokenId: f.token.id, x: was.x, y: was.y });
+          memberFields.push(fieldsOf(f.token, x, y));
           if (f.token.id !== planned) setSpot(f.token, f.token.x + landsBy.dx, f.token.y + landsBy.dy);
         }
         for (const layer of layers) layer.batchDraw();
+        // One frame for every token: a free drag's says so, so every device reads the box the drop counts it in as this one does (SNAPBUILD-ASTRA-02).
+        const lead = lone && drag.lead.id !== token.id ? drag.followers.findIndex((f) => f.token.id === drag.lead.id) : -1;
+        drag.outgoing?.move(groupMove({ at: { x: node.x(), y: node.y() }, free, own, members: memberFields, lead }), drawnFrom, members);
       },
       dragEnd(node, token) {
         const drag = dragRef.current;
@@ -1769,7 +1794,7 @@ export function MapStage(props: {
         if (!drag || drag.cancelled) {
           endPlacing();
           dragStopsRef.current.end();
-          putBack(node, token, followers);
+          putBack(node, token, followers, drag && !drag.refused ? drag.outgoing : null);
           return;
         }
         const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
@@ -1779,7 +1804,8 @@ export function MapStage(props: {
         const inPlace = linksRef.current.role === "dm" || (ownsTokenRef.current(lead) && !lead.locked);
         endPlacing();
         // A drop made while its route is searched waits at the ghost and lands once it is found (docs/design/design-v1-movement.md 3.1).
-        dragStopsRef.current.drop(leadNode, lead, drag.named, (plan, placed) => landDrop(node, token, followers, drag, plan, placed), { free, inPlace });
+        droppingRef.current = drag.outgoing;
+        dragStopsRef.current.drop(leadNode, lead, drag.named, (plan, placed) => landDrop(node, token, followers, drag, drag.outgoing, plan, placed), { free, inPlace });
       },
     };
   }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store, scope, altUps]);
