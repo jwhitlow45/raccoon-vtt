@@ -198,6 +198,24 @@ describe("a create whose answer a reconnect lost is settled by the room's record
     assert.deepEqual(heard.heard, [{ answer: "taken" }]);
   });
 
+  test("one sent again is in every state the store publishes, settling or pending, so a page waiting on both to reload keeps it", () => {
+    const s = setup(room());
+    s.connect();
+    s.room.dispatch(made(s.actions.newId()));
+    s.outbox.sent = [];
+    s.room.suspend();
+    s.clock.advance(40 * MINUTE);
+    s.connect(1);
+    const [ask] = s.asks();
+    const published: { settling: number; pending: number }[] = [];
+    const stop = s.room.store.subscribe((state) => published.push({ settling: state.idsSettling, pending: state.pending.length }));
+    s.room.receiveIds({ t: "ids", k: ask!.k, held: [], notHeld: [ask!.ids[0]!], pending: [] });
+    stop();
+    assert.ok(published.length > 0);
+    assert.deepEqual(published.filter((p) => p.settling + p.pending === 0), [], "never in neither");
+    assert.deepEqual(published.at(-1), { settling: 0, pending: 1 });
+  });
+
   test("while an id is pending the device asks again, and settles on the final answer", () => {
     const s = setup(room());
     s.connect();

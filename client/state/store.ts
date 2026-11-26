@@ -2019,7 +2019,6 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         else return true;
         return false;
       });
-      publishSettling();
       if (again.length > 0) {
         // Never recorded, so never taken: it goes again under fresh ids, at the end of the queue, with the work it holds.
         const queued = again.map((p) => ({ ...p, n: nextN++ }));
@@ -2027,6 +2026,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         commit({ pending: fresh.list });
         fresh.told();
       }
+      // Only once a create sent again is in `pending`, so a page that waits on both to reload never sees it in neither.
+      publishSettling();
       tell(landed, () => "unknown", undefined, "snapshot");
       if (settling.length > 0 && idsAsked.size === 0) idsTimer.set(IDS_AGAIN_MS, askIds);
       flush();
