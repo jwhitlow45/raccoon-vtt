@@ -269,7 +269,7 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
  * off them all: Top-down's pick (`trapNamePill`) does not carry over, since
  * the name stands upright and the frames lie on the turned ground. Where no
  * spot on the zone's edges is clear, centered or leaning, one over the zone's
- * own squares from its far edge is tried (ISO-1-MORE-SPOTS). The spots are
+ * own squares from its far or near edge is tried (ISO-1-MORE-SPOTS). The spots are
  * judged where the name draws, slid back from the edge of `view`, the clear
  * screen at the camera's rest.
  */
@@ -302,7 +302,7 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
       if (ys.length === 0) continue;
       add(x, Math.min(...ys), true);
       add(x, Math.max(...ys), false);
-      // Last choices, over the trap's own squares from its far edge, for a layout where a floor link's frames meet every spot along the edges (ISO-1-MORE-SPOTS).
+      // Last choices, over the trap's own squares from its edge at the grid's greatest or least y, which is its far or near edge on screen only at some turns, for a layout where a floor link's frames meet every spot along the edges (ISO-1-MORE-SPOTS).
       within.push({ ...original, x, y: Math.max(...ys), above: true, below: false }, { ...original, x, y: Math.min(...ys), above: false, below: true });
     }
   } else {
