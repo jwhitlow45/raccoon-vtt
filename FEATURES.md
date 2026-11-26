@@ -1412,7 +1412,7 @@ Every roll happens on the server, with a secure random source, so everyone sees 
   - Its Roll and its damage's Roll have the one-roll options. While the page waits for a check, or is offline, every control on it and in its open roll menus draws off, as a disabled control does, and the menu's choices do nothing. A pick never moves the page's Secret switch, except on a page the pick opened from Several creatures, whose switch starts as the dice it sent.
   - A player's spell's damage stays public, with no options.
 - **Roll saves and damage**: with dice in the group save's Damage field, one press rolls the saves and the damage ("Roll 3 saves and damage", "Roll 3 saves, ask 2 players and roll damage", or "Ask 2 players and roll damage"). A refused one keeps the DC.
-  - When every row is already set to Fail, Pass or Skip, so nothing is left to roll or ask, the roll button reads "Freeze the rows" ("Freeze the rows and roll damage" with dice in Damage) and moves the page on with the rows as set.
+  - When no row that is not skipped is set to Ask or Server, so every one is typed, failed by a condition or skipped and nothing is left to roll or ask, the roll button reads "Freeze the rows" ("Freeze the rows and roll damage" with dice in Damage) and moves the page on with the rows as set.
 
 ## Rolls
 
