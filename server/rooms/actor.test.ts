@@ -515,9 +515,13 @@ describe("op admission", () => {
       while (conn.lookupRate.take()) {
         // spent
       }
+      const from = sent.length;
       await actor.op(conn, 2, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
-      assert.deepEqual(sent.at(-1), { t: "retry", n: 2, code: "busy" });
+      // Read among the frames after it, which a presence frame can follow.
+      const after = sent.slice(from);
+      assert.deepEqual(after.filter((m) => m.t === "retry"), [{ t: "retry", n: 2, code: "busy" }]);
+      assert.ok(!after.some((m) => m.t === "ev" && m.acks?.includes(2)), "op 2 is not acked");
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
@@ -3958,8 +3962,11 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(table.conn.opRate.wouldAllow(43) && !table.conn.opRate.wouldAllow(44));
       for (let i = 0; i < 33; i++) assert.ok(table.conn.opRate.allow());
       assert.ok(table.conn.opRate.wouldAllow(1) && !table.conn.opRate.wouldAllow(16));
+      const from = table.sent.length;
       await actor.op(table.conn, 3, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g3");
-      assert.deepEqual(table.sent.at(-1), { t: "retry", n: 3, code: "busy" });
+      const after = table.sent.slice(from);
+      assert.deepEqual(after.filter((m) => m.t === "retry"), [{ t: "retry", n: 3, code: "busy" }]);
+      assert.ok(!after.some((m) => m.t === "ev" && m.acks?.includes(3)), "the ask is not acked");
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
