@@ -41,8 +41,9 @@ function table(): RoomState {
   return s;
 }
 
-async function open(t: TestContext, options: Parameters<typeof scopeActor>[2] = {}) {
+async function open(t: TestContext, options: Parameters<typeof scopeActor>[2] = {}, edit: (s: RoomState) => void = () => {}) {
   const state = table();
+  edit(state);
   const { actor: room, connect } = await scopeActor(t, state, options);
   const dm = await connect(state.members.dm1!, "dm", undefined, undefined, true);
   const p1 = await connect(state.members.p1!, "player", undefined, undefined, true);
@@ -169,6 +170,18 @@ describe("what a keyed page sends as it is", () => {
     assert.equal(await answer(r.dm, { t: "fog.draft", sceneId: OLD.scene, add: [{ id: r.dm.newId(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 2, h: 2 } }] } as Op), "taken");
     assert.equal(await answer(r.dm, { t: "room.setPlayerScene", sceneId: OLD.scene } as Op), "taken");
     assert.equal(r.state().meta.playerSceneId, OLD.scene);
+  });
+
+  test("so do a version 7 scene's sight holders and its memory's share of the room: a holders change, and a fold that writes the share", async (t) => {
+    const r = await open(t, {}, (s) => {
+      s.scenes[OLD.scene] = { ...s.scenes[OLD.scene]!, fogEnabled: true, vision: { on: true, light: "dim", perPlayer: true } };
+      // A share mark only a room from before map discovery's marks holds (migrate.ts), on a scene of its own time.
+      s.memoryShared = { [OLD.scene]: { sceneId: OLD.scene, rev: 0 } };
+    });
+    assert.equal(await answer(r.dm, { t: "vision.holders", sceneId: OLD.scene, on: ["p1"] } as Op), "taken");
+    assert.deepEqual(r.state().holders?.[OLD.scene]?.entries, [{ memberId: "p1", on: true }]);
+    assert.equal(await answer(r.dm, { t: "scene.update", sceneId: OLD.scene, patch: { vision: { on: true, light: "dim", perPlayer: false } } } as Op), "taken");
+    assert.equal(r.state().memoryShared?.[OLD.scene]?.party, true, "the fold kept the share for the party's layer");
   });
 
   test("a page that holds no key brings version 7 ids in every field before the cutover", async (t) => {
