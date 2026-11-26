@@ -184,3 +184,24 @@ test("picks of two tokens of one creature roll as the same token live, once the 
     else Reflect.deleteProperty(globalThis, "sessionStorage");
   }
 });
+
+test("the same tokens selected in two orders give the same rows, whatever source reads them", () => {
+  const view = room({
+    characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+    tokens: Object.fromEntries(["bree1", "bree2", "m1"].map((id) => [id, token(id, id === "m1" ? { kind: "monster", name: "Orc" } : { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } })])),
+  });
+  const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view, srd: { monsters: [], rolls: {} } };
+  const sources = (ids: string[]): Source[] => [
+    { kind: "selection", tokenIds: [...ids] },
+    { kind: "selection", tokenIds: [], live: true },
+    { kind: "selection", tokenIds: [], live: true, except: "m1" },
+    { kind: "trap", trapId: "trap", due: "d", tokenIds: [...ids] },
+    { kind: "trap", trapId: "trap", due: "d", tokenIds: [], live: true },
+    { kind: "fall", fallId: "fall", tokenIds: [...ids] },
+    { kind: "area", templateId: "a" },
+  ];
+  const rowsOf = (ids: string[]) => sources(ids).map((source) => groupRows(dice, sourceIds(source, ids, () => ids), { kind: "save", ability: "dex" }, false, new Map()).map((r) => [r.holder, r.tokenId]));
+  const [a, b] = [rowsOf(["m1", "bree2", "bree1"]), rowsOf(["bree1", "m1", "bree2"])];
+  assert.deepEqual(a, b);
+  for (const rows of a) assert.deepEqual(rows.find(([holder]) => holder === "character:bree")?.[1], "bree1", "the lowest id stands for Bree");
+});
