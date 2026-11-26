@@ -1471,15 +1471,15 @@ export function MapStage(props: {
   const lastMove = scope.get(lastMoveSlot);
   useEffect(() => followOps(store, lastMove), [store, lastMove]);
 
-  /** A dropped drag whose route is still searched: its previews end when it lands, or here if the board goes first. */
-  const droppingRef = useRef<OutgoingDrag | null>(null);
+  /** Each dropped drag whose route is still searched: its previews end when it lands, or here if the board goes first. */
+  const droppingRef = useRef(new Set<OutgoingDrag>());
   // A drag in progress when the scene or the stage goes away ends as a cancel for everyone watching. A refused one sent nothing to end.
   useEffect(
     () => () => {
       const drag = dragRef.current;
       if (drag && !drag.refused) drag.outgoing?.cancel();
-      droppingRef.current?.cancel();
-      droppingRef.current = null;
+      for (const dropping of droppingRef.current) dropping.cancel();
+      droppingRef.current.clear();
       clearSpots();
       const line = scope.get(dragLineSlot);
       if (line.getState().line !== null) line.setState({ line: null });
@@ -1580,7 +1580,7 @@ export function MapStage(props: {
         f.node.position(drawnSpot(sceneGrid(sceneRef.current), f.token));
         f.node.getLayer()?.batchDraw();
       }
-      if (droppingRef.current === outgoing) droppingRef.current = null;
+      if (outgoing) droppingRef.current.delete(outgoing);
       outgoing?.cancel();
       clearSpots();
     };
@@ -1671,7 +1671,7 @@ export function MapStage(props: {
         const at = landing(t) ? drawnAfter(t) : null;
         return at ? { x: at.x, y: at.y, ...(m?.squeeze ? { squeeze: true as const } : {}) } : null;
       });
-      if (droppingRef.current === outgoing) droppingRef.current = null;
+      if (outgoing) droppingRef.current.delete(outgoing);
       outgoing?.end(ends);
       clearSpots();
     };
@@ -1804,7 +1804,7 @@ export function MapStage(props: {
         const inPlace = linksRef.current.role === "dm" || (ownsTokenRef.current(lead) && !lead.locked);
         endPlacing();
         // A drop made while its route is searched waits at the ghost and lands once it is found (docs/design/design-v1-movement.md 3.1).
-        droppingRef.current = drag.outgoing;
+        if (drag.outgoing) droppingRef.current.add(drag.outgoing);
         dragStopsRef.current.drop(leadNode, lead, drag.named, (plan, placed) => landDrop(node, token, followers, drag, drag.outgoing, plan, placed), { free, inPlace });
       },
     };
