@@ -6,7 +6,7 @@ import { ownEntry } from "#shared/records.ts";
 import { startFloor } from "#shared/rules/floors.ts";
 import { canSqueeze } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
-import { expandGroup, isGroupFrame, loneEphSchema, outboundEph, type EphEvent, type EphEventOut, type GroupFrame, type GroupRoster, type ServerMessage } from "#shared/protocol.ts";
+import { expandGroup, isGroupFrame, loneEphSchema, outboundEph, type EphEvent, type EphEventOut, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
 import { heldBy, perPlayerClasses } from "./fanout.ts";
@@ -164,26 +164,46 @@ function mayMove(state: RoomState, sender: Connection, tokenId: string): boolean
   return mayMoveToken(state, sender.viewer, tokenId).ok;
 }
 
+/** What a player's copy of a drag frame leaves out (playerForm): the route's cost, and its path. */
+const NO_COST = 1;
+const NO_PATH = 2;
+
 /**
- * The event as a player receives it. A drag's path is every cell the token
- * passed through, and on a scene with fog or vision some of those may be
- * dark or out of the party's sight (a monster dragged through darkness back
- * into view), so a player gets only the position, which the check below
- * already passed (docs/design/design-v1-maps-vision.md 4.3.5).
+ * How a receiver gets an event, as flags for withForm. A drag's path is
+ * every cell the token passed through, and on a scene with fog or vision
+ * some of those may be dark or out of the party's sight (a monster dragged
+ * through darkness back into view), so a player gets only the position,
+ * which the check below already passed (docs/design/design-v1-maps-vision.md
+ * 4.3.5).
  */
-function forPlayer(state: RoomState, sceneId: string, e: EphEventOut, owner: boolean): EphEventOut {
-  if (e.k !== "dragMove") return e;
-  let out = e;
+function playerForm(state: RoomState, sceneId: string, e: EphEventOut, receiver: Connection): number {
+  if (receiver.role !== "player" || e.k !== "dragMove") return 0;
+  let form = 0;
   // A route's cost reads private facts, such as a Swim Speed, so only the token's owners get it (docs/design/design-v1-movement.md 6.5).
-  if (out.ft !== undefined && !owner) {
+  if (e.ft !== undefined) {
+    const token = state.tokens[e.tokenId];
+    if (!token || !ownsToken(state, receiver.viewer, token)) form |= NO_COST;
+  }
+  if (e.path !== undefined) {
+    const scene = state.scenes[sceneId];
+    if (scene?.fogEnabled || scene?.vision?.on === true) form |= NO_PATH;
+  }
+  return form;
+}
+
+/** The event without what its form leaves out (playerForm). */
+function withForm(e: EphEventOut, form: number): EphEventOut {
+  if (form === 0 || e.k !== "dragMove") return e;
+  let out = e;
+  if (form & NO_COST && out.ft !== undefined) {
     const { ft: _ft, ...rest } = out;
     out = rest;
   }
-  if (out.path === undefined) return out;
-  const scene = state.scenes[sceneId];
-  if (!scene?.fogEnabled && scene?.vision?.on !== true) return out;
-  const { path: _path, ...rest } = out;
-  return rest;
+  if (form & NO_PATH && out.path !== undefined) {
+    const { path: _path, ...rest } = out;
+    out = rest;
+  }
+  return out;
 }
 
 function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string): boolean {
@@ -340,61 +360,92 @@ function setOwner(sender: Connection, tokenId: string, key: string | null): void
   if (left && partsOf(sender, before, left).length === 0) sender.previewsSent.delete(before);
 }
 
-/*
- * What an outbox counts for what it holds (Outbox.staged), at or above what
- * the heap holds for it (previews.memory.itest.ts): a message's object and
- * its event's, with a route's numbers or a ruler's parsed points, and 8
- * bytes for each receiver it is posted to.
- */
-const STAGED_POST_BYTES = 8;
-const STAGED_MESSAGE_BYTES = 320;
-const STAGED_RULER_BYTES = 12 * 1024;
+/** Who an event is from and where, shared by every event of one sender's floor in a pass. */
+type Origin = { readonly from: string; readonly sceneId: string };
+
+/** A receiver's records, 4 bytes each, in chunks so a list never holds more than one chunk it does not use. */
+const RECORD_CHUNK = 1024;
+
+class Records {
+  readonly chunks: Int32Array[] = [];
+  #used = RECORD_CHUNK;
+
+  push(record: number): void {
+    if (this.#used === RECORD_CHUNK) {
+      this.chunks.push(new Int32Array(RECORD_CHUNK));
+      this.#used = 0;
+    }
+    this.chunks[this.chunks.length - 1]![this.#used++] = record;
+  }
+
+  get length(): number {
+    return this.chunks.length === 0 ? 0 : (this.chunks.length - 1) * RECORD_CHUNK + this.#used;
+  }
+
+  /** Each record in the order it was pushed. */
+  each(run: (record: number) => void): void {
+    const last = this.chunks.length - 1;
+    for (const [c, chunk] of this.chunks.entries()) {
+      const n = c === last ? this.#used : RECORD_CHUNK;
+      for (let i = 0; i < n; i++) run(chunk[i]!);
+    }
+  }
+}
 
 /**
- * The most a tick's release of held frames stages before it delivers what
- * it has (RoomActor #releaseFrames), as Outbox.staged counts it. A DM's
- * drag of 100 tokens held through a 2 s tick to 63 receivers stages about
- * 7 MiB, so a release of a room's honest frames goes in one run. Past it
- * the release delivers at a frame boundary and goes on, so what it holds
- * at once is this and one frame's messages.
- */
-export const MAX_STAGED_BYTES = 16 * 1024 * 1024;
-
-/**
- * What one pass of routing or judging previews sends, kept until the pass
- * ends and then sent receiver by receiver, each receiver's messages
- * together and in the order they were judged. So nothing is judged between
- * two messages to one receiver, however many tokens the pass reads. A
- * message is made once (message) and posted to every receiver that gets it
- * as it is, so what the outbox holds grows by a pointer per receiver.
+ * What one pass of routing or judging previews sends (design 7.6). The pass
+ * judges every frame first, keeping each event it may send once (message)
+ * and, for each receiver, one 4-byte record of which event and in which
+ * form (post). Once the pass ends, each receiver's messages are built from
+ * its records and sent together, receiver by receiver, in the order they
+ * were judged. So nothing is judged between two messages to one receiver,
+ * however many frames or tokens the pass reads, and what waits grows by 4
+ * bytes a receiver for each message, never by a built message.
  */
 export class Outbox {
-  #lists = new Map<Connection, ServerMessage[]>();
-  #bytes = 0;
+  #events: EphEventOut[] = [];
+  #origins: Origin[] = [];
+  #origin: Origin | null = null;
+  #records = new Map<Connection, Records>();
 
-  /** What the outbox holds until it delivers, as counted (STAGED_*). */
-  get staged(): number {
-    return this.#bytes;
+  /** What the outbox holds until it delivers: its records, and a pointer to each event and its origin. */
+  get staged(): { events: number; records: number; bytes: number } {
+    let records = 0;
+    for (const list of this.#records.values()) records += list.length;
+    return { events: this.#events.length, records, bytes: 4 * records + 16 * this.#events.length };
   }
 
-  /** A message for any number of receivers, counted once. */
-  message(from: string, sceneId: string, e: EphEventOut): ServerMessage {
-    this.#bytes += e.k === "ruler" ? STAGED_RULER_BYTES : STAGED_MESSAGE_BYTES + (e.k === "dragMove" && e.path ? 8 * e.path.length : 0);
-    return { t: "eph", from, sceneId, e };
+  /** An event for any number of receivers, kept once: the number posts name it by. */
+  message(from: string, sceneId: string, e: EphEventOut): number {
+    let origin = this.#origin;
+    if (origin === null || origin.from !== from || origin.sceneId !== sceneId) this.#origin = origin = { from, sceneId };
+    this.#events.push(e);
+    this.#origins.push(origin);
+    return this.#events.length - 1;
   }
 
-  post(receiver: Connection, msg: ServerMessage): void {
-    this.#bytes += STAGED_POST_BYTES;
-    const list = this.#lists.get(receiver);
-    if (list) list.push(msg);
-    else this.#lists.set(receiver, [msg]);
+  /** The event goes to the receiver in this form (playerForm), after what was posted to it before. */
+  post(receiver: Connection, event: number, form = 0): void {
+    let list = this.#records.get(receiver);
+    if (list === undefined) this.#records.set(receiver, (list = new Records()));
+    list.push(event * 4 + form);
   }
 
   deliver(): void {
-    const lists = this.#lists;
-    this.#lists = new Map();
-    this.#bytes = 0;
-    for (const [receiver, list] of lists) for (const msg of list) receiver.send(msg);
+    const events = this.#events;
+    const origins = this.#origins;
+    const records = this.#records;
+    this.#events = [];
+    this.#origins = [];
+    this.#origin = null;
+    this.#records = new Map();
+    for (const [receiver, list] of records) {
+      list.each((record) => {
+        const i = record >> 2;
+        const { from, sceneId } = origins[i]!;
+        receiver.send({ t: "eph", from, sceneId, e: withForm(events[i]!, record & 3) });
+      });
+    }
   }
 }
 
@@ -452,8 +503,8 @@ function routeInto(state: RoomState, sender: Connection, sceneId: string, e: Eph
   const out = outboundEph(e);
   const heldKey = preview ? `${sender.memberId}|${preview.kind}:${preview.id}` : null;
   const bareEnd = e.k === "rulerEnd" || e.k === "aoeEnd";
-  let shown: ServerMessage | undefined;
-  let cancel: ServerMessage | undefined;
+  let shown: number | undefined;
+  let cancel: number | undefined;
   for (const receiver of all) {
     if (receiver === sender || receiver.closed || receiver.held === null) continue;
     if (!holds(state, receiver, sceneId)) continue;
@@ -552,7 +603,7 @@ function endLeft(sender: Connection, key: string, before: SentPreview, pressedId
     if (named.has(id) || sender.dragOwners.get(id) !== key) continue;
     sender.dragOwners.delete(id);
     const heldKey = `${sender.memberId}|${dragKey(id)}`;
-    let cancel: ServerMessage | undefined;
+    let cancel: number | undefined;
     for (const receiver of receivers) if (release(receiver, heldKey, sender)) box.post(receiver, (cancel ??= box.message(sender.memberId, before.sceneId, cancelEvent("drag", id))));
   }
 }
@@ -589,17 +640,9 @@ function routeDragFrame(state: RoomState, sender: Connection, sceneId: string, e
   const withheld = withheldFor(state, sceneId, e);
   const ends = e.k === "dragEnd" || e.k === "dragCancel";
   const out = outboundEph(e);
-  // The frame as a DM, an owner or another player receives it, each made once for every receiver that gets it.
-  const forms = new Map<"dm" | "owner" | "player", ServerMessage>();
-  const formFor = (receiver: Connection): ServerMessage => {
-    const token = state.tokens[e.tokenId];
-    const form = receiver.role !== "player" ? "dm" : out.k === "dragMove" && out.ft !== undefined && token !== undefined && ownsToken(state, receiver.viewer, token) ? "owner" : "player";
-    let msg = forms.get(form);
-    if (msg === undefined) forms.set(form, (msg = box.message(sender.memberId, sceneId, form === "dm" ? out : forPlayer(state, sceneId, out, form === "owner"))));
-    return msg;
-  };
-  let bare: ServerMessage | undefined;
-  let cancel: ServerMessage | undefined;
+  let shown: number | undefined;
+  let bare: number | undefined;
+  let cancel: number | undefined;
   for (const receiver of all) {
     if (receiver === sender || receiver.closed || receiver.held === null) continue;
     if (!holds(state, receiver, sceneId)) continue;
@@ -610,7 +653,7 @@ function routeDragFrame(state: RoomState, sender: Connection, sceneId: string, e
       continue;
     }
     if (may && allowed(state, receiver, e, withheld)) {
-      box.post(receiver, formFor(receiver));
+      box.post(receiver, (shown ??= box.message(sender.memberId, sceneId, out)), playerForm(state, sceneId, out, receiver));
       if (ends) receiver.previewsHeld.delete(heldKey);
       else receiver.previewsHeld.set(heldKey, sender.id);
     } else if (receiver.previewsHeld.has(heldKey)) {
@@ -660,7 +703,7 @@ function dropSent(sender: Connection, key: string, sent: SentPreview, receivers:
   sender.previewsSent.delete(key);
   for (const { part, id } of partsOf(sender, key, sent)) {
     const heldKey = `${sender.memberId}|${part}`;
-    let cancel: ServerMessage | undefined;
+    let cancel: number | undefined;
     for (const receiver of receivers) if (release(receiver, heldKey, sender)) box.post(receiver, (cancel ??= box.message(sender.memberId, sent.sceneId, cancelEvent(sent.kind, id))));
   }
   disown(sender, key, sent);
@@ -768,7 +811,7 @@ function rejudgeInto(state: RoomState, all: readonly Connection[], tick: number 
         const heldKey = `${sender.memberId}|${part}`;
         const may = senderMay(state, sender, sceneId, frame);
         const withheld = withheldFor(state, sceneId, frame);
-        let cancel: ServerMessage | undefined;
+        let cancel: number | undefined;
         for (const receiver of all) {
           // Only the screens showing this socket's frame are judged by it.
           if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender.id) continue;
