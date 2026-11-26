@@ -6,7 +6,7 @@ import type { RoomState } from "./model.ts";
 import { projectState, type ProjectedState } from "./project.ts";
 import { opReads, reads, satisfies } from "./reads.ts";
 import { applyOp } from "./reducer.ts";
-import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, env, reveal, room, token } from "./testutil.ts";
+import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, env, reveal, room, token, trap } from "./testutil.ts";
 
 function setup() {
   const state = room();
@@ -479,5 +479,25 @@ describe("a fall card's outcome (FLR4INT-ASTRA-05)", () => {
     const onS1 = projectState(state, DM, { sceneId: "s1" });
     assert.equal(onS1.tokens.far, undefined, "the copy of s1 lacks the rider on s2");
     assert.equal(satisfies(r, onS1, DM, { sceneId: "s1" }), false);
+  });
+});
+
+describe("a trap's outcome per creature (docs/design/design-v1-traps.md 6.2)", () => {
+  test("one that names its creatures reads every creature the occurrence names, so a DM's copy without one on another scene waits for the server", () => {
+    const state = setup();
+    const base = trap("pit");
+    state.traps = { pit: { ...base, rig: { ...base.rig!, due: [{ id: "5:0", at: "2026-10-12T20:00:00.000Z", how: "enter", by: ["gob"], hits: ["far", "gob"] }] } } };
+    const named = { t: "actor.outcome" as const, plan: "p1", trap: { trapId: "pit", due: "5:0", tokenIds: ["gob"] }, targets: [{ target: { tokenId: "gob" }, amount: 3 }] };
+    const r = reads(named, state);
+    assert.ok(!("never" in r));
+    assert.deepEqual(r.keys.map((k) => k.key).filter((k) => k.startsWith("trap:") || k === "token:far"), ["trap:pit", "token:far"]);
+    const onS1 = projectState(state, DM, { sceneId: "s1" });
+    assert.equal(onS1.tokens.far, undefined, "the copy of s1 lacks the creature on s2");
+    assert.equal(satisfies(r, onS1, DM, { sceneId: "s1" }), false);
+    // A whole settle reads the trap alone, as before.
+    const { tokenIds: _ids, ...whole } = named.trap;
+    const plain = reads({ ...named, trap: whole }, state);
+    assert.ok(!("never" in plain));
+    assert.deepEqual(plain.keys.map((k) => k.key).filter((k) => k.startsWith("token:far")), []);
   });
 });

@@ -315,7 +315,15 @@ export function opReads(op: Op, state: RoomState): Reads {
         for (const effect of item.effects ?? []) r.push(...durationReads(state, effect.duration));
       }
       if (op.cast !== undefined) r.push({ key: keys.cast(op.cast) });
-      if (op.trap !== undefined) r.push({ key: keys.trap(op.trap.trapId) });
+      const trap = op.trap;
+      if (trap !== undefined) {
+        r.push({ key: keys.trap(trap.trapId) });
+        // What stays on a trap's occurrence reads every creature it names, as a fall card's does, so a copy without one waits for the server.
+        if (trap.tokenIds !== undefined) {
+          const due = ownEntry(state.traps, trap.trapId)?.rig?.due?.find((d) => d.id === trap.due);
+          r.push(...(due?.hits ?? []).map((id) => ({ key: keys.token(id) })));
+        }
+      }
       // What stays on a fall card reads every creature it names, so a copy without one, on another scene, waits for the server.
       if (op.fall !== undefined) {
         const card = ownEntry(state.falls, op.fall.fallId);
