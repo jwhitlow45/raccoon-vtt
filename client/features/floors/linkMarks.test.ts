@@ -676,3 +676,28 @@ describe("in Isometric, where every pill must cover nothing, a pill that would c
     }
   });
 });
+
+describe("in Isometric the pills of stairs keep off creatures on a floor with no opening (ISOLAB F1)", () => {
+  test("Isometric reads the tokens on any floor with an end, and Top-down still only on one with an opening", () => {
+    const placed = withStairs(tower({ tokens: { thorn: thornToken({ x: 2, y: 0 }) } }), { rect: { x: 2, y: 2, w: 2, h: 2 } });
+    assert.equal(tokenSpots(placed, GROUND), "", "Top-down: stairs keep their own edge and walk no tokens");
+    assert.equal(tokenSpots(placed, GROUND, true), "2,0,1,1", "Isometric: the creature by the stairs");
+    assert.equal(tokenSpots(tower({ tokens: { thorn: thornToken() } }), GROUND, true), "", "Isometric: no end, no tokens");
+  });
+
+  test("turn 0 at 40 px a cell: the stairs' name at 2,2 keeps off the creature standing at 2,0, which it met by 48.64 x 13.66 px", () => {
+    const state = withStairs(tower({ tokens: { thorn: thornToken({ x: 2, y: 0 }) } }), { rect: { x: 2, y: 2, w: 2, h: 2 } });
+    const iso = { turn: 0 as const, ground: () => 0 };
+    const o = outlineOf({ shape: "squares" } as Grid, { x: 2, y: 2, w: 2, h: 2 });
+    const stairs: EndPills = { id: "l1", o, hole: false, first: { name: "Up to Upper floor", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true, maxLines: 1, stack: true }, dropPill: null };
+    const creature = tokenBox({ x: 2, y: 0, w: 1, h: 1 }, iso);
+    const meets = (tokens: ReturnType<typeof spotsOf>) => {
+      const p = placeEnds([stairs], [], 40, iso, () => true, tokens, { clear: true }).get("l1")!.pill;
+      if (!p) return false;
+      const b = drawnBox(p, 40, iso, true, true);
+      return Math.min(b.x1, creature.x1) > Math.max(b.x0, creature.x0) && Math.min(b.y1, creature.y1) > Math.max(b.y0, creature.y0);
+    };
+    assert.equal(meets(spotsOf(tokenSpots(state, GROUND))), true, "read as Top-down reads, the name meets the creature");
+    assert.equal(meets(spotsOf(tokenSpots(state, GROUND, true))), false, "read for Isometric, it keeps off it");
+  });
+});

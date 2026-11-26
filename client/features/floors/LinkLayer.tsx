@@ -66,8 +66,9 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const quiet = useTreeShownView((s) => quietLinks(s.floorView, props.scene.id, props.role).join(" "));
   // Each hole's drop, read from the whole copy, which holds the floor below (openingView.ts).
   const drops = useTreeShownView((s) => (s.view ? holeDrops(s.view, props.scene.id) : ""));
-  // The tokens a hole's pills keep off, so a pill wider than its hole does not hide a creature standing beside it.
-  const spots = useTreeShownView((s) => tokenSpots(s.floorView, props.scene.id));
+  const iso = useIsoGround();
+  // The tokens a hole's pills keep off, so a pill wider than its hole does not hide a creature standing beside it, and in Isometric every end's pills.
+  const spots = useTreeShownView((s) => tokenSpots(s.floorView, props.scene.id, iso !== null));
   const tokens = useMemo(() => spotsOf(spots), [spots]);
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   const list = useMemo(
@@ -89,7 +90,6 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
   // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
   const view = useRestView();
-  const iso = useIsoGround();
   // Top-down places a name in cells. Isometric stands it where isoTrapNamePill picks, before the nudge off token text (F11-6), and takes the rest view, in view units, by what it draws.
   const trapNames = useMemo(
     () => (iso ? isoTrapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view) : trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, view)),

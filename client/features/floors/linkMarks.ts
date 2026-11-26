@@ -85,15 +85,17 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
 
 /**
  * The squares each token on a floor stands on, as one string so the
- * board places an opening's pills again only when a token moves, which
- * a hole's pills and a lower end's name keep off (placeEnds). Empty on a
- * floor with no opening end, whose ends keep their own edges, so a move
- * there costs one look at its ends and no walk over the tokens.
+ * board places an end's pills again only when a token moves, which a
+ * hole's pills and a lower end's name keep off (placeEnds), and in
+ * Isometric (`iso`) every end's pills, stairs and ladders too. In
+ * Top-down it is empty on a floor with no opening end, whose ends keep
+ * their own edges, so a move there costs one look at its ends and no walk
+ * over the tokens. In Isometric it is empty only on a floor with no end.
  */
-export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLinks"> | null | undefined, sceneId: string): string {
+export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLinks"> | null | undefined, sceneId: string, iso = false): string {
   const scene = view ? ownEntry(view.scenes, sceneId) : undefined;
   if (!view || !scene) return "";
-  if (!Object.values(view.floorLinks ?? {}).some((l) => l.sceneId === sceneId && l.kind === "opening" && linkDir(view, l) !== null)) return "";
+  if (!Object.values(view.floorLinks ?? {}).some((l) => l.sceneId === sceneId && (iso || l.kind === "opening") && linkDir(view, l) !== null)) return "";
   const g = sceneGrid(scene);
   return Object.values(view.tokens)
     .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)
