@@ -160,6 +160,7 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
         horse: token("horse", { name: "Horse", ...at("horse") }),
         thorn: thornToken(at("thorn")),
         thorn2: thornToken({ id: "thorn2", ...at("thorn2") }),
+        thorn3: thornToken({ id: "thorn3", ...at("thorn3") }),
         gob: token("gob", { name: "Goblin", ...at("gob") }),
         bree: token("bree", { name: "Bree", ...at("bree") }),
       },
@@ -269,6 +270,22 @@ describe("a fall card with two tokens of one creature (FLR4INT-ASTRA-08)", () =>
     const after = run(moved, plan);
     assert.equal(hp(after, "thorn"), 14, "Thorn takes it once");
     assert.equal(after.falls?.["120:0"], undefined, "and the card leaves with the token on the other scene too");
+  });
+
+  test("a card's creatures settle the same whatever order the card names its tokens in, whether the row's own token is there or gone", () => {
+    const outcomes = (named: string[], gone: boolean) => {
+      const state = room4(["horse", "thorn", ...named]);
+      const { page } = cardPage(state, state.falls!["120:0"]!);
+      const { thorn, ...rest } = state.tokens;
+      const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: { ...state, tokens: gone ? rest : { ...rest, thorn: thorn! } }, srd: { monsters: [], rolls: {} } };
+      const plan = buildPlan(page, dice, SIX, ids())!;
+      return { named: plan.targets.map((t) => t.target).filter((t) => "tokenId" in t && t.tokenId.startsWith("thorn")), settled: [...plan.fall!.tokenIds] };
+    };
+    for (const gone of [true, false]) {
+      const [a, b] = [outcomes(["thorn2", "thorn3"], gone), outcomes(["thorn3", "thorn2"], gone)];
+      assert.deepEqual(a, b, gone ? "row token gone" : "row token present");
+      assert.deepEqual(a.named, [{ tokenId: gone ? "thorn2" : "thorn" }], "the lowest id that is there stands for the creature");
+    }
   });
 
   test("through the lifecycle, the DM's view without the moved token keeps its holder, which takes the fall once and leaves the card (FU8-SOL-1)", () => {

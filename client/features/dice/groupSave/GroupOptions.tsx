@@ -104,7 +104,8 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: quickRollNow(taken, secretStartIn(room.getState(), creatures), override) });
   };
   const quickMode = (test: GroupTest): CellMode => {
-    const rows = dice ? groupRows(dice, [...props.tokenIds], test, false, labels) : [];
+    // In id order, as the page reads its source (chain.ts sourceIds), so the row's token never follows the selection order.
+    const rows = dice ? groupRows(dice, [...props.tokenIds].sort(), test, false, labels) : [];
     const server = rows.some((r) => !r.skip && r.ways[0] === "server");
     const d20 = d20Of(test, false);
     const source = JSON.stringify([props.tokenIds, dc, test, rows.map((row) => [row, dice && d20 ? presetFor(dice, row.target, d20) : null]), secretStartIn(room.getState(), creatures), panel.adv, panel.dis, panel.secret]);

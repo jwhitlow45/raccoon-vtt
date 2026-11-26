@@ -278,7 +278,8 @@ function reachedBy(page: Page, row: RowBase, dice: DiceView): Token | null {
   const own = dice.view.tokens[row.tokenId];
   if (own && holderOf(own) === row.holder && onPageScene(page, own, dice)) return own;
   if (page.source.kind !== "fall") return null;
-  for (const id of page.source.tokenIds) {
+  // By id, so which of the creature's tokens the outcome names is not the order the server listed the card's in.
+  for (const id of [...page.source.tokenIds].sort()) {
     const other = dice.view.tokens[id];
     if (other && holderOf(other) === row.holder && onPageScene(page, other, dice)) return other;
   }
@@ -414,7 +415,7 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   // that creature's fall again (FLR4INT-ASTRA-08), and a trap's occurrence its damage. The server takes off
   // the ones on another scene with their creature too (settleFallOutcome, settleTrapOutcome, FLR4-SOL-22).
   if (namesCreatures(page)) {
-    for (const id of page.source.tokenIds) {
+    for (const id of [...page.source.tokenIds].sort()) {
       const token = dice.view.tokens[id];
       if (token && !settled.includes(id) && settledHolders.has(holderOf(token)) && onPageScene(page, token, dice)) settled.push(id);
     }
