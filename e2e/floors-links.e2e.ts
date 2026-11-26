@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, expandBar, OpSocket, Shots, SocketWatch, sleep, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, expandBar, OpSocket, pagePoint, Shots, SocketWatch, sleep, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -38,6 +38,9 @@ import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/a
  * - flrl-9: Ana's Go up in line at 1440 x 900, 390 x 844 and 320 x 568 at
  *   100% and 130%: the bar's words, the strip's icon, and behind Expand at
  *   320 x 568 at 130%.
+ * - lp53fix-1: ] pressed while the DM drags Thorn shows Upper floor and
+ *   ends the drag as a cancel: Thorn stays on the stairs, drawn there back
+ *   on Ground, and neither the key nor the rest of the gesture sends a move.
  * - flrl-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty-seven, one file after
@@ -175,6 +178,19 @@ function climbsSent(socket: SocketWatch): number {
 }
 
 const thornAt = (socket: SocketWatch) => socket.state?.tokens[run.tThorn];
+
+/** Where the board draws Thorn's token node, in the stage's own units, or null where the floor shown draws none. */
+function thornDrawn(page: Page): Promise<{ x: number; y: number } | null> {
+  return page.evaluate((id) => {
+    type Node = { x(): number; y(): number };
+    const stages = (globalThis as unknown as { Konva: { stages: { width(): number; findOne(selector: string): Node | undefined }[] } }).Konva.stages.filter((s) => s.width() > 0);
+    for (const stage of stages) {
+      const n = stage.findOne(`#${id}`);
+      if (n) return { x: n.x(), y: n.y() };
+    }
+    return null;
+  }, run.tThorn);
+}
 
 /** A creature's bar after a reload: the page may bring the selection back by itself, and a tap then would let go of it. */
 async function barAfterReload(page: Page, name: string, cell: { x: number; y: number }): Promise<Locator> {
@@ -515,6 +531,50 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     assert.ok(forms.includes("390x844: icon in the quick row"), `390 x 844 draws the icon in Roll's place: ${forms.join(", ")}`);
     for (const small of ["320x568", "320x568-130"]) assert.ok(!forms.some((f) => f.startsWith(`${small}: `) && f.endsWith("in the quick row")), `${small} keeps it out of the quick row: ${forms.join(", ")}`);
     assert.deepEqual(lines, [], "Go up out of line");
+  });
+
+  test("lp53fix-1. ] pressed mid-drag shows Upper floor and ends the DM's drag of Thorn as a cancel: he stays on the stairs, and the rest of the gesture sends no move", async () => {
+    await onGroundStairs();
+    await deselect(dm);
+    await showsFloor(dm, "Ground floor");
+    await waitFor("Thorn on the stairs in the DM's copy", () => (thornAt(dmSocket)?.sceneId === run.ground && thornAt(dmSocket)?.x === STAIRS.x ? true : null));
+    const drawn = await thornDrawn(dm);
+    const from = await pagePoint(dm, BOUNDS, { x: STAIRS.x + 0.5, y: STAIRS.y + 0.5 });
+    const mid = await pagePoint(dm, BOUNDS, { x: STAIRS.x - 2.5, y: STAIRS.y + 0.5 });
+    const far = await pagePoint(dm, BOUNDS, { x: START.x + 0.5, y: START.y + 0.5 });
+    await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+    const start = dmSocket.sent.length;
+    await dm.mouse.move(from.x, from.y);
+    await dm.mouse.down();
+    try {
+      await dm.mouse.move(from.x + (mid.x - from.x) * 0.1, from.y, { steps: 3 });
+      await dm.mouse.move(mid.x, mid.y, { steps: 8 });
+      await waitFor("the DM's drag of Thorn under way", () => (dmSocket.sent.slice(start).some((f) => f.includes('"dragMove"') && f.includes(run.tThorn)) ? true : null), 5_000);
+      const pressed = dmSocket.sent.length;
+      await dm.keyboard.press("]");
+      await showsFloor(dm, "Upper floor");
+      await sleep(300);
+      const switched = dmSocket.sent.length;
+      await dm.mouse.move(far.x, far.y, { steps: 8 });
+      await shots.take(dm, "lp53fix-1-dm-upper-mid-gesture");
+      await dm.mouse.up();
+      await sleep(800);
+      const moves = dmSocket.sent.slice(pressed).filter((f) => /"t":"token\.move(Many)?"/.test(f));
+      assert.deepEqual(moves, [], "no move sent at the key or after it");
+      assert.deepEqual(dmSocket.sent.slice(switched).filter((f) => f.includes('"dragMove"')), [], "the rest of the gesture previews nothing");
+    } finally {
+      await dm.mouse.up().catch(() => {});
+    }
+    const t = thornAt(dmSocket);
+    assert.deepEqual([t?.sceneId, t?.x, t?.y], [run.ground, STAIRS.x, STAIRS.y], "Thorn stays on the stairs");
+    await keyOn(dm, "[");
+    await showsFloor(dm, "Ground floor");
+    await waitFor("Thorn drawn on the stairs again", async () => {
+      const now = await thornDrawn(dm);
+      return now && drawn && now.x === drawn.x && now.y === drawn.y ? true : null;
+    });
+    await shots.take(dm, "lp53fix-1-dm-ground-thorn-back");
+    await deselect(dm);
   });
 
   test("flrl-10. no page logged an error", () => {
