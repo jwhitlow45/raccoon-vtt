@@ -4,6 +4,7 @@
  * docs/dm-guide/, the value the raw shot a step in scripts/guide-scenes/
  * takes (the step's c.shot name).
  */
+// ddb-resources.webp and resync.webp show "Last synced on" the day of the run, so a rerun differs from the committed pictures in that date alone.
 // screen-phone.webp is taken by scripts/guide-music.ts, so the DM phone shot s108 makes (final-screen-phone) has no picture here.
 export const PICTURES: Record<string, string> = {
   "home-create": "home-create",
