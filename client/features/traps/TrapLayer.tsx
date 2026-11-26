@@ -6,23 +6,25 @@ import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { rectHexes } from "#shared/rules/traps.ts";
-import type { Box } from "../../lib/boardText.ts";
+import { cutName, MIN_CUT_LETTERS, type Box } from "../../lib/boardText.ts";
+import { measurePill } from "../../canvas/measureText.ts";
 import { hexOutline } from "../../lib/scene.ts";
-import { usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
+import { boardPillsSlot, usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
 import { markStands, pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { IsoNamesContext, isoNamePill, type IsoNames } from "../../canvas/relief/isoText.ts";
-import { boardTheme } from "../../lib/theme.ts";
+import { boardSizes } from "../../lib/boardScale.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { isometric } from "../../lib/view.ts";
 import { useScoped } from "../../state/scope.ts";
 import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
 import { areaOutline } from "../areas/placement.ts";
 import { findDoor } from "../doors/doors.ts";
-import { boxCoversOutline, cornersOf, drawnBox, outlineOf, type DrawSpace, type Outline } from "../floors/linkMarks.ts";
-import { pillPlace } from "../measure/pillPlace.ts";
+import { boxCoversOutline, cornersOf, drawnBox, outlineBox, outlineOf, type DrawSpace, type Outline } from "../floors/linkMarks.ts";
+import { pillGeometry, pillPlace } from "../measure/pillPlace.ts";
 import type { LayerProps } from "../layers.ts";
 import { BADGE_PX, trapBadgeBox } from "./badge.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
@@ -80,16 +82,39 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   const open = dm && tool === "trap" && paneId ? traps[paneId] : undefined;
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
+  const names = useContext(IsoNamesContext);
+  const view = useRestView();
+  const linkPills = useLinkPills();
+  // Isometric places the names together, so none covers another's (isoTrapNames). Top-down's TrapNameLayer places each alone.
+  const standing = useMemo(
+    () => (iso && names ? isoTrapNames(grid, props.scene.id, traps, chunks, props.scale, dm, frames, iso, view, names, linkPills) : null),
+    [iso, names, grid, props.scene.id, traps, chunks, props.scale, dm, frames, view, linkPills],
+  );
   return (
     <Group listening={false}>
       {list.map((t) => (
-        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} grid={grid} frames={frames} />
+        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} grid={grid} frames={frames} standing={standing ? (standing.get(t.id) ?? null) : undefined} />
       ))}
       {ground && open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} grid={grid} /> : null}
       {ground && dm && draft ? <Draft draft={draft} scale={props.scale} grid={grid} /> : null}
     </Group>
   );
 });
+
+/**
+ * The floor link pills the board shows (LinkLayer.tsx), which Isometric's
+ * trap names keep off where they draw. The link layer reads the trap names
+ * before token text and never these (isoTrapNameMarkers), so no two layers
+ * chase each other.
+ */
+function useLinkPills(): readonly PillSpec[] {
+  // Read only while its tree shows, as every board store is, so a hidden tree places nothing (canvas/relief/controllers.test.ts).
+  const pills = useTreeShownStore(useScoped(boardPillsSlot), (s) => s.pills);
+  const kept = useMemo(() => Object.entries(pills).flatMap(([key, list]) => (key.startsWith("floorLink:") ? list : [])), [pills]);
+  const key = JSON.stringify(kept);
+  // Keyed on what the pills say, so a publish by another layer places no name again.
+  return useMemo(() => kept, [key]);
+}
 
 /**
  * The found traps' names on the overlay layer, above the fog and the dark
@@ -187,20 +212,13 @@ export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record
 }
 
 /**
- * The trap names of a scene as Isometric stands them, before the nudge off token text and only where the stand rule lets them stand: isoTrapNamePill with
- * no token text to keep off, so it picks the spot the board would take on a floor with no creature near the name. A floor link's pills keep off these, and the
+ * The trap names of a scene as Isometric stands them, before the nudge off token text and only where the stand rule lets them stand: isoTrapNames with
+ * no token text to keep off, so each takes the spot the board would on a floor with no creature near the name. A floor link's pills keep off these, and the
  * nudge, which keeps off token text that keeps off the link pills, can still move one (F11-6).
  */
 export function isoTrapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[], iso: IsoGround, view: Box | null): PillSpec[] {
   const allowed = (p: PillSpec) => pillStands(iso.fog, { ...p, scale });
-  const names: IsoNames = { view: isometric(iso.turn), ground: iso.ground, boxes: [] };
-  return Object.values(traps)
-    .filter((t) => t.sceneId === sceneId)
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .flatMap((t) => {
-      const original = trapNamePill(g, t, chunks, scale, dm, ends);
-      return original && allowed(original) ? [isoTrapNamePill(original, g, t, chunks, names, scale, allowed, ends, iso, view)] : [];
-    });
+  return [...isoTrapNames(g, sceneId, traps, chunks, scale, dm, ends, iso, view).values()].flatMap((p) => (p && allowed(p) ? [p] : []));
 }
 
 /** The frames of the floor link ends a scene's board draws, which a trap's name keeps off (trapNamePill). */
@@ -274,6 +292,34 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
  * screen at the camera's rest.
  */
 export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, frames: readonly Outline[] = [], space: DrawSpace = null, view: Box | null = null): PillSpec {
+  const spots = isoNameSpots(original, grid, trap, chunks);
+  if (!spots) return original;
+  const { candidates, within } = spots;
+  // The original already passed the stand rule. If every sampled edge is
+  // fogged, keep it rather than choosing an unpermitted first candidate.
+  const permitted = candidates.filter(allowed);
+  const offFrames = (p: PillSpec) => {
+    const box = drawnBox(p, scale, space, true, true, view);
+    return frames.every((o) => !boxCoversOutline(box, cornersOf(o), space));
+  };
+  // Tested on the pushed spots isoNamePill tries too, so a nudge never lands on a frame.
+  let clear = frames.length ? permitted.filter(offFrames) : permitted;
+  // A name wider than its trap can meet a frame from every spot on the trap's edges, as Top-down's does: it then leans to a side, as there.
+  if (frames.length > 0 && clear.length === 0) clear = permitted.flatMap(leaning).filter((p) => allowed(p) && offFrames(p));
+  // A name that no spot on the edges, centered or leaning, keeps clear of the frames hangs over its own squares instead, where one does.
+  if (frames.length > 0 && clear.length === 0) clear = within.flatMap((p) => [p, ...leaning(p)]).filter((p) => allowed(p) && offFrames(p));
+  if (frames.length > 0 && clear.length > 0) return isoNamePill(clear, names, scale, (p) => allowed(p) && offFrames(p));
+  return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
+}
+
+const leaning = (p: PillSpec): PillSpec[] => [{ ...p, side: "right" }, { ...p, side: "left" }];
+
+/**
+ * The spots isoTrapNamePill picks from: on a zone's top and bottom edges as
+ * a vertical slice meets them (`candidates`), or over its own squares from
+ * them (`within`), and along a wire or a door. Null for a door that is gone.
+ */
+function isoNameSpots(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>): { candidates: PillSpec[]; within: PillSpec[] } | null {
   const zone = trap.zone;
   const candidates: PillSpec[] = [];
   const within: PillSpec[] = [];
@@ -305,36 +351,133 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
       // Last choices, over the trap's own squares from its edge at the grid's greatest or least y, which is its far or near edge on screen only at some turns, for a layout where a floor link's frames meet every spot along the edges (ISO-1-MORE-SPOTS).
       within.push({ ...original, x, y: Math.max(...ys), above: true, below: false }, { ...original, x, y: Math.min(...ys), above: false, below: true });
     }
-  } else {
-    const line = "wire" in zone
-      ? { a: { x: zone.wire.a[0], y: zone.wire.a[1] }, b: { x: zone.wire.b[0], y: zone.wire.b[1] } }
-      : findDoor(chunks, trap.sceneId, zone.door);
-    if (!line) return original;
-    candidates.push(original);
-    for (const f of fractions) {
-      const x = line.a.x + f * (line.b.x - line.a.x);
-      const y = line.a.y + f * (line.b.y - line.a.y);
-      // Above and below move the pill along view-up after projection. Its
-      // pointer stays on the actual wire or door, including diagonal ones.
-      add(x, y, true);
-      add(x, y, false);
-    }
+    return { candidates, within };
   }
-  // The original already passed the stand rule. If every sampled edge is
-  // fogged, keep it rather than choosing an unpermitted first candidate.
-  const permitted = candidates.filter(allowed);
-  const offFrames = (p: PillSpec) => {
-    const box = drawnBox(p, scale, space, true, true, view);
-    return frames.every((o) => !boxCoversOutline(box, cornersOf(o), space));
+  const line = "wire" in zone
+    ? { a: { x: zone.wire.a[0], y: zone.wire.a[1] }, b: { x: zone.wire.b[0], y: zone.wire.b[1] } }
+    : findDoor(chunks, trap.sceneId, zone.door);
+  if (!line) return null;
+  candidates.push(original);
+  for (const f of fractions) {
+    const x = line.a.x + f * (line.b.x - line.a.x);
+    const y = line.a.y + f * (line.b.y - line.a.y);
+    // Above and below move the pill along view-up after projection. Its
+    // pointer stays on the actual wire or door, including diagonal ones.
+    add(x, y, true);
+    add(x, y, false);
+  }
+  return { candidates, within };
+}
+
+/**
+ * Where a trap's badge sits, in cells (Badge): inside its zone's box by its
+ * top left corner, at a wire's middle, or on its door's. Null for a door
+ * that is gone.
+ */
+function trapBadgeAt(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number): { x: number; y: number } | null {
+  const zone = trap.zone;
+  if ("cells" in zone) {
+    const box = zoneBox(g, trap, chunks)!;
+    const s = 1 / scale;
+    return { x: box.x0 + (BADGE_PX / 2 + 2) * s, y: box.y0 + (BADGE_PX / 2 + 2) * s };
+  }
+  if ("wire" in zone) return { x: (zone.wire.a[0] + zone.wire.b[0]) / 2, y: (zone.wire.a[1] + zone.wire.b[1]) / 2 };
+  return findDoor(chunks, trap.sceneId, zone.door)?.mid ?? null;
+}
+
+/**
+ * The trap names of a scene as Isometric stands them, by trap id, placed
+ * together in order of id (LP52-ISO-NAMES-PHONE). Each takes isoTrapNamePill's
+ * pick where that covers nothing as it draws: another trap's name placed
+ * before it, another trap's squares or badge, a floor link's frame, or what
+ * `names` holds, the creatures and their text. Else the first spot of
+ * isoNameSpots, centered, leaning, or over its own squares, that covers
+ * none of those, and failing that the same with the name cut short, as a
+ * creature's name is cut where it has no room (lib/boardText.ts cutName).
+ * Where no spot is clear even so, the name is null and hides behind its
+ * badge, as it does zoomed out. A name the stand rule lays flat keeps
+ * Top-down's spot under the fog. Names with no token text (the default
+ * `names`) are the floor link layer's markers (isoTrapNameMarkers).
+ */
+export function isoTrapNames(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, frames: readonly Outline[], iso: IsoGround, view: Box | null, names: IsoNames = { view: isometric(iso.turn), ground: iso.ground, boxes: [] }, linkPills: readonly PillSpec[] = []): Map<string, PillSpec | null> {
+  const out = new Map<string, PillSpec | null>();
+  const allowed = (p: PillSpec) => pillStands(iso.fog, { ...p, scale });
+  const list = Object.values(traps)
+    .filter((t) => t.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const shape = (o: Outline) => {
+    const corners = cornersOf(o);
+    return { corners, box: outlineBox(corners, iso) };
   };
-  // Tested on the pushed spots isoNamePill tries too, so a nudge never lands on a frame.
-  let clear = frames.length ? permitted.filter(offFrames) : permitted;
-  // A name wider than its trap can meet a frame from every spot on the trap's edges, as Top-down's does: it then leans to a side, as there.
-  if (frames.length > 0 && clear.length === 0) clear = permitted.flatMap((p) => [{ ...p, side: "right" as const }, { ...p, side: "left" as const }]).filter((p) => allowed(p) && offFrames(p));
-  // A name that no spot on the edges, centered or leaning, keeps clear of the frames hangs over its own squares instead, where one does.
-  if (frames.length > 0 && clear.length === 0) clear = within.flatMap((p) => [p, { ...p, side: "right" as const }, { ...p, side: "left" as const }]).filter((p) => allowed(p) && offFrames(p));
-  if (frames.length > 0 && clear.length > 0) return isoNamePill(clear, names, scale, (p) => allowed(p) && offFrames(p));
-  return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
+  const frameShapes = frames.map(shape);
+  const squares = list.map((t) => ("cells" in t.zone ? t.zone.cells.map((r) => shape(outlineOf(g, r))) : []));
+  const badges = list.map((t) => standingBadge(g, t, chunks, scale, dm, iso));
+  // A creature's ring draws its stroke half outside the ellipse its box holds, so a name kept off the box by less still touches it.
+  const pad = (boardSizes(scale).ringPx / 2 + 1) / scale;
+  const tokens = names.boxes.map((b) => ({ x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }));
+  const placed: Box[] = linkPills.map((p) => drawnBox(p, scale, iso, allowed(p), true, view));
+  list.forEach((t, i) => {
+    const original = trapNamePill(g, t, chunks, scale, dm, frames);
+    if (!original) return;
+    if (!allowed(original)) {
+      out.set(t.id, original);
+      return;
+    }
+    const shapes = [...frameShapes, ...squares.flatMap((s, j) => (j === i ? [] : s))];
+    const others = badges.flatMap((b, j) => (b && j !== i ? [b] : []));
+    const clear = (p: PillSpec, creatures: readonly Box[]) => {
+      if (!allowed(p)) return false;
+      const box = drawnBox(p, scale, iso, true, true, view);
+      return shapes.every((s) => !boxesMeet(box, s.box) || !boxCoversOutline(box, s.corners, iso)) && others.every((m) => !boxesMeet(box, m)) && creatures.every((m) => !boxesMeet(box, m)) && placed.every((b) => !boxesMeet(box, b));
+    };
+    const forms = nameForms(original, scale).map((form) => {
+      const spots = isoNameSpots(form, g, t, chunks);
+      const all = spots ? [...spots.candidates, ...spots.candidates.flatMap(leaning), ...spots.within.flatMap((p) => [p, ...leaning(p)])] : [];
+      return [isoTrapNamePill(form, g, t, chunks, names, scale, allowed, frames, iso, view), ...all];
+    });
+    // Clear of the rings' strokes first, whole or cut, and only then of the creatures' boxes alone, which the nudge keeps a name off and a stroke can touch by a pixel.
+    let name: PillSpec | null = null;
+    for (const creatures of [tokens, names.boxes]) {
+      for (const spots of forms) {
+        name = spots.find((p) => clear(p, creatures)) ?? null;
+        if (name) break;
+      }
+      if (name) break;
+    }
+    out.set(t.id, name);
+    if (name) placed.push(drawnBox(name, scale, iso, true, true, view));
+  });
+  return out;
+}
+
+/** A trap's badge as Isometric stands it, in view units, or null where it has none. */
+function standingBadge(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, iso: IsoGround): Box | null {
+  const at = trapBadgeAt(g, trap, chunks, scale);
+  return at ? trapBadgeBox(viewPointOf(iso, at), scale, dm && trap.found) : null;
+}
+
+/** The badges of a scene's traps as Isometric stands them, which a floor link's pills keep off (floors/linkMarks.ts placeEnds). */
+export function isoTrapBadges(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, iso: IsoGround): Box[] {
+  return Object.values(traps)
+    .filter((t) => t.sceneId === sceneId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .flatMap((t) => standingBadge(g, t, chunks, scale, dm, iso) ?? []);
+}
+
+function boxesMeet(a: Box, b: Box): boolean {
+  return Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
+}
+
+/** A trap's name whole, then cut shorter and shorter, each once, down to its least cut. */
+function nameForms(p: PillSpec, scale: number): PillSpec[] {
+  const name = p.name?.trim();
+  if (!name) return [p];
+  const px = pillGeometry({ ...p, scale }).fontSize;
+  const measure = (text: string, at: number) => measurePill(text, at, theme.font.body);
+  const whole = measure(name, px);
+  const least = measure(`${[...name].slice(0, MIN_CUT_LETTERS).join("")}…`, px);
+  const cuts = [0.6, 0.4].map((f) => Math.max(least, f * whole)).concat(least).flatMap((w) => cutName(name, undefined, w, px, measure) ?? []);
+  return [p, ...[...new Set(cuts)].map((cut) => ({ ...p, name: cut }))];
 }
 
 const NO_PILLS: readonly PillSpec[] = [];
@@ -344,33 +487,26 @@ export function nameStands(name: PillSpec, iso: IsoGround | null, scale: number)
   return iso !== null && drawsHere(iso, pillStands(iso.fog, { ...name, scale }));
 }
 
-const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid; frames: readonly Outline[] }) {
+/** `standing` is the trap's name as the layer places Isometric's together, null where it hides, and undefined where they are not placed so. */
+const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid; frames: readonly Outline[]; standing: PillSpec | null | undefined }) {
   const { trap, scale, dm, grid } = props;
   const seen = trap as SeenTrap;
   const look = lookOf(seen, dm);
   const zone = trap.zone;
-  const s = 1 / scale;
-  const names = useContext(IsoNamesContext);
   const view = useRestView();
-  // Top-down's pick is judged in cells, and the rest view is in view units in Isometric, where isoTrapNamePill reads it by what it draws.
+  // Top-down's pick is judged in cells, and the rest view is in view units in Isometric, where isoTrapNames reads it by what it draws.
   const original = trapNamePill(grid, trap, props.chunks, scale, dm, props.frames, props.iso ? null : view);
-  const name = useMemo(() => {
-    const allowed = (p: PillSpec) => !props.iso || pillStands(props.iso.fog, { ...p, scale });
-    if (!original || !names || !allowed(original)) return original;
-    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed, props.frames, props.iso, view);
-  }, [original, names, props.iso, scale, grid, trap, props.chunks, props.frames, view]);
+  const name = props.standing === undefined ? original : props.standing;
   const nameKey = name ? JSON.stringify(name) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
   usePublishPills(`trap:${trap.id}`, useMemo(() => (name ? [name] : NO_PILLS), [nameKey]));
-  let badge: { x: number; y: number } | null = null;
+  const badge = trapBadgeAt(grid, trap, props.chunks, scale);
+  const s = 1 / scale;
   let body: ReactNode = null;
   if ("cells" in zone) {
-    const box = zoneBox(grid, trap, props.chunks)!;
-    badge = { x: box.x0 + (BADGE_PX / 2 + 2) * s, y: box.y0 + (BADGE_PX / 2 + 2) * s };
     body = isHex(grid) ? <Hexes grid={grid} rects={zone.cells} look={look} /> : <Squares rects={zone.cells} look={look} />;
   } else if ("wire" in zone) {
     const { a, b } = zone.wire;
-    badge = { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
     body = (
       <>
         <Line points={[a[0], a[1], b[0], b[1]]} stroke={boardTheme.color.textHalo} opacity={0.5} strokeWidth={look.width + 3} strokeScaleEnabled={false} lineCap="round" />
@@ -379,9 +515,6 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
         <Circle x={b[0]} y={b[1]} radius={4 * s} fill={look.color} stroke={boardTheme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
       </>
     );
-  } else {
-    const door = findDoor(props.chunks, trap.sceneId, zone.door);
-    if (door) badge = door.mid;
   }
   if (!badge) return null;
   const found = dm && trap.found;
