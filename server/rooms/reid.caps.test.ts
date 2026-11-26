@@ -227,3 +227,34 @@ test("an id players held only in a memory layer the load's measure forgets keeps
   assert.equal(h.actor.committed.state.memory?.[forgotten], undefined, "the measure forgot it here too");
   assert.ok(h.actor.committed.state.stamps[barrel], "the barrel keeps its id");
 });
+
+/** The map step with every op it returns while it measures every layer made one the schema refuses: nothing kept, nothing forgotten. */
+function refusing(): typeof mapStepOps & { measures: number } {
+  const step = ((input) => {
+    const ops = mapStepOps(input);
+    if (!input.everyLayer) return ops;
+    step.measures++;
+    return ops.map((op) => ({ t: "sys.remember" as const, sceneId: op.sceneId, layers: [] }));
+  }) as typeof mapStepOps & { measures: number };
+  step.measures = 0;
+  return step;
+}
+
+test("a batch whose every-layer measure is refused with its forgetting leaves the room owing the measure, which its next batch takes again", async (t) => {
+  const { state, sceneId, share } = overShare();
+  const db = new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 });
+  const first = await storedActor(t, db, { idGate: false, mapStep: failing(1) });
+  assert.equal(db.snapshot.capsPending, true);
+  const step = refusing();
+  const noForgetting = (_state: RoomState, scene: string) => ({ t: "sys.remember" as const, sceneId: scene, layers: [] });
+  const again = await restartStored(t, first, { snapshot: false, flush: false }, { idGate: false, mapStep: step, forgetScene: noForgetting });
+  const dm = await again.connect(dmOf(state));
+  const other = otherScene(again.actor.committed.state, sceneId);
+  assert.equal((await dm.apply({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere" } })).rejects, undefined);
+  assert.equal(step.measures, 1);
+  assert.ok(charge(again.actor.committed.state, sceneId) > share, "the refused measure forgot nothing");
+  assert.equal((await dm.apply({ t: "scene.update", sceneId: other, patch: { name: "Elsewhere again" } })).rejects, undefined);
+  assert.equal(step.measures, 2, "the next batch measures every layer again");
+  await restartStored(t, again, { snapshot: true }, { idGate: false, mapStep: failing(0) });
+  assert.equal(db.snapshot.capsPending, true, "the stop's snapshot still owes the measure");
+});

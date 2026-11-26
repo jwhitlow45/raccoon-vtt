@@ -160,6 +160,8 @@ export type ActorOptions = {
   receiptCaps: Partial<ReceiptCaps>;
   /** The map step (remember.ts), which only tests replace, to make its op one the schema or the reducer refuses. */
   mapStep: typeof mapStepOps;
+  /** A scene's forgetting when its map step op is refused (remember.ts forgetSceneOp), which only tests replace, to make it refused too. */
+  forgetScene: typeof forgetSceneOp;
   /** The meet step (meet.ts), which only tests replace, to make it throw. */
   meetStep: typeof meetOps;
   /** The memory estimate's scan (remember.ts), which only tests wrap, to see which scan each estimate asks for. */
@@ -236,6 +238,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   draw: serverDraw,
   receiptCaps: {},
   mapStep: mapStepOps,
+  forgetScene: forgetSceneOp,
   meetStep: meetOps,
   memoryGrowth,
   snapshotJson,
@@ -3770,9 +3773,10 @@ export class RoomActor {
    */
   #remember(batch: Batch): void {
     let ops: ReturnType<typeof mapStepOps>;
+    const after = this.#staged.state;
+    let lowered = false;
     try {
-      const after = this.#staged.state;
-      const lowered = this.#sizes.capsMoved(after);
+      lowered = this.#sizes.capsMoved(after);
       ops = this.#opts.mapStep({
         before: batch.step.before,
         after,
@@ -3781,12 +3785,8 @@ export class RoomActor {
         cap: (scene, layer) => this.#sizes.memoryCap(after, scene, layer),
         everyLayer: lowered,
       });
-      // Answered only once the step ran: a step that throws leaves the next batch's to measure every layer.
-      if (lowered) {
-        this.#sizes.capsMeasured(after);
-        batch.measured = true;
-      }
     } catch (err) {
+      lowered = false;
       // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
       this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
       try {
@@ -3796,12 +3796,19 @@ export class RoomActor {
         return;
       }
     }
+    let held = true;
     for (const op of ops) {
       if (this.#appendServerOp(batch, op, "map step")) continue;
       // A step the schema or the reducer refuses fails closed like a throw (rule 9), for its own scene alone: the
       // other scenes' steps stand, and this one's layers forget all but their sight before anything is published.
-      const forget = forgetSceneOp(this.#staged.state, op.sceneId);
-      if (forget) this.#appendServerOp(batch, forget, "map step's forgetting");
+      const forget = this.#opts.forgetScene(this.#staged.state, op.sceneId);
+      if (forget && !this.#appendServerOp(batch, forget, "map step's forgetting")) held = false;
+    }
+    // Answered only once the step ran and every op, or its forgetting, went in, as the load's measure (layersCapped):
+    // a step that throws, or a forgetting refused too, may leave a layer over its cap, which the next batch measures.
+    if (lowered && held) {
+      this.#sizes.capsMeasured(after);
+      batch.measured = true;
     }
   }
 
@@ -4710,7 +4717,7 @@ function layersCapped(loaded: LoadedRoom, opts: ActorOptions, log: Logger, roomI
   };
   for (const op of ops) {
     if (applied(op)) continue;
-    const forget = forgetSceneOp(state, op.sceneId);
+    const forget = opts.forgetScene(state, op.sceneId);
     if (forget && !applied(forget)) {
       log.error({ roomId, sceneId: op.sceneId }, "map step's forgetting refused at load, the room is stored as owing the measure");
       return null;
