@@ -160,7 +160,7 @@ try {
   await dm.getByRole("toolbar", { name: "Map builder options" }).getByRole("button", { name: "More options" }).click();
   const more = dm.getByRole("dialog", { name: "More Map builder options" });
   await more.getByRole("button", { name: "Clear build", exact: true }).click();
-  await more.getByRole("button", { name: "Tap again to clear" }).click();
+  await more.getByRole("button", { name: "Click again to clear" }).click();
   if (await more.isVisible()) await dm.keyboard.press("Escape");
   await dm.getByRole("dialog", { name: "Remembered map" }).waitFor();
   await sleep(500);

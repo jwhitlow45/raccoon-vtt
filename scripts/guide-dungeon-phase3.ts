@@ -246,7 +246,7 @@ try {
   await dm.mouse.move(a.x + (b.x - a.x) * 0.1, a.y + (b.y - a.y) * 0.1, { steps: 3 });
   await dm.mouse.move(b.x, b.y, { steps: 12 });
   await dm.mouse.up();
-  await waitFor("the line asking for the wall", async () => ((await line.innerText()).includes("Tap the wall the wing joins.") ? true : null));
+  await waitFor("the line asking for the wall", async () => (/(Tap|Click) the wall the wing joins\./.test(await line.innerText()) ? true : null));
   const join = await pagePoint(dm, KEEP, JOIN);
   await dm.mouse.click(join.x, join.y);
   await waitFor("the area and join set", async () => (/joined at the ringed wall/.test(await line.innerText()) ? true : null));
