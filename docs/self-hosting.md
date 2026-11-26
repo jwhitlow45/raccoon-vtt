@@ -686,7 +686,10 @@ newest first.
   both, and its Apply takes the damage and Prone once. A player's Undo of a
   fall now keeps its card for a creature the undo leaves on the floor below,
   such as a rider the DM hid or took off its mount after the fall, where it
-  used to remove the card whole. Cards made before the update stay as they
+  used to remove the card whole. A creature squeezed along the map's edge
+  that climbs, falls or drops through a trapdoor now stays squeezed where its
+  full space would leave the floor, where it used to land full size, half off
+  the map. Cards made before the update stay as they
   were, and stored changes replay as they were made. After a clean stop an
   older build opens every room this version saved, as [Going back to an older
   build](#going-back-to-an-older-build) says for the change format. After a
