@@ -375,6 +375,11 @@ export class RouteDrag {
   }
 }
 
+/** Whether any ground of the walk's world has a height or a stair: with none, flattening changes nothing, so no ledge can close a way that is not closed already. */
+export function hasHeights(input: WalkInput): boolean {
+  return Object.values(input.build.buildChunks).some((chunk) => chunk !== undefined && (chunk.heights !== undefined || chunk.up !== undefined));
+}
+
 /** A search of `world`'s ground with every height flattened, built on `budget` as one step that cannot stop partway, or "paused" when the budget is spent. */
 export function flatSearchOf(world: RouteWorld, budget: WorkBudget): RouteSearch | "paused" {
   if (budget.spent) return "paused";
