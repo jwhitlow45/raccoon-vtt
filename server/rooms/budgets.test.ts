@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
-import { DEFAULT_SNAPSHOT_BUDGET, DEFAULT_SOCKET_CAPS, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket, type DueOutcome } from "./budgets.ts";
+import { DEFAULT_PREVIEW_POOL_MB, DEFAULT_SNAPSHOT_BUDGET, DEFAULT_SOCKET_CAPS, DM_RESERVED_ALLOWANCES, EphRate, FrameBudget, PreviewPool, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket, type DueOutcome } from "./budgets.ts";
 
 function clock(start = 0): { now: () => number; tick: (ms: number) => void } {
   let t = start;
@@ -23,40 +23,79 @@ describe("TokenBucket", () => {
 });
 
 describe("FrameBudget", () => {
-  test("drops over-budget frames and flags abuse after 10 s without a break", () => {
+  test("drops frames over the count before parsing and flags abuse after 10 s without a break", () => {
     const c = clock();
     const f = new FrameBudget(c.now);
-    for (let i = 0; i < 200; i++) assert.equal(f.accept(10), "ok");
+    for (let i = 0; i < 400; i++) assert.equal(f.accept(10), "ok");
     assert.equal(f.accept(10), "drop");
     // Twice the budget for ten seconds: half the frames pass, the drops never pause, so it is abuse.
     let verdict: string = "drop";
     for (let step = 0; step < 101 && verdict !== "abuse"; step++) {
       c.tick(100);
-      for (let i = 0; i < 20; i++) verdict = f.accept(10);
+      for (let i = 0; i < 40; i++) verdict = f.accept(10);
     }
     assert.equal(verdict, "abuse");
     // A pause ends the streak: the same flood after a quiet 5 s starts over at "drop".
     const g = new FrameBudget(c.now);
     for (let step = 0; step < 60; step++) {
       c.tick(100);
-      for (let i = 0; i < 20; i++) g.accept(10);
+      for (let i = 0; i < 40; i++) g.accept(10);
     }
     c.tick(5_000);
     let after: string = "ok";
     for (let step = 0; step < 50; step++) {
       c.tick(100);
-      for (let i = 0; i < 20; i++) after = g.accept(10);
+      for (let i = 0; i < 40; i++) after = g.accept(10);
     }
     assert.equal(after, "drop");
   });
 
-  test("bytes count on their own", () => {
+  test("raw bytes before parsing count apart from the bytes a message pays once parsed", () => {
     const c = clock();
     const f = new FrameBudget(c.now);
-    assert.equal(f.accept(512 * 1024), "ok");
+    // The raw guard: 4 MiB at once, then 2 MiB a second.
+    assert.equal(f.accept(4 * 1024 * 1024), "ok");
     assert.equal(f.accept(1), "drop");
     c.tick(1_000);
-    assert.equal(f.accept(256 * 1024), "ok");
+    assert.equal(f.accept(2 * 1024 * 1024), "ok");
+    // The byte bucket, which every parsed message but `eph` pays: 512 KiB at once, then 256 KiB a second.
+    const g = new FrameBudget(c.now);
+    assert.equal(g.charge(512 * 1024), "ok");
+    assert.equal(g.charge(1), "drop");
+    c.tick(1_000);
+    assert.equal(g.charge(256 * 1024), "ok");
+    // A frame the raw guard took leaves the byte bucket whole.
+    const h = new FrameBudget(c.now);
+    assert.equal(h.accept(512 * 1024), "ok");
+    assert.equal(h.charge(512 * 1024), "ok");
+  });
+});
+
+describe("EphRate", () => {
+  test("one token a message whatever its size: 400 at once, then 100 a second", () => {
+    const c = clock(1_000);
+    const r = new EphRate(c.now);
+    for (let i = 0; i < 400; i++) assert.equal(r.accept(), "ok");
+    assert.equal(r.accept(), "drop");
+    c.tick(100);
+    for (let i = 0; i < 10; i++) assert.equal(r.accept(), "ok");
+    assert.equal(r.accept(), "drop");
+  });
+
+  test("past three times the rate for 10 s is abuse, at three times it is not", () => {
+    for (const [perSecond, abuse] of [
+      [300, false],
+      [301, true],
+    ] as const) {
+      const c = clock(1_000);
+      const r = new EphRate(c.now);
+      let verdict = "ok";
+      for (let second = 0; second <= 11 && verdict !== "abuse"; second++) {
+        for (let i = 0; i < perSecond && verdict !== "abuse"; i++) verdict = r.accept();
+        c.tick(1_000);
+      }
+      assert.equal(verdict === "abuse", abuse, `${perSecond} a second`);
+    }
   });
 });
 
@@ -559,5 +598,132 @@ describe("times given by the caller, as a queued command's arrival", () => {
     assert.equal(budget.delay(keys, 70_001), 0);
     assert.equal(budget.request("s1", true, 40_000), false);
     assert.equal(budget.request("s1", true, 35_000), false, "an earlier request does not move the abuse clock back");
+  });
+});
+
+describe("PreviewPool", () => {
+  type Sock = { id: number; role: "dm" | "player"; roomId: string; promote: () => boolean; raised: number; gone: boolean };
+  let nextId = 1;
+  const sock = (role: "dm" | "player", roomId: string): Sock => {
+    const s: Sock = { id: nextId++, role, roomId, raised: 0, gone: false, promote: () => (s.gone ? false : (s.raised++, true)) };
+    return s;
+  };
+  function pool(mb = DEFAULT_PREVIEW_POOL_MB) {
+    const logged: { role: string }[] = [];
+    return { pool: new PreviewPool(mb, { warn: (obj) => void logged.push(obj as { role: string }) }), logged };
+  }
+  /** 13 rooms of six players and a DM. */
+  const table = () => Array.from({ length: 13 }, (_, r) => [sock("dm", `room${r}`), ...Array.from({ length: 6 }, () => sock("player", `room${r}`))]);
+
+  test("128 MiB holds 154 full shares at 848 KiB, 50 kept for DM sockets, and 106 MiB still holds 50 and 78", () => {
+    assert.equal(new PreviewPool().full, 154);
+    assert.equal(new PreviewPool().reserved, DM_RESERVED_ALLOWANCES);
+    const floor = new PreviewPool(106);
+    assert.ok(floor.full - floor.reserved >= 78 && floor.reserved === 50, `${floor.full}`);
+  });
+
+  for (const order of ["players first", "DMs first", "shuffled"] as const) {
+    test(`91 sockets of 13 rooms, ${order}: every one full`, () => {
+      const { pool: p, logged } = pool();
+      const rooms = table();
+      let all = rooms.flat();
+      if (order === "players first") all = [...all.filter((s) => s.role === "player"), ...all.filter((s) => s.role === "dm")];
+      if (order === "DMs first") all = [...all.filter((s) => s.role === "dm"), ...all.filter((s) => s.role === "player")];
+      if (order === "shuffled") all = [...all].sort((a, b) => ((a.id * 7919) % 97) - ((b.id * 7919) % 97));
+      for (const s of all) assert.equal(p.admit(s), "full", `${s.role} ${s.roomId}`);
+      assert.deepEqual(p.counts, { reserve: 13, general: 78, off: 0 });
+      assert.deepEqual(logged, []);
+    });
+  }
+
+  test("all 78 players reconnect while their old sockets linger: each takes its old share, and all end full", () => {
+    const { pool: p } = pool();
+    const rooms = table();
+    for (const s of rooms.flat()) p.admit(s);
+    for (const old of rooms.flat().filter((s) => s.role === "player")) assert.equal(p.admit(sock("player", old.roomId), old), "full");
+    assert.deepEqual(p.counts, { reserve: 13, general: 78, off: 0 });
+    // The old sockets' close events come later and give back nothing they no longer hold.
+    for (const old of rooms.flat().filter((s) => s.role === "player")) p.release(old);
+    assert.deepEqual(p.counts, { reserve: 13, general: 78, off: 0 });
+  });
+
+  test("pages that reload as new clients go off past the general shares, and are raised as the old sockets close", () => {
+    const { pool: p } = pool();
+    const rooms = table();
+    for (const s of rooms.flat()) p.admit(s);
+    const olds = rooms.flat().filter((s) => s.role === "player");
+    const news = olds.map((old) => sock("player", old.roomId));
+    const verdicts = news.map((s) => p.admit(s));
+    assert.equal(verdicts.filter((v) => v === "full").length, 104 - 78);
+    for (const old of olds) p.release(old);
+    assert.deepEqual(p.counts, { reserve: 13, general: 78, off: 0 });
+    assert.ok(news.filter((_, i) => verdicts[i] === "off").every((s) => s.raised === 1), "each off socket raised once");
+  });
+
+  test("off past 104 general sockets for a player or a DM's second device, and for a DM's first only past 50 rooms' DMs too, each logged with its role", () => {
+    const { pool: p, logged } = pool();
+    for (let i = 0; i < 104; i++) assert.equal(p.admit(sock("player", "big")), "full");
+    assert.equal(p.admit(sock("player", "big")), "off");
+    assert.equal(p.admit(sock("dm", "big")), "full", "the room's DM takes its kept share");
+    assert.equal(p.admit(sock("dm", "big")), "off", "its second device takes none");
+    for (let r = 0; r < 49; r++) assert.equal(p.admit(sock("dm", `r${r}`)), "full");
+    assert.equal(p.admit(sock("dm", "r49")), "off", "the 51st room's DM");
+    assert.deepEqual(logged.map((l) => l.role), ["player", "dm", "dm"]);
+  });
+
+  test("a share that comes back raises the oldest off socket it may serve, a kept DM share only a DM socket of a room without one", () => {
+    const { pool: p } = pool(1);
+    // 1 MiB: one full share, kept for a DM.
+    assert.equal(p.full, 1);
+    const dmA = sock("dm", "a");
+    const player = sock("player", "a");
+    const dmA2 = sock("dm", "a");
+    const dmB = sock("dm", "b");
+    assert.equal(p.admit(dmA), "full");
+    assert.equal(p.admit(player), "off");
+    assert.equal(p.admit(dmA2), "off");
+    assert.equal(p.admit(dmB), "off");
+    p.release(dmA);
+    // The player and room a's second DM came first, but a kept share serves a DM: room a's second device, which holds none now.
+    assert.deepEqual([player.raised, dmA2.raised, dmB.raised], [0, 1, 0]);
+    dmA2.gone = true;
+    p.release(dmA2);
+    assert.deepEqual([player.raised, dmB.raised], [0, 1]);
+  });
+
+  test("a socket gone before its share comes back passes it on to the next", () => {
+    const { pool: p } = pool();
+    const holders = Array.from({ length: 104 }, () => sock("player", "a"));
+    for (const s of holders) p.admit(s);
+    const gone = sock("player", "a");
+    const next = sock("player", "a");
+    assert.equal(p.admit(gone), "off");
+    assert.equal(p.admit(next), "off");
+    gone.gone = true;
+    p.release(holders[0]!);
+    assert.deepEqual([gone.raised, next.raised], [0, 1]);
+    // The gone socket holds nothing now, so its own close later gives back nothing.
+    assert.deepEqual(p.counts, { reserve: 0, general: 104, off: 0 });
+    p.release(gone);
+    assert.deepEqual(p.counts, { reserve: 0, general: 104, off: 0 });
+  });
+
+  test("a replacement takes its predecessor's share only when its role may hold it", () => {
+    const { pool: p } = pool();
+    const dm = sock("dm", "a");
+    assert.equal(p.admit(dm), "full");
+    const waiting = sock("dm", "b");
+    // Fill the general shares and every kept one but room a's.
+    for (let i = 0; i < 104; i++) p.admit(sock("player", "x"));
+    for (let r = 0; r < 49; r++) p.admit(sock("dm", `k${r}`));
+    assert.equal(p.admit(waiting), "off");
+    // A role change between the two sockets: the demoted player's replacement takes no kept DM share.
+    const demoted = sock("player", "a");
+    assert.equal(p.admit(demoted, dm), "off", "no general share is free either");
+    assert.equal(waiting.raised, 1, "the kept share went to the oldest off DM socket");
+    // A DM's replacement keeps the kept share, and a player's its general one.
+    const again = sock("dm", "b");
+    assert.equal(p.admit(again, waiting), "full");
+    assert.deepEqual(p.counts.reserve, 50);
   });
 });

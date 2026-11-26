@@ -90,30 +90,90 @@ export class SustainedViolation {
 export type FrameVerdict = "ok" | "drop" | "abuse";
 
 /**
- * The per-socket frame budget checked before any parsing (design 7.2): 100
- * frames and 256 KiB per second with a burst of twice that. Frames over
- * budget are dropped unparsed, and a socket over budget for 10 s is abuse.
+ * The per-socket frame budget (design 7.2, 7.6). Before any parsing, every
+ * frame pays the count bucket, 200 frames a second with a burst of 400, and
+ * the raw-byte guard, 2 MiB a second with a burst of 4 MiB, which bounds
+ * what the parse reads. After parsing, the parsed kind decides, never a
+ * prefix of the text: every message but `eph` pays the byte bucket, 256
+ * KiB a second with a burst of 512 KiB, by its raw length, so previews,
+ * which their own rate counts (EphRate), never spend the bytes ops need.
+ * Frames over budget are dropped, and a socket over budget for 10 s is
+ * abuse.
  */
 export class FrameBudget {
   #frames: TokenBucket;
+  #raw: TokenBucket;
   #bytes: TokenBucket;
   #sustained: SustainedViolation;
 
-  constructor(now: Clock = Date.now, opts: { framesPerSec?: number; bytesPerSec?: number; holdMs?: number } = {}) {
-    const frames = opts.framesPerSec ?? 100;
+  constructor(now: Clock = Date.now, opts: { framesPerSec?: number; rawBytesPerSec?: number; bytesPerSec?: number; holdMs?: number } = {}) {
+    const frames = opts.framesPerSec ?? 200;
+    const raw = opts.rawBytesPerSec ?? 2 * 1024 * 1024;
     const bytes = opts.bytesPerSec ?? 256 * 1024;
     this.#frames = new TokenBucket(frames, frames * 2, now);
+    this.#raw = new TokenBucket(raw, raw * 2, now);
     this.#bytes = new TokenBucket(bytes, bytes * 2, now);
     this.#sustained = new SustainedViolation(opts.holdMs ?? 10_000, now);
   }
 
-  accept(bytes: number): FrameVerdict {
+  /** Before parsing: the frame's count and its raw bytes. */
+  accept(rawBytes: number): FrameVerdict {
     // Both buckets are debited even when one refuses, so an over-budget
     // socket cannot keep the other bucket full for later.
     const framesOk = this.#frames.take(1);
-    const bytesOk = this.#bytes.take(bytes);
-    if (framesOk && bytesOk) return "ok";
+    const rawOk = this.#raw.take(rawBytes);
+    if (framesOk && rawOk) return "ok";
     return this.#sustained.over() ? "abuse" : "drop";
+  }
+
+  /** After parsing, a message that is not `eph`: its raw bytes against the byte bucket. */
+  charge(rawBytes: number): FrameVerdict {
+    if (this.#bytes.take(rawBytes)) return "ok";
+    return this.#sustained.over() ? "abuse" : "drop";
+  }
+}
+
+/** A socket's ephemeral rate (design 7.6): one token a message whatever its size. */
+export const EPH_RATE = { perSec: 100, burst: 400 } as const;
+
+/**
+ * The ephemeral rate of one socket: 100 messages a second with a burst of
+ * 400, each one token whatever its size, and a socket that stays over three
+ * times that rate for 10 s is abuse. The second rule counts every message,
+ * those dropped included.
+ */
+export class EphRate {
+  #bucket: TokenBucket;
+  #second: number;
+  #count = 0;
+  #abuseAt: number;
+  #sustained: SustainedViolation;
+  #now: Clock;
+
+  constructor(now: Clock = Date.now, opts: { perSec?: number | undefined; burst?: number | undefined; holdMs?: number } = {}) {
+    const perSec = opts.perSec ?? EPH_RATE.perSec;
+    this.#bucket = new TokenBucket(perSec, opts.burst ?? EPH_RATE.burst, now);
+    this.#abuseAt = 3 * perSec;
+    this.#sustained = new SustainedViolation(opts.holdMs ?? 10_000, now);
+    this.#now = now;
+    this.#second = Math.floor(now() / 1000);
+  }
+
+  /** One message at `at`: whether it goes, is dropped, or the socket has been past three times the rate for the hold time. */
+  accept(at = this.#now()): FrameVerdict {
+    const second = Math.floor(at / 1000);
+    if (second > this.#second) {
+      this.#second = second;
+      this.#count = 0;
+    }
+    this.#count++;
+    if (this.#count > this.#abuseAt && this.#sustained.over(at)) return "abuse";
+    return this.#bucket.take(1, at) ? "ok" : "drop";
+  }
+
+  /** A token alone, for a test that routes frames by hand. */
+  take(): boolean {
+    return this.#bucket.take(1);
   }
 }
 
@@ -632,6 +692,136 @@ export class SnapshotBudget {
       return [];
     }
     return list.filter((s) => s.at > cutoff && s.at <= now);
+  }
+}
+
+/**
+ * A socket's full share of the preview pool (design 7.6): its held frames
+ * at their cap (actor.ts MAX_HELD_BYTES, 400 KiB) and its rosters at
+ * theirs (gestures.ts MAX_VERSION_BYTES, 448 KiB). An off socket keeps 64
+ * KiB from a fixed reserve outside the pool, over the camera, focus,
+ * laser and pings it may still send in 2 s, 58 KiB at their most.
+ */
+export const FULL_ALLOWANCE_BYTES = 848 * 1024;
+export const OFF_ALLOWANCE_BYTES = 64 * 1024;
+/** The pool's default, PREVIEW_POOL_MB (server/config.ts), and the full allowances kept for DM sockets, one a loadable room. */
+export const DEFAULT_PREVIEW_POOL_MB = 128;
+export const DM_RESERVED_ALLOWANCES = 50;
+
+/** A socket as the pool sees it: its role and room, and how it is raised to full, which answers false for a socket gone. */
+export type PoolSocket = { readonly id: number; readonly role: "dm" | "player"; readonly roomId: string; readonly promote: () => boolean };
+
+type Share = { socket: PoolSocket; kind: "reserve" | "general" | "off" };
+
+/**
+ * The server's preview memory pool (design 7.6): PREVIEW_POOL_MB split into
+ * full allowances, 154 at the default 128 MiB. DM_RESERVED_ALLOWANCES of
+ * them are kept for DM sockets, one for each room's first, and the rest go
+ * to any socket, first come. A socket that finds none is off. Each is
+ * decided from roles and what the pool holds alone, never from anything a
+ * socket sent, when the socket's hello names its client. A share that
+ * comes back raises the oldest off socket it may serve: a DM socket of a
+ * room holding none for the DM share, any socket otherwise. Nothing ever
+ * lowers a socket's pace.
+ */
+export class PreviewPool {
+  readonly full: number;
+  readonly reserved: number;
+  #reserveFree: number;
+  #generalFree: number;
+  #shares = new Map<number, Share>();
+  /** Rooms whose DM holds a reserved share. */
+  #reserveRooms = new Set<string>();
+  /** Off sockets in the order they were admitted, the oldest first. */
+  #off = new Map<number, PoolSocket>();
+  #log: BudgetLog;
+
+  constructor(poolMb = DEFAULT_PREVIEW_POOL_MB, log: BudgetLog = { warn: (obj, msg) => console.warn(msg, obj) }) {
+    this.full = Math.floor((poolMb * 1024 * 1024) / FULL_ALLOWANCE_BYTES);
+    this.reserved = Math.min(DM_RESERVED_ALLOWANCES, this.full);
+    this.#reserveFree = this.reserved;
+    this.#generalFree = this.full - this.reserved;
+    this.#log = log;
+  }
+
+  /** What the pool has out, for tests: full shares of each kind and off sockets. */
+  get counts(): { reserve: number; general: number; off: number } {
+    return { reserve: this.reserved - this.#reserveFree, general: this.full - this.reserved - this.#generalFree, off: this.#off.size };
+  }
+
+  /**
+   * A socket's share as its hello names its client. With `from`, the
+   * socket it replaces, already closed: the socket takes that one's share
+   * when its role may hold it, and otherwise that share comes back first and
+   * the socket asks afresh.
+   */
+  admit(socket: PoolSocket, from: PoolSocket | null = null): "full" | "off" {
+    const before = from === null ? undefined : this.#shares.get(from.id);
+    if (from !== null && before !== undefined) {
+      if (before.kind === "general" || (before.kind === "reserve" && socket.role === "dm")) {
+        this.#shares.delete(from.id);
+        this.#shares.set(socket.id, { socket, kind: before.kind });
+        return "full";
+      }
+      this.release(from);
+    }
+    const kind = this.#take(socket);
+    this.#shares.set(socket.id, { socket, kind });
+    if (kind !== "off") return "full";
+    this.#off.set(socket.id, socket);
+    this.#log.warn({ role: socket.role, roomId: socket.roomId }, "preview pool: a socket admitted off");
+    return "off";
+  }
+
+  /** The socket's share comes back, once, and raises the oldest off socket it may serve. */
+  release(socket: PoolSocket): void {
+    const share = this.#shares.get(socket.id);
+    if (share?.socket !== socket) return;
+    this.#shares.delete(socket.id);
+    this.#off.delete(socket.id);
+    if (share.kind === "off") return;
+    if (share.kind === "reserve") {
+      this.#reserveRooms.delete(socket.roomId);
+      this.#reserveFree++;
+    } else {
+      this.#generalFree++;
+    }
+    this.#promote(share.kind);
+  }
+
+  #take(socket: PoolSocket): Share["kind"] {
+    if (socket.role === "dm" && this.#reserveFree > 0 && !this.#reserveRooms.has(socket.roomId)) {
+      this.#reserveFree--;
+      this.#reserveRooms.add(socket.roomId);
+      return "reserve";
+    }
+    if (this.#generalFree > 0) {
+      this.#generalFree--;
+      return "general";
+    }
+    return "off";
+  }
+
+  #promote(kind: "reserve" | "general"): void {
+    for (const [id, socket] of this.#off) {
+      if (kind === "reserve" && (socket.role !== "dm" || this.#reserveRooms.has(socket.roomId))) continue;
+      this.#off.delete(id);
+      const share = this.#shares.get(id);
+      if (share === undefined) continue;
+      if (kind === "reserve") {
+        this.#reserveFree--;
+        this.#reserveRooms.add(socket.roomId);
+      } else {
+        this.#generalFree--;
+      }
+      share.kind = kind;
+      // A socket gone before its share came back gives it up again at once.
+      if (!socket.promote()) {
+        this.release(socket);
+        return;
+      }
+      return;
+    }
   }
 }
 
