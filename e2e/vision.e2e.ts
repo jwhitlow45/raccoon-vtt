@@ -259,12 +259,12 @@ async function stopNoteAt(size: { width: number; height: number }, shot: string,
   try {
     // Back west of the platform's wall, then the walk of step 9 again. Since step 9's teleport the party has seen the ground round the
     // platform, so on flat ground there is a way round the wall's north end, and the platform's edge there closes it: Thorn holds on the
-    // edge at the wall's end, 10 ft up, under the ledge's words, not down the stair and round on the ground (D-261114-036, D-261115-030).
+    // edge at the spot nearest the drop, 10 ft up, under the ledge's words, not down the stair and round on the ground (D-261114-036, D-261115-030).
     await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
     await thornAt({ x: 7, y: 14, elevation: 10 });
     await player.waitForTimeout(500);
     await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
-    await thornAt({ x: 8, y: 12, elevation: 10 });
+    await thornAt({ x: 8, y: 13, elevation: 10 });
     const note = player.locator("[data-stop-note]");
     await stopNote("Ledge in the way. No stairs you have seen lead there.").getByRole("button", { name: "Teleport here" }).waitFor();
     await player.waitForTimeout(300);
@@ -841,7 +841,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         await player.waitForTimeout(500);
         if (select) await tapCell(player, BOUNDS, { x: 7, y: 14 });
         await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
-        await thornAt({ x: 8, y: 12, elevation: 10 });
+        await thornAt({ x: 8, y: 13, elevation: 10 });
         await stopNote(ledge).getByRole("button", { name: "Teleport here" }).waitFor();
       };
       await stopAgain();
