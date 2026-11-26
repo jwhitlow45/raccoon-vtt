@@ -135,7 +135,7 @@ describe("labels", () => {
 });
 
 describe("previews", () => {
-  test("number the unmet after the last given, in id order, skipping a shown companion", () => {
+  test("number the unmet after the last given, in id order on one square, skipping a shown companion", () => {
     const state = numbered(
       [
         token("a1", { met: 1, number: 1 }),
@@ -150,6 +150,36 @@ describe("previews", () => {
     assert.deepEqual([...previewNumbers(state, "s1")].sort(), [
       ["b4", 3],
       ["c3", 4],
+    ]);
+  });
+
+  test("run top to bottom, then left to right, the lower floor first, where the party shares its sight", () => {
+    const state = room({
+      scenes: { s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground" } }), up: scene("up", { floor: { of: "s1", level: 1, name: "Upper" } }), s2: scene("s2", { order: 1 }) },
+      tokens: Object.fromEntries(
+        [token("g1", { x: 9, y: 2 }), token("g2", { x: 1, y: 2 }), token("g3", { x: 5, y: 2 }), token("g4", { x: 0, y: 7 }), token("g0", { x: 0, y: 0, sceneId: "up" })].map((t) => [t.id, t]),
+      ),
+    });
+    assert.deepEqual([...previewNumbers(state, "s1")], [
+      ["g2", 1],
+      ["g3", 2],
+      ["g1", 3],
+      ["g4", 4],
+      ["g0", 5],
+    ]);
+  });
+
+  test("on a floor where players see for themselves follow the shared floors', in id order whatever their places", () => {
+    const own = { on: true, light: "bright" as const, perPlayer: true as const };
+    const state = room({
+      scenes: { s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground" }, vision: own }), up: scene("up", { floor: { of: "s1", level: 1, name: "Upper" } }), s2: scene("s2", { order: 1 }) },
+      tokens: Object.fromEntries([token("g3", { x: 0, y: 0 }), token("g1", { x: 9, y: 9 }), token("g2", { x: 5, y: 1 }), token("g9", { x: 4, y: 4, sceneId: "up" })].map((t) => [t.id, t])),
+    });
+    assert.deepEqual([...previewNumbers(state, "s1")], [
+      ["g9", 1],
+      ["g1", 2],
+      ["g2", 3],
+      ["g3", 4],
     ]);
   });
 

@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "../keys.ts";
 import type { RoomState, Token, Viewer } from "../model.ts";
-import { NUMBER_NAMES_MOST, NUMBERS_MOST, tableNumber } from "../numbering.ts";
+import { NUMBER_NAMES_MOST, NUMBERS_MOST, meetingOrder, numberScope, tableNumber } from "../numbering.ts";
 import { applyOp } from "../reducer.ts";
 import type { Op, RestoreEntry } from "../protocol.ts";
-import { DM, character, env, member, room, scene, token } from "../testutil.ts";
-import { keepNumbering, meetCandidates, numberingUpgrade } from "./numbering.ts";
+import { DM, chance, character, env, int, member, pick, rng, room, scene, token } from "../testutil.ts";
+import { keepNumbering, meetCandidates, meetingRuns, numberingUpgrade } from "./numbering.ts";
 import { guardHash } from "./tx.ts";
 
 /*
@@ -29,10 +29,11 @@ function applied(state: RoomState, op: Op, seq = 1, who: Viewer = DM): { state: 
   return { state: result.state, touched: result.touched };
 }
 
-/** A batch's end: the step's candidates met in one `sys.meet`, as the actor appends it. */
+/** A batch's end: the step's candidates met by one `sys.meet` for each of their lists, as the actor appends them. */
 function met(state: RoomState, touched: readonly EntityKey[] = []): RoomState {
-  const ids = meetCandidates(state, touched, {});
-  return ids.length === 0 ? state : applied(state, { t: "sys.meet", tokenIds: ids }, 1, SERVER).state;
+  let out = state;
+  for (const tokenIds of meetingRuns(state, meetCandidates(state, touched, {}))) out = applied(out, { t: "sys.meet", tokenIds }, 1, SERVER).state;
+  return out;
 }
 
 /** An op, then the batch's end. */
@@ -193,6 +194,59 @@ describe("meeting creatures", () => {
   });
 });
 
+describe("the meeting order", () => {
+  const OWN_SIGHT = { on: false, light: "bright" as const, perPlayer: true as const };
+  const revealed = (ids: string[]) => ({ t: "token.updateMany", tokenIds: ids, patch: { visibility: "all" } }) as Op;
+  // Made left to right, with ids that sort another way.
+  const row = () => [token("gq", { x: 2, y: 4, ...HIDDEN }), token("gb", { x: 5, y: 4, ...HIDDEN }), token("gm", { x: 8, y: 4, ...HIDDEN }), token("oz", { name: "Orc", x: 1, y: 1, ...HIDDEN }), token("oa", { name: "Orc", x: 9, y: 1, ...HIDDEN })];
+
+  test("three Goblins made left to right and met together read 1, 2 and 3 left to right, where the party shares its sight", () => {
+    const state = roomWith(row());
+    const r = applied(state, revealed(["gq", "gb", "gm", "oz", "oa"]));
+    assert.deepEqual(meetingRuns(r.state, meetCandidates(r.state, r.touched, {})), [
+      ["gq", "oz"],
+      ["gb", "gm", "oa"],
+    ]);
+    assert.deepEqual(numbers(met(r.state, r.touched)), { gq: 1, gb: 2, gm: 3, oz: 1, oa: 2 });
+  });
+
+  test("met together on a floor where players see for themselves, they take their numbers in id order", () => {
+    const state = roomWith(row(), { scenes: { s1: scene("s1", { vision: OWN_SIGHT }), s2: scene("s2", { order: 1 }) } });
+    const r = applied(state, revealed(["gq", "gb", "gm", "oz", "oa"]));
+    assert.deepEqual(meetingRuns(r.state, meetCandidates(r.state, r.touched, {})), [["gb", "gm", "gq", "oa", "oz"]]);
+    assert.deepEqual(numbers(met(r.state, r.touched)), { gq: 3, gb: 1, gm: 2, oz: 2, oa: 1 });
+  });
+
+  test("each list rises in id, and together they meet each name's creatures on each scene in meeting order", () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed);
+      const scenes = {
+        s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground" }, ...(chance(r, 0.3) ? { vision: OWN_SIGHT } : {}) }),
+        up: scene("up", { floor: { of: "s1", level: 1, name: "Upper" }, ...(chance(r, 0.3) ? { vision: OWN_SIGHT } : {}) }),
+        s2: scene("s2", { order: 1 }),
+      };
+      const tokens = Array.from({ length: int(r, 0, 30) }, (_, i) =>
+        token(`t${int(r, 0, 9999)}x${i}`, { name: pick(r, ["Goblin", "Goblin", "Orc", "Kobold"]), sceneId: pick(r, ["s1", "up", "s2"]), x: int(r, 0, 4), y: int(r, 0, 4) }),
+      );
+      const state = roomWith(tokens, { scenes });
+      const ids = tokens.map((t) => t.id).filter(() => chance(r, 0.8));
+      const runs = meetingRuns(state, ids);
+      for (const run of runs) assert.ok(run.length > 0 && run.every((id, i) => i === 0 || run[i - 1]! < id), `seed ${seed}: ${JSON.stringify(run)} rises in id`);
+      assert.deepEqual(runs.flat().sort(), [...ids].sort(), `seed ${seed}: every creature named once`);
+      const order = meetingOrder(state);
+      const group = (id: string) => `${numberScope(state, state.tokens[id]!)} ${state.tokens[id]!.name}`;
+      let fewest = 0;
+      for (const key of new Set(ids.map(group))) {
+        const met = runs.flat().filter((id) => group(id) === key);
+        const want = ids.filter((id) => group(id) === key).sort((a, b) => order(state.tokens[a]!, state.tokens[b]!));
+        assert.deepEqual(met, want, `seed ${seed}: ${key} meets in meeting order`);
+        fewest = Math.max(fewest, 1 + want.filter((id, i) => i > 0 && id < want[i - 1]!).length);
+      }
+      assert.equal(runs.length, fewest, `seed ${seed}: as few lists as the names' orders allow`);
+    }
+  });
+});
+
 describe("the caps", () => {
   test("a name past the scene's names, or a number past a name's, is not listed and stays unnumbered", () => {
     const names = Object.fromEntries(Array.from({ length: NUMBER_NAMES_MOST }, (_, i) => [`Name ${i}`, [i + 1, 1] as [number, number]]));
@@ -349,7 +403,14 @@ describe("the numbering upgrade", () => {
     assert.equal(tableNumber(play(after, shown("c")), play(after, shown("c")).tokens.c!), 4);
   });
 
-  test("of two with one number the lower id keeps it, and hidden names meet under the name players read", () => {
+  test("of two with one number the first in meeting order keeps it, and the rest meet in that order, by place where the party shares its sight and by id where players see for themselves", () => {
+    const tokens = [token("a", { x: 9, number: 1 }), token("b", { x: 2, number: 1 }), token("c", { x: 5 }), token("d", { x: 1 })];
+    assert.deepEqual(numbers(numberingUpgrade(roomWith(tokens))), { a: 4, b: 1, c: 3, d: 2 });
+    const own = { s1: scene("s1", { vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) };
+    assert.deepEqual(numbers(numberingUpgrade(roomWith(tokens, { scenes: own }))), { a: 1, b: 2, c: 3, d: 4 });
+  });
+
+  test("of two with one number on two floors the lower floor's keeps it, and hidden names meet under the name players read", () => {
     const floors = {
       s1: scene("s1", { floor: { of: "s1", level: 0, name: "Ground floor", height: 10 } }),
       up: scene("up", { floor: { of: "s1", level: 1, name: "Upper", height: 10 } }),
