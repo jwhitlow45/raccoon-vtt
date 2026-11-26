@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { chunkKey } from "../keys.ts";
 import type { BuildChunk, RoomState, Token, Trap, TrapRig } from "../model.ts";
 import type { Op } from "../protocol.ts";
-import { lift } from "../discoveryTestutil.ts";
+import { lift, wall } from "../discoveryTestutil.ts";
 import { DM, P1, actor, room, token } from "../testutil.ts";
 import { sizeCategory } from "./footprint.ts";
 import { encodeHeights } from "./heights.ts";
@@ -505,5 +505,33 @@ describe("turns (5.1)", () => {
     assert.deepEqual(summary(planTurn(state, "thorn", "turnStart", {})), ["statue:turnStart:public:thorn"]);
     assert.deepEqual(summary(planTurn(state, "shade", "turnStart", {})), ["statue:turnStart:private:shade"]);
     assert.deepEqual(planTurn(state, "thorn", "turnEnd", {}), []);
+  });
+});
+
+describe("a stop in a corridor along the map's edge, from change format 66 (D-261126-226)", () => {
+  // A corridor one square wide along the north side, walled at y = 1 from x = 10 to 26, with a pit that stops a walker on 16, 0.
+  const corridor = (blocking: boolean) =>
+    world([thorn({ size: "large", x: 11.5, y: -0.5, squeeze: true })], [trap("pit", square(16, 0), { stops: true })], (s) => {
+      s.scenes.s1 = { ...s.scenes.s1!, blockMovement: blocking };
+      s.buildChunks = {};
+      wall(s, "edgesqw00001", [10, 1], [18, 1]);
+      wall(s, "edgesqw00002", [18, 1], [26, 1]);
+    });
+
+  test("a squeezed Large walker stops on the pit, on ground every player sees, squeezed there as between two walls", () => {
+    for (const blocking of [false, true]) {
+      for (const route of [undefined, [[21.5, -0.5, 0, 0]] as [number, number, number, 0 | 1][]]) {
+        const op: Op = { t: "token.move", tokenId: "thorn", x: 21.5, y: -0.5, squeeze: true, ...(route ? { route } : {}) };
+        const cut = plan(corridor(blocking), op, P1).op as Extract<Op, { t: "token.move" }>;
+        assert.deepEqual([cut.x, cut.y, cut.squeeze], [15.5, -0.5, true], `blocking ${blocking}, ${route ? "routed" : "plain"}`);
+      }
+    }
+  });
+
+  test("an op stored at 65 replays as the side never pinched: no stand there where walls stop moves, and full size where they do not", () => {
+    const op: Op = { t: "token.move", tokenId: "thorn", x: 21.5, y: -0.5, squeeze: true };
+    const at65 = (blocking: boolean) => planTrapMove(op, corridor(blocking), P1, { opVersion: 65 }).op as Extract<Op, { t: "token.move" }>;
+    assert.deepEqual([at65(true).x, at65(true).y, at65(true).squeeze], [21.5, -0.5, true]);
+    assert.deepEqual([at65(false).x, at65(false).y, at65(false).squeeze], [15.5, -0.5, undefined]);
   });
 });
