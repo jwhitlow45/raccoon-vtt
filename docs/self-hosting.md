@@ -689,8 +689,8 @@ newest first.
   used to remove the card whole. A creature squeezed along the map's edge
   that climbs, falls or drops through a trapdoor now stays squeezed where its
   full space would leave the floor, where it used to land full size, half off
-  the map. Cards made before the update stay as they
-  were, and stored changes replay as they were made. After a clean stop an
+  the map, or stay standing on a trapdoor along the east or south edge. Cards
+  made before the update stay as they were, and stored changes replay as they were made. After a clean stop an
   older build opens every room this version saved, as [Going back to an older
   build](#going-back-to-an-older-build) says for the change format. After a
   crash or a forced stop, an older build serves a room with changes at format
