@@ -1444,4 +1444,148 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await waitFor("the springing settled", () => (state(dmSocket)?.traps?.[trapId]?.rig?.due === undefined ? true : null));
     await card.waitFor({ state: "detached" });
   });
+
+  test("s66-1. a creature the pit hit, moved to another scene before Apply, stays on the card until it is back", async () => {
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[run.trapId] ?? null);
+    await dm.locator(".konvajs-content").first().waitFor();
+    // Only this step's card waits, so the column holds it whole at every size.
+    for (const t of Object.values(state(dmSocket)?.traps ?? {})) for (const d of t.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: t.id, due: d.id });
+    const vault = uuidv7();
+    const brute = uuidv7();
+    const bree = uuidv7();
+    const plateId = uuidv7();
+    await ops.send({ t: "scene.create", scene: { id: vault, name: "Vault", bounds: BOUNDS } });
+    for (const [id, name, x] of [
+      [brute, "Brute", 10],
+      [bree, "Bree", 11],
+    ] as const) {
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name, size: "medium", visibility: "all", x, y: 9, disposition: "hostile", actor: { inline: actor() } } });
+    }
+    const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", damage: [{ formula: "1d6", type: "fire" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: plateId, sceneId: run.sceneId, name: "Ember Plate", zone: { cells: [{ x: 10, y: 9, w: 2, h: 1 }] }, rig } });
+    await waitFor("the plate and its creatures on the DM's copy", () => (state(dmSocket)?.traps?.[plateId] && token(dmSocket, bree) ? true : null));
+    await ops.send({ t: "trap.spring", trapId: plateId, tokenIds: [brute, bree] });
+    const plate = () => state(dmSocket)?.traps?.[plateId];
+    await waitFor("the springing waits", () => ((plate()?.rig?.due?.length ?? 0) > 0 ? true : null));
+    const hpOf = (id: string) => {
+      const t = token(dmSocket, id);
+      return t && "inline" in t.actor ? t.actor.inline.hp.cur : null;
+    };
+    const title = "Ember Plate went off";
+    const card = dm.getByRole("group", { name: title });
+    const toggle = card.getByRole("button", { name: title, exact: true });
+    const save = card.getByRole("button", { name: "Save and damage", exact: true });
+    await card.getByText("It hits Brute and Bree.", { exact: true }).waitFor();
+    const moveBree = async (sceneId: string) => {
+      await ops.send({ t: "token.update", tokenId: bree, patch: { sceneId } });
+      await waitFor(`Bree ${sceneId === vault ? "off" : "on"} the DM's copy`, () => ((token(dmSocket, bree) !== undefined) === (sceneId !== vault) ? true : null));
+    };
+    await moveBree(vault);
+    await card.getByText("It hits Brute. It also hits Bree, not on this scene now.", { exact: true }).waitFor();
+    await shots.take(dm, "traps-s66-1-away");
+
+    // The longest line wraps inside the card at every size the DM may use, its words within 1 px of their line.
+    const lines: string[] = [];
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+      { width: 320, height: 568 },
+    ]) {
+      for (const scale of [1, 1.3]) {
+        const label = `the card with a creature away at ${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+        await dm.setViewportSize(size);
+        await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await reopenRoom(dm);
+        await waitFor("the DM's snapshot again", () => plate() ?? null);
+        await dm.locator(".konvajs-content").first().waitFor();
+        let shown = card.first();
+        const row = dm.getByRole("button", { name: new RegExp(`went off.*${await pointerText(dm, "Tap")} to answer\\.$`) });
+        await waitFor(`the card or its row, ${label}`, async () => ((await shown.isVisible()) || (await row.count()) > 0 ? true : null));
+        if (!(await shown.isVisible())) await row.first().click();
+        const opener = shown.getByRole("button", { name: title, exact: true });
+        if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+        await dm.waitForTimeout(300);
+        const alerts = dm.getByRole("dialog", { name: "Alerts" });
+        if ((await alerts.count()) > 0) {
+          shown = alerts.getByRole("group", { name: title }).first();
+          const there = shown.getByRole("button", { name: title, exact: true });
+          if ((await there.getAttribute("aria-expanded")) !== "true") await there.click();
+        }
+        // A reload forgets the names this device read, so the one away reads as a creature.
+        await shown.getByText("It hits Brute. It also hits a creature, not on this scene now.", { exact: true }).waitFor();
+        lines.push(...alignmentLines(await measureAlignment(shown), label));
+        const box = await rectOf(shown);
+        const words = await rectOf(shown.getByText(/not on this scene now\.$/));
+        assert.ok(words.left >= box.left - 0.5 && words.right <= box.right + 0.5, `${label}: the line runs past the card`);
+        await shots.take(dm, `traps-s66-1-${size.width}x${size.height}-${Math.round(scale * 100)}`);
+        if ((await alerts.count()) > 0) await alerts.getByRole("button", { name: "Close", exact: true }).click();
+      }
+    }
+    assert.deepEqual(lines, []);
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => plate() ?? null);
+    await dm.locator(".konvajs-content").first().waitFor();
+    // Bree back on the scene a moment, so this page reads her name again, then away.
+    await moveBree(run.sceneId);
+    await card.getByText("It hits Brute and Bree.", { exact: true }).waitFor();
+    await moveBree(vault);
+    await card.getByText("It hits Brute. It also hits Bree, not on this scene now.", { exact: true }).waitFor();
+
+    // Save and damage reaches the creature here alone, and Apply settles it alone.
+    const rollAndApply = async (who: string) => {
+      await save.click();
+      const creatures = dm.getByRole("group", { name: "Creatures" });
+      await creatures.getByText(who, { exact: true }).first().waitFor();
+      const damage = dm.getByLabel("Damage", { exact: true });
+      await damage.waitFor();
+      const logged = state(dmSocket)?.log.length ?? 0;
+      await damage.press("Enter");
+      const rolled = await waitFor("the damage roll", () => state(dmSocket)?.log.slice(logged).find((e) => e.data?.type === "dice" && e.data.rolls.some((r) => r.formula === "1d6")) ?? null);
+      const apply = dm.getByRole("button", { name: /^Apply: 1 takes damage$/ });
+      await apply.waitFor();
+      return { creatures, amount: rolled.data?.type === "dice" ? rolled.data.rolls.find((r) => r.formula === "1d6")!.total : 0, apply };
+    };
+    const first = await rollAndApply("Brute");
+    assert.equal(await first.creatures.getByText("Bree", { exact: true }).count(), 0, "the page has no row for Bree, who is away");
+    await shots.take(dm, "traps-s66-1-page");
+    await first.apply.click();
+    await waitFor(`Brute at ${HP - first.amount}`, () => (hpOf(brute) === HP - first.amount ? true : null));
+    await waitFor("Bree still waits", () => (JSON.stringify(plate()?.rig?.due?.map((d) => d.hits)) === JSON.stringify([[bree]]) ? true : null));
+    await card.getByText("It hits Bree, not on this scene now.", { exact: true }).waitFor();
+    assert.equal(await save.count(), 0, "Save and damage hides while every creature it names is away");
+    await card.getByRole("button", { name: `Dismiss ${title}`, exact: true }).waitFor();
+    await shots.take(dm, "traps-s66-1-waiting");
+
+    // Back on the scene, Save and damage shows again. Another device moves her away while it holds focus: focus goes to the card's toggle.
+    await moveBree(run.sceneId);
+    await card.getByText("It hits Bree.", { exact: true }).waitFor();
+    await save.waitFor();
+    await save.focus();
+    assert.equal(await save.evaluate((el) => el === el.ownerDocument.activeElement), true, "Save and damage holds focus");
+    await moveBree(vault);
+    await save.waitFor({ state: "detached" });
+    await waitFor("focus on the card's toggle", async () => ((await toggle.evaluate((el) => el === el.ownerDocument.activeElement)) ? true : null)).catch(async () => assert.fail(`focus is not on the card's toggle: ${JSON.stringify(await focusAt(dm))}`));
+    // Focus elsewhere is left alone.
+    await moveBree(run.sceneId);
+    await save.waitFor();
+    await toggle.focus();
+    await moveBree(vault);
+    await save.waitFor({ state: "detached" });
+    assert.equal(await toggle.evaluate((el) => el === el.ownerDocument.activeElement), true);
+
+    // Once she is back, Apply reaches her and ends the card.
+    await moveBree(run.sceneId);
+    const second = await rollAndApply("Bree");
+    await second.apply.click();
+    await waitFor(`Bree at ${HP - second.amount}`, () => (hpOf(bree) === HP - second.amount ? true : null));
+    await waitFor("the springing settled", () => (plate()?.rig?.due === undefined ? true : null));
+    await card.waitFor({ state: "detached" });
+    assert.equal(hpOf(brute), HP - first.amount, "Brute took it once");
+    assert.equal(patSocket.received.some((frame) => frame.includes(plateId)), false, "a frame to Pat named the unfound plate");
+  });
 });
