@@ -365,7 +365,7 @@ describe("SnapshotBudget", () => {
     for (const [session, due] of asks) b.record(b.keys(session, `ip-${session}`, false), 1, due - 1_000);
     for (const [session, due, onDue] of asks) b.wait(`X|${session}|a`, b.keys(session, `ip-${session}`, false), due, 0, onDue);
     assert.deepEqual(heard, []);
-    // A call from another room settles all three due by 1,000 ms, and returns.
+    // A call from another room settles the two requests due by 1,000 ms, and returns.
     assert.equal(b.mayWait(b.keys("s4", "ip-s4", false), 1_000), true);
     assert.deepEqual([heard, warned.length, b.waiting], [["s2 1000"], 1, 1]);
     c.tick(2_000);
