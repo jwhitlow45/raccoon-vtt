@@ -3803,8 +3803,8 @@ export const ephCaps = {
     version: 512,
     /** A held move or group end. */
     move: 3 * 1024,
-    /** A held ruler or area, their wire cap. */
-    measure: 4 * 1024,
+    /** A held ruler or area: its 4 KiB wire cap, which a held ruler keeps as bytes, and their header. */
+    measure: 4.25 * 1024,
     /** Any other held message. */
     other: 512,
   },
