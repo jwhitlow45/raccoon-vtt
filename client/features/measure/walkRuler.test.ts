@@ -159,6 +159,16 @@ describe("the walking ruler", () => {
     assert.equal(m.totalFt, 20, "10 ft up and 10 ft down, where the straight ruler reads 10 ft");
   });
 
+  test("a walk onto a rise no stairs reach holds at its foot, as the drag does (LP42R-FOLLOW 2)", () => {
+    // A block 10 ft high on x = 5 to 8 across the whole scene: players have no way up, though flat ground would have one.
+    const heights = Object.fromEntries(Array.from({ length: 30 }, (_, y) => [5, 6, 7, 8].map((x) => [`${x},${y}`, 10])).flat());
+    const state = world({ blockMovement: true, heights });
+    const read = (to: number) => measureWalk({ view: state, sceneId: "s1", stops: [free(2, 5), free(to, 5)], viewer: { role: "player" }, everything: false })!;
+    const m = read(7);
+    assert.deepEqual([m.legs[0]!.none, m.legs[0]!.ft], [false, 10], "the leg walks to the rise's foot on 4, 5 and ends there");
+    assert.deepEqual([m.legs[0]!.to.x, m.legs[0]!.to.y], [4, 5]);
+  });
+
   test("a kept walking ruler follows every token it is anchored to", () => {
     const state = world({ blockMovement: false, tokens: [token("a", { x: 1, y: 1 }), token("b", { x: 4, y: 1 })] });
     const kept = keptDrawing({ id: "k", sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.a!), tokenStop(SQUARES, state.tokens.b!)], ownerId: "dm1", color: "#fff", shared: true, walk: true })!;

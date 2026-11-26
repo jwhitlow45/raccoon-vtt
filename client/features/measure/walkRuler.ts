@@ -15,6 +15,7 @@ import { routeWalkers, type RoutePoint } from "#shared/rules/route.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch } from "#shared/rules/hexWalk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
+import { flatSearchOf, ledgeFoot } from "../movement/routeDrag.ts";
 import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type Aim, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { dragLead } from "../attach/groups.ts";
 import { carriedIndex } from "#shared/rules/attach.ts";
@@ -152,7 +153,7 @@ const STEP_UNITS = 16;
  * open-ground check of the leg still searching, `alone` while that is the
  * walker's own search without what it drags (`legFound`).
  */
-type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: RouteLegCheck; alone?: true } | null };
+type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: RouteLegCheck; alone?: true; flat?: RouteSearch } | null };
 
 /**
  * Where a ruler's walk stands before a leg: the room as the legs before it
@@ -313,7 +314,17 @@ function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: Wa
         progress.on = { leg: legKey, search: group, check };
         return null;
       }
-      found = traced ? { kind: "route", route: { pieces: traced.pieces } } : { kind: "none", capped: settled === "capped" };
+      if (traced) found = { kind: "route", route: { pieces: traced.pieces } };
+      else if (settled === "unreachable" && !group.world.tows) {
+        // The drag's ledge pass (routeDrag.ts ledgeFoot, D-261114-040): where flat ground has a way, the walk holds at the foot of the ledge, and the drop's planner reads the landing from it. With creatures in tow the drag says first whether one cannot follow, which the ruler does not, so it keeps the straight leg's hold there (LP42R-FOLLOW 2).
+        const flat = own?.flat ?? flatSearchOf(group.world, budget);
+        const held = flat === "paused" ? "paused" : ledgeFoot(group, flat, target, budget);
+        if (held === "paused") {
+          progress.on = { leg: legKey, search: group, check, ...(flat !== "paused" ? { flat } : {}) };
+          return null;
+        }
+        found = held ? { kind: "route", route: { pieces: held.pieces }, ledge: true } : { kind: "none", capped: false };
+      } else found = { kind: "none", capped: settled === "capped" };
     }
   }
   const search = group;

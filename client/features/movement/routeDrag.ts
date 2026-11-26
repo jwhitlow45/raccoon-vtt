@@ -243,7 +243,7 @@ export class RouteDrag {
       if (flat === "paused") return "paused";
       this.#flat = { from: world, search: flat };
     }
-    return ledgeHold(closed, this.#flat.search, to, budget);
+    return ledgeFoot(closed, this.#flat.search, to, budget);
   }
 
   /**
@@ -389,7 +389,7 @@ export function flatSearchOf(world: RouteWorld, budget: WorkBudget): RouteSearch
  * spots along the flat way that qualify, the one nearest the drop is held at, and the earliest along the way on a tie, so the
  * walk does not run on along a platform's edge to a wall's end that is no nearer the drop (LP43-POLISH-LEDGE).
  */
-export function ledgeHold(closed: RouteSearch, flat: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
+export function ledgeFoot(closed: RouteSearch, flat: RouteSearch, to: Point, budget: WorkBudget): WalkRoute | null | "paused" {
   const world = closed.world;
   const result = flat.settle(to, budget);
   if (result === "paused") return "paused";
