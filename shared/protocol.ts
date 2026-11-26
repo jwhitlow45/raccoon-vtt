@@ -2589,8 +2589,13 @@ const stateClientOps = [
      * joins it here under a refine that refuses both.
      */
     cast: id.optional(),
-    /** The trap occurrence this outcome settles, in the same op (docs/design/design-v1-traps.md 6.2). */
-    trap: z.strictObject({ trapId: id, due: trapDue }).optional(),
+    /**
+     * The trap occurrence this outcome settles, in the same op (docs/design/design-v1-traps.md 6.2), and the creatures it
+     * names that this outcome settles, applied, passed or skipped. The occurrence keeps every other creature it names that
+     * is still in the room, such as one moved to another scene, and goes once none is left. Without `tokenIds` it settles
+     * whole, which from change format 66 only an occurrence that names no one takes (trapSettlesNamed).
+     */
+    trap: z.strictObject({ trapId: id, due: trapDue, tokenIds: z.array(id).max(LIMITS.trapHits).optional() }).optional(),
     /**
      * The fall card this outcome settles (docs/design/design-v1-floors.md phase 4, 4.4) and the creatures it names that
      * this outcome settles, applied or skipped. The card keeps every other creature it names that is still in the room,
