@@ -222,8 +222,9 @@ export class RouteDrag {
   /**
    * Where a ledge closes the way to `to` once the search `closed` finds
    * none and no creature does: where a search of the same ground with
-   * every height flattened finds a way, the walk `closed` finds to the last
-   * spot of that way it reaches and may go on from, on the walker's own
+   * every height flattened finds a way, the walk `closed` finds to the spot of
+   * that way it reaches and may go on from that lies nearest the drop, the
+   * earliest along the way on a tie (`ledgeFoot`), on the walker's own
    * grid, standing between the walker's level and the drop's, the foot of
    * a rise or the edge of a pit. A drop onto a level the walk cannot reach
    * then holds there, where it held wherever the straight leg met a wall
