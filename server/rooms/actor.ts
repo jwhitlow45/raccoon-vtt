@@ -42,7 +42,7 @@ import { reidDue, reidRoom, renamedOp } from "./reid.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
-import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, holdsPreview, Outbox, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
 import { heldCharge, heldForm, routedForm, type HeldFrame, type RosterVersion } from "./gestures.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
@@ -1692,10 +1692,23 @@ export class RoomActor {
     this.#releaseFrames();
   }
 
-  /** Routes each socket's held frames, in order, whose ticks are covered, dropping those past RETAIN_MS. */
+  /**
+   * Routes each socket's held frames, in order, whose ticks are covered,
+   * dropping those past RETAIN_MS. What they send goes once every frame is
+   * routed, each receiver's together (ephemeral.ts Outbox).
+   */
   #releaseFrames(): void {
     if (this.#held.size === 0) return;
     const now = this.#opts.now();
+    const out = new Outbox();
+    try {
+      this.#releaseInto(now, out);
+    } finally {
+      out.deliver();
+    }
+  }
+
+  #releaseInto(now: number, out: Outbox): void {
     for (const [conn, frames] of this.#held) {
       while (frames.list.length > 0) {
         const frame = frames.list[0]!;
@@ -1708,21 +1721,21 @@ export class RoomActor {
         if (!this.#covered(frame.a)) break;
         frames.list.shift();
         frames.bytes -= frame.bytes;
-        this.#routeFrame(conn, frame);
+        this.#routeFrame(conn, frame, out);
       }
       if (frames.list.length === 0) this.#held.delete(conn);
     }
   }
 
   /** A live frame routed against the view of its tick: the newest published one, since it routes before the next publish. */
-  #routeFrame(conn: Connection, frame: HeldFrame): void {
-    this.#route(conn, this.#viewAt(frame.a)?.state ?? null, { ...frame, e: routedForm(frame.e) });
+  #routeFrame(conn: Connection, frame: HeldFrame, out: Outbox): void {
+    this.#route(conn, this.#viewAt(frame.a)?.state ?? null, { ...frame, e: routedForm(frame.e) }, out);
   }
 
   /** Routes a frame against `state`, none when its view is gone, a group frame by the version it bound, which it then lets go. */
-  #route(conn: Connection, state: RoomState | null, frame: { sceneId: string; e: EphEvent | GroupFrame; version: RosterVersion | null; at: number }): void {
+  #route(conn: Connection, state: RoomState | null, frame: { sceneId: string; e: EphEvent | GroupFrame; version: RosterVersion | null; at: number }, out?: Outbox): void {
     try {
-      if (state !== null) routeEphemeral(state, conn, frame.sceneId, frame.e, this.#connections, frame.at, frame.version);
+      if (state !== null) routeEphemeral(state, conn, frame.sceneId, frame.e, this.#connections, frame.at, frame.version, out);
     } finally {
       conn.gestures.release(frame.version);
     }

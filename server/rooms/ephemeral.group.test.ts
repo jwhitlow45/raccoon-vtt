@@ -521,6 +521,87 @@ describe("what a gesture's entry owns when its tokens change", () => {
   });
 });
 
+describe("each receiver's messages of one pass go together", () => {
+  /**
+   * V, a and b on Bree's screen, with 30 members under Hide between a and b
+   * in the roster. `work` counts the reads routing and judging make (the
+   * room's tokens, p1's held previews, what the DM's socket owns), and each
+   * message to Bree is marked with the count as it goes.
+   */
+  function probed() {
+    const state = room();
+    state.tokens.v = token("v", { x: 20, y: 5 });
+    state.tokens.a = token("a", { x: 21, y: 5 });
+    state.tokens.b = token("b", { x: 22, y: 5 });
+    const hidden = Array.from({ length: 30 }, (_, i) => `h${i}`);
+    for (const [i, id] of hidden.entries()) state.tokens[id] = token(id, { x: 2 + (i % 10), y: 2 + Math.floor(i / 10), visibility: "dm" });
+    const t = stage(state);
+    let work = 0;
+    const tokens = state.tokens;
+    state.tokens = new Proxy(tokens, {
+      get(target, prop, receiver) {
+        work++;
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    for (const map of [t.p1.conn.previewsHeld, t.dm.conn.dragOwners] as Map<string, unknown>[]) {
+      for (const name of ["get", "has", "delete", "set"] as const) {
+        const real = map[name].bind(map) as (...args: unknown[]) => unknown;
+        (map as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+          work++;
+          return real(...args);
+        };
+      }
+    }
+    const marks: number[] = [];
+    const real = t.bree.conn.send.bind(t.bree.conn);
+    t.bree.conn.send = (msg) => {
+      marks.push(work);
+      return real(msg);
+    };
+    const members = [{ id: "a", at: { x: 21, y: 5 } }, ...hidden.map((id, i) => ({ id, at: { x: 2 + (i % 10), y: 2 + Math.floor(i / 10) } })), { id: "b", at: { x: 22, y: 5 } }];
+    /** Bree's marks for one pass: how many messages, and how many counts they went at. */
+    const during = (run: () => void) => {
+      marks.length = 0;
+      run();
+      return { sent: marks.length, counts: new Set(marks).size };
+    };
+    return { t, members, during };
+  }
+
+  test("a group frame's members to Bree, with members she does not show judged between them", () => {
+    const { t, members, during } = probed();
+    assert.deepEqual(
+      during(() => t.send({ k: "dragStart", tokenId: "v", g: 1, x: 20, y: 5, ...roster(members, { x: 20, y: 5 }) })),
+      { sent: 3, counts: 1 },
+    );
+    assert.deepEqual(during(() => t.send({ k: "dragMove", tokenId: "v", g: 1, x: 21, y: 5 })), { sent: 3, counts: 1 });
+  });
+
+  test("the batch's judgment, a batch that takes tokens from Bree's copy, the sweep and a roster that leaves members out", () => {
+    for (const end of ["rejudge", "lost", "sweep", "roster"] as const) {
+      const { t, members, during } = probed();
+      t.send({ k: "dragStart", tokenId: "v", g: 1, x: 20, y: 5, ...roster(members, { x: 20, y: 5 }) });
+      const pass =
+        end === "rejudge"
+          ? during(() => {
+              t.state.tokens.a = { ...t.state.tokens.a!, visibility: "dm" };
+              t.state.tokens.b = { ...t.state.tokens.b!, visibility: "dm" };
+              rejudgePreviews(t.state, t.all);
+            })
+          : end === "lost"
+            ? during(() => cancelLost(t.bree.conn, ["token:a", "token:b"], t.all))
+            : end === "sweep"
+            ? during(() => {
+                t.tick(PREVIEW_STALE_MS);
+                sweepPreviews(t.all);
+              })
+            : during(() => t.send({ k: "dragMove", tokenId: "v", g: 1, x: 21, y: 5, with: [], from: { x: 20, y: 5 } }));
+      assert.deepEqual(pass, { sent: end === "rejudge" || end === "lost" ? 2 : 3, counts: 1 }, end);
+    }
+  });
+});
+
 describe("a frame whose gesture has no roster", () => {
   test("expands to its pressed token alone and asks for the roster at most once a second", () => {
     const state = room();

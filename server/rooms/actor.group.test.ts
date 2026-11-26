@@ -180,6 +180,29 @@ describe("group frames held for their tick", () => {
     assert.deepEqual(dm.conn.gestures.retained, { versions: 0, bytes: 0 }, "every ended gesture's rosters went once their frames routed");
   });
 
+  test("frames released at one tick go to each receiver together, once every one of them is routed", async (t) => {
+    const r = await room(t);
+    const dm = socketOf(r, r.f.dm, "dm");
+    await hello(r, dm, uuidv7());
+    const order: string[] = [];
+    for (const [name, conn] of [["dm", r.dm.conn], ["p1", r.p1.conn]] as const) {
+      const real = conn.send.bind(conn);
+      conn.send = (msg) => {
+        if (msg.t === "eph") order.push(name);
+        return real(msg);
+      };
+    }
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 21);
+    send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 10, y: 10 } });
+    send(r, dm.conn, { k: "dragStart", tokenId: "m2", g: 2, x: 12, y: 10, with: [{ tokenId: "m3", x: 13, y: 10 }], from: { x: 12, y: 10 } });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2);
+    r.gate.open();
+    await flush();
+    assert.deepEqual(order, ["dm", "dm", "dm", "dm", "p1", "p1", "p1", "p1"]);
+  });
+
   test("40 rosters while every version is pinned: retained charges stay within their cap, the excess frames drop, and their gestures recover by `need`", async (t) => {
     const r = await room(t);
     const dm = socketOf(r, r.f.dm, "dm");
