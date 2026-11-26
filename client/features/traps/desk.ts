@@ -61,18 +61,21 @@ export function whoLines(names: Names, due: TrapDue, labels: Labels, known?: Fal
   if (known) for (const id of here) keepName(known, id, nameOf(names, id, labels), holderIdOf(names, id));
   const hits = nameList(names, here, labels, due.hitsMore ?? 0);
   const reaches = due.hits.length === 0 || here.length > 0;
-  if (away.length === 0) return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one.", reaches };
-  const elsewhere = `${awayNames(known, away)}, not on this scene now.`;
+  const gone = awayNames(known, away, new Set(here.map((id) => holderIdOf(names, id))));
+  if (gone === null) return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one.", reaches };
+  const elsewhere = `${gone}, not on this scene now.`;
   return { by: set, hits: hits ? `It hits ${hits}. It also hits ${elsewhere}` : `It hits ${elsewhere}`, reaches };
 }
 
 /**
  * "Bree", "Bree and Thorn", "Bree and a creature", "2 creatures": the
  * creatures an occurrence names that the copy does not hold, by the names
- * `known` last read, each holder once, and the rest counted.
+ * `known` last read, each holder once, and the rest counted. A creature
+ * with another token here is named there alone, so null where every one
+ * away is such a creature.
  */
-function awayNames(known: FallNames | undefined, ids: readonly string[]): string {
-  const seen = new Set<string>();
+function awayNames(known: FallNames | undefined, ids: readonly string[], hereHolders: ReadonlySet<string>): string | null {
+  const seen = new Set(hereHolders);
   const names: string[] = [];
   let unnamed = 0;
   for (const id of ids) {
@@ -84,6 +87,7 @@ function awayNames(known: FallNames | undefined, ids: readonly string[]): string
     }
   }
   if (unnamed > 0) names.push(unnamed === 1 ? "a creature" : `${unnamed} creatures`);
+  if (names.length === 0) return null;
   return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 

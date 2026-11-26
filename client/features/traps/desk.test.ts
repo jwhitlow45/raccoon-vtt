@@ -72,6 +72,10 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
     const twice = { ...s, characters: { c1: character("c1", { name: "Mira" }) }, tokens: { ...s.tokens, m1: token("m1", { name: "Mira", kind: "pc", actor: { ref: "c1" } }), m2: token("m2", { name: "Mira", kind: "pc", actor: { ref: "c1" } }) } };
     hits({ hits: ["m1", "m2"] }, twice);
     assert.equal(hits({ hits: ["m1", "m2", "thorn"] }, left).hits, "It hits Thorn. It also hits Mira, not on this scene now.");
+    // One of Mira's tokens here and one away: she is named once, here.
+    const half = { ...twice, tokens: { ...rest, m1: twice.tokens.m1! } };
+    assert.equal(hits({ hits: ["bree", "m1", "m2"] }, half).hits, "It hits Mira. It also hits Bree, not on this scene now.");
+    assert.equal(hits({ hits: ["m1", "m2"] }, half).hits, "It hits Mira.");
     assert.equal(hits({ hits: [], hitsMore: 3 }, left).reaches, true);
   });
 
