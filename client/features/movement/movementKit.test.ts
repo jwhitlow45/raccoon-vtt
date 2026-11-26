@@ -198,6 +198,9 @@ describe("inside the ground (D31)", () => {
   test("the help names what the walk met: a wall, a ledge or a creature", () => {
     assert.match(teleportHelp({ blocker: "wall" }), /passes walls\. The walk to the wall is taken back/);
     assert.match(teleportHelp({ blocker: "ledge" }), /passes ledges\. The walk to the ledge is taken back/);
+    const unknown = teleportHelp({ blocker: "unknown" });
+    assert.match(unknown, /gets past what is in the way\. The walk is taken back/);
+    assert.doesNotMatch(unknown, /wall|ledge/);
     assert.match(teleportHelp({ blocker: "wall", creature: "Orc" }), /gets past a creature\. The walk is taken back/);
     assert.match(teleportHelp({ blocker: "wall", follower: "Goblin" }), /gets past a creature\. The walk is taken back/);
   });

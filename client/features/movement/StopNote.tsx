@@ -259,5 +259,6 @@ export function teleportHelp(stop: { blocker: string; creature?: string; followe
   const rest = "and the teleport does not count against Speed.";
   if (stop.follower !== undefined || stop.creature !== undefined) return `For Misty Step and anything else that gets past a creature. The walk is taken back, ${rest}`;
   if (stop.blocker === "ledge") return `For Misty Step and anything else that passes ledges. The walk to the ledge is taken back, ${rest}`;
+  if (stop.blocker === "unknown") return `For Misty Step and anything else that gets past what is in the way. The walk is taken back, ${rest}`;
   return `For Misty Step and anything else that passes walls. The walk to the wall is taken back, ${rest}`;
 }
