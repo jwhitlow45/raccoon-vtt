@@ -77,6 +77,9 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   up to Belfry beside the pit: on the DM's phone the pit's name keeps off
  *   the stairs' frame, and the stairs' name off the pit's squares, measured
  *   on the page from the pills Konva draws and the cells' page points.
+ *   QF-ASTRA-02: then in Isometric at each turn the pit's name keeps off the
+ *   frames of the stairs and the hole, measured against the frames' corners
+ *   where the ground plane puts them on the page.
  * - fl4o-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy-one, one file after
@@ -311,6 +314,7 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: DESK });
+    await dmContext.addInitScript("globalThis.__rvttIsoTest = true;");
     anaContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     breeContext = await browser.newContext({ viewport: DESK });
     dm = await dmContext.newPage();
@@ -883,6 +887,46 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
         if (covered(name, frame)) lines.push(`${where}: the pit's name ${JSON.stringify(name)} covers the stairs' frame ${JSON.stringify(frame)}`);
         if (covered(stairsName, squares)) lines.push(`${where}: the stairs' name ${JSON.stringify(stairsName)} covers the pit's squares ${JSON.stringify(squares)}`);
         await shots.take(dm, `lp50fix-1-pit-beside-stairs-${where}`);
+      }
+      // QF-ASTRA-02: still on the phone at the last scale, in Isometric the name stands upright over the turned ground, so it is measured against each frame's corners where the ground plane puts them on the page.
+      const hole = { x: 1, y: 2, w: 2, h: 1 };
+      for (const turn of [0, 1, 2, 3]) {
+        await dm.evaluate((t) => {
+          const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
+          hook.pick("isometric");
+          hook.turn(t);
+        }, turn);
+        await waitFor(`isometric turn ${turn}`, async () => ((await dm.getByRole("button", { name: "View: Isometric" }).count()) > 0 ? true : null));
+        await sleep(600);
+        const corners = (r: { x: number; y: number; w: number; h: number }) => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
+        const quads = await dm.evaluate(
+          (rects) => {
+            type Node = { getChildren(): Node[]; getAbsoluteTransform(): { point(p: { x: number; y: number }): { x: number; y: number } } };
+            type Stage = Node & { listening(): boolean; width(): number; getLayers(): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } };
+            const main = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((st) => st.width() > 0 && st.listening() && st.getLayers().length === 3);
+            if (!main) throw new Error("no isometric board on screen");
+            const plane = main.getLayers()[0]!.getChildren()[0]!.getChildren()[0]!;
+            const host = main.container().getBoundingClientRect();
+            return rects.map((pts) => pts.map((c) => { const p = plane.getAbsoluteTransform().point(c); return { x: host.left + p.x, y: host.top + p.y }; }));
+          },
+          [corners(stairs.rect), corners(hole), corners(pit)],
+        );
+        const meets = (p: { l: number; t: number; r: number; b: number }, q: { x: number; y: number }[]) => {
+          const rect = [{ x: p.l, y: p.t }, { x: p.r, y: p.t }, { x: p.r, y: p.b }, { x: p.l, y: p.b }];
+          const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }, ...q.map((a, i) => { const b = q[(i + 1) % q.length]!; return { x: a.y - b.y, y: b.x - a.x }; })];
+          return axes.every((a) => {
+            const on = (pts: { x: number; y: number }[]) => pts.map((v) => (v.x * a.x + v.y * a.y) / Math.hypot(a.x, a.y));
+            const u = on(rect);
+            const w = on(q);
+            return Math.min(Math.max(...u), Math.max(...w)) - Math.max(Math.min(...u), Math.min(...w)) > 1;
+          });
+        };
+        const seen = await pills();
+        const a = seen.find((p) => p.text.startsWith("Hidden Pit"));
+        assert.ok(a, `the pit's name drawn in Isometric at turn ${turn}`);
+        if (meets(a, quads[0]!)) lines.push(`Isometric turn ${turn}: the pit's name ${JSON.stringify(a)} covers the stairs' frame`);
+        if (meets(a, quads[1]!)) lines.push(`Isometric turn ${turn}: the pit's name ${JSON.stringify(a)} covers the hole's frame`);
+        await shots.take(dm, `qf-astra-02-iso-pit-turn-${turn}`);
       }
     } finally {
       await deskAgain(dm);
