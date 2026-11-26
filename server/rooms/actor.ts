@@ -2755,7 +2755,7 @@ export class RoomActor {
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
       if (!fromLog && historyHead !== undefined) this.#undo.consume(viewer.memberId, restoredFrom, historyScope, historyHead);
-      // A player's undone or redone step keeps no fall card either, and its records carry the card an undo removed (undo.ts fallsRestored).
+      // A player's undone or redone step keeps no fall card either, and its records carry the part of a card an undo took off (undo.ts fallsRestored).
       const restored = inverse && step.poses ? withoutFallCards(inverse) : inverse;
       const falls = step.poses ? fallsRestored(step.falls, restoredFrom, before, this.#staged.state) : undefined;
       if (restored && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, restored, step.label, step.poses ? posesAfter(this.#staged.state, restored, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step, { scope: historyScope, ...(viewer.role === "dm" ? { values: dmHistoryValues(restored, this.#staged.state, historyScope === "play") } : {}), ...(falls ? { falls } : {}) });

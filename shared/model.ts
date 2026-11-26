@@ -823,12 +823,15 @@ export const FALL_RIDERS_MOST = 19;
  * group save page, or Dismiss. `riders` are the other creatures that fell
  * with it, in the order they landed: what rode on it and what they carried
  * (D-261120-007), so one card a root asks the fall's damage and Prone of
- * each. An Apply takes off the card the creatures it settles, and the
- * card stays for any other it names that the room still holds, its first
- * left standing in `tokenId` (FLR4INT-ASTRA-05). `made` is the seq of the
- * op it fell in, which orders the cards for
- * eviction and the DM's toasts. No name is stored: the desk reads each
- * creature by its id.
+ * each. From change format 67 they also hold another token of a creature
+ * the card names that fell in the same op, appended as it fell, so one
+ * creature takes one fall a step. An Apply takes off the card the
+ * creatures it settles, and the card stays for any other it names that
+ * the room still holds, its first left standing in `tokenId`
+ * (FLR4INT-ASTRA-05). A player's undo takes off it the creatures it moved
+ * back whole, the same way. `made` is the seq of the op it fell in, which
+ * orders the cards for eviction and the DM's toasts. No name is stored:
+ * the desk reads each creature by its id.
  */
 export type Fall = { id: FallId; rev: number; tokenId: TokenId; riders?: TokenId[]; sceneId: SceneId; from: SceneId; ft: number; made: number };
 
@@ -836,8 +839,10 @@ export type Fall = { id: FallId; rev: number; tokenId: TokenId; riders?: TokenId
  * One root's fall through an opening in one op (phase 4, 4.5), which the
  * reducer returns (Applied.falls) and a player's step keeps beside its
  * climb: the faller, the upper end by id, rev and `made` as it stood
- * before the op, the floors from and to, and its card. `card` is only on a
- * step's record: the card an undo removed, which the redo writes back.
+ * before the op, the floors from and to, and the card that names its
+ * fall, which from change format 67 another root's record of the op may
+ * name too. `card` is only on a step's record: the part of the card an
+ * undo took off, the whole card where it went, which the redo puts back.
  */
 export type FallRecord = { tokenId: TokenId; linkId: FloorLinkId; rev: number; made: number; from: SceneId; to: SceneId; fallId: FallId; card?: Fall; shown?: ShownEnds };
 
