@@ -663,7 +663,22 @@ newest first.
 
 **Since v0.5.0**
 
-- **Trap cards per creature, and squeezes along the map's edge** ([design](design/design-v1-traps.md)): change format 66, room format 50 as before. Back up the database just before the update, and reload every open page after it, DM pages first: a DM page from before the update cannot apply a trap's card, which it reads as "It was settled meanwhile.", until it reloads. Apply on a trap's card now settles only the creatures the group save reached, so a creature the trap hit that was moved to another scene stays on the card until the DM applies it or dismisses the card. On square maps the map's edge counts as a wall for squeezing, so a creature squeezes into a corridor along the edge as it would between two walls. Stored changes replay as they were made. After a clean stop an older build opens every room this version saved, as [Going back to an older build](#going-back-to-an-older-build) says for the change format. After a crash or a forced stop, an older build serves a room with changes at format 66 after its last snapshot read-only, so going back then needs the backup taken just before the update.
+- **Trap cards per creature, and squeezes along the map's edge**
+  ([design](design/design-v1-traps.md)): change format 66, room format 50 as
+  before. Back up the database just before the update, and reload every open
+  page after it, DM pages first: a DM page from before the update cannot apply
+  a trap's card, which it reads as "It was settled meanwhile.", until it
+  reloads. Apply on a trap's card now settles only the creatures the group
+  save reached, so a creature the trap hit that was moved to another scene
+  stays on the card until the DM applies it or dismisses the card. On square
+  maps the map's edge counts as a wall for squeezing, so a creature squeezes
+  into a corridor along the edge as it would between two walls. Stored changes
+  replay as they were made. After a clean stop an older build opens every room
+  this version saved, as [Going back to an older
+  build](#going-back-to-an-older-build) says for the change format. After a
+  crash or a forced stop, an older build serves a room with changes at format
+  66 after its last snapshot read-only, so going back then needs the backup
+  taken just before the update.
 - **Version 8 ids** ([design](design/design-v1-player-limits.md)): room
   format 50. The app adds a `sealed_since` column to `server_facts` at
   start, which older builds leave alone. Devices make the ids of new things
