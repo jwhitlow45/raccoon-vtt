@@ -1601,6 +1601,34 @@ function roomOfBytes(bytes: number): RoomState {
   return { ...state, log };
 }
 
+/**
+ * The worker's next message, once `expected` takes it. A message that names
+ * an error, any other message, the worker's error and its exit before it
+ * answers each fail the wait, so a worker that could not start never leaves
+ * the bench waiting.
+ */
+export function workerAnswer<T>(worker: Pick<Worker, "on" | "off">, expected: (message: unknown) => message is T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const settle = (err: Error | null, message?: T) => {
+      worker.off("message", onMessage);
+      worker.off("error", onError);
+      worker.off("exit", onExit);
+      if (err) reject(err);
+      else resolve(message as T);
+    };
+    const onMessage = (message: unknown) => {
+      if (message !== null && typeof message === "object" && "error" in message) settle(new Error(`the socket worker failed: ${String((message as { error: unknown }).error)}`));
+      else if (expected(message)) settle(null, message);
+      else settle(new Error(`the socket worker sent ${JSON.stringify(message)}`));
+    };
+    const onError = (err: Error) => settle(err);
+    const onExit = (code: number) => settle(new Error(`the socket worker exited with code ${code} before it answered`));
+    worker.on("message", onMessage);
+    worker.on("error", onError);
+    worker.on("exit", onExit);
+  });
+}
+
 /** A QB-3 socket as its worker opens it: the room's address and the headers its client's cookie and address go in. */
 type Qb3Socket = { url: string; headers: Record<string, string>; clientId: string };
 type Qb3Answer = { ms: number; frames: number; seqs: number[]; retried: boolean };
@@ -1622,21 +1650,15 @@ async function qb3(): Promise<string> {
       sockets.push({ url, headers: headers(c.token, ip), clientId: `p${p}` });
     }
     const worker = new Worker(new URL(import.meta.url), { workerData: { qb3: sockets } });
-    const next = <T,>(): Promise<T> =>
-      new Promise<T>((resolve, reject) => {
-        worker.once("message", resolve);
-        worker.once("error", reject);
-      });
     try {
-      await next<"ready">();
+      await workerAnswer(worker, (m): m is "ready" => m === "ready");
       const loop = monitorEventLoopDelay({ resolution: 1 });
       loop.enable();
       const heapBefore = process.memoryUsage().heapUsed;
-      const answered = next<Qb3Answer[] | { error: string }>();
+      const answered = workerAnswer(worker, (m): m is Qb3Answer[] => Array.isArray(m));
       worker.postMessage("go");
       const acked = await answered;
       loop.disable();
-      if ("error" in acked) throw new Error(acked.error);
       const seqs = new Set(acked.flatMap((a) => a.seqs));
       return [
         `QB-3 3,060 answers in one tick (49 players and the DM's two sockets at 60 each), small room, test database, sockets in a worker`,

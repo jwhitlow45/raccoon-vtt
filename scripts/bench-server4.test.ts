@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import { visionRules } from "../shared/ruleHooks.ts";
 
@@ -276,4 +277,26 @@ test("a queue row times each op from its due time, so a long task that holds the
   assert.ok(m.latency.length > 100, `${m.latency.length} ops answered`);
   assert.ok(Math.max(...m.latency) >= 250, `the longest op took ${Math.max(...m.latency).toFixed(1)} ms from its due time`);
   assert.ok(m.backlogMs >= 250, `the backlog cleared ${m.backlogMs.toFixed(0)} ms after the input was due to end`);
+});
+
+test("qb-3's wait on its socket worker fails on a startup error, another message or an early exit, and takes the message it waits for", async () => {
+  const { workerAnswer } = await import("./bench-server4.ts");
+  const ready = (m: unknown): m is "ready" => m === "ready";
+  const fake = () => new EventEmitter() as unknown as Parameters<typeof workerAnswer>[0] & EventEmitter;
+  for (const [emit, why] of [
+    [(w: EventEmitter) => w.emit("message", { error: "Error: connect ECONNREFUSED" }), /failed: Error: connect ECONNREFUSED/],
+    [(w: EventEmitter) => w.emit("message", [1, 2]), /sent \[1,2\]/],
+    [(w: EventEmitter) => w.emit("exit", 0), /exited with code 0/],
+    [(w: EventEmitter) => w.emit("error", new Error("boom")), /boom/],
+  ] as const) {
+    const w = fake();
+    const waiting = workerAnswer(w, ready);
+    emit(w);
+    await assert.rejects(waiting, why);
+    assert.equal(w.listenerCount("message") + w.listenerCount("exit") + w.listenerCount("error"), 0, "no listener left");
+  }
+  const w = fake();
+  const waiting = workerAnswer(w, ready);
+  w.emit("message", "ready");
+  assert.equal(await waiting, "ready");
 });
