@@ -3,7 +3,7 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { type LogEntry, type LogEvent, type RoomState, type Scene, type Token, type TokenId, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
-import { trapSettlesNamed } from "../migrate.ts";
+import { fallsOnce, trapSettlesNamed } from "../migrate.ts";
 import { cellWord, isHex, sceneGrid, shapeOfGrid, type Grid } from "../rules/grid.ts";
 import { hexInScene, sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
@@ -18,7 +18,7 @@ import { ownEntry } from "../records.ts";
 import { fallDrop, floorBelow, linkHeight } from "../rules/floorLinks.ts";
 import { isCreature } from "../rules/attach.ts";
 import { footprintGround } from "../rules/heights.ts";
-import { footprintRect, occupiedHexes } from "../rules/footprint.ts";
+import { footprintRect, isSqueezed, occupiedHexes } from "../rules/footprint.ts";
 import { hexKey } from "../rules/hex.ts";
 import { PIT_OR_BELOW } from "../protocol.ts";
 
@@ -354,8 +354,9 @@ function openBelow(tx: Tx, trap: Trap): boolean {
 
 /**
  * A trapdoor's drop (4.6, D-261119-112): each victim (`dropVictims`) whose
- * space lies inside the floor below falls there onto the ground under its
- * full space (reducer/floorLinks.ts dropThrough), what sits on it riding
+ * space lies inside the floor below (`spaceInScene`) falls there onto the
+ * ground under its space, full size unless its full space would leave that
+ * floor (reducer/floorLinks.ts dropThrough), what sits on it riding
  * down, with a card naming the creatures that rode down with it
  * (D-261120-007), its drop measured from the ground it stood on. The
  * squares do not change. Victims seated on a holder that does not count
@@ -374,7 +375,7 @@ export function dropBelow(tx: Tx, sprung: Trap): void {
     const now = ownEntry(tx.state.tokens, victim.id);
     // One an earlier drop carried along has landed already.
     if (!now || now.sceneId !== trap.sceneId) continue;
-    if (!spaceInScene(below, now)) continue;
+    if (!spaceInScene(below, now, tx.env.opVersion)) continue;
     const first = openingsOf(tx)?.landings.length ?? 0;
     dropThrough(tx, now, below.id);
     leaveSeat(tx, now);
@@ -383,12 +384,20 @@ export function dropBelow(tx: Tx, sprung: Trap): void {
   }
 }
 
-/** Whether a creature's full space lies inside a floor's edge, on its grid (4.6): only those a trapdoor drops onto it. */
-function spaceInScene(scene: Scene, token: Token): boolean {
+/**
+ * Whether a creature's space lies inside a floor's edge, on its grid (4.6):
+ * only those a trapdoor drops onto it. Its full space, snapped, which on
+ * squares rounds a squeeze along the west or north edge in but along the
+ * east or south edge out, so from op version 67 (migrate.ts fallsOnce) a
+ * squeezed creature on squares is judged by the space it squeezes into,
+ * and falls squeezed along every edge (D-261126-406). Ops stored before
+ * left it standing on the east and south edges, and replay so.
+ */
+function spaceInScene(scene: Scene, token: Token, opVersion: number | undefined): boolean {
   const g = sceneGrid(scene);
   const { squeeze: _squeeze, ...full } = token;
   if (isHex(g)) return occupiedHexes(g, full).every((h) => hexInScene(g, scene.bounds, h));
-  const r = footprintRect(g, full);
+  const r = footprintRect(g, isSqueezed(token) && fallsOnce(opVersion) ? token : full);
   const E = 1e-9;
   return r.x >= -E && r.y >= -E && r.x + r.w <= scene.bounds.w + E && r.y + r.h <= scene.bounds.h + E;
 }
