@@ -189,11 +189,12 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
     </Button>
   );
   const closeButton = <IconButton icon="close" label="Close" onClick={close} style={oneRow ? undefined : { alignSelf: "flex-start", marginTop: -lift }} />;
+  const help = teleportHelp(note);
   const body = (
     <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: (oneRow ? theme.space(2) : theme.space(3)) - lift }}>
       <strong style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{status}</strong>
       <Help id={helpId} style={{ marginTop: theme.space(1) }}>
-        {HELP}
+        {help}
       </Help>
     </div>
   );
@@ -242,7 +243,7 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
           <PaneHeader title={status} lines={TITLE_LINES} onClose={close} />
           {action}
           <div style={{ minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
-            <Help id={helpId}>{HELP}</Help>
+            <Help id={helpId}>{help}</Help>
           </div>
         </>
       )}
@@ -250,4 +251,13 @@ export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewpo
   );
 }
 
-const HELP = "For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.";
+/**
+ * The help under the note's button, worded for what stopped the walk: "the wall" is wrong under a ledge's note or a creature's,
+ * since the walk taken back stopped at the ledge or short of the creature (LP42R-FOLLOW 3).
+ */
+export function teleportHelp(stop: { blocker: string; creature?: string; follower?: string }): string {
+  const rest = "and the teleport does not count against Speed.";
+  if (stop.follower !== undefined || stop.creature !== undefined) return `For Misty Step and anything else that gets past a creature. The walk is taken back, ${rest}`;
+  if (stop.blocker === "ledge") return `For Misty Step and anything else that passes ledges. The walk to the ledge is taken back, ${rest}`;
+  return `For Misty Step and anything else that passes walls. The walk to the wall is taken back, ${rest}`;
+}

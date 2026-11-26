@@ -13,7 +13,7 @@ const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { RoomProvider } = await import("../../state/view.ts");
 const { stopNoteSlot } = await import("./store.ts");
 const { holdMarkSizes } = await import("./MoveLayer.tsx");
-const { COMPACT_NOTE_ROOM, FULL_NOTE_ROOM, StopNoteHost } = await import("./StopNote.tsx");
+const { COMPACT_NOTE_ROOM, FULL_NOTE_ROOM, StopNoteHost, teleportHelp } = await import("./StopNote.tsx");
 const { GroundNotice } = await import("./GroundNotice.tsx");
 const { flatPick } = await import("../../canvas/boardPick.ts");
 
@@ -193,5 +193,12 @@ describe("inside the ground (D31)", () => {
     const markup = inRoom(view, createElement(GroundNotice, { token: view.tokens.thorn! }));
     assert.match(markup, new RegExp(`<p style="margin:0;font-size:${theme.font.small}px;[^"]*color:${theme.color.warning.replace(/[()]/g, "\\$&")}[^"]*">Inside the ground \\(10 ft below\\)\\.</p>`));
     assert.match(markup, /Stand on it/);
+  });
+
+  test("the help names what the walk met: a wall, a ledge or a creature", () => {
+    assert.match(teleportHelp({ blocker: "wall" }), /passes walls\. The walk to the wall is taken back/);
+    assert.match(teleportHelp({ blocker: "ledge" }), /passes ledges\. The walk to the ledge is taken back/);
+    assert.match(teleportHelp({ blocker: "wall", creature: "Orc" }), /gets past a creature\. The walk is taken back/);
+    assert.match(teleportHelp({ blocker: "wall", follower: "Goblin" }), /gets past a creature\. The walk is taken back/);
   });
 });
