@@ -1,5 +1,5 @@
 import { keys, parseKey, readEntity } from "#shared/keys.ts";
-import type { FallRecord, RoomState, Token } from "#shared/model.ts";
+import type { Fall, FallRecord, RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
 /** A route as `token.move` carries it. */
@@ -344,7 +344,7 @@ export class UndoStacks {
     if (walked?.rides) entry.rides = walked.rides;
     // A climb undone is still one, so its redo crosses back by the same stairs, and every later undo and redo after it.
     if (walked?.climb) entry.climb = walked.climb;
-    // So is a fall, its records with the card the undo removed, so the redo writes back that card and no other (4.5).
+    // So is a fall, its records with the part of the card the undo took off, so the redo puts back that part and no other (4.5).
     if (history.falls && history.falls.length > 0) entry.falls = history.falls.map((record) => ({ ...record }));
     if (walked?.gesture && !saveOutcome) entry.gesture = walked.gesture;
     if (saveOutcome) entry.saveOutcome = { ...saveOutcome };
@@ -587,18 +587,35 @@ export function fallsKept(falls: readonly FallRecord[] | undefined, inverse: rea
 
 /**
  * The records an undone or redone fall carries onto the opposite stack
- * (4.5, D-261119-107): after an undo each holds the card it removed, so its
- * redo writes back that card and no other, or none where the card had gone
- * already (applied, dismissed or evicted), so damage applied is never asked
- * for twice. After a redo none holds one: the undo removes a card by its id.
- * `before` and `after` are the room around the restore.
+ * (4.5, D-261119-107): after an undo each holds the part of its card the
+ * undo took off (reducer/falls.ts restoreFallCards), so its redo puts back
+ * that part and no other: the whole card where it went, the card with only
+ * those tokens where it stays, and none where the undo took nothing off or
+ * the card had gone already (applied, dismissed or evicted), so damage
+ * applied is never asked for twice. A part never names a creature the card
+ * still names, since an undo takes a creature off whole. After a redo none
+ * holds one: the undo trims a card by its id. `before` and `after` are the
+ * room around the restore. Undo histories do not outlive a restart, so
+ * every restore it reads ran by today's rule.
  */
 export function fallsRestored(falls: readonly FallRecord[] | undefined, from: HistoryDirection, before: RoomState, after: RoomState): FallRecord[] | undefined {
   if (!falls || falls.length === 0) return undefined;
   return falls.map(({ card: _card, ...record }) => {
-    const removed = from === "undo" ? ownEntry(before.falls, record.fallId) : undefined;
-    return removed && ownEntry(after.falls, record.fallId) === undefined ? { ...record, card: { ...removed } } : record;
+    const was = from === "undo" ? ownEntry(before.falls, record.fallId) : undefined;
+    if (!was) return record;
+    const now = ownEntry(after.falls, record.fallId);
+    const part = now ? partTaken(was, now) : { ...was };
+    return part ? { ...record, card: part } : record;
   });
+}
+
+/** The card with only the tokens it named before the undo and no longer does, or undefined where it lost none. */
+function partTaken(was: Fall, now: Fall): Fall | undefined {
+  const kept = new Set([now.tokenId, ...(now.riders ?? [])]);
+  const [first, ...riders] = [was.tokenId, ...(was.riders ?? [])].filter((id) => !kept.has(id));
+  if (first === undefined) return undefined;
+  const { riders: _riders, ...rest } = was;
+  return { ...rest, tokenId: first, ...(riders.length > 0 ? { riders } : {}) };
 }
 
 /** The tokens an op names, the roots of its groups (docs/design/design-v1-attach.md 8.2): every other token it moves rides on one of them. */

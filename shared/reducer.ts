@@ -321,7 +321,7 @@ function landAfter(tx: Tx, before: RoomState, op: Op, openings: Openings): { fal
   };
   // A DM's delete takes its creature's cards with it (4.4).
   dropGoneCards(tx, before);
-  if (op.t === "sys.restore") restoreFallCards(tx, op);
+  if (op.t === "sys.restore") restoreFallCards(tx, op, before);
   // 4b.
   const deferred = openings.deferred ?? [];
   openings.deferred = null;

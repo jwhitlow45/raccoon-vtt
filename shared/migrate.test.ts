@@ -8,6 +8,8 @@ import {
   OP_VERSION,
   SNAPSHOT_VERSION,
   TRAP_EDGE_OP_VERSION,
+  FALL_ONCE_OP_VERSION,
+  fallsOnce,
   edgePinches,
   trapSettlesNamed,
   healRevivesDead,
@@ -2186,7 +2188,7 @@ describe("snapshot 50, version 8 ids", () => {
   test("a v49 room is a v50 room as it is, and a build at 49 refuses a v50 snapshot", () => {
     assert.equal(SEALED_IDS_SNAPSHOT_VERSION, 50);
     assert.equal(SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION);
-    assert.equal(OP_VERSION, TRAP_EDGE_OP_VERSION, "no op changes shape");
+    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION, "no op changes shape");
     const state = room();
     assert.equal(runMigrations(state, 49, 50, snapshotMigrations), state);
     assert.equal(migrateSnapshot(state, 49), state);
@@ -2204,7 +2206,7 @@ describe("op version 65 and snapshot 49, walks that end with their turn", () => 
   test("keeps stored ops and snapshots unchanged through the identity steps, and the new op and fields parse", () => {
     assert.equal(WALK_TRIM_OP_VERSION, 65);
     assert.equal(WALK_TRIM_SNAPSHOT_VERSION, 49);
-    assert.equal(OP_VERSION, TRAP_EDGE_OP_VERSION);
+    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION);
     assert.ok(SNAPSHOT_VERSION >= WALK_TRIM_SNAPSHOT_VERSION);
     const old = restore({ climb, falls: [fall] });
     assert.equal(runMigrations(old, 64, 65, opMigrations), old);
@@ -2289,7 +2291,7 @@ describe("op version 66, trap cards per creature and squeezes along the map's ed
 
   test("is the identity step at version 66, with room format 50 as before", () => {
     assert.equal(TRAP_EDGE_OP_VERSION, 66);
-    assert.equal(OP_VERSION, 66);
+    assert.ok(OP_VERSION >= TRAP_EDGE_OP_VERSION);
     assert.equal(SNAPSHOT_VERSION, 50);
     assert.equal(runMigrations(named, 65, 66, opMigrations), named);
     assert.equal(migrateOp(named, 65), named);
@@ -2304,5 +2306,26 @@ describe("op version 66, trap cards per creature and squeezes along the map's ed
 
   test("a build at 65 refuses an op from this one by number", () => {
     assert.throws(() => runMigrations(named, 66, 65, opMigrations), /cannot migrate from version 66 down to 65/);
+  });
+});
+
+describe("op version 67, a creature falls once a step", () => {
+  const restore = { t: "sys.restore", from: "undo", entries: [{ key: "token:thorn", value: null }], deps: true, falls: [{ tokenId: "thorn", linkId: "o1", rev: 1, made: 14, from: "s2", to: "s1", fallId: "120:0" }] };
+
+  test("is the identity step at version 67, with room format 50 as before", () => {
+    assert.equal(FALL_ONCE_OP_VERSION, 67);
+    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION);
+    assert.equal(SNAPSHOT_VERSION, 50);
+    assert.equal(runMigrations(restore, 66, 67, opMigrations), restore);
+    assert.equal(migrateOp(restore, 66), restore);
+    assert.equal(migrateOp(restore, 67), restore);
+  });
+
+  test("gates the rule at 67, so ops stored at 66 and before replay as they ran", () => {
+    assert.deepEqual([fallsOnce(1), fallsOnce(64), fallsOnce(65), fallsOnce(66), fallsOnce(67), fallsOnce(undefined)], [false, false, false, false, true, true]);
+  });
+
+  test("a build at 66 refuses an op from this one by number", () => {
+    assert.throws(() => runMigrations(restore, 67, 66, opMigrations), /cannot migrate from version 67 down to 66/);
   });
 });

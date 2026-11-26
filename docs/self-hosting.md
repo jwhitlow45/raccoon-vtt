@@ -679,6 +679,20 @@ newest first.
 
 **Since v0.5.0**
 
+- **A creature falls once a step** ([design](design/design-v1-floors.md)):
+  change format 67, room format 50 as before. Back up the database just
+  before the update. When both tokens of one character fall in one step,
+  through an opening or a trapdoor, the DM now gets one fall card that names
+  both, and its Apply takes the damage and Prone once. A player's Undo of a
+  fall now keeps its card for a creature the undo leaves on the floor below,
+  such as a rider the DM hid or took off its mount after the fall, where it
+  used to remove the card whole. Cards made before the update stay as they
+  were, and stored changes replay as they were made. After a clean stop an
+  older build opens every room this version saved, as [Going back to an older
+  build](#going-back-to-an-older-build) says for the change format. After a
+  crash or a forced stop, an older build serves a room with changes at format
+  67 after its last snapshot read-only, so going back then needs the backup
+  taken just before the update.
 - **Trap cards per creature, and squeezes along the map's edge**
   ([design](design/design-v1-traps.md)): change format 66, room format 50 as
   before. Back up the database just before the update, and reload every open
