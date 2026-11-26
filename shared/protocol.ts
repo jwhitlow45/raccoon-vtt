@@ -3145,9 +3145,10 @@ export const serverOnlyOps = [
      * phase 4, 4.5), one record a root the player received, beside `climb`,
      * never inside it. Under each the restore may move that root, its
      * passengers and their areas between the record's two floors, and an
-     * undo removes the record's card while it is there, a redo writing back
-     * the `card` it carries. Only the server builds a restore, from its own
-     * history. Bounded as the entries are, since a record's root keeps its
+     * undo takes off the record's card, while it is there, the creatures it
+     * moved back whole (the card goes once none is left), a redo putting
+     * back the part of it the record carries in `card`. Only the server
+     * builds a restore, from its own history. Bounded as the entries are, since a record's root keeps its
      * key in them (fallsKept), and one step drags, carries and drops more
      * creatures than it names (FLR4-SOL-02).
      */
