@@ -13,7 +13,7 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { LayerProps } from "../layers.ts";
-import { isoTrapNameMarkers, linkFrames, trapNameMarkers, trapSquares } from "../traps/TrapLayer.tsx";
+import { isoTrapBadges, isoTrapNameMarkers, linkFrames, trapNameMarkers, trapSquares } from "../traps/TrapLayer.tsx";
 import { trapNameShown } from "../traps/rules.ts";
 import { FLOOR_LINK_ATTR } from "./ids.ts";
 import { dropChip, linkMarksLine } from "./linkWords.ts";
@@ -96,6 +96,7 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
     [grid, props.scene.id, traps, chunks, scale, dm, frames, iso, view],
   );
   const squares = useMemo(() => trapSquares(grid, props.scene.id, traps), [grid, props.scene.id, traps]);
+  const badges = useMemo(() => (iso ? isoTrapBadges(grid, props.scene.id, traps, chunks, scale, dm, iso) : []), [iso, grid, props.scene.id, traps, chunks, scale, dm]);
   const trapKey = JSON.stringify(trapNames);
   const markers = useMemo(() => (trapNames.length === 0 ? turn : [...turn, ...trapNames]), [turn, trapKey]);
   const shown = trapNameShown(scale);
@@ -121,7 +122,7 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
       }),
     [list, scenes, grid, far, hushed, feet, shown],
   );
-  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view, traps: squares }), [ends, markers, scale, iso, tokens, view, squares]);
+  const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view, traps: squares, badges, clear: true }), [ends, markers, scale, iso, tokens, view, squares, badges]);
   return (
     <Group listening={false}>
       {list.map((l, i) => {

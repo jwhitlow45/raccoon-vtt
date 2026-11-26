@@ -581,3 +581,98 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     }
   });
 });
+
+describe("in Isometric, where every pill must cover nothing, a pill that would cover something moves or hides (LP52-ISO-NAMES-PHONE)", () => {
+  const grid: Grid = { shape: "squares" } as Grid;
+  const flat = (turn: Turn) => ({ turn, ground: () => 0 });
+  const meet = (a: Box, b: Box) => Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
+  const rect = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
+
+  /** A seeded small floor: a hole, stairs and sometimes a second hole, two or three traps' squares with a marker (a trap's name) and a badge each, and a creature or two. */
+  const floors = (count: number) => {
+    let s = 7;
+    const rand = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pick = (n: number) => Math.floor(rand() * n);
+    return Array.from({ length: count }, (_, k) => {
+      const hole = (id: string, r: ReturnType<typeof rect>): EndPills => {
+        const o = outlineOf(grid, r);
+        return { id, o, hole: true, first: { name: "Down to Undercroft", value: "Not reached yet", x: o.x + o.w / 2, y: o.y + o.h, below: true, size: "map", small: true, maxLines: 1, stack: true }, dropPill: { value: "10 ft down", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true } };
+      };
+      const stairs = (id: string, r: ReturnType<typeof rect>): EndPills => {
+        const o = outlineOf(grid, r);
+        return { id, o, hole: false, first: { name: "Up to Belfry", value: "Not reached yet", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true, maxLines: 1, stack: true }, dropPill: null };
+      };
+      const ends = [hole("a", rect(pick(6), pick(5), 2, 1)), stairs("b", rect(pick(6), pick(4), 2, 2)), ...(pick(2) ? [hole("c", rect(pick(7), pick(5), 1, 1))] : [])];
+      const traps = Array.from({ length: 2 + pick(2) }, () => outlineOf(grid, rect(pick(8), pick(6), 1 + pick(2), 1)));
+      const markers: PillSpec[] = traps.map((o) => ({ name: "Hidden Pit", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true, maxLines: 1 }));
+      const tokens = Array.from({ length: 1 + pick(2) }, () => rect(pick(8), pick(6), 1, 1));
+      return { k, ends, traps, markers, tokens };
+    });
+  };
+
+  /** What each shown pill covers as it draws: another shown pill, a marker, a badge, a trap's squares, another end's squares, its own hole under its words, or a creature. */
+  const coversOf = (f: ReturnType<typeof floors>[number], placed: ReturnType<typeof placeEnds>, iso: DrawSpace, scale: number, view: Box | null, badges: readonly Box[]): string[] => {
+    const shown = f.ends.flatMap((e) => {
+      const got = placed.get(e.id)!;
+      return [got.pill, got.chip].flatMap((p) => (p ? [{ e, p, box: drawnBox(p, scale, iso, true, true, view) }] : []));
+    });
+    const out: string[] = [];
+    shown.forEach((a, i) => {
+      const tip = pillGeometry({ ...a.p, scale }).pointer / scale;
+      const body = a.p.above ? { ...a.box, y1: a.box.y1 - tip } : { ...a.box, y0: a.box.y0 + tip };
+      for (const b of shown.slice(i + 1)) if (meet(a.box, b.box)) out.push(`${a.e.id} on ${b.e.id}'s pill`);
+      if (f.markers.some((m) => meet(a.box, drawnBox(m, scale, iso, true, true, view)))) out.push(`${a.e.id} on a marker`);
+      if (badges.some((b) => meet(a.box, b))) out.push(`${a.e.id} on a badge`);
+      if (f.traps.some((o) => boxCoversOutline(a.box, cornersOf(o), iso))) out.push(`${a.e.id} on a trap's squares`);
+      for (const e of f.ends) if (e !== a.e && boxCoversOutline(a.box, cornersOf(e.o), iso)) out.push(`${a.e.id} on ${e.id}'s squares`);
+      if (a.e.hole && boxCoversOutline(body, cornersOf(a.e.o), iso)) out.push(`${a.e.id} on its own hole`);
+      if (f.tokens.some((r) => meet(a.box, tokenBox(r, iso)))) out.push(`${a.e.id} on a creature`);
+    });
+    return out;
+  };
+
+  test("no shown pill covers anything at any turn, on a phone and a desk, and where the search's own placement covers nothing it is kept", () => {
+    let hidden = 0;
+    let other = 0;
+    let kept = 0;
+    for (const f of floors(80)) {
+      for (const scale of [21.375, 40]) {
+        for (const turn of [0, 1, 2, 3] as const) {
+          const iso = flat(turn);
+          const badges = f.traps.map((o) => {
+            const at = viewPointOf(iso, { x: o.x + 0.3, y: o.y + 0.3 });
+            return { x0: at.x - 10 / scale, y0: at.y - 10 / scale, x1: at.x + 10 / scale, y1: at.y + 10 / scale };
+          });
+          const c = viewPointOf(iso, { x: 4, y: 3 });
+          const view = { x0: c.x - 187 / scale, x1: c.x + 187 / scale, y0: c.y - 300 / scale, y1: c.y + 300 / scale };
+          const options = { view, traps: f.traps, badges };
+          const searched = placeEnds(f.ends, f.markers, scale, iso, () => true, f.tokens, options);
+          const placed = placeEnds(f.ends, f.markers, scale, iso, () => true, f.tokens, { ...options, clear: true });
+          const at = `floor ${f.k} at ${scale}, turn ${turn}`;
+          assert.deepEqual(coversOf(f, placed, iso, scale, view, badges), [], at);
+          if (coversOf(f, searched, iso, scale, view, badges).length === 0) {
+            assert.deepEqual(placed, searched, `${at}: a placement that covers nothing is kept`);
+            kept++;
+          }
+          for (const e of f.ends) {
+            const [was, now] = [searched.get(e.id)!, placed.get(e.id)!];
+            for (const [p, q] of [[was.pill, now.pill], [was.chip, now.chip]] as const) {
+              if (p && !q) hidden++;
+              // A hole's pill turned the other way: a name over its corner or a chip under it.
+              if (q && e.hole && (q === now.pill ? q.above : q.below)) other++;
+            }
+          }
+        }
+      }
+    }
+    assert.ok(hidden > 0 && other > 0 && kept > 0, `the floors exercise every step: ${kept} kept whole, ${other} pills hung the other way, ${hidden} hidden`);
+  });
+
+  test("Top-down keeps the search's placement, clear or not", () => {
+    for (const f of floors(20)) {
+      const badges = f.traps.map((o) => ({ x0: o.x, y0: o.y, x1: o.x + 0.5, y1: o.y + 0.5 }));
+      const options = { traps: f.traps, badges };
+      assert.deepEqual(placeEnds(f.ends, f.markers, 21.375, null, () => false, f.tokens, { ...options, clear: true }), placeEnds(f.ends, f.markers, 21.375, null, () => false, f.tokens, options), `floor ${f.k}`);
+    }
+  });
+});

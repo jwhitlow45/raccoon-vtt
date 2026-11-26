@@ -331,9 +331,13 @@ const PILL_ON_TOKEN = PILL_ON_SQUARES;
  * breaks a tie of charges. The search keeps the first of equal choices,
  * so a lone hole's pills hang where they would alone: in Isometric a name
  * under the lowest corner on the screen and a chip over the highest, and
- * in Top-down from the middles of its bottom and top edges. Ends that are
- * not holes keep their own edge, or the other one off a marker or a trap's
- * squares (clearOfMarkers), and the holes keep off their pills.
+ * in Top-down from the middles of its bottom and top edges. In Top-down
+ * ends that are not holes keep their own edge, or the other one off a
+ * marker or a trap's squares (clearOfMarkers), and the holes keep off their
+ * pills. In Isometric their names are searched as a lower end's is, and the
+ * traps' badges (`badges`) weigh as markers do. With `clear`, Isometric's
+ * pills cover nothing at all: each that would moves to a spot that covers
+ * nothing, or hides (LP52-ISO-NAMES-PHONE).
  * Each pill is judged where it draws: near the edge of `view`, the clear
  * part of the screen at the camera's rest (canvas/boardView.ts
  * restViewSlot), a standing pill slides back inside it, which on a phone at
@@ -348,18 +352,22 @@ export function placeEnds(
   iso: DrawSpace,
   stands: (p: PillSpec) => boolean,
   tokens: readonly FloorLink["rect"][] = [],
-  options: { view?: Box | null; prune?: boolean; traps?: readonly Outline[] } = {},
+  options: { view?: Box | null; prune?: boolean; traps?: readonly Outline[]; badges?: readonly Box[]; clear?: boolean } = {},
 ): Map<string, PlacedPills> {
-  const { view = null, prune = true, traps = [] } = options;
+  const { view = null, prune = true, traps = [], badges = [], clear = false } = options;
   const out = new Map<string, PlacedPills>();
   const squares = ends.map((e) => outlineBox(cornersOf(e.o), iso));
   const trapBoxes = traps.map((o) => outlineBox(cornersOf(o), iso));
+  // In Isometric squares draw as diamonds, whose boxes hold empty corners a pill can hang over (boxCoversOutline). Top-down's boxes are the squares.
+  const onSquares = (box: Box, o: Outline, b: Box, charge: number) => (iso && boxesMeet(box, b) && !boxCoversOutline(box, cornersOf(o), iso) ? 0 : covers(box, b, charge));
   const standing = tokens.map((r) => tokenBox(r, iso));
-  type Cand = { spec: PillSpec; box: Box; solo: number };
-  type Slot = { end: number; chip: boolean; cands: Cand[] };
+  type Cand = { spec: PillSpec; box: Box; solo: number; covers?: boolean };
+  type Slot = { end: number; chip: boolean; cands: Cand[]; spare: Cand[] };
   const slots: Slot[] = [];
   // The markers stay put, so a pill over one costs as a pill over a fixed pill does. A name is also kept off them outright, but a chip only pays.
   const fixed: Box[] = markers.map((m) => drawnBox(m, scale, iso, true, true, view));
+  // In Isometric the traps' badges stand as the markers do, and a pill over one hides it as one over a pill would.
+  if (iso) fixed.push(...badges);
   const edges = ends.map((e) => {
     const { o, hole, first } = e;
     // Every stage decides alike, from the first place's stand, so the ground and the overlay publish the same pill.
@@ -369,8 +377,8 @@ export function placeEnds(
   const fits = (p: PillSpec) => iso === null || stands(p);
   ends.forEach((e, i) => {
     const edge = edges[i]!;
-    // A hole's lower end keeps its own edge unless a creature stands there: it is searched for the name alone, with no cost for covering its own squares.
-    const lower = e.lower === true && !e.hole;
+    // A hole's lower end keeps its own edge unless a creature stands there: it is searched for the name alone, with no cost for covering its own squares. In Isometric stairs and ladders are searched so too, where a crowd meets their edges (LP52-ISO-NAMES-PHONE).
+    const lower = (e.lower === true || iso !== null) && !e.hole;
     if (!e.hole && !lower) {
       out.set(e.id, { pill: edge, chip: e.dropPill });
       for (const p of [edge, e.dropPill]) if (p) fixed.push(drawnBox(p, scale, iso, fits(p), true, view));
@@ -383,50 +391,53 @@ export function placeEnds(
     const lists: [PillSpec | null, boolean][] = lower ? [[edge, false]] : [[edge, false], [e.dropPill, true]];
     for (const [spec, chip] of lists) {
       if (!spec) continue;
-      // A hole's chip hangs over its corners and its name under them. A lower end's name hangs either way, the way its edge has it first.
-      const overs = lower ? [spec.above === true, spec.above !== true] : [chip];
-      const around = overs.flatMap((over) => {
-        const sign = over ? 1 : -1;
-        const ordered = corners.map((c) => ({ c, y: viewPointOf(iso, c).y })).sort((a, b) => sign * (a.y - b.y));
-        const at = (c: { x: number; y: number }, side?: "left" | "right"): PillSpec => ({ ...spec, x: c.x, y: c.y, above: over, below: !over, ...(side ? { side } : {}) });
-        // Each corner centers a pill, and a corner left or right of the hole's middle also hangs one outward on its side, which clears the hole where a centered pill wider than it cannot (ISO-1-MORE-SPOTS).
-        const outward = ordered.flatMap(({ c }) => {
-          const x = seen[corners.indexOf(c)]!;
-          return x < mid - 1e-9 ? [at(c, "left")] : x > mid + 1e-9 ? [at(c, "right")] : [];
+      const build = (overs: readonly boolean[], edge: boolean): Cand[] => {
+        const around = overs.flatMap((over) => {
+          const sign = over ? 1 : -1;
+          const ordered = corners.map((c) => ({ c, y: viewPointOf(iso, c).y })).sort((a, b) => sign * (a.y - b.y));
+          const at = (c: { x: number; y: number }, side?: "left" | "right"): PillSpec => ({ ...spec, x: c.x, y: c.y, above: over, below: !over, ...(side ? { side } : {}) });
+          // Each corner centers a pill, and a corner left or right of the hole's middle also hangs one outward on its side, which clears the hole where a centered pill wider than it cannot (ISO-1-MORE-SPOTS).
+          const outward = ordered.flatMap(({ c }) => {
+            const x = seen[corners.indexOf(c)]!;
+            return x < mid - 1e-9 ? [at(c, "left")] : x > mid + 1e-9 ? [at(c, "right")] : [];
+          });
+          return [...ordered.map(({ c }) => at(c)), ...outward];
         });
-        return [...ordered.map(({ c }) => at(c)), ...outward];
-      });
-      const specs = around.filter((p) => fits(p) && (chip || !meetsTurnMarker(p, markers, scale, iso, true)));
-      // In Isometric the end's own edge is the last choice, and the only one where no corner serves. In Top-down it is the first, as a lone hole's name and chip hang from its edges' middles. A lower end's is always the first, so it moves only off a cost.
-      if (!iso || lower) specs.unshift(spec);
-      else if (specs.length === 0 || stands(spec)) specs.push(spec);
-      // A name with a value can also take two lines, the value under it: narrower, for a phone at fit, where two names side by side are wider than the screen. After every one-line choice, and charged (stackCharge), so it serves only where it covers fewer things.
-      if (pillGeometry({ ...spec, stacked: true, scale }).width < pillGeometry({ ...spec, scale }).width) {
-        specs.push(...specs.map((p) => ({ ...p, stacked: true })).filter((p) => fits(p) && !meetsTurnMarker(p, markers, scale, iso, true)));
-      }
-      const cands = specs.map((s2) => {
-        const up = fits(s2);
-        const box = drawnBox(s2, scale, iso, up, true, view);
-        // The pointer always meets the rim it points at, so only the body can hide the hole.
-        const tip = up ? pillGeometry({ ...s2, scale }).pointer / scale : 0;
-        const body = chip ? { ...box, y1: box.y1 - tip } : { ...box, y0: box.y0 + tip };
-        // A pill over its own hole hides the hole it names, so it costs more than one over another end's squares, but less than one over another pill (D-261122-112).
-        return { spec: s2, box, solo: !lower && boxCoversOutline(body, corners, iso) ? covers(body, squares[i]!, PILL_ON_OWN) : 0 };
-      });
-      slots.push({ end: i, chip, cands });
+        const specs = around.filter((p) => fits(p) && (chip || !meetsTurnMarker(p, markers, scale, iso, true)));
+        // In Isometric the end's own edge is the last choice, and the only one where no corner serves. In Top-down it is the first, as a lone hole's name and chip hang from its edges' middles. A lower end's is always the first, so it moves only off a cost.
+        if (edge && (!iso || lower)) specs.unshift(spec);
+        else if (edge && (specs.length === 0 || stands(spec))) specs.push(spec);
+        // A name with a value can also take two lines, the value under it: narrower, for a phone at fit, where two names side by side are wider than the screen. After every one-line choice, and charged (stackCharge), so it serves only where it covers fewer things.
+        if (pillGeometry({ ...spec, stacked: true, scale }).width < pillGeometry({ ...spec, scale }).width) {
+          specs.push(...specs.map((p) => ({ ...p, stacked: true })).filter((p) => fits(p) && !meetsTurnMarker(p, markers, scale, iso, true)));
+        }
+        return specs.map((s2) => {
+          const up = fits(s2);
+          const box = drawnBox(s2, scale, iso, up, true, view);
+          // The pointer always meets the rim it points at, so only the body can hide the hole.
+          const tip = up ? pillGeometry({ ...s2, scale }).pointer / scale : 0;
+          const body = s2.above ? { ...box, y1: box.y1 - tip } : { ...box, y0: box.y0 + tip };
+          // A pill over its own hole hides the hole it names, so it costs more than one over another end's squares, but less than one over another pill (D-261122-112).
+          return { spec: s2, box, solo: !lower && boxCoversOutline(body, corners, iso) ? covers(body, squares[i]!, PILL_ON_OWN) : 0 };
+        });
+      };
+      // A hole's chip hangs over its corners and its name under them. A lower end's name hangs either way, the way its edge has it first. A hole's pill that must cover nothing can also hang the other way (`clear`), tried only after every spot the first way.
+      const cands = build(lower ? [spec.above === true, spec.above !== true] : [chip], true);
+      slots.push({ end: i, chip, cands, spare: clear && iso && !lower ? build([!chip], false) : [] });
     }
   });
   // A two-line name pays a charge below the least cover's split among every slot, so two lines win only by covering fewer things than one line can, never by less area alone (D-261122-221), as long as the areas differ by less than it.
   const stackCharge = PILL_ON_SQUARES / (slots.length + 1);
   // What a pill covers apart from the other holes' pills: another end's squares, a trap's, the tokens, and the pills that stay put.
   for (const slot of slots) {
-    for (const c of slot.cands) {
+    for (const c of [...slot.cands, ...slot.spare]) {
       c.solo +=
-        (c.spec.stacked ? stackCharge : 0) +
-        squares.reduce((n, b, j) => (j !== slot.end ? n + covers(c.box, b, PILL_ON_SQUARES) : n), 0) +
-        trapBoxes.reduce((n, b) => n + covers(c.box, b, PILL_ON_SQUARES), 0) +
+        squares.reduce((n, b, j) => (j !== slot.end ? n + onSquares(c.box, ends[j]!.o, b, PILL_ON_SQUARES) : n), 0) +
+        trapBoxes.reduce((n, b, j) => n + onSquares(c.box, traps[j]!, b, PILL_ON_SQUARES), 0) +
         standing.reduce((n, b) => n + covers(c.box, b, PILL_ON_TOKEN), 0) +
         fixed.reduce((n, b) => n + covers(c.box, b, PILL_ON_PILL), 0);
+      c.covers = c.solo > 0;
+      if (c.spec.stacked) c.solo += stackCharge;
     }
     // Cheapest first, so the first path is already good when the node limit cuts the search short. The sort is stable, so equal choices keep their corner order.
     slot.cands.sort((a, b) => a.solo - b.solo);
@@ -454,11 +465,16 @@ export function placeEnds(
     }
   };
   search(0, 0);
+  // Where every pill must cover nothing (`clear`, Isometric only), each in turn keeps the search's spot where that covers nothing, the pills kept before it included, else takes the first of its spots that does, its hole's other way last, else hides.
+  const kept: Box[] = [];
+  const clearOf = (c: Cand) => !c.covers && kept.every((b) => !boxesMeet(c.box, b));
   best.pick.forEach((c, k) => {
     const slot = slots[k]!;
     const id = ends[slot.end]!.id;
     const placed = out.get(id)!;
-    out.set(id, slot.chip ? { ...placed, chip: c.spec } : { ...placed, pill: c.spec });
+    const shown = clear && iso ? ([c, ...slot.cands, ...slot.spare].find(clearOf) ?? null) : c;
+    if (shown) kept.push(shown.box);
+    out.set(id, slot.chip ? { ...placed, chip: shown?.spec ?? null } : { ...placed, pill: shown?.spec ?? null });
   });
   return out;
 }
