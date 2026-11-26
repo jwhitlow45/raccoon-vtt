@@ -43,7 +43,7 @@ import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, holdsPreview, Outbox, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
-import { holdFrame, routedForm, type HeldFrame, type RosterVersion } from "./gestures.ts";
+import { chargeCancels, holdFrame, routedForm, type HeldFrame, type RosterVersion } from "./gestures.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import { compactLink, wholeLink, type ViewLink } from "./viewRing.ts";
@@ -340,15 +340,28 @@ export const MAX_HELD_BYTES_OFF = OFF_ALLOWANCE_BYTES;
 
 /**
  * The most a room's held frames may send any one receiver once their tick
- * is covered, each counted at its most by its kind (gestures.ts heldSends),
- * never by what it names: about 66 group frames at 100 tokens. So a tick's
- * release hands its 63 receivers at most 126 MiB of messages, and each
- * receiver 2 MiB, far below a socket's send buffer bound (ws.ts
- * DEFAULT_BUFFERED_LIMIT). Moves take the place of older ones while they
- * wait (heldSlot), so a room's honest drags through a stalled tick hold a
- * few frames each.
+ * is covered, each counted at its most by its kind and what its routing
+ * may cancel (gestures.ts heldSends, chargeCancels), never by what it names:
+ * about 20 group frames at 100 tokens. So a tick's release hands its 63
+ * receivers at most 126 MiB of messages, and each receiver 2 MiB, far below
+ * a socket's send buffer bound (ws.ts DEFAULT_BUFFERED_LIMIT). Moves take
+ * the place of older ones while they wait (heldSlot), and a gesture whose
+ * start and end both wait goes whole, so a room's honest drags through a
+ * stalled tick hold a few frames each.
  */
 export const MAX_ROOM_HELD_SENDS = 2 * 1024 * 1024;
+/**
+ * The share of the room's count one member's held frames may take, all its
+ * sockets together (D-261126-265): over what an honest member's devices
+ * hold through a stall (gestures.ts HONEST_MEMBER_SENDS, 754 KiB). So one
+ * member's frames, whatever they show, never drop another's, and two
+ * members at their share still leave a third its drag's start and move.
+ * A DM's view as a player counts as the DM.
+ */
+export const MEMBER_HELD_SHARE = 768 * 1024;
+
+/** A socket's held frames in arrival order, their charges, and the member whose share they count in (MEMBER_HELD_SHARE). */
+type HeldQueue = { list: HeldFrame[]; bytes: number; readonly member: string };
 
 /** A reader waiting for its tick to be covered (RoomActor.asOf): its tick, its answer, its deadline, and the end of its abort's watch. */
 type Waiter = { a: number; resolve: (view: RoomView) => void; reject: (err: Error) => void; timer: NodeJS.Timeout; stop: () => void };
@@ -761,9 +774,11 @@ export class RoomActor {
   /** Readers waiting for their tick to be covered (asOf), at most MAX_WAITING_READERS. */
   #waiting = new Set<Waiter>();
   /** Each socket's live frames held until their ticks are covered, in arrival order (ephemeral). */
-  #held = new Map<Connection, { list: HeldFrame[]; bytes: number }>();
+  #held = new Map<Connection, HeldQueue>();
   /** What every held frame of the room may send one receiver at the most (MAX_ROOM_HELD_SENDS). */
   #heldSends = 0;
+  /** The same for each member's held frames, by the member its queue counts for (MEMBER_HELD_SHARE). */
+  #memberSends = new Map<string, number>();
   /** The steps before the walk being handled, until it installs (#markSteps): put back if it is refused or throws first. */
   #walkMark: StepsMark | null = null;
   /** Whether this load has logged a walk reduced again without its steps that still changed what players see. */
@@ -1199,7 +1214,8 @@ export class RoomActor {
     }
     // Its previews end on every screen, its held frames and rosters go, and only then its share of the preview pool.
     cancelPreviews(conn, this.#connections);
-    for (const frame of this.#held.get(conn)?.list ?? []) this.#heldSends -= frame.sends;
+    const held = this.#held.get(conn);
+    for (const frame of held?.list ?? []) this.#unhold(held!, frame);
     this.#held.delete(conn);
     conn.releasePreviews?.();
     this.#broadcastPresence();
@@ -1532,26 +1548,66 @@ export class RoomActor {
       this.#route(conn, this.#viewAt(a)?.state ?? null, { sceneId: msg.sceneId, e: msg.e, version, at });
       return;
     }
-    // It waits in its kept form, charged by its kind (gestures.ts holdFrame).
+    // It waits in its kept form, charged by its kind and what its routing may cancel (gestures.ts holdFrame, chargeCancels).
     const frame = holdFrame(msg.sceneId, msg.e, version, arrived, a, at);
-    frames ??= { list: [], bytes: 0 };
+    frames ??= { list: [], bytes: 0, member: conn.previewBy ?? conn.memberId };
+    if (this.#elided(conn, frames, frame)) return;
     const older = this.#replaced(frames.list, frame);
+    chargeCancels(frame, frames.list, conn.previewsSent, older);
     const most = conn.pace === "off" ? MAX_HELD_BYTES_OFF : MAX_HELD_BYTES;
     const count = frames.list.length - (older ? 1 : 0);
-    if (count >= MAX_HELD_FRAMES || frames.bytes - (older?.bytes ?? 0) + frame.bytes > most || this.#heldSends - (older?.sends ?? 0) + frame.sends > MAX_ROOM_HELD_SENDS) {
+    const freed = older?.sends ?? 0;
+    const member = this.#memberSends.get(frames.member) ?? 0;
+    if (
+      count >= MAX_HELD_FRAMES ||
+      frames.bytes - (older?.bytes ?? 0) + frame.bytes > most ||
+      this.#heldSends - freed + frame.sends > MAX_ROOM_HELD_SENDS ||
+      member - freed + frame.sends > MEMBER_HELD_SHARE
+    ) {
       conn.gestures.release(version);
       return;
     }
     if (older) {
       frames.list.splice(frames.list.indexOf(older), 1);
-      frames.bytes -= older.bytes;
-      this.#heldSends -= older.sends;
+      this.#unhold(frames, older);
       conn.gestures.release(older.version);
     }
     frames.list.push(frame);
     frames.bytes += frame.bytes;
     this.#heldSends += frame.sends;
+    this.#memberSends.set(frames.member, member - freed + frame.sends);
     this.#held.set(conn, frames);
+  }
+
+  /** A held frame leaves its queue's counts: its charge, and what it may send, the room's and its member's. */
+  #unhold(frames: HeldQueue, frame: HeldFrame): void {
+    frames.bytes -= frame.bytes;
+    this.#heldSends -= frame.sends;
+    const left = (this.#memberSends.get(frames.member) ?? 0) - frame.sends;
+    if (left > 0) this.#memberSends.set(frames.member, left);
+    else this.#memberSends.delete(frames.member);
+  }
+
+  /**
+   * A gesture's end or cancel whose start still waits, with nothing of the
+   * gesture sent from the socket (D-261126-265): the gesture leaves the
+   * queue whole, its moves included, and the end with it, and the rosters
+   * they bound are let go. Receivers would only see it appear and vanish,
+   * and the op shows where it ended. It reads that gesture alone.
+   */
+  #elided(conn: Connection, frames: HeldQueue, frame: HeldFrame): boolean {
+    const slot = frame.slot;
+    if (slot === null || !slot.closes || conn.previewsSent.has(slot.key) || !frames.list.some((f) => f.slot?.key === slot.key && f.slot.opens)) return false;
+    for (let i = frames.list.length - 1; i >= 0; i--) {
+      const held = frames.list[i]!;
+      if (held.slot?.key !== slot.key) continue;
+      frames.list.splice(i, 1);
+      this.#unhold(frames, held);
+      conn.gestures.release(held.version);
+    }
+    conn.gestures.release(frame.version);
+    if (frames.list.length === 0) this.#held.delete(conn);
+    return true;
   }
 
   /**
@@ -1577,10 +1633,10 @@ export class RoomActor {
     sweepPreviews(this.#connections, now);
   }
 
-  /** What a socket's queue holds while its ticks are not covered: its frames and their charges, and the room's count of what they all may send, for its tests. */
-  heldOf(conn: Connection): { frames: number; bytes: number; roomSends: number } {
+  /** What a socket's queue holds while its ticks are not covered: its frames and their charges, and what they all may send, its member's and the room's, for its tests. */
+  heldOf(conn: Connection): { frames: number; bytes: number; memberSends: number; roomSends: number } {
     const held = this.#held.get(conn);
-    return { frames: held?.list.length ?? 0, bytes: held?.bytes ?? 0, roomSends: this.#heldSends };
+    return { frames: held?.list.length ?? 0, bytes: held?.bytes ?? 0, memberSends: this.#memberSends.get(conn.previewBy ?? conn.memberId) ?? 0, roomSends: this.#heldSends };
   }
 
   /** A DM's `scene` request (design 7.1): counted against the snapshot budget's abuse rule, then answered with `resync`. */
@@ -1767,15 +1823,13 @@ export class RoomActor {
         const frame = frames.list[0]!;
         if (conn.closed || conn.held === null || now - frame.arrived > RETAIN_MS) {
           frames.list.shift();
-          frames.bytes -= frame.bytes;
-          this.#heldSends -= frame.sends;
+          this.#unhold(frames, frame);
           conn.gestures.release(frame.version);
           continue;
         }
         if (!this.#covered(frame.a)) break;
         frames.list.shift();
-        frames.bytes -= frame.bytes;
-        this.#heldSends -= frame.sends;
+        this.#unhold(frames, frame);
         this.#routeFrame(conn, frame, out);
       }
       if (frames.list.length === 0) this.#held.delete(conn);
@@ -1788,9 +1842,9 @@ export class RoomActor {
   }
 
   /** Routes a frame against `state`, none when its view is gone, a group frame by the version it bound, which it then lets go. */
-  #route(conn: Connection, state: RoomState | null, frame: { sceneId: string; e: EphEvent | GroupFrame; version: RosterVersion | null; at: number }, out?: Outbox): void {
+  #route(conn: Connection, state: RoomState | null, frame: { sceneId: string; e: EphEvent | GroupFrame; version: RosterVersion | null; at: number; leaves?: boolean }, out?: Outbox): void {
     try {
-      if (state !== null) routeEphemeral(state, conn, frame.sceneId, frame.e, this.#connections, frame.at, frame.version, out);
+      if (state !== null) routeEphemeral(state, conn, frame.sceneId, frame.e, this.#connections, frame.at, frame.version, out, frame.leaves ?? true);
     } finally {
       conn.gestures.release(frame.version);
     }
@@ -1866,6 +1920,7 @@ export class RoomActor {
       for (const waiter of [...this.#waiting]) this.#endWaiter(waiter, new ViewBusyError("the room is closing"));
       this.#held.clear();
       this.#heldSends = 0;
+      this.#memberSends.clear();
       for (const conn of this.#connections) conn.close(opts.code);
       const queued = this.#queue;
       this.#queue = [];
