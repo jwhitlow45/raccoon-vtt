@@ -713,6 +713,33 @@ describe("a creature squeezed along the map's edge lands squeezed (change format
     assert.deepEqual(pose(applied(stairs, climb, ANA, 66).state.tokens.bear!), [UPPER, -0.5, 6.5, null]);
   });
 
+  test("on the east and south edges a trapdoor drops it squeezed too, by a springing and by Ana's walk, Large or Huge, where at 66 it stood (D-261126-406)", () => {
+    // Each squeezed with its full space half past the edge: a Large one on a 1-wide strip, a Huge one on a 2-wide strip.
+    const edges = [
+      { name: "a Large bear on the east edge", size: "large" as const, at: { x: 18.5, y: 6.5 }, cells: { x: 19, y: 7, w: 1, h: 2 }, wall: [[19, 4], [19, 10]] as const },
+      { name: "a Huge bear on the east edge", size: "huge" as const, at: { x: 17.5, y: 6.5 }, cells: { x: 18, y: 7, w: 2, h: 2 }, wall: [[18, 4], [18, 10]] as const },
+      { name: "a Large bear on the south edge", size: "large" as const, at: { x: 6.5, y: 18.5 }, cells: { x: 7, y: 19, w: 2, h: 1 }, wall: [[4, 19], [10, 19]] as const },
+      { name: "a Huge bear on the south edge", size: "huge" as const, at: { x: 6.5, y: 17.5 }, cells: { x: 7, y: 18, w: 2, h: 2 }, wall: [[4, 18], [10, 18]] as const },
+    ];
+    for (const e of edges) {
+      const door = trapdoor("td1", { zone: { cells: [e.cells] } });
+      const sprung = withTrapdoor(tower({ tokens: { bear: squeezed({ size: e.size, ...e.at }) } }), door);
+      const walled = { ...withTrapdoor(tower({ tokens: { bear: bear({ size: e.size, x: 3, y: 1 }) } }), door), buildChunks: {} };
+      wall(walled, "edgewall0002", [e.wall[0][0], e.wall[0][1]], [e.wall[1][0], e.wall[1][1]], { kind: "wall" }, UPPER);
+      const walk: Op = { t: "token.move", tokenId: "bear", ...e.at, squeeze: true };
+      const ways: [string, RoomState, Op, typeof DM][] = [
+        ["springing", sprung, spring, DM],
+        ["walk", walled, walk, ANA],
+      ];
+      for (const [how, state, op, who] of ways) {
+        const live: RoomState = applied(state, op, who).state;
+        assert.deepEqual(pose(live.tokens.bear!), [GROUND, e.at.x, e.at.y, true], `${e.name}, ${how}`);
+        assert.equal(Object.keys(live.falls ?? {}).length, 1, `${e.name}, ${how}: one card`);
+        assert.equal(applied(state, op, who, 66).state.tokens.bear!.sceneId, UPPER, `${e.name}, ${how} at 66 stands`);
+      }
+    }
+  });
+
   test("a player's copy differs from the one an op stored at 66 makes by the bear's squeeze alone", () => {
     for (const c of cases) {
       for (const who of [ANA, BREE]) {

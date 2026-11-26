@@ -24,6 +24,8 @@ import { AT, DM, actor, character, token } from "../testutil.ts";
  * the map's west edge, its full space half past it, that a trapdoor drops,
  * Ana walks onto a trapdoor or a hole, the DM opens a hole under, or
  * climbs stairs: each landed full size, half off the floor (LP53-FALL-1).
+ * And one squeezed along the east edge that a trapdoor left standing on
+ * it, since its full space snapped out past the floor (D-261126-406).
  * The fixture holds each room and its ops as stored, the undo and redo
  * built from the stored run as the server built them, and a hash of every
  * result at each format, against which the same ops as live ops land
@@ -154,6 +156,11 @@ function chains(): Chain[] {
       initial: withStairs(edgeRoom(false, GROUND), { rect: EDGE_RECT }),
       steps: [[{ t: "token.climb", tokenId: "bear", linkId: "l1" }, ANA]],
     },
+    {
+      name: "a trapdoor on the east edge under the squeezed bear leaves it standing",
+      initial: withTrapdoor(room([up("bear", { name: "Bear", size: "large", ownerIds: ["p1"], x: 18.5, y: 6.5, squeeze: true })]), trapdoor("td1", { zone: { cells: [{ x: 19, y: 7, w: 1, h: 2 }] } })),
+      steps: [[{ t: "trap.spring", trapId: "td1", tokenIds: ["bear"] }, DM]],
+    },
   ];
   return specs.map((spec) => {
     let state = spec.initial;
@@ -199,7 +206,7 @@ describe("stored ops of change formats 64 to 66 replay to what they made (fallsO
   const pinned = existsSync(FIXTURE) ? (JSON.parse(readFileSync(FIXTURE, "utf8")) as Fixture) : { chains: [] };
 
   test("every room's ops replay to the pinned results at each format", () => {
-    assert.equal(pinned.chains.length, 12, "twelve rooms pinned");
+    assert.equal(pinned.chains.length, 13, "thirteen rooms pinned");
     for (const c of pinned.chains) for (const v of VERSIONS) assert.deepEqual(replay(c, v), c.hashes[String(v)], `${c.name} at ${v}`);
   });
 
@@ -229,12 +236,13 @@ describe("stored ops of change formats 64 to 66 replay to what they made (fallsO
         state = old.state;
       }
     }
-    // Every first op folds, of the undos only the one that leaves its rider below keeps a card, and every edge bear keeps its squeeze.
-    assert.deepEqual(differs, ["0:0", "1:0", "2:0", "3:0", "4:0", "5:0", "6:1", "7:0", "8:0", "9:0", "10:0", "11:0"]);
+    // Every first op folds, of the undos only the one that leaves its rider below keeps a card, every edge bear keeps its squeeze,
+    // and the east edge's trapdoor drops its bear.
+    assert.deepEqual(differs, ["0:0", "1:0", "2:0", "3:0", "4:0", "5:0", "6:1", "7:0", "8:0", "9:0", "10:0", "11:0", "12:0"]);
   });
 
   test("the bear squeezed along the west edge lands full size at 66 and squeezed live, on the same squares", () => {
-    for (const c of pinned.chains.slice(7)) {
+    for (const c of pinned.chains.slice(7, 12)) {
       const s = c.ops[0]!;
       const land = (opVersion: number | undefined) => {
         const t = resultHash(c.initial, s, opVersion).state.tokens.bear!;
@@ -242,6 +250,16 @@ describe("stored ops of change formats 64 to 66 replay to what they made (fallsO
       };
       assert.deepEqual([land(66), land(undefined)], [[-0.5, 6.5, null], [-0.5, 6.5, true]], c.name);
     }
+  });
+
+  test("the trapdoor on the east edge left the squeezed bear standing at 66, and drops it squeezed live (D-261126-406)", () => {
+    const c = pinned.chains[12]!;
+    const land = (opVersion: number | undefined) => {
+      const r = resultHash(c.initial, c.ops[0]!, opVersion).state;
+      const t = r.tokens.bear!;
+      return [t.sceneId, t.x, t.y, t.squeeze ?? null, Object.keys(r.falls ?? {}).length];
+    };
+    assert.deepEqual([land(66), land(undefined)], [[UPPER, 18.5, 6.5, true, 0], [GROUND, 18.5, 6.5, true, 1]]);
   });
 
   test("the pinned rooms are the rooms this file builds, so a change to the fixtures shows here", () => {
