@@ -58,6 +58,7 @@ import {
   readWatermark,
   setReadOnly,
   snapshotJson,
+  snapshotSlices,
   writeSnapshotJson,
   type ArchiveGuard,
   type AssetFact,
@@ -164,6 +165,8 @@ export type ActorOptions = {
   memoryGrowth: typeof memoryGrowth;
   /** The build of the snapshot a room's first commit here carries (#countSnapshot), which only tests replace, to make it throw. */
   snapshotJson: typeof snapshotJson;
+  /** A mark's build of the snapshot, in pieces read across turns (#mark), which only tests replace, to see each build. */
+  snapshotSlices: typeof snapshotSlices;
   /** Asked before each write to the log archive (persistence.ts ArchiveGuard). The app passes the asset volume's free-disk check. */
   archiveGuard: ArchiveGuard;
   /**
@@ -235,6 +238,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   meetStep: meetOps,
   memoryGrowth,
   snapshotJson,
+  snapshotSlices,
   archiveGuard: ARCHIVE_ALWAYS,
   animatedMaps: false,
   roomSound: false,
@@ -371,6 +375,13 @@ const ASK_TURN_MS = 8;
  * its tick wait.
  */
 const DRAIN_TURN_MS = 8;
+
+/**
+ * How long one turn of a mark's snapshot build runs before it lets the
+ * event loop go (#mark), as the drain's and an ask's turns do. A room near
+ * its size line builds in a few turns instead of one long one.
+ */
+const SNAPSHOT_TURN_MS = 8;
 
 /** How many closed batches may wait for their commits, half a second of ticks, before the drain waits for the oldest to land. */
 export const MAX_PENDING_BATCHES = 25;
@@ -746,6 +757,8 @@ export class RoomActor {
   #snapshotTimer: NodeJS.Timeout | null = null;
   /** The next mark's timer (#armMark), and the index on the room's grid of the last mark handled, null until the first is placed. */
   #markTimer: NodeJS.Timeout | null = null;
+  /** The mark whose build is being read (#mark): a later mark's build takes its place. */
+  #markBuild = 0;
   #lastMark: number | null = null;
   /** The quota check after a stored snapshot or a deletion (#recheckQuota), and whether another was asked for while it ran. */
   #quotaCheck: Promise<void> | null = null;
@@ -4173,7 +4186,10 @@ export class RoomActor {
    * writes that build at every third mark, counted on the room's grid, when
    * rows were stored since the last write that landed, or at any mark once
    * those rows reach snapshotBackstopRows. A write still running skips the
-   * write, never the build.
+   * write, never the build. The build reads its pieces (snapshotSlices) in
+   * turns of SNAPSHOT_TURN_MS, the first at once, and what to write is
+   * decided once it is read: a write that landed meanwhile, at a stop,
+   * leaves nothing to write.
    */
   #mark(): void {
     if (this.#closed || this.#lastMark === null) return;
@@ -4186,16 +4202,30 @@ export class RoomActor {
     this.#armMark();
     const { state, seq } = this.#committed;
     const capsPending = this.#capsPending;
-    let json: string;
-    try {
-      json = this.#opts.snapshotJson(state);
-    } catch (err) {
-      this.#log.error({ err, roomId: this.roomId, seq }, "snapshot build failed");
-      return;
-    }
-    const rows = seq - this.#snapshotSeq;
-    if (this.#snapshotting || rows <= 0) return;
-    if (third || rows >= this.#opts.snapshotBackstopRows) void this.#write(seq, json, capsPending);
+    const build = ++this.#markBuild;
+    const slices = this.#opts.snapshotSlices(state);
+    const pieces: string[] = [];
+    const turn = (): void => {
+      if (this.#closed || this.#markBuild !== build) return;
+      const until = performance.now() + SNAPSHOT_TURN_MS;
+      try {
+        for (let next = slices.next(); !next.done; next = slices.next()) {
+          pieces.push(next.value);
+          if (performance.now() >= until) {
+            setImmediate(turn);
+            return;
+          }
+        }
+      } catch (err) {
+        this.#log.error({ err, roomId: this.roomId, seq }, "snapshot build failed");
+        return;
+      }
+      const json = pieces.join("");
+      const rows = seq - this.#snapshotSeq;
+      if (this.#snapshotting || rows <= 0) return;
+      if (third || rows >= this.#opts.snapshotBackstopRows) void this.#write(seq, json, capsPending);
+    };
+    turn();
   }
 
   /** Whether a test asked for writes by its count or its wait (snapshotOps, snapshotIdleMs) in place of the marks. */

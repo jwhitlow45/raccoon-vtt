@@ -8,7 +8,7 @@ import type { Op, RestoreEntry } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, actor, character, entry, env, member, reveal, room, token } from "#shared/testutil.ts";
-import { assetFactOf, assetIdsOf, loadAssetFacts, loadRoom, type AssetFactRow, type Pool } from "./persistence.ts";
+import { assetFactOf, assetIdsOf, loadAssetFacts, loadRoom, snapshotJson, snapshotSlices, type AssetFactRow, type Pool } from "./persistence.ts";
 
 /**
  * Replay of stored ops (design 16.2), against a pool that answers the two
@@ -422,5 +422,28 @@ describe("a video row's facts (docs/design/design-v1-animated-maps.md 9.1)", () 
     const facts = await loadAssetFacts(pool, [VIDEO_ID]);
     assert.match(sql, /to_jsonb\(a\) -> 'media' as media, to_jsonb\(a\) -> 'video' as video/);
     assert.deepEqual(facts.get(VIDEO_ID), { id: VIDEO_ID, roomId: "ROOM", kind: "map", width: 1920, height: 1080, uploaders: [] });
+  });
+});
+
+describe("a snapshot built in pieces", () => {
+  test("joins to the same text as one build, for states of every shape JSON writes", () => {
+    let seed = 7;
+    const next = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
+    const value = (depth: number): unknown => {
+      const r = next();
+      if (depth > 2 || r < 0.3) return [null, 0, -1.5, "s\u2028\"q\"", true, undefined, () => 1][Math.floor(next() * 7)];
+      if (r < 0.6) return Array.from({ length: Math.floor(next() * 4) }, () => value(depth + 1));
+      if (r < 0.65) return new Date(Date.UTC(2026, 10, 1));
+      return Object.fromEntries(Array.from({ length: Math.floor(next() * 4) }, (_, i) => [next() < 0.2 ? String(i) : `k${i}`, value(depth + 1)]));
+    };
+    const states: unknown[] = [room(), {}, { log: [] }, { meta: undefined }, { a: undefined, b: 1 }];
+    for (let i = 0; i < 300; i++) states.push(Object.fromEntries(Array.from({ length: Math.floor(next() * 6) }, (_, k) => [next() < 0.2 ? String(k) : `f${k}`, value(0)])));
+    for (const state of states) assert.equal([...snapshotSlices(state as RoomState)].join(""), snapshotJson(state as RoomState));
+  });
+
+  test("checks the save ledger before its first piece, as one build does", () => {
+    const state = { ...room(), saveOutcomes: { bad: true } } as unknown as RoomState;
+    assert.throws(() => snapshotJson(state));
+    assert.throws(() => snapshotSlices(state).next());
   });
 });

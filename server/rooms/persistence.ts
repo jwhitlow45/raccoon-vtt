@@ -745,6 +745,47 @@ export function snapshotJson(state: RoomState): string {
 }
 
 /**
+ * snapshotJson in pieces, whose join is the same text: each field of the
+ * state, and each entry of a field that is a record or a list, as its own
+ * piece. A mark builds the snapshot from them across turns of the event
+ * loop (actor.ts #mark), so a room near its size line never holds the loop
+ * for the whole build. The state is a committed one, which nothing writes
+ * into again (shared/writable.ts), so the pieces read the same room
+ * however many turns apart they are read.
+ */
+export function* snapshotSlices(state: RoomState): Generator<string, void, undefined> {
+  if (state.saveOutcomes !== undefined) saveOutcomeLedgerSchema.parse(state.saveOutcomes);
+  let open = "{";
+  for (const [field, value] of Object.entries(state)) {
+    if (!inJson(value)) continue;
+    const name = `${open}${JSON.stringify(field)}:`;
+    open = ",";
+    if (value === null || typeof value !== "object" || typeof (value as { toJSON?: unknown }).toJSON === "function") {
+      yield name + JSON.stringify(value);
+    } else if (Array.isArray(value)) {
+      yield `${name}[`;
+      for (let i = 0; i < value.length; i++) yield (i === 0 ? "" : ",") + (inJson(value[i]) ? JSON.stringify(value[i]) : "null");
+      yield "]";
+    } else {
+      yield `${name}{`;
+      let comma = "";
+      for (const [id, entry] of Object.entries(value)) {
+        if (!inJson(entry)) continue;
+        yield `${comma}${JSON.stringify(id)}:${JSON.stringify(entry)}`;
+        comma = ",";
+      }
+      yield "}";
+    }
+  }
+  yield open === "{" ? "{}" : "}";
+}
+
+/** Whether JSON.stringify writes a value where an object holds it, rather than leaving the key out. */
+function inJson(value: unknown): boolean {
+  return value !== undefined && typeof value !== "function" && typeof value !== "symbol";
+}
+
+/**
  * Writes a snapshot row, always at today's schema version, so a build from
  * before it refuses the room, with `capsPending` where the state still owes
  * a measure of every memory layer (actor.ts load), and prunes the rows it

@@ -6,7 +6,7 @@ import type { ServerMessage } from "#shared/protocol.ts";
 import { markOffset, RoomActor, SNAPSHOT_EVERY_MS, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { snapshotJson, type Pool } from "./persistence.ts";
+import { snapshotJson, snapshotSlices, type Pool } from "./persistence.ts";
 import { ScopeClient, scopeFixture, StoredRoomDb, storedActor, type StoredRow } from "./undoScopeTesting.ts";
 
 /*
@@ -93,6 +93,10 @@ async function markRoom(t: TestContext, opts: { options?: ActorDeps["options"]; 
       snapshotJson: (state) => {
         builds.push(clock.now);
         return snapshotJson(state);
+      },
+      snapshotSlices: (state) => {
+        builds.push(clock.now);
+        return snapshotSlices(state);
       },
       ...opts.options,
     },
@@ -186,6 +190,48 @@ describe("marks", () => {
       "the same writes, and one more at the mark after 300 rows",
     );
     assert.ok(a.r.db.rows.length < 300, "the backstop's write pruned what it covers");
+  });
+
+  test("a mark's build of a large room reads its pieces in turns that let the event loop go, and writes the same bytes as one build", async (t) => {
+    const f = scopeFixture();
+    const state: RoomState = structuredClone(f.state);
+    for (let i = 0; i < 400; i++) state.log.push({ id: `${1_000_000 + i}:0`, at: "2026-11-10T19:00:00.000Z", kind: "chat", from: f.dm.id, text: "x".repeat(200) });
+    // Every piece read moves the loop's clock 3 ms, so a turn of the build takes three pieces on any machine.
+    const turns: number[] = [];
+    let turn = 0;
+    let ticking = true;
+    const tick = () => {
+      turn++;
+      if (ticking) setImmediate(tick);
+    };
+    setImmediate(tick);
+    t.after(() => void (ticking = false));
+    const r = await markRoom(t, {
+      state,
+      options: {
+        snapshotBackstopRows: 1,
+        snapshotSlices: function* (s: RoomState) {
+          for (const piece of snapshotSlices(s)) {
+            turns.push(turn);
+            yield piece;
+          }
+        },
+      },
+    });
+    const [m1] = marksBetween(r.clock.now, T0 + 100_000) as [Mark];
+    await r.to(m1.at - 500);
+    chat(r.p1, "a row");
+    await r.to(m1.at - 1);
+    const expected = snapshotJson(r.actor.committed.state);
+    let loop = 0;
+    t.mock.method(performance, "now", () => (loop += 3));
+    await r.to(m1.at);
+    for (let i = 0; i < 400 && r.writes.length === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.restoreAll();
+    assert.ok(new Set(turns).size > 10, `the build read in ${new Set(turns).size} turns`);
+    assert.deepEqual(r.writes, [m1.at], "the mark's write, once its build is read");
+    assert.equal(JSON.stringify(r.db.snapshot.state), JSON.stringify(JSON.parse(expected)), "the same bytes as one build");
+    assert.equal(r.db.snapshot.seq, r.actor.committed.seq);
   });
 
   test("no rows stored since the last write: the third mark builds and writes nothing", async (t) => {

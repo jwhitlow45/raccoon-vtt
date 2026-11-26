@@ -73,7 +73,7 @@ import { SnapshotBudget } from "../server/rooms/budgets.ts";
 import { Connection } from "../server/rooms/connection.ts";
 import type { RoomGateway } from "../server/rooms/gateway.ts";
 import { chunkCharge, layerCharge, MEMORY_CAP } from "../server/rooms/memorySize.ts";
-import { snapshotJson, type Pool } from "../server/rooms/persistence.ts";
+import { snapshotJson, snapshotSlices, type Pool } from "../server/rooms/persistence.ts";
 import { actor as testActor, room as testRoom, scene as testScene, token as testToken } from "../shared/testutil.ts";
 import { capRoom, lightReachesEveryHolder, lightScene } from "./bench-vision.ts";
 
@@ -1751,16 +1751,47 @@ async function qb8(dmPerTick: number, what: string): Promise<string> {
   ].join("\n");
 }
 
-function qb9(): string {
+/**
+ * QB-9: a mark's build on the largest room, read in turns of 8 ms as the
+ * actor reads it (actor.ts #mark, SNAPSHOT_TURN_MS), each turn timed, and
+ * the whole build as one call beside it.
+ */
+async function qb9(): Promise<string> {
   const state = roomOfBytes(9 * 1048576);
-  const times: number[] = [];
+  const whole: number[] = [];
+  const longest: number[] = [];
+  const spans: number[] = [];
   let bytes = 0;
   for (let i = 0; i < 11; i++) {
-    const t0 = performance.now();
+    let t0 = performance.now();
     bytes = snapshotJson(state).length;
-    times.push(performance.now() - t0);
+    whole.push(performance.now() - t0);
+    t0 = performance.now();
+    const slices = snapshotSlices(state);
+    const pieces: string[] = [];
+    let most = 0;
+    for (;;) {
+      const start = performance.now();
+      let next = slices.next();
+      for (; !next.done; next = slices.next()) {
+        pieces.push(next.value);
+        if (performance.now() >= start + 8) break;
+      }
+      if (next.done) {
+        if (pieces.join("").length !== bytes) throw new Error("the pieces join to another text");
+        most = Math.max(most, performance.now() - start);
+        break;
+      }
+      most = Math.max(most, performance.now() - start);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    longest.push(most);
+    spans.push(performance.now() - t0);
   }
-  return `QB-9 a mark's build of a ${mib(bytes)} room: ms ${spread(times)} (under 15)`;
+  return [
+    `QB-9 a mark's build of a ${mib(bytes)} room, in turns: longest turn ms ${spread(longest)} (under 15)`,
+    `  start to end ms ${spread(spans)} | as one build ms ${spread(whole)}`,
+  ].join("\n");
 }
 
 async function qb10(): Promise<string> {
@@ -1860,7 +1891,7 @@ export async function runQueueBench(only: string | null): Promise<string[]> {
     out.push(await qb8(120, "the DM at 120 a tick"));
     out.push(await qb8(17, "the DM at 17 a tick, section 9's rate"));
   }
-  if (want("QB-9")) out.push(qb9());
+  if (want("QB-9")) out.push(await qb9());
   if (want("QB-10")) out.push(await qb10());
   if (want("QB-11")) out.push(await qb11());
   return out;

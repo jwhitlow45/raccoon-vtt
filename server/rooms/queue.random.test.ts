@@ -257,7 +257,10 @@ class RTwin {
         standingClock: true,
         idGate: false,
         // Each build a mark makes, by its time.
-        ...({ snapshotJson: (state: RoomState) => (this.builds.push(clock.now - T0), persistence.snapshotJson(state)) } as unknown as Partial<ActorOptions>),
+        ...({
+          snapshotJson: (state: RoomState) => (this.builds.push(clock.now - T0), persistence.snapshotJson(state)),
+          snapshotSlices: (state: RoomState) => (this.builds.push(clock.now - T0), persistence.snapshotSlices(state)),
+        } as unknown as Partial<ActorOptions>),
         ...this.#options,
       },
     } satisfies ActorDeps);
