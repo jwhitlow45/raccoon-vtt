@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "./model.ts";
-import { MOVE_OFF_MAP, TELEPORT_OFF_MAP, canApply, type PermissionDeps } from "./permissions.ts";
+import { wall } from "./discoveryTestutil.ts";
+import { MOVE_OFF_MAP, NOT_A_SQUEEZE, TELEPORT_OFF_MAP, canApply, type PermissionDeps } from "./permissions.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { hexCenter, type HexGrid } from "./rules/hex.ts";
 import { DM, P1, room, scene, token } from "./testutil.ts";
@@ -174,5 +175,49 @@ describe("a plain move on hexes", () => {
     const state = hexState((s) => (s.tokens.own = { ...s.tokens.own!, size: "large", ownerIds: ["p1"] }));
     assert.equal(answer(state, { t: "token.move", tokenId: "own", ...at(5, 6) }), "ok");
     assert.equal(answer(state, { t: "token.move", tokenId: "own", ...at(0, 0) }), off);
+  });
+});
+
+describe("a squeeze along the map's edge, from change format 66 (D-261126-226, 238)", () => {
+  /** A corridor one square wide along the north side, walled at y = 1 from x = 10 to 26, and Pat's Large horse at its mouth, half past the side. */
+  const edge = (blocking: boolean, walled = true): RoomState =>
+    table(blocking, (s) => {
+      s.tokens.big = { ...s.tokens.big!, x: 7, y: -0.5 };
+      if (walled) {
+        wall(s, "edgesqw00001", [10, 1], [18, 1]);
+        wall(s, "edgesqw00002", [18, 1], [26, 1]);
+      }
+    });
+  const squeezed = { x: 13.5, y: -0.5 };
+
+  for (const blocking of [false, true]) {
+    test(`a player's walk into the corridor ends squeezed, its squeezed box on the scene, walls ${blocking ? "stopping" : "not stopping"} moves`, () => {
+      const state = edge(blocking);
+      assert.equal(answer(state, { t: "token.move", tokenId: "big", ...squeezed, squeeze: true }), "ok");
+      // Full size there its box lies half past the side.
+      assert.equal(answer(state, { t: "token.move", tokenId: "big", ...squeezed }), off);
+      // In the open beside the side nothing pinches, so the flag cannot carry a box past the edge.
+      assert.equal(answer(edge(blocking, false), { t: "token.move", tokenId: "big", ...squeezed, squeeze: true }), `invalid: ${NOT_A_SQUEEZE}`);
+    });
+  }
+
+  test("a player's squeezed Teleport here into the corridor is taken, and an unsqueezed one past the edge is refused", () => {
+    const state = edge(true);
+    state.tokens.big = { ...state.tokens.big!, x: 10, y: 10 };
+    assert.equal(answer(state, { t: "token.move", tokenId: "big", ...squeezed, squeeze: true, teleport: "wall" }), "ok");
+    assert.equal(answer(state, { t: "token.move", tokenId: "big", ...squeezed, teleport: "wall" }), `forbidden: ${TELEPORT_OFF_MAP}`);
+    // A squeeze the narrow-space test refuses is refused for a teleport too, wherever it would land.
+    const open = edge(true, false);
+    open.tokens.big = { ...open.tokens.big!, x: 10, y: 10 };
+    assert.equal(answer(open, { t: "token.move", tokenId: "big", ...squeezed, squeeze: true, teleport: "wall" }), `invalid: ${NOT_A_SQUEEZE}`);
+  });
+
+  test("on hexes a squeezed teleport stands by its squeezed hexes too, which the narrow-space test then judges", () => {
+    // A corner where only the squeezed hex fits: open ground, so it is no squeeze, and the refusal is the squeeze's, not the edge's.
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexColumns", bounds: { w: 20, h: 14 } }) } });
+    const c = hexCenter(COLUMNS, { col: 0, row: 0 });
+    state.tokens.own = token("own", { name: "Thorn", kind: "pc", size: "large", x: 8, y: 8, ownerIds: ["p1"] });
+    assert.equal(answer(state, { t: "token.move", tokenId: "own", x: c.x - 0.5, y: c.y - 0.5, squeeze: true, teleport: "wall" }), `invalid: ${NOT_A_SQUEEZE}`);
+    assert.equal(answer(state, { t: "token.move", tokenId: "own", x: c.x - 0.5, y: c.y - 0.5, teleport: "wall" }), `forbidden: ${TELEPORT_OFF_MAP}`);
   });
 });

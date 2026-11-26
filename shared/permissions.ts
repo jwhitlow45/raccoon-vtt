@@ -3035,8 +3035,9 @@ function legCheck(c: Check, tokenId: string, to: StoredEnd, teleport: boolean): 
   const token = ownEntry(c.state.tokens, tokenId);
   const scene = token ? ownEntry(c.state.scenes, token.sceneId) : undefined;
   if (!token || !scene) return OK;
+  // The stored end itself, since `legEndOf` keeps the squeeze on hexes alone, and a squeezed teleport on squares stands squeezed too.
+  if (teleport) return insideScene(scene, token, to) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
   const end = legEndOf(scene, to, token.elevation);
-  if (teleport) return insideScene(scene, token, end) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
   const edge = endInside(c, tokenId, to);
   if (!edge.ok) return edge;
   if (scene.blockMovement !== true) return OK;
@@ -3164,11 +3165,16 @@ function hexStopAgrees(c: Check, op: OpOf<"token.move">): Decision {
   return Math.abs(placed.x - op.x) < 1e-6 && Math.abs(placed.y - op.y) < 1e-6 ? OK : refuse("invalid", HEX_STOP_OFF);
 }
 
-/** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design/design-v1-hex-grids.md 4.2). */
-function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point): boolean {
-  // Only the footprint fields: a stored token's runtime `squeeze` would shrink the footprint read here, and a teleport or placement lands full size.
-  const full: PlacedToken = { size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) };
-  return standsInScene(sceneGrid(scene), scene.bounds, full);
+/**
+ * Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design/design-v1-hex-grids.md 4.2).
+ * The box follows the destination's own squeeze, as a plain move's end does (`endInside`): a teleport that lands squeezed in a
+ * corridor along the map's edge stands by its squeezed box, which `squeezeFits` has judged a real squeeze. A placement carries no
+ * squeeze, so it lands full size.
+ */
+function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point & { squeeze?: boolean }): boolean {
+  // Only the footprint fields and the destination's squeeze: a stored token's own `squeeze` says how it stands now, not where it lands.
+  const placed: PlacedToken = { size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}), ...(at.squeeze === true ? { squeeze: true as const } : {}) };
+  return standsInScene(sceneGrid(scene), scene.bounds, placed);
 }
 
 /** A player's refusals at a door (docs/design/design-v1-maps-vision.md 4.1), the way players learn about locks. */

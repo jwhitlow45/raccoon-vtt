@@ -9,6 +9,7 @@ import { hexCenter, type HexGrid } from "#shared/rules/hex.ts";
 import { DM, P1, int, pick, rng, room, scene, token } from "#shared/testutil.ts";
 import { groupOffsetOnScene, heldShortOfCreature, keptOnScene, measuredLanding, moveOpsOf, pressedAim, planGroup, planOne, type DropPlan } from "./drop.ts";
 import { groupDragOf } from "./dragTesting.ts";
+import { teleportMove } from "./teleport.ts";
 import { line, seenRoom, thorn, world } from "./testing.ts";
 
 /**
@@ -210,6 +211,44 @@ describe("a squeeze at the edge", () => {
     }
     const op = opSchema.parse({ t: "token.move", tokenId: "thorn", x: -0.5, y: 13.5, squeeze: true });
     assert.equal(canApply(op, P1, state, deps).ok, true);
+  });
+});
+
+describe("a squeeze along the map's edge, from change format 66 (D-261126-226, 238)", () => {
+  // A corridor one square wide along each of two sides, walled on its inner side alone: the scene's edge is its other wall.
+  const corridors = [
+    { side: "north", edges: line("n", 1, 10, 30), parked: { x: 7, y: -0.5 }, aim: { x: 13.3, y: -0.4 }, squeezed: { x: 13.5, y: -0.5 } },
+    { side: "west", edges: line("w", 1, 10, 30), parked: { x: -0.5, y: 7 }, aim: { x: -0.4, y: 13.3 }, squeezed: { x: -0.5, y: 13.5 } },
+  ] as const;
+
+  for (const c of corridors) {
+    test(`a Large creature dragged into the corridor along the ${c.side} side lands squeezed, and the server takes it`, () => {
+      const ogre = thorn({ size: "large", ...c.parked });
+      const state = world({ edges: c.edges, tokens: [ogre] });
+      for (const mode of ["walk", "free"] as const) {
+        const plan = planOne(seenRoom(state), ogre, c.aim, mode);
+        assert.deepEqual(plan.moves, [{ tokenId: "thorn", ...c.squeezed, squeeze: true }], mode);
+        for (const op of moveOpsOf(plan.moves)) assert.equal(canApply(opSchema.parse(op), P1, state, deps).ok, true, `${mode}: ${JSON.stringify(op)}`);
+      }
+    });
+
+    test(`Teleport here from a walk the corridor's wall stopped, along the ${c.side} side, lands squeezed in it, and the server takes it`, () => {
+      const ogre = thorn({ size: "large", x: 5, y: 5 });
+      const state = world({ edges: c.edges, tokens: [ogre], blockMovement: true });
+      const view = seenRoom(state);
+      const plan = planOne(view, ogre, c.aim, "walk");
+      assert.ok(plan.stop, "the walk is stopped short of the corridor");
+      const op = { t: "token.move" as const, ...teleportMove(view, ogre, plan.stop) };
+      assert.deepEqual({ x: op.x, y: op.y, squeeze: op.squeeze }, { ...c.squeezed, squeeze: true });
+      assert.equal(canApply(opSchema.parse(op), P1, state, deps).ok, true);
+    });
+  }
+
+  test("beside the side in the open a drop never squeezes, so the box is kept on the scene full size", () => {
+    const ogre = thorn({ size: "large", x: 7, y: 3 });
+    const state = world({ tokens: [ogre] });
+    const plan = planOne(seenRoom(state), ogre, { x: 13.3, y: -0.4 }, "free");
+    assert.deepEqual(plan.moves, [{ tokenId: "thorn", x: 13, y: 0 }]);
   });
 });
 
