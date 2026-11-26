@@ -343,6 +343,21 @@ describe("a hello of a client whose socket is already open", () => {
     assert.ok(!a.sent.some((m) => m.t === "ev" && m.acks?.includes(n)));
   });
 
+  test("a table display's two sockets of one client both stay open, whichever hello comes first", async (t) => {
+    for (const newerFirst of [false, true]) {
+      const r = await room(t);
+      const session = uuidv7();
+      const clientId = uuidv7();
+      const older = socketOf(r, r.f.player, "player", session, { display: true });
+      const newer = socketOf(r, r.f.player, "player", session, { display: true });
+      for (const s of newerFirst ? [newer, older] : [older, newer]) await hello(r, s, clientId);
+      for (const s of [older, newer]) {
+        assert.equal(s.closed(), null, `newer first: ${newerFirst}`);
+        assert.ok(s.sent.some((m) => m.t === "snapshot"));
+      }
+    }
+  });
+
   test("a newer socket's hello closes the older one first, its previews ended and its held frames gone, and takes its share", async (t) => {
     const r = await room(t);
     const session = uuidv7();

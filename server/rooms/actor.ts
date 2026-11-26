@@ -1255,17 +1255,27 @@ export class RoomActor {
     // socket's own key (Connection.key once its hello is handled).
     const at = this.#opts.now();
     const request = conn.previewBy === null ? key : `preview|${conn.id}`;
-    // Found by its id in the budget, so a hello finds its client's request after the room unloaded and loaded again.
-    this.#budget.drop(this.#requestId(request), at);
-    const replaced = this.#delayed.get(request);
-    if (replaced) {
-      this.#delayed.delete(request);
-      this.#letGo(replaced);
+    // A hello older than an open socket of its client, its current one or one whose snapshot request waits, leaves that
+    // socket's request alone and is refused below, as #processHello would refuse it: under the same key, its own request
+    // would take the newer one's place in the budget.
+    const stale = this.#newerOf(conn, key) !== null;
+    if (!stale) {
+      // Found by its id in the budget, so a hello finds its client's request after the room unloaded and loaded again.
+      this.#budget.drop(this.#requestId(request), at);
+      const replaced = this.#delayed.get(request);
+      if (replaced) {
+        this.#delayed.delete(request);
+        this.#letGo(replaced);
+      }
     }
     // A hello past the abuse rule closes the session's sockets in this room as it arrives, so the sockets that close are
     // the ones open then, never one that came while the hello waited its turn in the queue.
     if (fresh && this.#pastAbuseRule(conn, at)) {
       this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+      return;
+    }
+    if (stale) {
+      conn.close(CLOSE.replaced, "a newer socket holds this client");
       return;
     }
     // A socket closed before its hello joins the queue keeps what the budget spent for it, and a delayed request of one
@@ -3300,8 +3310,8 @@ export class RoomActor {
     // Which of two sockets of one client is older goes by their ids, never by the order their hellos come in, since a
     // hello may wait on its watermark read before it joins the queue. A hello older than its client's current socket
     // is refused before it touches anything of the client's.
-    const current = conn.previewBy === null ? this.#clients.get(key) : undefined;
-    if (current !== undefined && current !== conn && !current.closed && current.id > conn.id) {
+    const current = this.#rivalOf(conn, key);
+    if (current !== null && current.id > conn.id) {
       conn.close(CLOSE.replaced, "a newer socket holds this client");
       return;
     }
@@ -3315,7 +3325,7 @@ export class RoomActor {
     if (conn.clientId !== null && conn.clientId !== cmd.clientId) takeKeptRejects(conn);
     // An older socket of the client is closed first, in this step, so nothing it holds outlives its share of the pool,
     // and its share passes to this one when this one's role may hold it.
-    const replaced = current !== undefined && current !== conn && !current.closed ? current : null;
+    const replaced = current;
     if (replaced) this.#closeReplaced(replaced);
     conn.clientId = cmd.clientId;
     conn.held = null;
@@ -3343,6 +3353,28 @@ export class RoomActor {
       batch.watermarks.set(key, Math.max(batch.watermarks.get(key) ?? 0, wm.staged));
     }
     this.#readSnapshot(conn, key, cmd.admission);
+  }
+
+  /**
+   * The client's current socket other than `conn`, still open, when both
+   * take part in replacement (design 7.6): a table display's sockets and a
+   * preview's never replace one another or are replaced, and go by their
+   * key as before.
+   */
+  #rivalOf(conn: Connection, key: ClientKey): Connection | null {
+    if (conn.previewBy !== null || conn.display) return null;
+    const current = this.#clients.get(key);
+    return current !== undefined && current !== conn && !current.closed ? current : null;
+  }
+
+  /** An open socket of the client newer than `conn`, as its hello arrives: the current one, or one whose snapshot request waits. */
+  #newerOf(conn: Connection, key: ClientKey): Connection | null {
+    if (conn.previewBy !== null || conn.display) return null;
+    const waiting = this.#delayed.get(key)?.conn;
+    for (const other of [this.#rivalOf(conn, key), waiting]) {
+      if (other && other !== conn && !other.closed && other.id > conn.id) return other;
+    }
+    return null;
   }
 
   /**

@@ -93,10 +93,10 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
 }
 
-function socketOn(actor: RoomActor, grant: { sessionId?: string; memberId: string; role: "dm" | "player" }, now: () => number): { conn: Connection; sent: Wire[] } {
+function socketOn(actor: RoomActor, grant: { sessionId?: string; memberId: string; role: "dm" | "player"; display?: true }, now: () => number): { conn: Connection; sent: Wire[] } {
   const sent: Wire[] = [];
   const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as Wire), close() {}, terminate() {} };
-  const conn = new Connection(socket as never, { sessionId: grant.sessionId ?? uuidv7(), roomId: "UNDOSCOPE", memberId: grant.memberId, role: grant.role }, "203.0.113.20", { now });
+  const conn = new Connection(socket as never, { sessionId: grant.sessionId ?? uuidv7(), roomId: "UNDOSCOPE", memberId: grant.memberId, role: grant.role, ...(grant.display ? { display: true } : {}) }, "203.0.113.20", { now });
   actor.attach(conn);
   return { conn, sent };
 }
@@ -530,6 +530,58 @@ describe("a snapshot's wait read from the hello's arrival", () => {
       await flush();
     }
     assert.deepEqual([answers(gone.sent), answers(stays.sent)], [["wait 510"], ["wait 500", "snapshot"]]);
+  });
+
+  test("an older socket's hello after its client's newer socket's delayed request is refused, and the newer one's snapshot still comes due", async (t) => {
+    // Held: the queue is busy, so the newer hello is not handled yet when the older one arrives, and only its waiting request shows it.
+    for (const held of [false, true]) {
+      const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
+      r.timers.enable();
+      r.timers.move(T0 + 500);
+      const step = held ? heldStep(r.actor) : null;
+      const older = socketOn(r.actor, { sessionId: r.p1.conn.sessionId, memberId: r.f.player.id, role: "player" }, r.now);
+      const newer = socketOn(r.actor, { sessionId: r.p1.conn.sessionId, memberId: r.f.player.id, role: "player" }, r.now);
+      void r.actor.hello(newer.conn, { clientId: r.p1.clientId, resumeFrom: r.p1.n + 1 });
+      await flush();
+      r.timers.move(T0 + 520);
+      await flush();
+      // The older socket's hello waited on its watermark read and comes now, with the newer one's request still waiting.
+      r.timers.move(T0 + 600);
+      void r.actor.hello(older.conn, { clientId: r.p1.clientId, resumeFrom: r.p1.n + 1 });
+      await flush();
+      step?.release();
+      for (let at = T0 + 620; at <= T0 + 3_000; at += 20) {
+        r.timers.move(at);
+        await flush();
+      }
+      assert.equal(older.conn.closedWith, CLOSE.replaced, `held: ${held}`);
+      assert.deepEqual(answers(older.sent), []);
+      assert.deepEqual(answers(newer.sent), ["wait 510", "snapshot"], `held: ${held}`);
+    }
+  });
+
+  test("a table display's older socket's hello after its newer one's delayed request is not refused", async (t) => {
+    const r = await room(t, { budget: (now) => new SnapshotBudget({ sessionCount: 1, windowMs: 1_010 }, now) });
+    r.timers.enable();
+    const display = { sessionId: uuidv7(), memberId: "display:abcdefghijkl", role: "player" as const, display: true as const };
+    const clientId = uuidv7();
+    const first = socketOn(r.actor, display, r.now);
+    void r.actor.hello(first.conn, { clientId, resumeFrom: 1 });
+    await flush();
+    r.timers.move(T0 + 500);
+    const older = socketOn(r.actor, display, r.now);
+    const newer = socketOn(r.actor, display, r.now);
+    void r.actor.hello(newer.conn, { clientId, resumeFrom: 1 });
+    await flush();
+    r.timers.move(T0 + 600);
+    void r.actor.hello(older.conn, { clientId, resumeFrom: 1 });
+    await flush();
+    for (let at = T0 + 620; at <= T0 + 3_000; at += 20) {
+      r.timers.move(at);
+      await flush();
+    }
+    for (const s of [first, older, newer]) assert.equal(s.conn.closedWith, null);
+    assert.equal(answers(older.sent).at(-1), "snapshot");
   });
 
   test("requests of sockets the room closed count against their session's bound on requests waiting at once until each is answered", async (t) => {
