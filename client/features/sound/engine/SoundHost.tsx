@@ -7,7 +7,7 @@ import { soundTimeLink } from "../../../state/socket.ts";
 import { useAssets, useIsDisplay, useRoomStore, useRoomView } from "../../../state/view.ts";
 import { mixerSupported, soundUnlock } from "./context.ts";
 import type { EngineInput, SoundEngine } from "./engine.ts";
-import { setSoundHere, useRoomSoundOn } from "./store.ts";
+import { refreshServerRoomSound, setSoundHere, useRoomSoundOn } from "./store.ts";
 
 /**
  * The room's sound on this page (docs/design/design-v1-music.md 5): in the
@@ -59,6 +59,15 @@ function Host() {
   enabledRef.current = enabled;
 
   useEffect(() => soundUnlock().arm(() => enabledRef.current), []);
+
+  // A server restart may have changed the room sound switch, which the Sound panel reads from one answer per page load.
+  const link = useRef<"never" | "open" | "dropped">("never");
+  useEffect(() => {
+    if (connected) {
+      if (link.current === "dropped") refreshServerRoomSound();
+      link.current = "open";
+    } else if (link.current === "open") link.current = "dropped";
+  }, [connected]);
 
   const engine = useRef<SoundEngine | null>(null);
   const loading = useRef(false);

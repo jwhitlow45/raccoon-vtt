@@ -70,6 +70,21 @@ export function serverRoomSound(): Promise<boolean> {
 
 export const serverSound = serverSwitch.get;
 
+/**
+ * Asks the server's switch again after a reconnect, because a restart with
+ * ROOM_SOUND changed leaves a page that stayed open with the old answer
+ * until it reloads. The old answer stands while the new one is on its way,
+ * and a failed read keeps it, so the panel never flickers to "unknown" for
+ * a blip. Never asks before the first answer: the first reader owns that.
+ */
+export function refreshServerRoomSound(): void {
+  if (serverAsked === null) return;
+  void api.getConfig().then(
+    (config) => serverSwitch.set(config.roomSound === true ? "on" : "off"),
+    () => undefined,
+  );
+}
+
 function subscribeServerSwitch(listener: () => void): () => void {
   void serverRoomSound();
   return serverSwitch.subscribe(listener);
