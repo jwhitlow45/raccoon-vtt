@@ -55,9 +55,8 @@ export type Source =
 /**
  * Creatures in the order every list the page sends names them: by id. The
  * page shows its rows by the DM's own names, ties in the order their source
- * gave them (a trap's springing or a fall card keeps the server's), so a
- * request, a dice line or the lines an outcome writes would otherwise list
- * players' creatures by names and an order only the DM holds.
+ * gave them, so a request, a dice line or the lines an outcome writes would
+ * otherwise list creatures to players in an order only the DM holds.
  */
 export function byCreature<T>(of: (item: T) => { tokenId?: string; characterId?: string }): (a: T, b: T) => number {
   return (a, b) => {
