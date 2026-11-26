@@ -6,7 +6,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { mapCanvasBox, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { mapCanvasBox, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, readCamera, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toView, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 import type { Op } from "../shared/protocol.ts";
@@ -3175,6 +3175,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         consoles.phone.attach(page);
         await open(page, scale);
         await shots.take(page, `uipolish-iso-fit-before-${scale}`);
+        const topDownBefore = await readCamera(page);
         await toIso(page);
         await page.waitForTimeout(300);
         const settled = (await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { drawn(): Cam | null } }).__rvttIsoHook.drawn())) as Cam;
@@ -3183,9 +3184,13 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         const corners = [[0, 0], [14, 0], [0, 9], [14, 9]].map(([x, y]) => toView(iso, { x: x!, y: y! }));
         const screen = corners.map((c) => ({ x: settled.x + c.x * settled.scale, y: settled.y + c.y * settled.scale }));
         // The fit clears the top bar and the toolbar, so the corners belong in the rect between them, not only in the canvas.
+        // A selector that stops matching must fail here, not loosen the check to the canvas.
         const bars = await page.evaluate(() => {
           const doc = (globalThis as unknown as { document: { querySelector(s: string): { getBoundingClientRect(): { top: number; bottom: number } } | null } }).document;
-          return { top: doc.querySelector("[data-rvtt-topbar]")?.getBoundingClientRect().bottom ?? 0, bottom: doc.querySelector('nav[aria-label="Tools"]')?.getBoundingClientRect().top ?? 1e9 };
+          const top = doc.querySelector("[data-rvtt-topbar]");
+          const tools = doc.querySelector('nav[aria-label="Tools"]');
+          if (!top || !tools) throw new Error(`the bar rect check found ${top ? "" : "no [data-rvtt-topbar]"}${top || tools ? "" : " and "}${tools ? "" : 'no nav[aria-label="Tools"]'}`);
+          return { top: top.getBoundingClientRect().bottom, bottom: tools.getBoundingClientRect().top };
         });
         const cleared = { top: Math.max(0, bars.top - box.y), bottom: Math.min(box.height, bars.bottom - box.y) };
         assert.ok(cleared.bottom > cleared.top, `${scale}: the bars leave the map room (${JSON.stringify(cleared)})`);
@@ -3196,6 +3201,13 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         }
         fitScales.push(settled.scale);
         await shots.take(page, `uipolish-iso-fit-after-${scale}`);
+        // Back to Top-down the map still at its Isometric fit is fitted again, so the canvas reads as it did before the round trip (LP52-ISO-BACK).
+        await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("topDown"));
+        await untilShown(page, "top-down");
+        await page.waitForTimeout(300);
+        const topDownAfter = await readCamera(page);
+        assert.ok(topDownBefore && topDownAfter, `${scale}: the Top-down camera reads`);
+        for (const key of ["x", "y", "scale"] as const) assert.ok(Math.abs(topDownAfter[key] - topDownBefore[key]) < 0.5, `${scale}: Isometric back to Top-down refits the map to its Top-down fit (${key} ${topDownAfter[key].toFixed(2)} against ${topDownBefore[key].toFixed(2)})`);
         await page.close();
       }
       // A camera the viewer zoomed in is held: its zoom stays what the zoom left it, wider than the fit's.
