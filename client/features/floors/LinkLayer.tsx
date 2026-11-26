@@ -87,11 +87,15 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
   const chunks = useTreeShownView((s) => s.floorView?.buildChunks ?? NO_CHUNKS);
   // The traps' names keep off the ends' frames as the trap layers place them, and the ends' pills keep off the traps' squares, neither off the other's pills.
   const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
-  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames), [grid, props.scene.id, traps, chunks, scale, dm, frames]);
+  // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
+  const view = useRestView();
+  const iso = useIsoGround();
+  // The names as Top-down places them, in cells: the rest view is in view units in Isometric, where the markers' drawn boxes take it instead (placeEnds).
+  const cellView = iso ? null : view;
+  const trapNames = useMemo(() => trapNameMarkers(grid, props.scene.id, traps, chunks, scale, dm, frames, cellView), [grid, props.scene.id, traps, chunks, scale, dm, frames, cellView]);
   const squares = useMemo(() => trapSquares(grid, props.scene.id, traps), [grid, props.scene.id, traps]);
   const trapKey = JSON.stringify(trapNames);
   const markers = useMemo(() => (trapNames.length === 0 ? turn : [...turn, ...trapNames]), [turn, trapKey]);
-  const iso = useIsoGround();
   const shown = trapNameShown(scale);
   // Every end's pills are placed together, in order of id, so a hole's pills can keep off the other ends and the pills before them (placeEnds).
   const ends = useMemo(
@@ -115,8 +119,6 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
       }),
     [list, scenes, grid, far, hushed, feet, shown],
   );
-  // Judged by where the screen's edge slides each pill at the camera's rest, read alike by both isometric stages, so a pan lays out nothing until it stops.
-  const view = useRestView();
   const placed = useMemo(() => placeEnds(ends, markers, scale, iso, (p) => iso !== null && pillStands(iso.fog, { ...p, scale }), tokens, { view, traps: squares }), [ends, markers, scale, iso, tokens, view, squares]);
   return (
     <Group listening={false}>

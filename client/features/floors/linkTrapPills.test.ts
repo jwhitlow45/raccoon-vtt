@@ -66,3 +66,22 @@ test("a hole's name pays for covering a trap's squares as for another end's, so 
   const pill = placeEnds([hole], [], SCALE, null, () => true, [], { traps: squares }).get("h")!.pill!;
   assert.ok(!covers(pill, squares), `the name at ${JSON.stringify(pill)} covers the trap`);
 });
+
+test("a trap's name is judged where the screen's edge slides it, so it takes the clear spot when its first one slides onto a frame (FUUI-SOL-01)", () => {
+  const scale = 40;
+  const trap = makeTrap("t", { zone: { cells: [{ x: 6, y: 6, w: 2, h: 1 }] } });
+  const alone = trapNamePill(SQUARES, trap, {}, scale, true)!;
+  const rest = pillPlace({ ...alone, scale }, null).box;
+  // A frame just right of the top name, level with its row only: clear until the left edge of the view pushes the name right onto it.
+  const links = { f: { id: "f", sceneId: "s1", rect: { x: Math.ceil(rest.x1 * 10) / 10 + 0.1, y: rest.y0, w: 2, h: rest.y1 - rest.y0 } } };
+  const frames = linkFrames(SQUARES, "s1", links);
+  const view = { x0: rest.x0 + 1, y0: 0, x1: 40, y1: 40 };
+  const off = (p: PillSpec, v: typeof view | null) => !boxCoversOutline(pillPlace({ ...p, scale }, v).box, cornersOf(frames[0]!), null);
+  assert.ok(off(alone, null), "with no edge near, the name over the top edge is clear");
+  assert.ok(!off(alone, view), "slid by the view's edge it covers the frame");
+  const blind = trapNamePill(SQUARES, trap, {}, scale, true, frames)!;
+  assert.deepEqual(blind, alone, "judged where it stands, the first spot is kept");
+  const seen = trapNamePill(SQUARES, trap, {}, scale, true, frames, view)!;
+  assert.ok(off(seen, view), `the name at ${JSON.stringify(seen)} covers the frame once slid`);
+  assert.deepEqual(trapNameMarkers(SQUARES, "s1", { t: trap }, {}, scale, true, frames, view), [seen], "the link layer keeps off the name where it is drawn");
+});

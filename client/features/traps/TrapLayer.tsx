@@ -6,8 +6,9 @@ import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { rectHexes } from "#shared/rules/traps.ts";
+import type { Box } from "../../lib/boardText.ts";
 import { hexOutline } from "../../lib/scene.ts";
-import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
+import { usePublishPills, useRestView, type PillSpec } from "../../canvas/boardView.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
 import { markStands, pillStands } from "../../canvas/markStand.ts";
@@ -104,11 +105,12 @@ export const TrapNameLayer = memo(function TrapNameLayer(props: LayerProps) {
   const dm = props.role === "dm";
   const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   const frames = useMemo(() => linkFrames(grid, props.scene.id, links), [grid, props.scene.id, links]);
+  const view = useRestView();
   const list = useMemo(() => Object.values(traps).filter((t) => t.sceneId === props.scene.id), [traps, props.scene.id]);
   return (
     <Group listening={false}>
       {list.map((trap) => {
-        const name = trapNamePill(grid, trap, chunks, props.scale, dm, frames);
+        const name = trapNamePill(grid, trap, chunks, props.scale, dm, frames, view);
         if (!name) return null;
         return (
           <Group key={trap.id} opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
@@ -146,7 +148,7 @@ function lookOf(trap: SeenTrap, dm: boolean): Look {
  * off every place the view can slide it to (canvas/useBoardText.ts
  * pillObstacles).
  */
-export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = []): PillSpec | null {
+export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = [], view: Box | null = null): PillSpec | null {
   if (!trapNameShown(scale)) return null;
   const zone = trap.zone;
   const words = !dm && (trap as SeenTrap).disarmed ? "Disarmed" : undefined;
@@ -158,7 +160,8 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
     const under: PillSpec = { ...pill, ...edgeAnchor(g, zone.cells, box, "bottom"), below: true };
     const spots = [over, under].flatMap((p) => [p, { ...p, side: "right" as const }, { ...p, side: "left" as const }]);
     const clear = (p: PillSpec) => {
-      const drawn = pillPlace({ ...p, scale }, null).box;
+      // Judged where Pill.tsx slides it from the screen's edge (`view`, the camera at rest), since a name near the edge can slide onto a frame that its spot clears (FUUI-SOL-01).
+      const drawn = pillPlace({ ...p, scale }, view).box;
       return ends.every((o) => !boxCoversOutline(drawn, cornersOf(o), null));
     };
     return spots.find(clear) ?? over;
@@ -175,11 +178,11 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
  * nudged spot would let a link pill move token text that moves a trap name
  * that moves the link pill.
  */
-export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = []): PillSpec[] {
+export function trapNameMarkers(g: Grid, sceneId: string, traps: Readonly<Record<string, Trap>>, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean, ends: readonly Outline[] = [], view: Box | null = null): PillSpec[] {
   return Object.values(traps)
     .filter((t) => t.sceneId === sceneId)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .flatMap((t) => trapNamePill(g, t, chunks, scale, dm, ends) ?? []);
+    .flatMap((t) => trapNamePill(g, t, chunks, scale, dm, ends, view) ?? []);
 }
 
 /** The frames of the floor link ends a scene's board draws, which a trap's name keeps off (trapNamePill). */
@@ -246,9 +249,11 @@ function hexNameAnchor(g: HexGrid, rects: readonly CellRect[], box: { x0: number
  * A candidate that covers a floor link's frame (`frames`) where it draws, in
  * view units at `space`'s turn, is left out while any other candidate keeps
  * off them all: Top-down's pick (`trapNamePill`) does not carry over, since
- * the name stands upright and the frames lie on the turned ground.
+ * the name stands upright and the frames lie on the turned ground. The spots are
+ * judged where the name draws, slid back from the edge of `view`, the clear
+ * screen at the camera's rest.
  */
-export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, frames: readonly Outline[] = [], space: DrawSpace = null): PillSpec {
+export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, frames: readonly Outline[] = [], space: DrawSpace = null, view: Box | null = null): PillSpec {
   const zone = trap.zone;
   const candidates: PillSpec[] = [];
   const add = (x: number, y: number, above: boolean) => candidates.push({ ...original, x, y, above, below: !above });
@@ -296,7 +301,7 @@ export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chun
   // fogged, keep it rather than choosing an unpermitted first candidate.
   const permitted = candidates.filter(allowed);
   const offFrames = (p: PillSpec) => {
-    const box = drawnBox(p, scale, space, true, true);
+    const box = drawnBox(p, scale, space, true, true, view);
     return frames.every((o) => !boxCoversOutline(box, cornersOf(o), space));
   };
   // Tested on the pushed spots isoNamePill tries too, so a nudge never lands on a frame.
@@ -321,12 +326,14 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   const zone = trap.zone;
   const s = 1 / scale;
   const names = useContext(IsoNamesContext);
-  const original = trapNamePill(grid, trap, props.chunks, scale, dm, props.frames);
+  const view = useRestView();
+  // Top-down's pick is judged in cells, and the rest view is in view units in Isometric, where isoTrapNamePill reads it by what it draws.
+  const original = trapNamePill(grid, trap, props.chunks, scale, dm, props.frames, props.iso ? null : view);
   const name = useMemo(() => {
     const allowed = (p: PillSpec) => !props.iso || pillStands(props.iso.fog, { ...p, scale });
     if (!original || !names || !allowed(original)) return original;
-    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed, props.frames, props.iso);
-  }, [original, names, props.iso, scale, grid, trap, props.chunks, props.frames]);
+    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed, props.frames, props.iso, view);
+  }, [original, names, props.iso, scale, grid, trap, props.chunks, props.frames, view]);
   const nameKey = name ? JSON.stringify(name) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
   usePublishPills(`trap:${trap.id}`, useMemo(() => (name ? [name] : NO_PILLS), [nameKey]));
