@@ -1163,6 +1163,16 @@ export function MapStage(props: {
     drag.cancelled = true;
     drag.node.stopDrag();
   }, []);
+  // A switch of floor or scene unmounts the dragged nodes, and Konva's remove ends their drag as a drop, which would land
+  // them at the switch with the button still down (LP53-DRAG-1). The store's listener runs at the switch, before React
+  // draws the new board, so the drag ends as a cancel first: each token goes back and the rest of the gesture sends nothing.
+  useEffect(
+    () =>
+      store.subscribe((now, before) => {
+        if (now.sceneId !== before.sceneId) stopTokenDrag();
+      }),
+    [store, stopTokenDrag],
+  );
 
   const hasStage = size !== null && cam !== null;
   /**
