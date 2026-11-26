@@ -3,7 +3,7 @@ import { after, before, describe, test } from "node:test";
 import { ID_TIME_REFUSED, uuidv7 } from "#shared/ids.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
-import { Connection } from "./connection.ts";
+import { CLOSE, Connection } from "./connection.ts";
 import { heldIds, ID_TAKEN, idRow, pruneIds, recordIds, SERVER_MEMBER } from "./createIds.ts";
 import { commitBatch, loadReceipts } from "./persistence.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
@@ -98,7 +98,7 @@ describe("the id record through the room", () => {
     }
   });
 
-  test("a device's ask reads its own member's rows: held, not held, and pending while its old socket is open", async () => {
+  test("a device's ask reads its own member's rows: held and not held, and at once when its newer socket closed the old one", async () => {
     const r = await room("Ids ask");
     const landed = uuidv7();
     assert.equal(await answer(r.anaSocket, line(landed, r.sceneId, r.anaId)), null);
@@ -118,18 +118,16 @@ describe("the id record through the room", () => {
       actor.ids(conn, { k: 7, ids });
       for (let i = 0; i < 400 && !sent.some((m) => m.t === "ids"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
       actor.detach(conn);
-      if (old) assert.equal(old.closed, false);
+      if (old) assert.equal(old.closedWith, CLOSE.replaced);
       const reply = sent.find((m): m is Extract<ServerMessage, { t: "ids" }> => m.t === "ids");
       assert.ok(reply, "answered");
       return reply;
     };
     assert.deepEqual(await ask(r.anaId, [landed, lost]), { t: "ids", k: 7, held: [landed], notHeld: [lost], pending: [] });
     assert.deepEqual(await ask(r.breeId, [landed]), { t: "ids", k: 7, held: [], notHeld: [landed], pending: [] }, "another member's id reads as not theirs");
-    // The device's old socket is still open, so an op it sent may still come.
+    // The device's newer socket closes its old one as its hello is taken, so no op can come from the old one and the ask is final.
     const old = await open(r.anaId);
-    assert.deepEqual(await ask(r.anaId, [landed, lost], old.conn), { t: "ids", k: 7, held: [], notHeld: [], pending: [landed, lost] });
-    actor.detach(old.conn);
-    assert.deepEqual(await ask(r.anaId, [landed, lost]), { t: "ids", k: 7, held: [landed], notHeld: [lost], pending: [] }, "final once it is gone");
+    assert.deepEqual(await ask(r.anaId, [landed, lost], old.conn), { t: "ids", k: 7, held: [landed], notHeld: [lost], pending: [] });
   });
 
   test("an ask in the batch that holds an op of the member is answered once that batch commits, the id held", async () => {

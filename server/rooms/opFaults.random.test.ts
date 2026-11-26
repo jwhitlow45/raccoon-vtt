@@ -338,7 +338,8 @@ async function run(seed: number, steps: number, script?: readonly Action[]): Pro
         for (const r of m.rejects ?? []) answered.set(r.n, (answered.get(r.n) ?? 0) + 1);
       }
       for (const [n, times] of answered) assert.ok(times <= 1, `seed ${seed}: op ${n} answered ${times} times on one socket`);
-      if (s.conn.closedWith !== null && s.conn.closedWith !== 1012) assert.ok(s.mayClose && s.conn.closedWith === 1011, `seed ${seed}: a socket closed with ${s.conn.closedWith} for no fault past staging or the third refusal`);
+      // A reconnect's hello closes the device's older socket (design 7.6), with a code its page reconnects from.
+      if (s.conn.closedWith !== null && s.conn.closedWith !== 1012 && s.conn.closedWith !== 4012) assert.ok(s.mayClose && s.conn.closedWith === 1011, `seed ${seed}: a socket closed with ${s.conn.closedWith} for no fault past staging or the third refusal`);
       if (s.mayClose) assert.equal(s.conn.closedWith, 1011, `seed ${seed}: the socket that earned a close was closed`);
     }
   }

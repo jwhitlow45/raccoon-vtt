@@ -155,6 +155,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
     pool,
     log: app.log,
     options: {
+      previewPoolMb: config.PREVIEW_POOL_MB,
       ...rooms,
       actor: {
         quotaBytes: config.ROOM_QUOTA_MB * 1024 * 1024,

@@ -4,7 +4,7 @@ import { sealedId, uuidv7 } from "#shared/ids.ts";
 import type { Op } from "#shared/protocol.ts";
 import { actor, character, room } from "#shared/testutil.ts";
 import { ID_TAKEN } from "./createIds.ts";
-import { Connection } from "./connection.ts";
+import { CLOSE, Connection } from "./connection.ts";
 import { scopeActor, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 /**
@@ -82,20 +82,18 @@ describe("a device's ids ask", () => {
     }
   });
 
-  test("the device's old socket still open, or an ask past its socket's op rate, answers pending", async (t) => {
+  test("a newer socket's hello closes the device's old one, so its ask reads at once, and an ask past its socket's op rate answers pending", async (t) => {
     const r = await open(t);
     const id = uuidv7();
-    // A second socket of P1's device, under the same client: its ask waits while the first is open.
+    // A second socket of P1's device, under the same client: its hello closes the first, which can then send no op.
     const sent: unknown[] = [];
     const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text)), close() {}, terminate() {} };
     const again = new Connection(socket as never, { sessionId: r.p1.conn.sessionId, roomId: "UNDOSCOPE", memberId: r.p1.conn.memberId, role: "player" }, "203.0.113.9", { now: () => r.clock.now });
     r.p1.actor.attach(again);
     await r.p1.actor.hello(again, { clientId: r.p1.clientId, resumeFrom: r.p1.n + 1 });
     await until(() => sent.find((m) => (m as { t?: string }).t === "snapshot"), "the second socket's snapshot");
-    assert.deepEqual((await askIds(r.p1, 1, [id], again, sent)).pending, [id], "the old socket is open");
-    r.p1.actor.detach(r.p1.conn);
-    r.p1.conn.close(1000);
-    assert.deepEqual((await askIds(r.p1, 2, [id], again, sent)).notHeld, [id], "read once the old socket is gone");
+    assert.equal(r.p1.conn.closedWith, CLOSE.replaced);
+    assert.deepEqual((await askIds(r.p1, 2, [id], again, sent)).notHeld, [id], "read at once, the old socket gone");
     while (again.opRate.allow(1, r.clock.now)) {
       // the socket's whole burst
     }

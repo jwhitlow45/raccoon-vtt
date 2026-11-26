@@ -278,10 +278,9 @@ describe("websocket: reconnects and watermarks", () => {
     assert.equal(await b.maybe("ev", () => true, 150), null);
     const ev = await b.next("ev", (m) => m.acks?.includes(n) ?? false);
     assert.deepEqual(ev.changes, []);
-    // The old socket sees the change but never that client's ack.
-    const old = await a.next("ev");
-    assert.equal(old.acks, undefined);
-    assert.ok(old.changes.some((c) => c.key.startsWith("log:")));
+    // The newer socket's hello closed the old one, with a code a page reconnects from (design 7.6), so it never sees that client's ack.
+    assert.equal((await a.waitClosed()).code, 4012);
+    assert.ok(!a.received.some((m) => m.t === "ev" && m.acks?.includes(n)));
     const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
     assert.equal(rows[0].n, 1);
     a.close();
@@ -530,17 +529,119 @@ describe("websocket: rates", () => {
     try {
       const s = await t.connect(roomId, dm);
       await s.snapshot("c1");
-      // 300 pings at once: the burst's 200 frames are the hello and 199 pings, and the rest are dropped unparsed, not punished.
-      for (let i = 0; i < 300; i++) s.send({ t: "ping", k: i });
+      // 500 pings at once: the burst's 400 frames are the hello and 399 pings, and the rest are dropped unparsed, not punished.
+      for (let i = 0; i < 500; i++) s.send({ t: "ping", k: i });
       const answered: number[] = [];
-      for (let i = 0; i < 199; i++) answered.push((await s.next("pong")).k);
-      assert.deepEqual(answered, Array.from({ length: 199 }, (_, k) => k));
+      for (let i = 0; i < 399; i++) answered.push((await s.next("pong")).k);
+      assert.deepEqual(answered, Array.from({ length: 399 }, (_, k) => k));
       assert.equal(await s.maybe("pong", () => true, 500), null, "a pong past the burst");
       assert.equal(s.closeCode, null);
       s.close();
     } finally {
       frozenAt = null;
     }
+  });
+});
+
+describe("websocket: what a frame pays is what it parses to (design 7.6)", () => {
+  let t: Engine;
+  let frozenAt: number | null = null;
+  before(async () => {
+    t = await startEngine({ ws: { now: () => frozenAt ?? Date.now() } });
+  });
+  after(() => t.close());
+
+  test("previews spend their own rate, never the bytes an op needs, and a frame that names `t` twice is what it parsed to", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Kinds");
+    frozenAt = Date.now();
+    try {
+      const s = await t.connect(roomId, dm);
+      const snap = await s.snapshot("c1");
+      const sceneId = sceneOf(snap.state as ProjectedState);
+      // The eph burst spent whole, within the frame count's: 399 pings of the map, then a second's 101 more.
+      for (let i = 0; i < 399; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      frozenAt += 1_000;
+      for (let i = 0; i < 101; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
+      // An op that names `t` twice is an op to the parser, so it pays the bytes, which the pings left whole.
+      s.sendRaw(`{"t":"eph","t":"op","n":1,"op":{"t":"log.chat","text":"twice"}}`);
+      const ev = await s.next("ev", (m) => Boolean(m.acks?.includes(1)));
+      assert.ok(ev);
+      // And an eph that names `t` twice is an eph, which the empty bucket drops.
+      const other = await t.connect(roomId, dm);
+      await other.snapshot("c2");
+      s.sendRaw(`{"t":"op","t":"eph","sceneId":"${sceneId}","e":{"k":"ping","x":2,"y":2}}`);
+      assert.equal(await other.maybe("eph", (m) => m.e.k === "ping" && m.e.x === 2, 500), null);
+      assert.equal(s.closeCode, null);
+      s.close();
+      other.close();
+    } finally {
+      frozenAt = null;
+    }
+  });
+
+  test("every other message pays its bytes once parsed, past the burst it drops, and previews still go", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Bytes");
+    frozenAt = Date.now();
+    try {
+      const s = await t.connect(roomId, dm);
+      const snap = await s.snapshot("c1");
+      const sceneId = sceneOf(snap.state as ProjectedState);
+      const other = await t.connect(roomId, dm);
+      await other.snapshot("c2");
+      // 200 pings of 4 KiB, padded with spaces: the 512 KiB burst holds the hello and 127 of them.
+      for (let k = 0; k < 200; k++) {
+        const text = `{"t":"ping","k":${k}}`;
+        s.sendRaw(text + " ".repeat(4096 - text.length));
+      }
+      const answered: number[] = [];
+      for (let i = 0; i < 127; i++) answered.push((await s.next("pong")).k);
+      assert.deepEqual(answered, Array.from({ length: 127 }, (_, k) => k));
+      assert.equal(await s.maybe("pong", () => true, 500), null, "a pong past the burst");
+      s.send({ t: "eph", sceneId, e: { k: "ping", x: 3, y: 3 } });
+      assert.ok(await other.next("eph", (m) => m.e.k === "ping" && m.e.x === 3));
+      assert.equal(s.closeCode, null);
+      s.close();
+      other.close();
+    } finally {
+      frozenAt = null;
+    }
+  });
+
+  test("a flood of previews at three times the rate for 10 s closes 4008", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Flood");
+    frozenAt = Date.now();
+    try {
+      const s = await t.connect(roomId, dm);
+      const snap = await s.snapshot("c1");
+      const sceneId = sceneOf(snap.state as ProjectedState);
+      for (let second = 0; second < 12 && s.closeCode === null; second++) {
+        for (let i = 0; i < 301; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
+        // The frames reach the server before the clock moves on.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        frozenAt += 1_000;
+      }
+      await s.waitClosed();
+      assert.equal(s.closeCode, 4008);
+    } finally {
+      frozenAt = null;
+    }
+  });
+
+  test("a hello that carries its op version is told the socket's preview pace after `build`, before its snapshot", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Takes");
+    const s = await t.connect(roomId, dm);
+    s.send({ t: "hello", clientId: "c1", resumeFrom: 1, opVersion: OP_VERSION });
+    const build = await s.next("build");
+    const takes = await s.next("takes");
+    assert.deepEqual(takes, { t: "takes", groups: true, pace: "full" });
+    await s.next("snapshot");
+    assert.ok(build);
+    s.close();
   });
 });
 

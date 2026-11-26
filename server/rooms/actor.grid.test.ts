@@ -275,9 +275,9 @@ describe("a device's reads are answered at a batch's close", () => {
     assert.equal(commits, 0, "no transaction for a batch of reads");
     assert.equal(r.db.rows.length, rows);
     assert.equal(r.db.pub, stored);
-    // The next answer is above the number the read was handed.
+    // The next answer is above the number the read was handed. The device's newer socket sends it, since its hello closed the older one.
     r.clock.now = T0 + 5_020;
-    chat(r.p1, "after the read");
+    void r.actor.op(again.conn, ++r.p1.n, { t: "log.chat", text: "after the read" });
     await flush();
     moveTo(t, r.clock, T0 + 5_040);
     await flush();

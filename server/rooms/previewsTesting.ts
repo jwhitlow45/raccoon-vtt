@@ -33,6 +33,8 @@ export type PreviewTwin = {
   frame: (e: EphEvent) => void;
   /** The DM's op, answered. */
   dmOp: (op: Op) => Promise<void>;
+  /** The room's sweep of previews past their age, which the twins run by hand. */
+  sweep: () => void;
   state: () => RoomState;
   /** What Bree and the DM were sent through the ephemeral channel so far. */
   seen: () => { bree: unknown[]; dm: unknown[] };
@@ -42,7 +44,7 @@ export async function previewTwin(t: TestContext, f: PreviewFixture): Promise<Pr
   const clock = { now: 1_000_000 };
   const now = () => clock.now;
   // The room reads the sockets' clock too, so a batch's close moment, which judges a held preview's age, is on it.
-  const h = await scopeActor(t, structuredClone(f.state), { now });
+  const h = await scopeActor(t, structuredClone(f.state), { now, previewSweepMs: null });
   const dm = await h.connect(f.dm, "dm", now);
   const p1 = await h.connect(f.player, "player", now);
   const bree = await h.connect(f.unrelated, "player", now);
@@ -57,6 +59,7 @@ export async function previewTwin(t: TestContext, f: PreviewFixture): Promise<Pr
       const ev = await dm.send(op);
       assert.equal(ev.rejects?.length ?? 0, 0, `${op.t}: ${JSON.stringify(ev.rejects)}`);
     },
+    sweep: () => h.actor.sweepPreviews(),
     state: () => h.actor.committed.state,
     seen: () => ({ bree: eph(bree), dm: eph(dm) }),
   };

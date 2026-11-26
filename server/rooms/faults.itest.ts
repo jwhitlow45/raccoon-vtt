@@ -309,12 +309,12 @@ describe("a fault in the room engine", () => {
       faults.draw = true;
       socket.op(roll());
       await until(() => actor.retrying, "the commit to retry");
-      // The socket's clock steps 0.9 s at a time, so each step's frames overrun what its budget refills, and the streak of
-      // frames over budget runs past the 10 s that closes a socket as abuse.
+      // The socket's clock steps 0.9 s at a time, and each step's 500 frames overrun the frame count's burst of 400 and what
+      // it refills, so the streak of frames over budget starts at once and runs past the 10 s that closes a socket as abuse.
       const from = Date.now();
       for (let step = 0; step <= 12 && socket.closeCode === null; step++) {
         wsClock = from + step * 900;
-        for (let i = 0; i < 300; i++) socket.send({ t: "ping", k: i });
+        for (let i = 0; i < 500; i++) socket.send({ t: "ping", k: i });
         await new Promise((done) => setTimeout(done, 100));
       }
       assert.equal((await socket.waitClosed()).code, 4008, "a flood past the frame budget closes it as abuse");

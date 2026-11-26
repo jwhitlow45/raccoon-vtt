@@ -252,6 +252,8 @@ class RTwin {
         retryBaseMs: 5,
         retryMaxMs: 20,
         grantRecheckMs: 3_600_000,
+        // Swept by hand at the same steps in both twins, never by a timer of the test runner's own.
+        previewSweepMs: null,
         draw,
         now: () => clock.now,
         standingClock: true,
@@ -942,6 +944,8 @@ async function runTwin(t: TestContext, twin: RTwin, plan: Shared[][], ownR: () =
             twin.actor.ephemeral(p1.conn, { sceneId: "s1", e: { k: "dragStart", tokenId: "a", x: 4.5, y: 4.5 } }, twin.clock.now);
             break;
           case "dragOn":
+            // The room's sweep runs by the clock alone, here just ahead of the frame in both twins alike.
+            twin.actor.sweepPreviews();
             twin.actor.ephemeral(p1.conn, { sceneId: "s1", e: { k: "dragMove", tokenId: "a", x: 5.5, y: 5.5 } }, twin.clock.now);
             if (isA && busy) counts.previewsPastAge++;
             break;

@@ -2,9 +2,10 @@ import type { WebSocket } from "ws";
 import type { EntityKey } from "#shared/keys.ts";
 import type { HeldEntry } from "#shared/project.ts";
 import type { Viewer } from "#shared/model.ts";
-import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
+import type { EphEvent, PreviewPace, ServerMessage } from "#shared/protocol.ts";
 import { inSortedOrder } from "#shared/sortedJson.ts";
-import { FrameBudget, OP_RATE, OpRate, TokenBucket, type Clock } from "./budgets.ts";
+import { EphRate, FrameBudget, OP_RATE, OpRate, TokenBucket, type Clock } from "./budgets.ts";
+import { GestureVersions } from "./gestures.ts";
 
 /** Close codes from design section 7.1. */
 export const CLOSE = {
@@ -17,6 +18,12 @@ export const CLOSE = {
   restarting: 1012,
   /** A socket whose send buffer stayed full (design 10.4). Not an abuse code: the client reconnects normally. */
   stalled: 1013,
+  /**
+   * A socket a newer one of its client took the place of, or a hello older
+   * than its client's current socket (RoomActor #processHello). A page
+   * reconnects from it as from any code it does not know.
+   */
+  replaced: 4012,
 } as const;
 
 export type ClientKey = string;
@@ -33,12 +40,17 @@ export function sessionOfKey(key: ClientKey): string {
 /** What a socket sends through the ephemeral channel and may still be showing on other screens. */
 export type PreviewKind = "drag" | "ruler" | "aoe";
 
-/** A preview other screens hold from a socket: the scene it was sent for, its last frame and when that came. */
-export type SentPreview = { kind: PreviewKind; id: string; sceneId: string; last: EphEvent; at: number };
+/**
+ * A preview other screens hold from a socket: the scene it was sent for, its
+ * last frame and when that came. A group drag's entry is its pressed
+ * token's (`id`, `last`) and its members': their ids in roster order and
+ * the last point each was shown at, x then y, NaN for one never shown.
+ */
+export type SentPreview = { kind: PreviewKind; id: string; sceneId: string; last: EphEvent; at: number; members?: { ids: readonly string[]; points: Float64Array } };
 
 export type ConnectionOptions = {
   now?: Clock;
-  /** Per-socket ephemeral rate (design 7.6): 40 per second, burst 80. */
+  /** Per-socket ephemeral rate (design 7.6): 100 per second, burst 400, whatever each one's size. */
   ephPerSec?: number;
   ephBurst?: number;
 };
@@ -129,15 +141,37 @@ export class Connection {
    * alone, so the check never reads how far the queue has got.
    */
   readonly lookupRate: TokenBucket;
-  readonly eph: TokenBucket;
+  readonly eph: EphRate;
+  /**
+   * How this socket may send previews (design 7.6), from the preview pool
+   * at its hello (budgets.ts PreviewPool): null until then, and for a table
+   * display or a preview, which send none. It only ever rises.
+   */
+  pace: PreviewPace | null = null;
+  /** The hello carried `opVersion`, so the page reads `takes` and may send group frames. */
+  takesFrames = false;
+  /**
+   * Gives back this socket's share of the preview pool. Its room calls it as
+   * it detaches the socket, once the socket's previews, held frames and
+   * rosters are gone, and the socket layer again on the close event.
+   */
+  releasePreviews: (() => void) | null = null;
+  /** The rosters of this socket's group drags (gestures.ts). */
+  readonly gestures = new GestureVersions();
+  /**
+   * Which of this socket's drag entries each token it drags belongs to: the
+   * newest that framed it (ephemeral.ts). Only tokens of kept entries.
+   */
+  readonly dragOwners = new Map<string, string>();
   /** The socket's clock, which its budgets read and its previews are timed by. */
   readonly now: Clock;
   /**
-   * Previews other viewers hold from this socket, keyed `kind:id`, with the
-   * scene they were sent for, the last frame, by which every batch while a
-   * screen holds a preview judges each receiver's again (ephemeral.ts
-   * rejudgePreviews), and when it came. Only previews some viewer holds,
-   * at most MOST_PREVIEWS_SENT, the one framed least recently first.
+   * Previews other viewers hold from this socket, keyed `kind:id`, a group
+   * drag's by its gesture as `drag#g`, with the scene they were sent for,
+   * the last frame, by which every batch while a screen holds a preview
+   * judges each receiver's again (ephemeral.ts rejudgePreviews), and when it
+   * came. Only previews some viewer holds, at most MOST_PREVIEWS_SENT, the
+   * one framed least recently first.
    */
   readonly previewsSent = new Map<string, SentPreview>();
   /**
@@ -172,7 +206,7 @@ export class Connection {
     this.frames = new FrameBudget(now);
     this.opRate = new OpRate(now);
     this.lookupRate = new TokenBucket(OP_RATE.perSec, OP_RATE.burst, now);
-    this.eph = new TokenBucket(opts.ephPerSec ?? 40, opts.ephBurst ?? 80, now);
+    this.eph = new EphRate(now, { perSec: opts.ephPerSec, burst: opts.ephBurst });
   }
 
   get viewer(): Viewer {

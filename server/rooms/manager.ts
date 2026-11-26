@@ -2,7 +2,7 @@ import type pg from "pg";
 import { LIMITS } from "#shared/limits.ts";
 import { ActorClosedError, DEFAULT_ACTOR_OPTIONS, RoomActor, type ActorOptions, type DeletionRun, type Logger } from "./actor.ts";
 import { ActorGateway } from "./actorGateway.ts";
-import { SnapshotBudget, type Clock, type SnapshotBudgetLimits } from "./budgets.ts";
+import { DEFAULT_PREVIEW_POOL_MB, PreviewPool, SnapshotBudget, type Clock, type SnapshotBudgetLimits } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE } from "./connection.ts";
 import { TooBusyError } from "./errors.ts";
@@ -35,6 +35,8 @@ export type ManagerOptions = {
   /** How long close() then waits for its one read of what every room it touched has stored: 2 s. */
   auditTimeoutMs: number;
   snapshotBudget: Partial<SnapshotBudgetLimits>;
+  /** The server's preview memory pool in MiB, PREVIEW_POOL_MB (budgets.ts PreviewPool). */
+  previewPoolMb: number;
   actor: Partial<ActorOptions>;
   now: Clock;
 };
@@ -48,6 +50,7 @@ export const DEFAULT_MANAGER_OPTIONS: ManagerOptions = {
   closeTimeoutMs: 16_000,
   auditTimeoutMs: 2_000,
   snapshotBudget: {},
+  previewPoolMb: DEFAULT_PREVIEW_POOL_MB,
   actor: {},
   now: Date.now,
 };
@@ -91,6 +94,8 @@ export type DeletionStep<T> = {
 export class RoomManager {
   readonly gateway: ActorGateway;
   readonly budget: SnapshotBudget;
+  /** Every room's sockets share it. */
+  readonly previews: PreviewPool;
   readonly options: ManagerOptions;
   /** What closing sockets still write, which shutdown waits for before the pool ends (server/shutdown.ts). */
   readonly closeWrites = new CloseWrites();
@@ -119,6 +124,7 @@ export class RoomManager {
     this.#log = deps.log;
     this.options = { ...DEFAULT_MANAGER_OPTIONS, ...deps.options };
     this.budget = new SnapshotBudget(this.options.snapshotBudget, this.options.now, deps.log);
+    this.previews = new PreviewPool(this.options.previewPoolMb, deps.log);
     this.gateway = new ActorGateway(this, deps.pool);
     this.#pruneTimer = setInterval(() => void this.prune(), DAY_MS);
     this.#pruneTimer.unref();
@@ -412,6 +418,7 @@ export class RoomManager {
       info,
       log: this.#log,
       budget: this.budget,
+      previews: this.previews,
       gateway: this.gateway,
       options: this.options.actor,
       onIdle: (actor) => this.#onIdle(entry, actor),

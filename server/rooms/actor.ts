@@ -14,7 +14,7 @@ import { carriedGroup, holderOf, linkHolds, onHolder } from "#shared/rules/attac
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { eventReach, gridOfToken, hashValue, inSightOfNonOwners, projectEntity, seatView, seenByNonOwners, stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, MAX_REFUSED_IDS, mintedIds, recordedIds, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, FORGET_ASK, isGroupFrame, isPoseOp, isResizeOp, MAX_REFUSED_IDS, mintedIds, recordedIds, serverOnlyOpSchema, type EphEvent, type GroupFrame, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { addsReservedEntryId } from "#shared/reservedIds.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -31,7 +31,7 @@ import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { roomStoredBytes } from "../assets/quota.ts";
-import { OP_RATE, SnapshotBudget, TokenBucket, type Clock, type WaitingRequest } from "./budgets.ts";
+import { DEFAULT_PREVIEW_POOL_MB, OFF_ALLOWANCE_BYTES, OP_RATE, PreviewPool, SnapshotBudget, TokenBucket, type Clock, type PoolSocket, type WaitingRequest } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, sessionOfKey, type ClientKey, type Connection } from "./connection.ts";
 import { counted } from "./counted.ts";
@@ -42,7 +42,8 @@ import { reidDue, reidRoom, renamedOp } from "./reid.ts";
 import { newV7Ids } from "./newIdPaths.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { rideEndOps } from "./rideEnd.ts";
-import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
+import { heldCharge, heldForm, routedForm, type HeldFrame, type RosterVersion } from "./gestures.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import { compactLink, wholeLink, type ViewLink } from "./viewRing.ts";
@@ -124,6 +125,8 @@ export type ActorOptions = {
   /** Tests only: a write this long after the first batch with ops since the last one. Absent, or not finite, it is off. */
   snapshotIdleMs?: number;
   grantRecheckMs: number;
+  /** How often the room's previews and rosters are swept by the clock (ephemeral.ts sweepPreviews): once a second. Null for none, for a test that sweeps by hand. */
+  previewSweepMs: number | null;
   roomOpsPerSec: number;
   /** The room storage quota. 0 disables the read-only switch. */
   quotaBytes: number;
@@ -228,6 +231,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   snapshotEveryMs: SNAPSHOT_EVERY_MS,
   snapshotBackstopRows: SNAPSHOT_BACKSTOP_ROWS,
   grantRecheckMs: 60_000,
+  previewSweepMs: 1_000,
   roomOpsPerSec: 60,
   quotaBytes: 0,
   retryBaseMs: 250,
@@ -257,6 +261,8 @@ export type ActorDeps = {
   info: RoomInfo;
   log: Logger;
   budget: SnapshotBudget;
+  /** The server's preview memory pool, which every room shares (budgets.ts PreviewPool). A pool of the room's own otherwise. */
+  previews?: PreviewPool;
   gateway: RoomGateway;
   options?: Partial<ActorOptions>;
   /** Called whenever the room may be idle: no sockets, nothing queued, nothing in flight. */
@@ -321,22 +327,28 @@ export const READER_DEADLINE_MS = 10_000;
 /** The most views the ring keeps: every tick within RETAIN_MS at the 20 ms grid, plus the newest one older. */
 export const MAX_VIEWS = 102;
 
-/** The most live frames, and bytes of them, a socket's queue holds while their tick is not yet covered (RoomActor.ephemeral). */
-export const MAX_HELD_FRAMES = 80;
-export const MAX_HELD_BYTES = 256 * 1024;
+/**
+ * The most live frames a socket's queue holds while their tick is not yet
+ * covered (RoomActor.ephemeral), and their charges by kind (gestures.ts
+ * heldCharge), never their bytes: a full socket's (design 7.6), over the
+ * 140 frames and about 364 KiB its previews send at their most in
+ * RETAIN_MS, and an off socket's, within its 64 KiB.
+ */
+export const MAX_HELD_FRAMES = 160;
+export const MAX_HELD_BYTES = 400 * 1024;
+export const MAX_HELD_BYTES_OFF = OFF_ALLOWANCE_BYTES;
 
 /** A reader waiting for its tick to be covered (RoomActor.asOf): its tick, its answer, its deadline, and the end of its abort's watch. */
 type Waiter = { a: number; resolve: (view: RoomView) => void; reject: (err: Error) => void; timer: NodeJS.Timeout; stop: () => void };
 
 /** A live frame as a socket sent it. */
-type EphMessage = { sceneId: string; e: Parameters<typeof routeEphemeral>[3] };
+type EphMessage = { sceneId: string; e: EphEvent | GroupFrame };
 
-/**
- * A live frame held until its tick is covered: its arrival on the room's
- * clock and the tick it is routed as of, its arrival on its socket's clock,
- * which its preview is timed by, and its size.
- */
-type HeldFrame = { msg: EphMessage; arrived: number; a: number; at: number; bytes: number };
+
+/** The kinds an off socket may not send (design 7.6): every drag, ruler and area preview. */
+function previewKind(e: EphEvent | GroupFrame): boolean {
+  return e.k.startsWith("drag") || e.k === "groupEnd" || e.k.startsWith("ruler") || e.k.startsWith("aoe");
+}
 
 /** A reader the room cannot answer as of its arrival: too old, past the waiting bound, past its deadline, or the room closed. Answered 503 `busy`. */
 export class ViewBusyError extends Error {
@@ -877,6 +889,9 @@ export class RoomActor {
   /** The room's id keys (idKeys.ts): each member's, sent to their keyed sockets and read by the gate, and the server's. */
   readonly #idKeys: RoomIdKeys;
   #recheckTimer: NodeJS.Timeout | null = null;
+  #sweepTimer: NodeJS.Timeout | null = null;
+  #previews: PreviewPool;
+  #poolSockets = new WeakMap<Connection, PoolSocket>();
   #reconciling: Promise<void> | null = null;
   #visibleCache = new Map<string, { seq: number; ids: Set<string> }>();
   #stagedVisibleCache = new Map<string, { seq: number; ids: Set<string> }>();
@@ -919,6 +934,7 @@ export class RoomActor {
     this.#log = deps.log;
     this.#closeWrites = deps.closeWrites ?? new CloseWrites();
     this.#budget = deps.budget;
+    this.#previews = deps.previews ?? new PreviewPool(DEFAULT_PREVIEW_POOL_MB, deps.log);
     this.#gateway = deps.gateway;
     this.#opts = { ...DEFAULT_ACTOR_OPTIONS, ...deps.options };
     this.#onIdle = deps.onIdle;
@@ -988,6 +1004,10 @@ export class RoomActor {
     if (cutoverAheadMs > 0) this.#log.warn({ roomId: this.roomId, aheadMs: cutoverAheadMs }, "the ids cutover is ahead of the server's clock: check the clock");
     this.#recheckTimer = setInterval(() => void this.#recheckGrants(), this.#opts.grantRecheckMs);
     this.#recheckTimer.unref();
+    if (this.#opts.previewSweepMs !== null) {
+      this.#sweepTimer = setInterval(() => this.sweepPreviews(), this.#opts.previewSweepMs);
+      this.#sweepTimer.unref();
+    }
   }
 
   /** Loads the room (design 16.2) and reconciles its DM labels with the grants that exist. Null when the room has no snapshot. */
@@ -1163,8 +1183,10 @@ export class RoomActor {
       this.#letGo(delayed);
       if (conn.closedWith === null) this.#budget.drop(delayed.request.id, this.#opts.now());
     }
+    // Its previews end on every screen, its held frames and rosters go, and only then its share of the preview pool.
     cancelPreviews(conn, this.#connections);
     this.#held.delete(conn);
+    conn.releasePreviews?.();
     this.#broadcastPresence();
     // The members rule counts from the last member socket's close (6.4), and no tick runs in a room nobody is in.
     if (!conn.display) this.#lastMemberAt = this.#opts.now();
@@ -1454,31 +1476,59 @@ export class RoomActor {
 
   /**
    * A live frame (design 7.6) as it arrives, `at` on its socket's clock,
-   * which is the server's: a test may give a socket its own.
+   * which is the server's: a test may give a socket its own. A group frame
+   * binds here to its gesture's roster (gestures.ts), and keeps that
+   * version until it routes or drops. The socket layer has already counted
+   * it against the socket's ephemeral rate.
    */
   ephemeral(conn: Connection, msg: EphMessage, at = conn.now()): void {
-    if (conn.held === null || !conn.eph.take()) return;
+    if (conn.held === null) return;
+    // An old page on an off socket still sends drags: they go nowhere, as a page told it is off sends none.
+    if (conn.pace === "off" && previewKind(msg.e)) return;
+    let version: RosterVersion | null = null;
+    if (isGroupFrame(msg.e)) {
+      const bound = conn.gestures.arrive(msg.e, at);
+      // No room for its roster while every version is pinned: the frame goes, and its gesture asks again later.
+      if (bound === "refused") return;
+      version = bound;
+    }
     // Under a number clock of a test's own, ticks do not follow the server's clock, so a frame routes as it arrives,
     // against the committed room.
     if (this.#ownNumberClock) {
-      routeEphemeral(this.#committed.state, conn, msg.sceneId, msg.e, this.#connections, at);
+      this.#route(conn, this.#committed.state, { sceneId: msg.sceneId, e: msg.e, version, at });
       return;
     }
     // Routed against the room as of its arrival, once that is covered (asOf), after the socket's frames before it. Until
     // then it waits in its socket's bounded queue, and past the bound it drops, as an empty bucket drops it.
     const arrived = this.#opts.now();
-    const frame: HeldFrame = { msg, arrived, a: this.#readerTick(arrived), at, bytes: 0 };
+    const a = this.#readerTick(arrived);
     let frames = this.#held.get(conn);
-    if (frames === undefined && this.#covered(frame.a)) {
-      this.#routeFrame(conn, frame);
+    if (frames === undefined && this.#covered(a)) {
+      this.#route(conn, this.#viewAt(a)?.state ?? null, { sceneId: msg.sceneId, e: msg.e, version, at });
       return;
     }
-    frame.bytes = Buffer.byteLength(JSON.stringify(msg));
+    // It waits in its kept form, charged by its kind (gestures.ts heldForm, heldCharge).
+    const frame: HeldFrame = { sceneId: msg.sceneId, e: heldForm(msg.e), version, arrived, a, at, bytes: heldCharge(msg.e) };
     frames ??= { list: [], bytes: 0 };
-    if (frames.list.length >= MAX_HELD_FRAMES || frames.bytes + frame.bytes > MAX_HELD_BYTES) return;
+    const most = conn.pace === "off" ? MAX_HELD_BYTES_OFF : MAX_HELD_BYTES;
+    if (frames.list.length >= MAX_HELD_FRAMES || frames.bytes + frame.bytes > most) {
+      conn.gestures.release(version);
+      return;
+    }
     frames.list.push(frame);
     frames.bytes += frame.bytes;
     this.#held.set(conn, frames);
+  }
+
+  /** Every socket's previews and rosters past their age go, by the clock alone (ephemeral.ts sweepPreviews). */
+  sweepPreviews(now?: number): void {
+    sweepPreviews(this.#connections, now);
+  }
+
+  /** What a socket's queue holds while its ticks are not covered: its frames and their charges, for its tests. */
+  heldOf(conn: Connection): { frames: number; bytes: number } {
+    const held = this.#held.get(conn);
+    return { frames: held?.list.length ?? 0, bytes: held?.bytes ?? 0 };
   }
 
   /** A DM's `scene` request (design 7.1): counted against the snapshot budget's abuse rule, then answered with `resync`. */
@@ -1652,6 +1702,7 @@ export class RoomActor {
         if (conn.closed || conn.held === null || now - frame.arrived > RETAIN_MS) {
           frames.list.shift();
           frames.bytes -= frame.bytes;
+          conn.gestures.release(frame.version);
           continue;
         }
         if (!this.#covered(frame.a)) break;
@@ -1665,8 +1716,16 @@ export class RoomActor {
 
   /** A live frame routed against the view of its tick: the newest published one, since it routes before the next publish. */
   #routeFrame(conn: Connection, frame: HeldFrame): void {
-    const view = this.#viewAt(frame.a);
-    if (view !== null) routeEphemeral(view.state, conn, frame.msg.sceneId, frame.msg.e, this.#connections, frame.at);
+    this.#route(conn, this.#viewAt(frame.a)?.state ?? null, { ...frame, e: routedForm(frame.e) });
+  }
+
+  /** Routes a frame against `state`, none when its view is gone, a group frame by the version it bound, which it then lets go. */
+  #route(conn: Connection, state: RoomState | null, frame: { sceneId: string; e: EphEvent | GroupFrame; version: RosterVersion | null; at: number }): void {
+    try {
+      if (state !== null) routeEphemeral(state, conn, frame.sceneId, frame.e, this.#connections, frame.at, frame.version);
+    } finally {
+      conn.gestures.release(frame.version);
+    }
   }
 
   /** The assets a player's projection refers to (design 11.2) as of a reader that arrived at `at`, cached per view seq. */
@@ -1726,6 +1785,7 @@ export class RoomActor {
       if (this.#drainTurn) clearImmediate(this.#drainTurn);
       this.#drainTurn = null;
       if (this.#recheckTimer) clearInterval(this.#recheckTimer);
+      if (this.#sweepTimer) clearInterval(this.#sweepTimer);
       this.#clearSoundTimer();
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
       if (this.#markTimer) clearTimeout(this.#markTimer);
@@ -3223,18 +3283,31 @@ export class RoomActor {
   #processHello(cmd: Extract<Command, { t: "hello" }>): void {
     const conn = cmd.conn;
     if (conn.closed || conn.closing) return;
+    const key = clientKey(conn.sessionId, cmd.clientId);
+    // Which of two sockets of one client is older goes by their ids, never by the order their hellos come in, since a
+    // hello may wait on its watermark read before it joins the queue. A hello older than its client's current socket
+    // is refused before it touches anything of the client's.
+    const current = conn.previewBy === null ? this.#clients.get(key) : undefined;
+    if (current !== undefined && current !== conn && !current.closed && current.id > conn.id) {
+      conn.close(CLOSE.replaced, "a newer socket holds this client");
+      return;
+    }
     conn.ackDetails = cmd.ackDetails;
     conn.sealIds = cmd.sealIds;
     if (conn.previewBy !== null) {
       this.#previewHello(conn, cmd);
       return;
     }
-    const key = clientKey(conn.sessionId, cmd.clientId);
     // What this socket kept is the client's it answered for until now, which a hello for another client never takes.
     if (conn.clientId !== null && conn.clientId !== cmd.clientId) takeKeptRejects(conn);
+    // An older socket of the client is closed first, in this step, so nothing it holds outlives its share of the pool,
+    // and its share passes to this one when this one's role may hold it.
+    const replaced = current !== undefined && current !== conn && !current.closed ? current : null;
+    if (replaced) this.#closeReplaced(replaced);
     conn.clientId = cmd.clientId;
     conn.held = null;
     this.#clients.set(key, conn);
+    this.#admitPreviews(conn, replaced);
     if (conn.role === "dm") {
       const state = this.#staged.state;
       const asked = cmd.sceneId !== undefined && state.scenes[cmd.sceneId] ? cmd.sceneId : state.meta.playerSceneId;
@@ -3257,6 +3330,64 @@ export class RoomActor {
       batch.watermarks.set(key, Math.max(batch.watermarks.get(key) ?? 0, wm.staged));
     }
     this.#readSnapshot(conn, key, cmd.admission);
+  }
+
+  /**
+   * A socket a newer one of its client replaces (design 7.6): the room
+   * closes it, so its close counts as the room's (detach), with a code its
+   * page reconnects from, and detaches it now, which cancels its previews and
+   * drops its held frames and rosters. Its share of the preview pool stays
+   * for the replacement to take or give back (#admitPreviews).
+   */
+  #closeReplaced(old: Connection): void {
+    const share = old.releasePreviews;
+    old.releasePreviews = null;
+    old.close(CLOSE.replaced, "replaced by a newer socket");
+    this.detach(old);
+    old.releasePreviews = share;
+  }
+
+  /**
+   * A socket's share of the preview pool, decided as its hello names its
+   * client (budgets.ts PreviewPool): once for the socket, so a resync's or a
+   * scene switch's hello keeps it, and `takes` tells a page that reads it.
+   * A table display and a preview send no previews and take none.
+   */
+  #admitPreviews(conn: Connection, replaced: Connection | null): void {
+    if (conn.display || conn.previewBy !== null) return;
+    if (conn.pace !== null) {
+      // A socket that already holds its share keeps it, and the one it replaced gives its own back.
+      replaced?.releasePreviews?.();
+    } else {
+      const socket = this.#poolSocket(conn);
+      const from = replaced?.releasePreviews ? (this.#poolSockets.get(replaced) ?? null) : null;
+      if (replaced) replaced.releasePreviews = null;
+      conn.pace = this.#previews.admit(socket, from);
+      conn.releasePreviews = () => {
+        conn.releasePreviews = null;
+        this.#previews.release(socket);
+      };
+    }
+    if (conn.takesFrames) conn.send({ t: "takes", groups: true, pace: conn.pace });
+  }
+
+  /** The pool's view of a socket, made once for it: raising it sends the page its new pace. */
+  #poolSocket(conn: Connection): PoolSocket {
+    const known = this.#poolSockets.get(conn);
+    if (known) return known;
+    const socket: PoolSocket = {
+      id: conn.id,
+      role: conn.role === "dm" ? "dm" : "player",
+      roomId: this.roomId,
+      promote: () => {
+        if (conn.closed) return false;
+        conn.pace = "full";
+        if (conn.takesFrames) conn.send({ t: "takes", groups: true, pace: "full" });
+        return true;
+      },
+    };
+    this.#poolSockets.set(conn, socket);
+    return socket;
   }
 
   /**

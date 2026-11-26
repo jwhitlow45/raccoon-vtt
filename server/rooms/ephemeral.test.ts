@@ -19,7 +19,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, P2, actor, character, env, member, reveal, room, scene, token } from "#shared/testutil.ts";
 import { ANA, ATTIC, BREE, GROUND, UPPER, putOp, run, withStairs } from "#shared/floorLinksTestutil.ts";
 import { Connection } from "./connection.ts";
-import { cancelLost, cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelLost, cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral, sweepPreviews } from "./ephemeral.ts";
 
 /** A connection that has had its snapshot, keeping what it is sent, on the clock given or the real one. */
 function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEventOut[] } {
@@ -443,8 +443,9 @@ describe("drag previews on vision scenes (docs/design/design-v1-maps-vision.md 4
 /**
  * What a socket's previews keep on the server (review PV3-ASTRA-2): the
  * last frame of each preview some screen shows, and no other, at most
- * MOST_PREVIEWS_SENT of them, each gone once it has had no frame for
- * PREVIEW_STALE_MS, with a bare cancel to the screens still holding it.
+ * MOST_PREVIEWS_SENT of them, each gone at the clock's sweep once it has
+ * had no frame for PREVIEW_STALE_MS, with a bare cancel to the screens
+ * still holding it.
  */
 describe("what a socket's previews keep", () => {
   function clocked(state: RoomState) {
@@ -493,16 +494,17 @@ describe("what a socket's previews keep", () => {
     assert.deepEqual([...t.p2.conn.previewsHeld.keys()].sort(), [...t.p1.conn.previewsSent.keys()].map((k) => `p1|${k}`).sort());
   });
 
-  test("a preview with no frame for a while goes at the sender's next frame, never at a batch, and one kept alive stays", () => {
+  test("a preview with no frame for a while goes at the clock's sweep, never at a batch or the sender's next frame, and one kept alive stays", () => {
     const state = room();
     const t = clocked(state);
     // The one kept alive came first, so only its later frames put it after the still one.
     t.send(t.p1.conn, ruler("alive"));
     t.send(t.p1.conn, ruler("still"));
-    // A device sends a still preview's frame again every second.
+    // A device sends a still preview's frame again every second, and the room sweeps once a second.
     for (let s = 0; s < 30; s++) {
       t.tick(1_000);
       t.send(t.p1.conn, ruler("alive"));
+      sweepPreviews(t.all);
     }
     assert.deepEqual([...t.p1.conn.previewsSent.keys()], ["ruler:alive"]);
     assert.deepEqual(
@@ -515,8 +517,11 @@ describe("what a socket's previews keep", () => {
     rejudgePreviews(state, t.all);
     assert.deepEqual([[...t.p1.conn.previewsSent.keys()], t.p2.got.length, [...t.p2.conn.previewsHeld.keys()]], [["ruler:alive"], sent, ["p1|ruler:alive"]], "a batch neither ends nor forgets it");
     t.send(t.p1.conn, ruler("next"));
+    assert.deepEqual([...t.p1.conn.previewsSent.keys()], ["ruler:alive", "ruler:next"], "nor does the sender's next frame");
+    assert.deepEqual(t.p2.got.slice(sent).filter((e) => e.k === "rulerEnd"), []);
+    sweepPreviews(t.all);
     assert.deepEqual([...t.p1.conn.previewsSent.keys()], ["ruler:next"]);
-    assert.deepEqual(t.p2.got.slice(sent, sent + 1), [{ k: "rulerEnd", id: "alive" }]);
+    assert.deepEqual(t.p2.got.slice(sent).filter((e) => e.k === "rulerEnd"), [{ k: "rulerEnd", id: "alive" }]);
     assert.deepEqual([...t.p2.conn.previewsHeld.keys()], ["p1|ruler:next"]);
   });
 });
@@ -550,17 +555,16 @@ describe("two sockets of one member on one preview", () => {
     t.tick(9_000);
     t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
     t.tick(1_001);
-    // A ruler the DM keeps to the DM's own screens: the older socket's next frame.
-    t.send(t.a.conn, { k: "ruler", id: "a-next", points: [{ x: 5.5, y: 5.5 }] });
+    sweepPreviews(t.all);
     assert.deepEqual(cancels(t.p1.got), []);
     assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"), "the screen still holds the drag");
     assert.equal(t.a.conn.previewsSent.has("drag:gob"), false, "the older entry went");
     assert.deepEqual([...t.b.conn.previewsSent.keys()], ["drag:gob"]);
-    // Once the newer one is stale too, a batch sends nothing and the newer socket's next frame ends it.
+    // Once the newer one is stale too, a batch sends nothing and the sweep ends it.
     t.tick(PREVIEW_STALE_MS);
     rejudgePreviews(state, t.all);
     assert.deepEqual(cancels(t.p1.got), []);
-    t.send(t.b.conn, { k: "ruler", id: "b-next", points: [{ x: 5.5, y: 5.5 }] });
+    sweepPreviews(t.all);
     assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
   });
 
@@ -1097,9 +1101,10 @@ describe("a ruler carried over stairs (docs/design/design-v1-floors.md phase 3, 
 
 /**
  * A preview's age is read from moments the room gives (design 7.6): a frame
- * keeps the moment it arrived, its sender's next frame ages the rest by its
- * own moment, and a batch's judgment by the batch's tick. The sender's clock
- * reading at the time any of that runs decides nothing.
+ * keeps the moment it arrived, the clock's sweep ages the rest by the
+ * moment it runs at, and a batch's judgment by the batch's tick. The
+ * sender's clock reading at the time any of that runs decides nothing, and
+ * neither does any other frame the sender sends.
  */
 describe("a preview's age by the moments given", () => {
   const FRAME = 1_000_000;
@@ -1131,19 +1136,21 @@ describe("a preview's age by the moments given", () => {
       const tick = FRAME + PREVIEW_STALE_MS + 1;
       if (path === "rejudgePreviews") rejudgePreviews(t.dmOnly, t.all, tick);
       else cancelLost(t.p1.conn, ["token:gob"], t.all, tick);
-      assert.deepEqual(cancels(t.p1.got), [], "a stale frame waits for its sender's next frame or close");
+      assert.deepEqual(cancels(t.p1.got), [], "a stale frame waits for the sweep or its sender's close");
       assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"));
     });
   }
 
-  test("a frame keeps the moment it arrived, and the sender's next frame ages the rest by its own moment", () => {
+  test("a frame keeps the moment it arrived, and the sweep ages it by its own moment, whatever else the sender sends", () => {
     const t = shown(FRAME + 5 * PREVIEW_STALE_MS);
     assert.equal(t.dm.conn.previewsSent.get("drag:gob")?.at, FRAME, "kept with its arrival, not the clock's reading");
-    routeEphemeral(t.state, t.dm.conn, "s1", { k: "ruler", id: "r", points: [{ x: 1.5, y: 1.5 }], shared: true }, t.all, FRAME + PREVIEW_STALE_MS - 1);
-    assert.ok(t.dm.conn.previewsSent.has("drag:gob"), "1 ms short of its age by the new frame's moment");
+    routeEphemeral(t.state, t.dm.conn, "s1", { k: "ruler", id: "r", points: [{ x: 1.5, y: 1.5 }], shared: true }, t.all, FRAME + PREVIEW_STALE_MS);
+    assert.ok(t.dm.conn.previewsSent.has("drag:gob"), "the sender's other frames age nothing");
+    sweepPreviews(t.all, FRAME + PREVIEW_STALE_MS - 1);
+    assert.ok(t.dm.conn.previewsSent.has("drag:gob"), "1 ms short of its age by the sweep's moment");
     assert.deepEqual(cancels(t.p1.got), []);
-    routeEphemeral(t.state, t.dm.conn, "s1", { k: "ruler", id: "r", points: [{ x: 2.5, y: 1.5 }], shared: true }, t.all, FRAME + PREVIEW_STALE_MS);
-    assert.equal(t.dm.conn.previewsSent.has("drag:gob"), false, "at its age by the next frame's moment");
+    sweepPreviews(t.all, FRAME + PREVIEW_STALE_MS);
+    assert.equal(t.dm.conn.previewsSent.has("drag:gob"), false, "at its age by the sweep's moment");
     assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
   });
 });

@@ -4,7 +4,7 @@ import type { RawData, WebSocket } from "ws";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { HARD } from "#shared/limits.ts";
 import { OP_VERSION } from "#shared/migrate.ts";
-import { clientMessageSchema, isGroupFrame, type ClientMessage } from "#shared/protocol.ts";
+import { clientMessageSchema, type ClientMessage } from "#shared/protocol.ts";
 import { clientIp } from "../auth/clientIp.ts";
 import { renewClosedDisplay } from "../auth/displaySessions.ts";
 import { ipKey } from "../auth/ipKey.ts";
@@ -27,7 +27,8 @@ import type { RoomManager } from "./manager.ts";
  * or the desktop app's own, server/local/guard.ts), the session cookie, a
  * current-epoch grant for the room, and the socket caps. After it: the
  * socket is bound to that grant, the room loads (or the socket closes with
- * 4011), and every frame passes the budget before it is parsed.
+ * 4011), and every frame passes its count and raw-byte budget before it is
+ * parsed, then pays by the kind it parsed to (design 7.6).
  *
  * `/ws?room=&as=display` is a table display's socket (docs/design/design-v1-dm-tools.md
  * 3.1): it takes only a display session from the display cookie, and its
@@ -225,6 +226,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
 
       const handle = (data: RawData, isBinary: boolean): void => {
         const room = actor;
+        const bytes = rawLength(data);
         if (!room || conn.closed) return;
         if (isBinary) {
           conn.close(CLOSE.authFailure, "binary frame");
@@ -245,6 +247,14 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
           conn.close(CLOSE.authFailure, "invalid message");
           return;
         }
+        // The parsed kind decides what a frame pays, never its text: a frame that names `t` twice is what it parsed to.
+        // An `eph` pays one token of the socket's ephemeral rate whatever its size, and every other message its bytes.
+        const verdict = parsed.data.t === "eph" ? (conn.display || conn.previewBy !== null ? "ok" : conn.eph.accept()) : conn.frames.charge(bytes);
+        if (verdict === "abuse") {
+          conn.close(CLOSE.abuse, parsed.data.t === "eph" ? "ephemeral rate" : "frame budget");
+          return;
+        }
+        if (verdict === "drop") return;
         dispatch(room, parsed.data);
       };
 
@@ -274,6 +284,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             }
             conn.helloAllowed = false;
             conn.helloPending = true;
+            // A page that sends its op version reads `takes`, which the room sends after this, ahead of the snapshot.
+            conn.takesFrames = msg.opVersion !== undefined;
             // Ahead of the snapshot, so a page on older code knows before it shows the room.
             if (msg.opVersion !== undefined) conn.send({ t: "build", opVersion: OP_VERSION });
             chain(() => room.hello(conn, msg));
@@ -296,10 +308,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
             chain(() => room.ids(conn, msg));
             return;
           case "eph":
-            // No socket is told it `takes` group frames yet, so one that sends them anyway has them dropped.
-            if (isGroupFrame(msg.e)) return;
             // The frame's moment is read as it arrives, before anything waits, and the room routes it as of then.
-            room.ephemeral(conn, { sceneId: msg.sceneId, e: msg.e }, room.serverTime());
+            room.ephemeral(conn, msg, room.serverTime());
             return;
           case "scene":
             if (conn.role !== "dm") {
@@ -318,6 +328,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
       socket.on("message", (data: RawData, isBinary: boolean) => {
         try {
           if (conn.closed) return;
+          // Every frame's count and raw bytes, before any parsing. What else it pays waits on what it parses to (handle).
           const verdict = conn.frames.accept(rawLength(data));
           if (verdict === "abuse") {
             conn.close(CLOSE.abuse, "frame budget");
@@ -343,6 +354,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
           conn.closed = true;
           conn.clearTimers();
           actor?.detach(conn);
+          // The room gives the socket's share of the preview pool back as it detaches it. One whose room went first gives it back here.
+          conn.releasePreviews?.();
           actor = null;
           if (conn.display) displayClosed(conn);
         } catch (err) {

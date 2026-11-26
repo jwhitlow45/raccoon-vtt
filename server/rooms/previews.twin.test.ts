@@ -6,8 +6,8 @@ import { previewRoom, previewTwin, VAULT, type PreviewFixture } from "./previews
 
 /*
  * Held previews are judged again after every batch while a screen holds
- * one, and a frame past PREVIEW_STALE_MS is dead by the clock alone
- * (docs/design/design-v1-per-player-vision.md 7.2). Bree is sent the same
+ * one, and a frame past PREVIEW_STALE_MS is dead by the clock alone, which
+ * the room's sweep reads (docs/design/design-v1-per-player-vision.md 7.2). Bree is sent the same
  * frames of P1's drag in twins apart only in the DM's work on a scene no
  * player holds.
  */
@@ -41,7 +41,7 @@ describe("a held preview is judged again after every batch (D-261121-068)", () =
     });
   }
 
-  test("a drag gone stale, a batch on the vault in one twin, then the drag's next frame: dragCancel, dragMove in both, and nothing at the batch", async (t) => {
+  test("a drag gone stale, a batch on the vault in one twin, then the sweep and the drag's next frame: dragCancel, dragMove in both, and nothing at the batch", async (t) => {
     const f = previewRoom();
     const got: unknown[][][] = [];
     for (const hidden of [true, false]) {
@@ -50,6 +50,7 @@ describe("a held preview is judged again after every batch (D-261121-068)", () =
       twin.clock.now += PREVIEW_STALE_MS + 1;
       if (hidden) await twin.dmOp(VAULT_CHANGES[0]!.op);
       const marks = [twin.seen().bree];
+      twin.sweep();
       twin.frame({ k: "dragMove", tokenId: f.pc, x: 9, y: 3 });
       marks.push(twin.seen().bree);
       got.push(marks);
@@ -62,7 +63,7 @@ describe("a held preview is judged again after every batch (D-261121-068)", () =
     ["locks", { t: "token.update", tokenId: "", patch: { locked: true } }],
     ["hides", { t: "token.update", tokenId: "", patch: { visibility: "dm" } }],
   ] as const) {
-    test(`a stale drag is neither judged nor forgotten at a batch: the DM ${what} the creature, and Bree's cancel waits for P1's next frame`, async (t) => {
+    test(`a stale drag is neither judged nor forgotten at a batch or P1's next frame: the DM ${what} the creature, and Bree's cancel waits for the sweep`, async (t) => {
       const f = previewRoom();
       const twin = await previewTwin(t, f);
       twin.frame({ k: "dragStart", tokenId: f.pc, x: 8, y: 3 });
@@ -71,6 +72,8 @@ describe("a held preview is judged again after every batch (D-261121-068)", () =
       assert.deepEqual(twin.seen().bree.filter((e) => (e as { k: string }).k === "dragCancel"), [], "nothing at the batch");
       assert.ok(twin.bree.conn.previewsHeld.size > 0 && twin.p1.conn.previewsSent.size > 0, "both sides still hold it");
       twin.frame({ k: "ruler", id: "next", points: [{ x: 2.5, y: 2.5 }] });
+      assert.deepEqual(twin.seen().bree.filter((e) => (e as { k: string }).k === "dragCancel"), [], "nothing at P1's next frame");
+      twin.sweep();
       assert.deepEqual(twin.seen().bree.filter((e) => (e as { k: string }).k === "dragCancel"), [{ k: "dragCancel", tokenId: f.pc }]);
     });
   }

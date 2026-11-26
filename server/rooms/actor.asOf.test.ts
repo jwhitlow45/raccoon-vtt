@@ -3,7 +3,7 @@ import { describe, test, type TestContext } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { uuidv7 } from "#shared/ids.ts";
-import type { ServerMessage } from "#shared/protocol.ts";
+import { ephCaps, type ServerMessage } from "#shared/protocol.ts";
 import { MAX_HELD_BYTES, MAX_HELD_FRAMES, MAX_VIEWS, MAX_WAITING_READERS, READER_DEADLINE_MS, RETAIN_MS, RoomActor, ViewBusyError, type ActorDeps, type RoomView } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
@@ -446,6 +446,7 @@ describe("live frames held for their tick", () => {
   }
 
   const rulers = (sent: readonly unknown[]) => (sent as ServerMessage[]).filter((m): m is Eph => m.t === "eph" && m.e.k === "ruler").map((m) => (m.e as { id: string }).id);
+  const pings = (sent: readonly unknown[]) => (sent as ServerMessage[]).filter((m): m is Eph => m.t === "eph" && m.e.k === "ping").map((m) => (m.e as { x: number }).x);
 
   test(`frames behind a committing batch route in order once it publishes, and the ${MAX_HELD_FRAMES + 1}st is dropped`, async (t) => {
     const r = await room(t);
@@ -455,14 +456,16 @@ describe("live frames held for their tick", () => {
     await heldBatch(t, r, T);
     moveTo(t, r.clock, T + 21);
     const from = r.dm.sent.length;
-    for (let i = 0; i <= MAX_HELD_FRAMES; i++) r.actor.ephemeral(conn, { sceneId, e: { k: "ruler", id: `r${i}`, points: [{ x: 1.5, y: 1.5 }] } });
+    // Pings, each charged the least, so the count bound comes first.
+    assert.ok(MAX_HELD_FRAMES * ephCaps.charges.other < MAX_HELD_BYTES);
+    for (let i = 0; i <= MAX_HELD_FRAMES; i++) r.actor.ephemeral(conn, { sceneId, e: { k: "ping", x: i, y: 1.5 } });
     await flush();
-    assert.deepEqual(rulers(r.dm.sent.slice(from)), [], "held while the batch commits");
+    assert.deepEqual(pings(r.dm.sent.slice(from)), [], "held while the batch commits");
     r.gate.open();
     await flush();
     assert.deepEqual(
-      rulers(r.dm.sent.slice(from)),
-      Array.from({ length: MAX_HELD_FRAMES }, (_, i) => `r${i}`),
+      pings(r.dm.sent.slice(from)),
+      Array.from({ length: MAX_HELD_FRAMES }, (_, i) => i),
       "each frame in order, the one past the bound dropped",
     );
     // Covered again, a frame routes at once.
@@ -470,19 +473,21 @@ describe("live frames held for their tick", () => {
     assert.equal(rulers(r.dm.sent).at(-1), "after");
   });
 
-  test("held frames stop at their byte bound, and frames older than the views kept are dropped as they would route", async (t) => {
+  test("held frames stop at their charges' bound, a ruler charged by its kind whatever its size, and frames older than the views kept are dropped as they would route", async (t) => {
     const r = await room(t);
     const conn = await sender(r);
     const sceneId = r.actor.committed.state.meta.playerSceneId!;
     const T = T0 + 1_000;
     await heldBatch(t, r, T);
     moveTo(t, r.clock, T + 21);
-    const points = Array.from({ length: 500 }, (_, i) => ({ x: 1.5 + i, y: 1.5 }));
-    const bytes = Buffer.byteLength(JSON.stringify({ sceneId, e: { k: "ruler", id: "r00", points } }));
-    const fit = Math.floor(MAX_HELD_BYTES / bytes);
-    assert.ok(fit < MAX_HELD_FRAMES, "the byte bound comes first");
+    const fit = Math.floor(MAX_HELD_BYTES / ephCaps.charges.measure);
+    assert.ok(fit < MAX_HELD_FRAMES, "the charges' bound comes first");
     const from = r.dm.sent.length;
-    for (let i = 0; i < fit + 3; i++) r.actor.ephemeral(conn, { sceneId, e: { k: "ruler", id: `r${String(i).padStart(2, "0")}`, points } });
+    // One stop or fifty, each ruler is charged its kind's charge.
+    for (let i = 0; i < fit + 3; i++) {
+      const points = Array.from({ length: i % 2 === 0 ? 1 : 50 }, (_, k) => ({ x: 1.5 + k, y: 1.5 }));
+      r.actor.ephemeral(conn, { sceneId, e: { k: "ruler", id: `r${String(i).padStart(3, "0")}`, points } });
+    }
     r.gate.open();
     await flush();
     assert.equal(rulers(r.dm.sent.slice(from)).length, fit);
