@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 50;
-export const OP_VERSION = 65;
+export const OP_VERSION = 66;
 
 export type MigrationStep = {
   from: number;
@@ -1548,6 +1548,17 @@ export const opMigrations: MigrationStep[] = [
     to: 65,
     apply: (op) => op,
   },
+  {
+    // Trap cards per creature, and squeezes along the map's edge (TRAP_EDGE_OP_VERSION): `actor.outcome`'s `trap` may
+    // carry `tokenIds`, which an older strict schema refuses, so no stored op changes shape and the step is the identity.
+    // From this version a trap outcome without it on an occurrence that names creatures is refused (trapSettlesNamed),
+    // and on square maps the scene's edge pinches a squeeze (edgePinches). Ops stored before replay as they ran.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup only for a room with changes at this version after its last snapshot, which an older build refuses.
+    from: 65,
+    to: 66,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2730,4 +2741,31 @@ export function migrateSnapshot(state: unknown, fromVersion: number, steps: Migr
 
 export function migrateOp(op: unknown, fromVersion: number, steps: MigrationStep[] = opMigrations): Op {
   return runMigrations(op, fromVersion, OP_VERSION, steps) as Op;
+}
+
+/**
+ * The op version of per-creature trap cards and of the map's edge pinching a
+ * squeeze. Room format stays at 50: no stored field changes shape.
+ */
+export const TRAP_EDGE_OP_VERSION = 66;
+
+/**
+ * Whether a trap outcome that names no creatures settles an occurrence that
+ * does. From op version 66 it is refused, so a DM page from before the update
+ * whose queued Apply goes out after it cannot hurt a creature twice or end
+ * another's wait. Ops stored before settled the whole occurrence and replay
+ * so. Live ops carry no stored version and take today's rule.
+ */
+export function trapSettlesNamed(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < TRAP_EDGE_OP_VERSION);
+}
+
+/**
+ * Whether the scene's four sides count as walls for the narrow-space test on
+ * square maps. They are no movement walls. Ops stored before version 66 read
+ * walls alone there and replay so, so a stored squeeze and a restore's hash
+ * guards still match. Live ops carry no stored version and take today's rule.
+ */
+export function edgePinches(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < TRAP_EDGE_OP_VERSION);
 }

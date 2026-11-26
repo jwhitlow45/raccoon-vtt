@@ -7,6 +7,9 @@ import {
   COUNT_SNAPSHOT_VERSION,
   OP_VERSION,
   SNAPSHOT_VERSION,
+  TRAP_EDGE_OP_VERSION,
+  edgePinches,
+  trapSettlesNamed,
   healRevivesDead,
   marksHadTurn,
   migrateOp,
@@ -2183,7 +2186,7 @@ describe("snapshot 50, version 8 ids", () => {
   test("a v49 room is a v50 room as it is, and a build at 49 refuses a v50 snapshot", () => {
     assert.equal(SEALED_IDS_SNAPSHOT_VERSION, 50);
     assert.equal(SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION);
-    assert.equal(OP_VERSION, WALK_TRIM_OP_VERSION, "no op changes shape");
+    assert.equal(OP_VERSION, TRAP_EDGE_OP_VERSION, "no op changes shape");
     const state = room();
     assert.equal(runMigrations(state, 49, 50, snapshotMigrations), state);
     assert.equal(migrateSnapshot(state, 49), state);
@@ -2201,7 +2204,7 @@ describe("op version 65 and snapshot 49, walks that end with their turn", () => 
   test("keeps stored ops and snapshots unchanged through the identity steps, and the new op and fields parse", () => {
     assert.equal(WALK_TRIM_OP_VERSION, 65);
     assert.equal(WALK_TRIM_SNAPSHOT_VERSION, 49);
-    assert.equal(OP_VERSION, WALK_TRIM_OP_VERSION);
+    assert.equal(OP_VERSION, TRAP_EDGE_OP_VERSION);
     assert.ok(SNAPSHOT_VERSION >= WALK_TRIM_SNAPSHOT_VERSION);
     const old = restore({ climb, falls: [fall] });
     assert.equal(runMigrations(old, 64, 65, opMigrations), old);
@@ -2278,5 +2281,28 @@ describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md
     assert.deepEqual([upgraded.memory, upgraded.memoryBy], [{}, {}]);
     const kept = mapDiscoveryUpgrade(room({ scenes: { s1: scenes.s1 }, playedScenes: { s1: { sceneId: "s1", rev: 3 } } }));
     assert.deepEqual(kept.playedScenes, { s1: { sceneId: "s1", rev: 3 } });
+  });
+});
+
+describe("op version 66, trap cards per creature and squeezes along the map's edge", () => {
+  const named = { t: "actor.outcome", trap: { trapId: "t1", due: 3, tokenIds: ["thorn"] } };
+
+  test("is the identity step at version 66, with room format 50 as before", () => {
+    assert.equal(TRAP_EDGE_OP_VERSION, 66);
+    assert.equal(OP_VERSION, 66);
+    assert.equal(SNAPSHOT_VERSION, 50);
+    assert.equal(runMigrations(named, 65, 66, opMigrations), named);
+    assert.equal(migrateOp(named, 65), named);
+    assert.equal(migrateOp(named, 66), named);
+  });
+
+  test("gates both rules at 66, so ops stored at 65 and before replay as they ran", () => {
+    for (const gate of [trapSettlesNamed, edgePinches]) {
+      assert.deepEqual([gate(1), gate(64), gate(65), gate(66), gate(undefined)], [false, false, false, true, true], gate.name);
+    }
+  });
+
+  test("a build at 65 refuses an op from this one by number", () => {
+    assert.throws(() => runMigrations(named, 66, 65, opMigrations), /cannot migrate from version 66 down to 65/);
   });
 });
