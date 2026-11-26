@@ -10,7 +10,7 @@ import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { MOST_PREVIEWS_SENT } from "./ephemeral.ts";
 import { CANCEL_SENDS, CANCELS_SENDS, heldSends, HONEST_MEMBER_SENDS, MAX_VERSIONS } from "./gestures.ts";
-import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
+import { ScopeClient, scopeFixture, StoredRoomDb, turnsUntil, until } from "./undoScopeTesting.ts";
 
 /*
  * Group drag frames through the room (design 7.6): bound to their roster as
@@ -99,12 +99,8 @@ async function hello(r: Room, s: ReturnType<typeof socketOf>, clientId: string, 
   s.conn.helloPending = true;
   const snapshots = s.sent.filter((m) => m.t === "snapshot").length;
   await r.actor.hello(s.conn, { clientId, resumeFrom: 1 });
-  // Turns of the event loop alone, so a test's mocked timers never stall it.
-  for (let i = 0; i < 200 && !queued; i++) {
-    if (s.conn.closed || s.sent.filter((m) => m.t === "snapshot").length > snapshots) return;
-    await flush();
-  }
-  if (!queued) assert.fail("no snapshot or close");
+  if (queued) return;
+  await turnsUntil(() => s.conn.closed || s.sent.filter((m) => m.t === "snapshot").length > snapshots, "snapshot or close");
 }
 
 async function flush(): Promise<void> {

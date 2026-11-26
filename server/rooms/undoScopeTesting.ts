@@ -302,6 +302,21 @@ export async function until<T>(get: () => T | undefined, what: string): Promise<
   assert.fail(`timed out waiting for ${what}`);
 }
 
+/**
+ * Turns of the event loop until `done`, within a deadline of real time. What
+ * a test waits on may be a real timer, as a hello's snapshot waits on its
+ * batch's tick, and how many turns pass in its 20 ms differs tenfold between
+ * machines, so a count of turns is no bound. Turns alone, never a timer, so a
+ * test's mocked timers never stall the wait.
+ */
+export async function turnsUntil(done: () => boolean, what: string, ms = 5_000): Promise<void> {
+  const deadline = performance.now() + ms;
+  while (!done()) {
+    if (performance.now() > deadline) assert.fail(`no ${what} within ${ms} ms`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 export async function scopeActor(t: TestContext, state: RoomState, options: ActorDeps["options"] = {}) {
   const db = new UndoScopeDb(state);
   const info: ActorDeps["info"] = { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false };
