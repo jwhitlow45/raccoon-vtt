@@ -6,6 +6,7 @@ import {
   MAX_GROUP_MEMBERS,
   clientMessageSchema,
   ephCaps,
+  expandAt,
   expandGroup,
   groupFrameSchema,
   isGroupFrame,
@@ -292,6 +293,30 @@ describe("expandGroup", () => {
     sameWire(expandOwn(group), today);
     const [mount, rider] = expandOwn(group);
     assert.ok(mount && "free" in mount && rider && !("free" in rider));
+  });
+
+  test("expandAt gives each token's frame exactly as expandGroup does, the Alt-held rider's and mount's included", () => {
+    const followers = [
+      { tokenId: "mount", x: 3, y: 4 },
+      { tokenId: "rider2", x: 3.5, y: 4.5 },
+    ];
+    const frames = [
+      { k: "dragMove", tokenId: "rider", g: 2, x: 7.3, y: 4.1, lead: { i: 0, x: 5, y: 4, path: [3, 4, 5, 4], ft: 10 }, with: followers, from: { x: 3.25, y: 4 } },
+      { k: "dragMove", tokenId: "rider", g: 2, x: 7.3, y: 4.1, lead: { i: 0, path: [3, 4, 7, 4], ft: 20 }, with: followers, from: { x: 3.25, y: 4 } },
+      { k: "dragMove", tokenId: "mount", g: 3, x: 6.6, y: 2.2, path: [2, 2, 6, 2], ft: 20, free: true, with: [{ tokenId: "rider", x: 2.25, y: 2 }], from: { x: 2, y: 2 } },
+      { k: "dragMove", tokenId: "p", g: 1, x: 2.2, y: 3.3, fts: [null, 7], squeeze: true, ...roster(2, (i) => ({ x: 0.1 * i, y: 1.7 })) },
+      { k: "dragStart", tokenId: "p", g: 1, x: 0.7, y: -0.25, ...roster(3, (i) => ({ x: 12.125 + i, y: 3 })) },
+      { k: "groupEnd", tokenId: "p", g: 1, at: [{ x: 4, y: 5 }, null, { x: 1, y: 1, squeeze: true }], ...roster(2) },
+      { k: "dragCancel", tokenId: "p", g: 1, ...roster(2) },
+    ];
+    for (const e of frames) {
+      const frame = parsed(e);
+      for (const r of [rosterOf(frame), null]) {
+        const all = expandGroup(frame, r);
+        assert.equal(all.length, 1 + (r?.ids.length ?? 0));
+        for (const [j, one] of all.entries()) assert.equal(JSON.stringify(expandAt(frame, r, j)), JSON.stringify(one), `${frame.k} ${j}`);
+      }
+    }
   });
 
   test("a start puts every member where it stands", () => {

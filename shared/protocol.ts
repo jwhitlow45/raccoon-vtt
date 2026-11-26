@@ -3876,30 +3876,31 @@ function loneMove(tokenId: string, x: number, y: number, fields: { path?: number
  * `loneEphSchema`, and one that fails is dropped alone.
  */
 export function expandGroup(e: GroupFrame, roster: GroupRoster | null): EphEvent[] {
-  const ids = roster?.ids ?? [];
-  if (e.k === "dragCancel") return [e.tokenId, ...ids].map((tokenId) => ({ k: "dragCancel", tokenId }));
+  return Array.from({ length: 1 + (roster?.ids.length ?? 0) }, (_, j) => expandAt(e, roster, j));
+}
+
+/**
+ * The frame of one token of a group frame, as expandGroup gives it: `j` 0
+ * is the pressed token, and `j` from 1 the roster's members in order. So a
+ * receiver's frame can be made from the group frame when it is sent.
+ */
+export function expandAt(e: GroupFrame, roster: GroupRoster | null, j: number): EphEvent {
+  const tokenId = j === 0 ? e.tokenId : roster!.ids[j - 1]!;
+  if (e.k === "dragCancel") return { k: "dragCancel", tokenId };
   if (e.k === "groupEnd") {
-    return [e.tokenId, ...ids].map((tokenId, i): EphEvent => {
-      const at = e.at[i] ?? null;
-      return at ? { k: "dragEnd", tokenId, x: at.x, y: at.y, ...(at.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId };
-    });
+    const at = e.at[j] ?? null;
+    return at ? { k: "dragEnd", tokenId, x: at.x, y: at.y, ...(at.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId };
   }
-  const frames: EphEvent[] = [e.k === "dragStart" ? { k: "dragStart", tokenId: e.tokenId, x: e.x, y: e.y } : loneMove(e.tokenId, e.x, e.y, e)];
-  if (roster === null) return frames;
-  const dx = e.x - roster.from.x;
-  const dy = e.y - roster.from.y;
-  for (const [i, tokenId] of ids.entries()) {
-    // A start the roster lacks reads as NaN, which no lone frame passes.
-    const x = (roster.starts[2 * i] ?? Number.NaN) + dx;
-    const y = (roster.starts[2 * i + 1] ?? Number.NaN) + dy;
-    if (e.k === "dragStart") {
-      frames.push({ k: "dragStart", tokenId, x, y });
-      continue;
-    }
-    const lead = e.lead?.i === i ? e.lead : undefined;
-    frames.push(loneMove(tokenId, lead?.x ?? x, lead?.y ?? y, { path: lead?.path, ft: lead?.ft ?? e.fts?.[i], squeeze: lead?.squeeze }));
-  }
-  return frames;
+  if (j === 0) return e.k === "dragStart" ? { k: "dragStart", tokenId, x: e.x, y: e.y } : loneMove(tokenId, e.x, e.y, e);
+  const i = j - 1;
+  const dx = e.x - roster!.from.x;
+  const dy = e.y - roster!.from.y;
+  // A start the roster lacks reads as NaN, which no lone frame passes.
+  const x = (roster!.starts[2 * i] ?? Number.NaN) + dx;
+  const y = (roster!.starts[2 * i + 1] ?? Number.NaN) + dy;
+  if (e.k === "dragStart") return { k: "dragStart", tokenId, x, y };
+  const lead = e.lead?.i === i ? e.lead : undefined;
+  return loneMove(tokenId, lead?.x ?? x, lead?.y ?? y, { path: lead?.path, ft: lead?.ft ?? e.fts?.[i], squeeze: lead?.squeeze });
 }
 
 // Client to server messages (design 7.1).
