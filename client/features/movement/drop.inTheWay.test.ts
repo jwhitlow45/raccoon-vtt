@@ -237,6 +237,17 @@ describe("squares: a ledge that closes the way holds the walk at its foot (D-261
     }
   });
 
+  test("two spots of the flat way equally near the drop: Thorn holds on the earlier one along the way, not the later (LP43-POLISH-LEDGE tie)", () => {
+    // The vault with a pillar 20 ft up on 8, 13 that closes the platform's edge column, and Thorn on 7, 15. The flat way to 9, 13, behind the wall, runs up the edge column past the pillar, so 8, 14 and 8, 12 lie the same distance from the drop, and the pillar between them is no foot.
+    const s = vault(true);
+    heights(s, { x: 8, y: 13, w: 1, h: 1 }, 20);
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 7, y: 15 };
+    const { drag, note } = dropThorn(s, { x: 9, y: 13 });
+    assert.equal(note, "Ledge in the way. No stairs you have seen lead there.");
+    assert.deepEqual(drag.plan.moves.map((m) => [m.x, m.y]), [[8, 14]]);
+    assert.deepEqual(drag.hold && [drag.hold.at.x, drag.hold.at.y], [8, 14], "the board held him there too");
+  });
+
   test("the DM's drag still lands on the rise", () => {
     const s = hall();
     heights(s, { x: 17, y: 1, w: 4, h: 8 }, 10);
