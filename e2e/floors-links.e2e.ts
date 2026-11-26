@@ -40,7 +40,8 @@ import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/a
  *   320 x 568 at 130%.
  * - lp53fix-1: ] pressed while the DM drags Thorn shows Upper floor and
  *   ends the drag as a cancel: Thorn stays on the stairs, drawn there back
- *   on Ground, and neither the key nor the rest of the gesture sends a move.
+ *   on Ground, Bree hears the drag cancelled, and neither the key nor the
+ *   rest of the gesture sends a move.
  * - flrl-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty-seven, one file after
@@ -544,15 +545,21 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
     const far = await pagePoint(dm, BOUNDS, { x: START.x + 0.5, y: START.y + 0.5 });
     await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
     const start = dmSocket.sent.length;
+    const heard = breeSocket.received.length;
+    const thornFrame = (k: string) => (f: string) => f.includes(`"${k}"`) && f.includes(run.tThorn);
     await dm.mouse.move(from.x, from.y);
     await dm.mouse.down();
     try {
       await dm.mouse.move(from.x + (mid.x - from.x) * 0.1, from.y, { steps: 3 });
       await dm.mouse.move(mid.x, mid.y, { steps: 8 });
-      await waitFor("the DM's drag of Thorn under way", () => (dmSocket.sent.slice(start).some((f) => f.includes('"dragMove"') && f.includes(run.tThorn)) ? true : null), 5_000);
+      await waitFor("the DM's drag of Thorn under way", () => (dmSocket.sent.slice(start).some(thornFrame("dragMove")) ? true : null), 5_000);
+      await waitFor("Bree sees Thorn's ghost", () => (breeSocket.received.slice(heard).some(thornFrame("dragMove")) ? true : null), 5_000);
       const pressed = dmSocket.sent.length;
+      const breePressed = breeSocket.received.length;
       await dm.keyboard.press("]");
       await showsFloor(dm, "Upper floor");
+      // The cancel reaches another device, so the ghost it drew of Thorn ends.
+      await waitFor("Bree hears the drag cancelled", () => (breeSocket.received.slice(breePressed).some(thornFrame("dragCancel")) ? true : null), 5_000);
       await sleep(300);
       const switched = dmSocket.sent.length;
       await dm.mouse.move(far.x, far.y, { steps: 8 });
