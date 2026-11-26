@@ -70,7 +70,11 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
     assert.equal(whoLines(left, due("3:0", { hits: ["ogre"] }), new Map()).hits, "It hits a creature, not on this scene now.");
     // A character's two tokens are named once, and one that names no one reaches the room's selection.
     const twice = { ...s, characters: { c1: character("c1", { name: "Mira" }) }, tokens: { ...s.tokens, m1: token("m1", { name: "Mira", kind: "pc", actor: { ref: "c1" } }), m2: token("m2", { name: "Mira", kind: "pc", actor: { ref: "c1" } }) } };
-    hits({ hits: ["m1", "m2"] }, twice);
+    assert.equal(hits({ hits: ["m1", "m2"] }, twice).hits, "It hits Mira.");
+    // Here, both of Mira's tokens with Thorn, on the hits line, the by-line and a hidden springing's line (LP53-TRAP-1).
+    assert.deepEqual(whoLines(twice, due("3:0", { by: ["m1", "m2", "thorn"], how: "hand", hits: ["m1", "m2", "thorn"] }), new Map()), { by: "You set it off for Mira and Thorn.", hits: "It hits Mira and Thorn.", reaches: true });
+    assert.equal(whoLines(twice, due("3:0", { by: ["m1", "m2"] }), new Map()).by, "Mira set it off.");
+    assert.equal(hiddenLine(twice, due("3:0", { by: ["m2", "m1", "thorn"] }), new Map()), "Mira and Thorn set it off, out of the players' sight. The trap is still armed for them.");
     assert.equal(hits({ hits: ["m1", "m2", "thorn"] }, left).hits, "It hits Thorn. It also hits Mira, not on this scene now.");
     // One of Mira's tokens here and one away: she is named once, here.
     const half = { ...twice, tokens: { ...rest, m1: twice.tokens.m1! } };

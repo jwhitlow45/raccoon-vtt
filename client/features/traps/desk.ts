@@ -32,10 +32,15 @@ function nameOf(names: Names, id: string, labels: Labels): string {
   return token ? displayName(token, labels) : "a creature";
 }
 
-/** "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more", and "51 creatures" where it names none. */
+/**
+ * "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more", and "51 creatures"
+ * where it names none. A character the copy holds by two tokens is one
+ * creature, so it is named once (`fallNamed`, LP53-TRAP-1), as the away
+ * part of a trap card names it.
+ */
 export function nameList(names: Names, ids: readonly string[], labels: Labels, more = 0): string {
   if (ids.length === 0 && more > 0) return more === 1 ? "1 creature" : `${more} creatures`;
-  const parts = ids.map((id) => nameOf(names, id, labels));
+  const parts = fallNamed(names, ids).map((id) => nameOf(names, id, labels));
   if (more > 0) parts.push(`${more} more`);
   if (parts.length <= 1) return parts[0] ?? "";
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
