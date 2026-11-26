@@ -10,6 +10,7 @@ import type { Walker } from "./movement.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 import { ownEntry } from "../records.ts";
+import { standsInScene } from "./sceneEdge.ts";
 
 /**
  * Attached tokens (docs/design/design-v1-attach.md): a rider on a mount, a
@@ -448,9 +449,7 @@ export function getOffFits(g: Grid, settings: DistanceSettings, bounds: { w: num
 
 /** Whether a token's full footprint lies inside the scene: on hexes every hex of it the scene's (docs/design/design-v1-hex-grids.md 4.2). */
 export function footprintInScene(g: Grid, bounds: { w: number; h: number }, placed: FootprintToken): boolean {
-  if (isHex(g)) return fullHexes(g, placed).every((h) => hexInScene(g, bounds, h));
-  const r = fullRect(g, placed);
-  return !(r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS);
+  return standsInScene(g, bounds, unsqueezed(placed));
 }
 
 /**

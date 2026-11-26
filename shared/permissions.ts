@@ -3166,10 +3166,7 @@ function hexStopAgrees(c: Check, op: OpOf<"token.move">): Decision {
 
 /** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design/design-v1-hex-grids.md 4.2). */
 function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point): boolean {
-  const grid = sceneGrid(scene);
-  if (isHex(grid)) return occupiedHexes(grid, { ...token, x: at.x, y: at.y }).every((h) => hexInScene(grid, scene.bounds, h));
-  const fp = footprintSize({ ...token, x: at.x, y: at.y });
-  return at.x >= 0 && at.y >= 0 && at.x + fp.w <= scene.bounds.w && at.y + fp.h <= scene.bounds.h;
+  return standsInScene(sceneGrid(scene), scene.bounds, { ...token, x: at.x, y: at.y });
 }
 
 /** A player's refusals at a door (docs/design/design-v1-maps-vision.md 4.1), the way players learn about locks. */
