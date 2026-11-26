@@ -432,6 +432,95 @@ describe("each token belongs to the newest gesture that framed it", () => {
   });
 });
 
+describe("what a gesture's entry owns when its tokens change", () => {
+  const unknown = (round: number) => Array.from({ length: 99 }, (_, i) => ({ tokenId: `u${round}-${i}`, x: 1 + (i % 10), y: 1 + Math.floor(i / 10) }));
+  /** V and 99 ids no token has, a new 99 in each of 300 rosters 11 ms apart. */
+  function rotating() {
+    const state = room();
+    state.tokens.v = token("v", { x: 20, y: 5 });
+    const t = stage(state);
+    for (let round = 0; round < 300; round++) {
+      t.send({ k: "dragMove", tokenId: "v", g: 1, x: 20 + (round % 2) / 2, y: 5, with: unknown(round), from: { x: 20, y: 5 } });
+      assert.ok(t.dm.conn.dragOwners.size <= 100, `${t.dm.conn.dragOwners.size} after ${round + 1} rosters`);
+      t.tick(11);
+    }
+    return t;
+  }
+
+  test("300 rosters of 99 new ids each: the entry owns V and the last roster's members alone", () => {
+    const t = rotating();
+    assert.equal(t.dm.conn.dragOwners.size, 100);
+    assert.deepEqual([...new Set(t.dm.conn.dragOwners.values())], ["drag#1"]);
+    assert.ok(t.bree.conn.previewsHeld.has("dm1|drag:v"));
+  });
+
+  test("after them, the gesture's cancel leaves no owner and no entry", () => {
+    const t = rotating();
+    t.send({ k: "dragCancel", tokenId: "v", g: 1 });
+    assert.equal(t.dm.conn.dragOwners.size, 0);
+    assert.equal(t.dm.conn.previewsSent.size, 0);
+  });
+
+  test("after them, the sweep leaves no owner and no entry", () => {
+    const t = rotating();
+    t.tick(PREVIEW_STALE_MS);
+    sweepPreviews(t.all);
+    assert.equal(t.dm.conn.dragOwners.size, 0);
+    assert.equal(t.dm.conn.previewsSent.size, 0);
+  });
+
+  test("a new roster that leaves out a member Bree shows ends it there, and the members it keeps go on", () => {
+    const state = room();
+    for (const [id, x] of [["v", 20], ["a", 21], ["b", 22], ["c", 23]] as const) state.tokens[id] = token(id, { x, y: 5 });
+    const t = stage(state);
+    t.send({ k: "dragStart", tokenId: "v", g: 1, x: 20, y: 5, ...roster([{ id: "a", at: { x: 21, y: 5 } }, { id: "b", at: { x: 22, y: 5 } }], { x: 20, y: 5 }) });
+    t.bree.got.length = 0;
+    t.send({ k: "dragMove", tokenId: "v", g: 1, x: 21, y: 5, ...roster([{ id: "b", at: { x: 22, y: 5 } }, { id: "c", at: { x: 23, y: 5 } }], { x: 20, y: 5 }) });
+    assert.deepEqual(t.bree.got, [
+      { k: "dragCancel", tokenId: "a" },
+      { k: "dragMove", tokenId: "v", x: 21, y: 5 },
+      { k: "dragMove", tokenId: "b", x: 23, y: 5 },
+      { k: "dragMove", tokenId: "c", x: 24, y: 5 },
+    ]);
+    assert.deepEqual([...t.dm.conn.dragOwners.keys()].sort(), ["b", "c", "v"]);
+    assert.ok(!t.bree.conn.previewsHeld.has("dm1|drag:a"));
+  });
+
+  test("a member a newer gesture took stays the newer one's when the older gesture's new roster leaves it out", () => {
+    const state = room();
+    state.tokens.v = token("v", { x: 20, y: 5 });
+    state.tokens.p = token("p", { x: 10, y: 5 });
+    state.tokens.q = token("q", { x: 30, y: 5 });
+    const t = stage(state);
+    t.send({ k: "dragStart", tokenId: "p", g: 1, x: 10, y: 5, ...roster([{ id: "v", at: { x: 20, y: 5 } }], { x: 10, y: 5 }) });
+    t.send({ k: "dragStart", tokenId: "v", g: 2, x: 20, y: 5, with: [], from: { x: 20, y: 5 } });
+    t.bree.got.length = 0;
+    t.send({ k: "dragMove", tokenId: "p", g: 1, x: 11, y: 5, ...roster([{ id: "q", at: { x: 30, y: 5 } }], { x: 10, y: 5 }) });
+    assert.deepEqual(t.bree.got, [
+      { k: "dragMove", tokenId: "p", x: 11, y: 5 },
+      { k: "dragMove", tokenId: "q", x: 31, y: 5 },
+    ]);
+    assert.equal(t.dm.conn.dragOwners.get("v"), "drag#2");
+    assert.ok(t.bree.conn.previewsHeld.has("dm1|drag:v"));
+  });
+
+  test("a gesture's frames under another pressed token end the one before, however many it names in turn", () => {
+    const state = room();
+    state.tokens.v = token("v", { x: 20, y: 5 });
+    state.tokens.w = token("w", { x: 24, y: 5 });
+    const t = stage(state);
+    t.send({ k: "dragStart", tokenId: "v", g: 1, x: 20, y: 5, with: [], from: { x: 20, y: 5 } });
+    t.bree.got.length = 0;
+    t.send({ k: "dragMove", tokenId: "w", g: 1, x: 25, y: 5 });
+    assert.deepEqual(t.bree.got, [
+      { k: "dragCancel", tokenId: "v" },
+      { k: "dragMove", tokenId: "w", x: 25, y: 5 },
+    ]);
+    for (let i = 0; i < 300; i++) t.send({ k: "dragMove", tokenId: `u${i}`, g: 1, x: 1, y: 1 });
+    assert.ok(t.dm.conn.dragOwners.size <= 1, `${t.dm.conn.dragOwners.size}`);
+  });
+});
+
 describe("a frame whose gesture has no roster", () => {
   test("expands to its pressed token alone and asks for the roster at most once a second", () => {
     const state = room();

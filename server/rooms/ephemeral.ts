@@ -419,6 +419,7 @@ function routeDrags(
   if (pressed === undefined || !("tokenId" in pressed)) return;
   const before = sender.previewsSent.get(key);
   const ids = step.members ?? before?.members?.ids ?? null;
+  if (before) endLeft(sender, key, before, pressed.tokenId, ids, all);
   const points = ids === null ? null : pointsFor(ids, before);
   let last = before?.last ?? pressed;
   for (const [j, frame] of frames.entries()) {
@@ -444,6 +445,25 @@ function routeDrags(
     return;
   }
   keepSent(sender, key, { kind: "drag", id: pressed.tokenId, sceneId, last, at, ...(ids && points ? { members: { ids, points } } : {}) }, all);
+}
+
+/**
+ * A step that names other tokens than its entry did, by a new roster or
+ * another pressed token, ends each token the entry still owns that it no
+ * longer names, with a bare cancel to the screens showing this socket's
+ * frame of it, and gives it up. So what a socket's entries own never
+ * passes what they name, however many rosters a gesture sends.
+ */
+function endLeft(sender: Connection, key: string, before: SentPreview, pressedId: string, ids: readonly string[] | null, receivers: readonly Connection[]): void {
+  if (before.id === pressedId && (before.members?.ids ?? null) === ids) return;
+  const named = new Set(ids);
+  named.add(pressedId);
+  for (const id of entryTokens(before)) {
+    if (named.has(id) || sender.dragOwners.get(id) !== key) continue;
+    sender.dragOwners.delete(id);
+    const heldKey = `${sender.memberId}|${dragKey(id)}`;
+    for (const receiver of receivers) if (release(receiver, heldKey, sender)) receiver.send({ t: "eph", from: sender.memberId, sceneId: before.sceneId, e: cancelEvent("drag", id) });
+  }
 }
 
 /** The points an entry holds for these members: the ones it held, by id, and none for a member it never framed. */
