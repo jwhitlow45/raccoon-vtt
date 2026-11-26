@@ -464,6 +464,9 @@ class Dedicated {
       if (this.#statementMs !== bound) {
         await this.#client.query({ text: "select set_config('statement_timeout', $1, false)", values: [String(bound)], query_timeout: ms } as pg.QueryConfig);
         this.#statementMs = bound;
+        // A cancel or a drop that landed while the setting went out sends no statement after it, as for one before it.
+        if (this.#signal.aborted) throw new ScanCancelledError(this.#signal.reason);
+        if (!this.usable) throw new Error("log metadata connection is gone");
       }
       return await this.#client.query<R>({ text, values, query_timeout: ms } as pg.QueryConfig);
     } catch (err) {

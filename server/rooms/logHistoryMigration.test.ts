@@ -29,7 +29,7 @@ class FakeClient extends EventEmitter {
     const text = config.text.replace(/\s+/g, " ").trim();
     if (text.includes("statement_timeout")) {
       this.steps.push(`timeout ${String(config.values?.[0])}`);
-      return Promise.resolve({ rows: [] });
+      return (this.holdTimeout ?? Promise.resolve()).then(() => ({ rows: [] }));
     }
     this.steps.push(label(text));
     const a = this.answer(text);
@@ -37,6 +37,9 @@ class FakeClient extends EventEmitter {
     if (a instanceof Error) return Promise.reject(a);
     return Promise.resolve(a);
   }
+
+  /** Holds each statement timeout setting until it settles, so a test can land a stop while one is going out. */
+  holdTimeout: Promise<void> | null = null;
 
   /** What the test notes at the close, such as the leases still held. */
   onEnd: () => string = () => "";
@@ -331,6 +334,37 @@ describe("the log metadata worker", () => {
       ...["timeout 2000", "lock", "valid?", "timeout 90000", "create index", "timeout 2000", "valid?", "unlock", "end"],
       ...["timeout 2000", "lock", "valid?", "unlock", "lock", "read", "complete", "unlock", "end"],
     ]);
+  });
+
+  test("a stop that lands while a statement's timeout is being set sends no statement after it, cancel first", async () => {
+    const steps: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let cancelling!: () => void;
+    const cancelled = new Promise<void>((resolve) => (cancelling = resolve));
+    const { m } = rig(
+      database(0),
+      {
+        cancel: async () => {
+          steps.push("cancel");
+          cancelling();
+          // The setting's answer comes back while the cancel request is still on its way.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        },
+      },
+      () => {
+        const client = new FakeClient(steps, database(0));
+        client.holdTimeout = held;
+        return Promise.resolve(client);
+      },
+    );
+    m.start();
+    await until(() => steps.includes("timeout 15000"), "the setting sent");
+    const stopping = m.stop();
+    await cancelled;
+    release();
+    await stopping;
+    assert.deepEqual(steps, ["timeout 15000", "cancel", "end"], "no statement after the stop");
   });
 
   test("rooms are asked for once each, up to a bound, and a deleted one leaves the queue", async () => {
