@@ -13,6 +13,7 @@ import type { Op } from "../shared/protocol.ts";
 import { placedOnHex } from "../shared/rules/footprint.ts";
 import { standsInScene } from "../shared/rules/sceneEdge.ts";
 import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { TRAP_ICON_PATH } from "../client/features/traps/icon.ts";
 
 /**
  * The isometric view's choice (docs/design/design-v1-isometric-view.md 7 and
@@ -617,6 +618,118 @@ function boardTexts(page: Page): Promise<string[]> {
     const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
     return konva.stages.flatMap((st) => st.find("Text")).filter((t) => t.isVisible()).map((t) => t.text());
   });
+}
+
+/** A box on the page, in px. */
+type PageBox = { x0: number; y0: number; x1: number; y1: number };
+type PagePt = { x: number; y: number };
+
+/**
+ * What the board shows of a crowded floor (ISOLAB), read off every stage:
+ * each pill's tag, pointer included, by its words; each trap badge's disc,
+ * the circle drawn just before the wolf trap's path; and each creature's
+ * figure apart from its name, its art's box and the ring at its base.
+ */
+function crowdOnScreen(page: Page, tokenIds: readonly string[], icon: string): Promise<{ pills: { text: string; box: PageBox }[]; badges: PageBox[]; figures: { art: PageBox; rings: PageBox[] }[] }> {
+  return page.evaluate(([ids, icon]) => {
+    type Rect = { x: number; y: number; width: number; height: number };
+    type N = { id(): string; name(): string; getClassName(): string; isVisible(): boolean; getAttr(k: string): unknown; getParent(): { getChildren(): N[] } | null; getTag?(): N | undefined; getText?(): { text(): string } | undefined; find(f: string | ((n: N) => boolean)): N[]; getClientRect(o?: object): Rect };
+    const stages = (globalThis as unknown as { Konva: { stages: (N & { width(): number; visible(): boolean })[] } }).Konva.stages.filter((s) => s.width() > 0 && s.visible());
+    const box = (r: Rect) => ({ x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height });
+    const seen = new Set<string>();
+    const once = (key: string) => (seen.has(key) ? false : (seen.add(key), true));
+    const pills: { text: string; box: PageBox }[] = [];
+    const badges: PageBox[] = [];
+    const figures: { art: PageBox; rings: PageBox[] }[] = [];
+    for (const st of stages) {
+      for (const label of st.find("Label")) {
+        if (!label.isVisible()) continue;
+        const r = (label.getTag?.() ?? label).getClientRect({ skipStroke: true, skipShadow: true });
+        const text = (label.getText?.()?.text() ?? "").replace(/\n/g, " ");
+        if (r.width > 0 && once(`${text}|${Math.round(r.x)},${Math.round(r.y)}`)) pills.push({ text, box: box(r) });
+      }
+      for (const path of st.find((n) => n.getClassName() === "Path" && n.getAttr("data") === icon && n.isVisible())) {
+        const kids = path.getParent()?.getChildren() ?? [];
+        const r = (kids[kids.indexOf(path) - 1] ?? path).getClientRect({ skipShadow: true });
+        if (once(`badge ${Math.round(r.x)},${Math.round(r.y)}`)) badges.push(box(r));
+      }
+      for (const id of ids) for (const n of st.find((n) => n.id() === id)) {
+        const shapes = n.find((c) => c.isVisible() && ["Image", "Circle", "Ellipse", "Rect", "Path", "Shape"].includes(c.getClassName()));
+        const art = shapes.filter((c) => c.name() !== "standeeRing").map((c) => c.getClientRect({ skipShadow: true })).filter((r) => r.width > 0);
+        if (art.length === 0) continue;
+        const x0 = Math.min(...art.map((r) => r.x));
+        const y0 = Math.min(...art.map((r) => r.y));
+        figures.push({ art: { x0, y0, x1: Math.max(...art.map((r) => r.x + r.width)), y1: Math.max(...art.map((r) => r.y + r.height)) }, rings: shapes.filter((c) => c.name() === "standeeRing").map((c) => box(c.getClientRect({ skipShadow: true }))) });
+      }
+    }
+    return { pills, badges, figures };
+  }, [tokenIds, icon] as const);
+}
+
+/** World cells on the page through the ground plane, by way of a floor link's drawn outline (LinkLayer.tsx), which lies on it. */
+function groundOnScreen(page: Page, linkId: string, points: readonly PagePt[]): Promise<PagePt[]> {
+  return page.evaluate(([link, pts]) => {
+    type N = { getClassName(): string; getAttr(k: string): unknown; getChildren?(): N[]; find(f: (n: N) => boolean): N[]; getAbsoluteTransform(): { point(p: PagePt): PagePt } };
+    const stages = (globalThis as unknown as { Konva: { stages: (N & { width(): number })[] } }).Konva.stages.filter((s) => s.width() > 0);
+    for (const st of stages) for (const g of st.find((n) => n.getAttr("data-floor-link") === link)) {
+      const rim = (g.getChildren?.() ?? []).find((c) => c.getClassName() === "Shape");
+      if (rim) return pts.map((p) => rim.getAbsoluteTransform().point(p));
+    }
+    throw new Error(`no outline for ${link}`);
+  }, [linkId, points] as const);
+}
+
+/** The convex hull of points, which a pill covers by more than a pixel where no axis separates them (a diamond's box would count its empty corners). */
+function hullOf(points: readonly PagePt[]): PagePt[] {
+  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: PagePt, a: PagePt, b: PagePt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (list: PagePt[]) => {
+    const out: PagePt[] = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(pts), ...half(pts.reverse())];
+}
+
+function coversHull(b: PageBox, hull: readonly PagePt[]): boolean {
+  const rect = [{ x: b.x0, y: b.y0 }, { x: b.x1, y: b.y0 }, { x: b.x1, y: b.y1 }, { x: b.x0, y: b.y1 }];
+  const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }, ...hull.map((p, i) => ({ x: p.y - hull[(i + 1) % hull.length]!.y, y: hull[(i + 1) % hull.length]!.x - p.x }))];
+  return axes.every((a) => {
+    const on = (pts: readonly PagePt[]) => pts.map((p) => p.x * a.x + p.y * a.y);
+    const [r, h] = [on(rect), on(hull)];
+    return Math.min(Math.max(...r), Math.max(...h)) - Math.max(Math.min(...r), Math.min(...h)) > LIMIT_PX * Math.hypot(a.x, a.y);
+  });
+}
+
+const boxesMeet = (a: PageBox, b: PageBox) => Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > LIMIT_PX && Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > LIMIT_PX;
+
+/**
+ * Whether a box meets a creature's base ring by more than a pixel. Konva's
+ * client rect of the ring is the box round its square turned a quarter and
+ * squashed, so the ellipse is that box over the square root of 2, with its
+ * stroke round it.
+ */
+function meetsRing(b: PageBox, ring: PageBox): boolean {
+  const cx = (ring.x0 + ring.x1) / 2;
+  const cy = (ring.y0 + ring.y1) / 2;
+  const a = (ring.x1 - ring.x0) / (2 * Math.SQRT2) + 2;
+  const h = (ring.y1 - ring.y0) / (2 * Math.SQRT2) + 2;
+  const s = { x0: b.x0 + LIMIT_PX, y0: b.y0 + LIMIT_PX, x1: b.x1 - LIMIT_PX, y1: b.y1 - LIMIT_PX };
+  const px = Math.max(s.x0, Math.min(cx, s.x1));
+  const py = Math.max(s.y0, Math.min(cy, s.y1));
+  return s.x1 > s.x0 && s.y1 > s.y0 && ((px - cx) / a) ** 2 + ((py - cy) / h) ** 2 < 1;
+}
+
+function isInside(c: PagePt, hull: readonly PagePt[]): boolean {
+  const signs = hull.map((a, i) => {
+    const b = hull[(i + 1) % hull.length]!;
+    return Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+  });
+  return signs.every((k) => k >= 0) || signs.every((k) => k <= 0);
 }
 
 describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
@@ -1656,6 +1769,113 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       }
     } finally {
       await ops.send({ t: "token.delete", tokenId: raised });
+    }
+  });
+
+  test("ISOLAB-1. a crowded 8 x 6 floor, four traps, a hole and stairs and two creatures, on phones of 375 x 667 and 320 x 568 and a desk at 100% and 130%, at every turn: no name covers another pill, another trap's squares or badge, a floor link's squares or a creature, each cut short or hidden instead (LP52-ISO-NAMES-PHONE)", async () => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await context.addInitScript(HOOK_FLAG);
+    const page = await context.newPage();
+    consoles.keys.attach(page);
+    const watch = new SocketWatch("isolab");
+    await watch.attach(context, page);
+    const room = { id: "", name: `E2E isolab ${Date.now()}` };
+    let crowdOps: OpSocket | null = null;
+    try {
+      await page.goto(`${server.origin}/`);
+      await page.getByLabel("Room name").fill(room.name);
+      await page.getByLabel("Your name").fill("Dana the DM");
+      await page.getByRole("button", { name: "Create room" }).click();
+      await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
+      const link = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec((await page.locator("code").first().textContent()) ?? "");
+      assert.ok(link, "the DM link shows");
+      room.id = link[1]!.replace("-", "");
+      await page.getByLabel("I saved my DM link").check();
+      await page.getByRole("button", { name: "Continue to the room" }).click();
+      await page.locator(".konvajs-content").first().waitFor();
+      const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      crowdOps = await OpSocket.open({ origin: server.origin, roomId: room.id, cookie });
+      const nave = (await waitFor("the room's snapshot", () => watch.state)).meta.playerSceneId!;
+      const [belfry, under] = [uuidv7(), uuidv7()];
+      const bounds = { w: 8, h: 6 };
+      await crowdOps.send({ t: "scene.update", sceneId: nave, patch: { name: "Nave", bounds, fogEnabled: false } });
+      await crowdOps.send({ t: "scene.create", scene: { id: belfry, name: "Nave", bounds }, floor: { beside: nave, side: "above", besideName: "Nave", name: "Belfry" } });
+      await crowdOps.send({ t: "scene.create", scene: { id: under, name: "Nave", bounds }, floor: { beside: nave, side: "below", name: "Undercroft" } });
+      // The live play 52 floor: a hole and stairs, a trap with a long name in the far corner and one in the near, a pit beside the hole and a snare under the stairs.
+      const hole = { id: uuidv7(), rect: { x: 1, y: 2, w: 2, h: 1 } };
+      const stairs = { id: uuidv7(), rect: { x: 5, y: 1, w: 2, h: 2 } };
+      await crowdOps.send({ t: "floorLink.put", link: { id: hole.id, pairId: uuidv7(), sceneId: nave, to: under, rect: hole.rect, kind: "opening" } });
+      await crowdOps.send({ t: "floorLink.put", link: { id: stairs.id, pairId: uuidv7(), sceneId: nave, to: belfry, rect: stairs.rect, kind: "stairs" } });
+      const traps: [string, { x: number; y: number; w: number; h: number }][] = [["Hidden Pit", { x: 3, y: 2, w: 2, h: 1 }], ["Corner Dart Trap Of Long Name", { x: 7, y: 5, w: 1, h: 1 }], ["Edge snare", { x: 0, y: 0, w: 1, h: 1 }], ["Tripwire", { x: 4, y: 4, w: 1, h: 1 }]];
+      const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+      for (const [name, cell] of traps) await crowdOps.send({ t: "trap.create", trap: { id: uuidv7(), sceneId: nave, name, zone: { cells: [cell] }, rig } } as Op);
+      const creatures = [{ id: uuidv7(), name: "Rat", x: 2, y: 4 }, { id: uuidv7(), name: "Bat", x: 6, y: 3 }];
+      for (const c of creatures) await crowdOps.send(tokenOp(c.id, { sceneId: nave, kind: "monster", name: c.name, x: c.x, y: c.y, disposition: "hostile" }) as Op);
+      const corners = (r: { x: number; y: number; w: number; h: number }) => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
+      const trapOf = (text: string) => traps.find(([n]) => {
+        const head = text.replace(/…$/, "");
+        return head.length >= 4 && n.startsWith(head);
+      })?.[0];
+      const linkOf = (text: string) => (/^(Down to|\d+ ft down)/.test(text) ? "hole" : /^Up to/.test(text) ? "stairs" : undefined);
+      let shownAll = 0;
+      for (const [width, height] of [[375, 667], [320, 568], [1440, 900]] as const) {
+        for (const scale of [1, 1.3]) {
+          await page.setViewportSize({ width, height });
+          await page.evaluate((k) => localStorage.setItem("rvtt.uiScale", String(k)), scale);
+          await page.reload();
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+          for (const turn of [0, 1, 2, 3] as const) {
+            // By the hook, since a phone keeps the View button in the room's menu.
+            await page.evaluate((t) => {
+              const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
+              hook.pick("isometric");
+              hook.turn(t);
+            }, turn);
+            const at = `${width} x ${height} at ${scale * 100}%, turn ${turn}`;
+            // The layers place their pills over a few renders, each reading what the one before published, so read once two looks agree.
+            let last = "";
+            const seen = await waitFor(`${at}: the pills at rest`, async () => {
+              await page.waitForTimeout(250);
+              const now = await crowdOnScreen(page, creatures.map((c) => c.id), TRAP_ICON_PATH);
+              const key = JSON.stringify(now);
+              if (key === last && now.figures.length === creatures.length) return now;
+              last = key;
+              return null;
+            });
+            const zones = [
+              ...await Promise.all(traps.map(async ([name, r]) => ({ owner: name, hull: hullOf(await groundOnScreen(page, hole.id, corners(r))) }))),
+              { owner: "hole", hull: hullOf(await groundOnScreen(page, hole.id, corners(hole.rect))) },
+              { owner: "stairs", hull: hullOf(await groundOnScreen(page, hole.id, corners(stairs.rect))) },
+            ];
+            const crowd = seen.pills.filter((p) => trapOf(p.text) !== undefined || linkOf(p.text) !== undefined);
+            const covers: string[] = [];
+            crowd.forEach((p, i) => {
+              const owner = trapOf(p.text) ?? linkOf(p.text)!;
+              for (const q of crowd.slice(i + 1)) if (boxesMeet(p.box, q.box)) covers.push(`"${p.text}" on "${q.text}"`);
+              for (const z of zones) if (z.owner !== owner && coversHull(p.box, z.hull)) covers.push(`"${p.text}" on ${z.owner}'s squares`);
+              for (const b of seen.badges) {
+                const mine = zones.some((z) => z.owner === owner && isInside({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }, z.hull));
+                if (!mine && boxesMeet(p.box, b)) covers.push(`"${p.text}" on a badge`);
+              }
+              seen.figures.forEach((f, k) => {
+                if (boxesMeet(p.box, f.art) || f.rings.some((r) => meetsRing(p.box, r))) covers.push(`"${p.text}" on ${creatures[k]!.name}`);
+              });
+            });
+            assert.deepEqual(covers, [], `${at}: ${crowd.map((p) => p.text).join(", ")}`);
+            assert.ok(crowd.length > 0, `${at}: some name shows`);
+            if (width === 1440 && scale === 1) assert.equal(crowd.length, 7, `${at}: a desk at 100% has room for every name: ${crowd.map((p) => p.text).join(", ")}`);
+            shownAll += crowd.length;
+            if (width === 375 && scale === 1) await shots.take(page, `isolab-1-375-turn-${turn}`);
+          }
+        }
+      }
+      // Six sizes, four turns, seven pills each at most.
+      assert.ok(shownAll > 24 * 7 * 0.6, `most names show: ${shownAll} of ${24 * 7}`);
+    } finally {
+      crowdOps?.close();
+      if (room.id) await context.request.delete(`${server.origin}/api/rooms/${room.id}`, { headers: { Origin: server.origin }, data: { name: room.name } }).catch(() => null);
+      await context.close();
     }
   });
 
