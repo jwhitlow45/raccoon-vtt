@@ -5,6 +5,7 @@ import type { ClientOp, EphEvent, EphEventOut, RefusalCode } from "#shared/proto
 import type { ProjectedState } from "#shared/project.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import type { SceneLoad } from "./sceneLoad.ts";
+import type { DragMember, OutgoingDrag } from "./socket.ts";
 
 /**
  * The shapes the Room page reads, kept free of React and the DOM so the
@@ -719,6 +720,12 @@ export type RoomActions = {
    * until the person shares it, such as an AoE being aimed.
    */
   sendEph(e: EphEvent, opts?: { localOnly?: boolean }): void;
+  /**
+   * Starts a drag's previews for every token it moves (design 7.6): the
+   * pressed token drawn at `from`, and its members in the order the drag
+   * moves them. Konva draws this device's own drag, so nothing shows here.
+   */
+  startDrag(tokenId: string, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): OutgoingDrag;
   /** DM only: view another scene. The latest pick wins. */
   switchScene(sceneId: SceneId): void;
   /**

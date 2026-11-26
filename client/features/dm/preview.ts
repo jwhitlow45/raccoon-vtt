@@ -258,6 +258,8 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
       return null;
     },
     sendEph() {},
+    // A preview moves nothing, so it never drags.
+    startDrag: () => ({ move() {}, end() {}, cancel() {} }),
     switchScene() {},
     // A floor pick is the preview socket's store's own, as on the player's device: it sends nothing, and that store holds only the floors the player holds.
     showFloor(sceneId) {

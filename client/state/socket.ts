@@ -1,6 +1,6 @@
 import { historyMessageSchema } from "#shared/undoContract.ts";
 import { OP_VERSION } from "#shared/migrate.ts";
-import { serverMessageSchema, type ClientMessage, type EphEvent, type ServerMessage } from "#shared/protocol.ts";
+import { expandGroup, loneEphSchema, serverMessageSchema, type ClientMessage, type EphEvent, type GroupFrame, type GroupRoster, type PreviewPace, type ServerMessage } from "#shared/protocol.ts";
 import { mainFloorId, sameScene } from "#shared/rules/floors.ts";
 import { shouldReloadForBuild, type BuildReload } from "../lib/buildReload.ts";
 import type { RoomStore } from "./store.ts";
@@ -36,6 +36,8 @@ export const BUSY_BACKOFF_CAP_MS = 60_000;
 export const EPH_PER_SECOND = 30;
 /** Previews still in progress are repeated this often, so receivers never time them out while a finger rests. */
 export const EPH_KEEPALIVE_MS = 1_000;
+/** How early a drag's keepalive may count as due, so a timer's rounding never leaves one due but not taken. */
+const KEEPALIVE_SLACK_MS = 0.001;
 
 /*
  * What one socket lets itself send, under the server's frame budget
@@ -171,9 +173,10 @@ export type RoomSocketOptions = {
   /** requestAnimationFrame, for coalescing ephemeral frames. */
   frame?: (cb: () => void) => unknown;
   /**
-   * How many ephemeral frames a second this device sends, read at each
-   * flush: EPH_PER_SECOND, or fewer in low-power mode (features/device), which
-   * can change while the room is open.
+   * How many ephemeral frames a second each preview sends, read at each
+   * flush: EPH_PER_SECOND, or fewer in low-power mode (features/device),
+   * which can change while the room is open. On a server older than group
+   * frames it caps all of this device's previews together.
    */
   ephPerSecond?: () => number;
   /**
@@ -205,13 +208,48 @@ export type RoomSocketOptions = {
 /** How long the update note shows before the reload, so a person sees why the page went blank. */
 export const BUILD_RELOAD_NOTE_MS = 1_500;
 
+/** A token that moves with a drag's pressed token, at the spot it is drawn on as the drag starts (design 7.6). */
+export type DragMember = { readonly tokenId: string; readonly x: number; readonly y: number };
+
+type GroupMove = Extract<GroupFrame, { k: "dragMove" }>;
+
+/**
+ * One step of a drag for all its tokens: the pressed token's point, which
+ * every member moves by, its route fields or the movement lead's (`lead`),
+ * and each member's cost in member order (`fts`).
+ */
+export type DragMove = Omit<GroupMove, "k" | "tokenId" | "g" | "with" | "from">;
+
+/** Where a token of a drag lands, or null for one that ends where it stood. */
+export type DragLanding = Extract<GroupFrame, { k: "groupEnd" }>["at"][number];
+
+/** A drag's previews, from its start to its end. Once it ended, every call does nothing. */
+export type OutgoingDrag = {
+  /**
+   * A step of the drag, with where the pressed token and each member are
+   * drawn now. Those move only when a token's own spot changes during the
+   * drag, and then the drag's next message says so.
+   */
+  move(step: DragMove, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): void;
+  /** The drop: each token's landing, the pressed token's first and then the members' in order. */
+  end(at: readonly DragLanding[]): void;
+  /** The drag ended without a move. */
+  cancel(): void;
+};
+
 export type RoomSocket = {
   start(): void;
   dispose(): void;
   /** DM only: view another scene. At most one switch is in flight, and the latest pick wins. */
   switchScene(sceneId: string): void;
-  /** Sends an ephemeral event on the next animation frame, coalesced with others of the same preview. */
+  /** Sends an ephemeral event on the next animation frame, coalesced with others of the same preview. Drags go by `startDrag`. */
   sendEph(e: EphEvent): void;
+  /**
+   * Starts a drag's previews (design 7.6): the pressed token `tokenId`,
+   * drawn at `from`, and every token that moves with it, in the order the
+   * drag moves them. Its first frame goes at the next flush.
+   */
+  startDrag(tokenId: string, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): OutgoingDrag;
   /** For tests and diagnostics. */
   readonly debug: { readonly phase: Phase; readonly attempt: number };
 };
@@ -254,8 +292,64 @@ function ephSlot(e: EphEvent, unique: () => number): string {
 }
 
 /** Frames that open or continue a preview, which receivers drop after 3 s without one. */
-function keepsAlive(e: EphEvent): boolean {
+function keepsAlive(e: EphEvent | GroupFrame): boolean {
   return e.k === "dragStart" || e.k === "dragMove" || e.k === "ruler" || e.k === "aoe";
+}
+
+function isDrag(e: EphEvent): boolean {
+  return e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd" || e.k === "dragCancel";
+}
+
+/** The kinds a socket at the `off` pace still sends: the camera, focus, the laser and pings. */
+function sentWhenOff(e: EphEvent | GroupFrame): boolean {
+  return e.k === "view" || e.k === "focus" || e.k === "laser" || e.k === "ping";
+}
+
+function groupRoster(from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): GroupRoster {
+  const starts = new Float64Array(members.length * 2);
+  for (const [i, m] of members.entries()) {
+    starts[2 * i] = m.x;
+    starts[2 * i + 1] = m.y;
+  }
+  return { from: { x: from.x, y: from.y }, ids: members.map((m) => m.tokenId), starts };
+}
+
+function sameRoster(gesture: { roster: GroupRoster; members: readonly DragMember[] }, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): boolean {
+  if (gesture.roster.from.x !== from.x || gesture.roster.from.y !== from.y || gesture.members.length !== members.length) return false;
+  return members.every((m, i) => {
+    const was = gesture.members[i]!;
+    return was.tokenId === m.tokenId && was.x === m.x && was.y === m.y;
+  });
+}
+
+/**
+ * A drag's previews sent as each token's own frames, for what carries
+ * ephemeral events without a socket of its own, such as a test's room.
+ */
+export function loneDrag(tokenId: string, from: { readonly x: number; readonly y: number }, members: readonly DragMember[], send: (e: EphEvent) => void): OutgoingDrag {
+  let roster = groupRoster(from, members);
+  let done = false;
+  const out = (e: GroupFrame) => {
+    for (const one of expandGroup(e, roster)) send(one);
+  };
+  out({ k: "dragStart", tokenId, g: 0, x: from.x, y: from.y });
+  return {
+    move(step, at, now) {
+      if (done) return;
+      roster = groupRoster(at, now);
+      out({ ...step, k: "dragMove", tokenId, g: 0 });
+    },
+    end(at) {
+      if (done) return;
+      done = true;
+      out({ k: "groupEnd", tokenId, g: 0, at: [...at] });
+    },
+    cancel() {
+      if (done) return;
+      done = true;
+      out({ k: "dragCancel", tokenId, g: 0 });
+    },
+  };
 }
 
 /** The bare end of a preview's frame, for the floor the preview leaves, or null for an event that is no preview's frame. */
@@ -302,6 +396,42 @@ function timeAnswer(json: unknown): { k: number; at: number } | null {
   if (m.t !== "time" || typeof m.k !== "number" || !Number.isSafeInteger(m.k) || typeof m.at !== "number" || !Number.isFinite(m.at)) return null;
   return { k: m.k, at: m.at };
 }
+
+/**
+ * A drag in progress on this page (design 7.6). Its number `g` and its
+ * members hold for its whole life, across sockets and floors.
+ */
+type Gesture = {
+  readonly g: number;
+  readonly tokenId: string;
+  roster: GroupRoster;
+  members: readonly DragMember[];
+  /** The floor its frames go to, null before its first. */
+  sceneId: string | null;
+  /** Its latest start or move, which the keepalive repeats, or null once it ended. */
+  last: GroupFrame | null;
+  queuedAt: number;
+  /** On this socket: the floor its members were last named on, null when its next message names them. */
+  rosterOn: string | null;
+  /** On this socket: the floor of its last message sent, null before one. */
+  sentOn: string | null;
+};
+
+/** A queued message: another preview's event, or a drag's frame, which names the drag's members when it goes if the socket needs them. */
+type SlotEntry =
+  | { readonly sceneId: string | null; readonly e: EphEvent; readonly gesture?: undefined }
+  | {
+      readonly sceneId: string | null;
+      readonly e: GroupFrame;
+      readonly gesture: Gesture;
+      /** The drag's own end, after which it is gone. */
+      readonly ends: boolean;
+      /** An old floor's cancel, which goes in the same flush as the new floor's frame queued after it. */
+      readonly pair: boolean;
+    };
+
+/** One preview's queue and the times it sent in the last second. */
+type Slot = { queue: SlotEntry[]; sent: number[]; last: number };
 
 export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const { room, url } = options;
@@ -350,16 +480,33 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   let helloWhileOpen = false;
 
   // Ephemeral sending. Each event keeps the floor it was made on, the floor shown then, so a switch before the flush sends it on its own floor (docs/design/design-v1-floors.md 8.2).
+  /**
+   * What this socket's `takes` said: it sends drags as group frames, each
+   * preview paced on its own, at this pace. Null before it, and on a server
+   * older than group frames, which gets each token's own frames under one
+   * window for all, as before.
+   */
+  let takes: { pace: PreviewPace } | null = null;
+  /** Without `takes`: the latest event of each slot, sent under the one window (ephSent, lastEphFlush). */
   const ephQueue = new Map<string, { e: EphEvent; sceneId: string | null }>();
-  /** Previews in progress, by slot, with their floor and when each was last sent. */
+  /** With `takes`: each slot's queue and its own window, so what one preview sends never moves another's frames. */
+  const slots = new Map<string, Slot>();
+  /** Previews in progress other than drags, by slot, with their floor and when each was last sent. */
   const openPreviews = new Map<string, { e: EphEvent; sceneId: string | null; sentAt: number }>();
+  /** Drags in progress, and ended ones whose end is still queued, by gesture number. */
+  const gestures = new Map<number, Gesture>();
+  /** Every drag of this page takes a new number, kept across sockets, since a drag goes on through a reconnect. */
+  let nextGesture = 0;
   let ephFrameScheduled = false;
   const ephDelay = new Timer(clock);
   const keepAliveTimer = new Timer(clock);
+  const dragKeepAliveTimer = new Timer(clock);
   const ephSent: number[] = [];
   let lastEphFlush = Number.NEGATIVE_INFINITY;
   let pingSlot = 0;
   let ephScene: string | null = null;
+  /** Kinds already reported, so a malformed frame sent 30 times a second logs once. */
+  const reported = new Set<string>();
 
   const role = () => room.store.getState().you?.role ?? "player";
   const previewOf = options.previewOf;
@@ -398,15 +545,17 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
    * that does not fit is not sent: it waits in the outbox, pending and so
    * saving, until the budget has room for it. Every other frame goes at once,
    * since a hello, a ping or a preview is small and late would be wrong, and
-   * the ops after it wait that much longer.
+   * the ops after it wait that much longer. A server that `takes` group
+   * frames counts previews apart from every other frame, so they are sent
+   * outside the budget (`budgeted` false) and leave all of it to ops.
    */
-  function sendRaw(msg: ClientMessage, paced = false): boolean {
+  function sendRaw(msg: ClientMessage, paced = false, budgeted = true): boolean {
     if (!ws || ws.readyState !== OPEN) return false;
     if (previewOf !== undefined && msg.t !== "hello" && msg.t !== "ping") return false;
     const data = JSON.stringify(msg);
-    const bytes = utf8.encode(data).length;
-    if (!paced) budget.force(bytes);
-    else if (!budget.take(bytes)) {
+    const bytes = budgeted ? utf8.encode(data).length : 0;
+    if (budgeted && !paced) budget.force(bytes);
+    else if (budgeted && !budget.take(bytes)) {
       paceTimer.set(budget.waitFor(bytes), () => room.flushOutbox());
       return false;
     }
@@ -437,6 +586,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     ws = socket;
     // The server's budget is per connection, and a new one starts full.
     budget = new SendBudget(clock);
+    // So is what it holds of each drag's members. What the last socket was told, and each preview's window, went with it (detach).
+    for (const gesture of gestures.values()) {
+      gesture.rosterOn = null;
+      gesture.sentOn = null;
+    }
     socket.onopen = () => {
       if (ws !== socket) return;
       openTimer.clear();
@@ -478,6 +632,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     sceneInFlight = false;
     helloWhileOpen = false;
     ephQueue.clear();
+    // Queued ends go with the socket, whose close the server ends its previews by, and so does each preview's window.
+    // A drag still in progress goes on on the next.
+    takes = null;
+    dropSlots();
     // A first load the server held said "Still loading…": without the socket it is connecting again.
     room.trackScene({ t: "lost" });
     room.suspend();
@@ -719,7 +877,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     if (msg.you.sceneId !== ephScene) {
       ephScene = msg.you.sceneId;
       openPreviews.clear();
+      gestures.clear();
       keepAliveTimer.clear();
+      dragKeepAliveTimer.clear();
     }
     flushEph();
     considerBuildReload();
@@ -820,6 +980,19 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       case "build":
         newerBuild = msg.opVersion;
         return;
+      case "takes":
+        takes = { pace: msg.pace };
+        // Only a server that never said `takes` fills this queue, and it is not this one.
+        ephQueue.clear();
+        // A drag's own frames from before go as its group frames from now on.
+        for (const slot of openPreviews.keys()) if (slot.startsWith("drag:")) openPreviews.delete(slot);
+        // A raised pace sends from each preview's next frame or keepalive, and a drag's carries its members, which nothing sent at `off` named.
+        return;
+      case "need": {
+        const gesture = gestures.get(msg.g);
+        if (gesture && gesture.tokenId === msg.id) gesture.rosterOn = null;
+        return;
+      }
       case "pong":
         if (unansweredK !== null && msg.k >= unansweredK) {
           unansweredK = null;
@@ -835,8 +1008,13 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
   // ------------------------------------------------------------ ephemeral
 
+  function ephRate(): number {
+    return Math.min(EPH_PER_SECOND, Math.max(1, options.ephPerSecond?.() ?? EPH_PER_SECOND));
+  }
+
   function scheduleEphFlush(): void {
-    if (ephFrameScheduled || ephDelay.pending) return;
+    // Without `takes`, a window still closed holds every slot until its timer.
+    if (ephFrameScheduled || (!takes && ephDelay.pending)) return;
     ephFrameScheduled = true;
     frame(() => {
       ephFrameScheduled = false;
@@ -845,17 +1023,26 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   }
 
   /**
-   * At most one flush per animation frame and at most 30 frames a second
-   * (design 7.6). Within a flush each slot sends its latest event only.
+   * At most one flush per animation frame (design 7.6). With `takes`, each
+   * slot sends at most one message per flush, 30 a second (fewer in low
+   * power) with a gap between, on its own window, so how many previews or
+   * members this device has never moves the frames of another. Without it,
+   * as an older server needs, all slots share the one window and each slot
+   * sends its latest event only.
    */
   function flushEph(): void {
+    if (takes) flushSlots();
+    else flushQueue();
+  }
+
+  function flushQueue(): void {
     if (ephQueue.size === 0) return;
     if (phase !== "open") {
       ephQueue.clear();
       return;
     }
     const now = clock.now();
-    const rate = Math.min(EPH_PER_SECOND, Math.max(1, options.ephPerSecond?.() ?? EPH_PER_SECOND));
+    const rate = ephRate();
     // Frames land on the display's refresh, so a gap of exactly 1/30 s would
     // often wait one refresh too many. The window below is the hard cap.
     const gap = (1000 / rate) * 0.8;
@@ -878,6 +1065,144 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     if (ephQueue.size > 0) scheduleEphFlush();
   }
 
+  /** Empties every slot, and forgets each drag whose end was waiting in one. `windows` false keeps what each sent, for the same socket. */
+  function dropSlots(windows = true): void {
+    if (windows) slots.clear();
+    else for (const slot of slots.values()) slot.queue = [];
+    for (const [g, gesture] of gestures) if (gesture.last === null) gestures.delete(g);
+  }
+
+  function flushSlots(): void {
+    // Nothing goes between a resync's hello and its snapshot, as without `takes`.
+    if (phase !== "open") {
+      dropSlots(false);
+      return;
+    }
+    const now = clock.now();
+    const rate = ephRate();
+    const gap = (1000 / rate) * 0.8;
+    let waiting = false;
+    for (const [key, slot] of slots) {
+      while (slot.sent.length > 0 && now - slot.sent[0]! >= 1000) slot.sent.shift();
+      const head = slot.queue[0];
+      if (!head) {
+        if (slot.sent.length === 0) slots.delete(key);
+        continue;
+      }
+      // An old floor's cancel and the new floor's frame go together, the cancel first, as the server needs them.
+      const n = head.gesture && head.pair && slot.queue.length > 1 && rate >= 2 ? 2 : 1;
+      const over = slot.sent.length + n - rate;
+      const due = Math.max(slot.last + gap - now, over > 0 ? slot.sent[over - 1]! + 1000 - now : 0);
+      if (due > 0) {
+        waiting = true;
+        continue;
+      }
+      slot.last = now;
+      for (const entry of slot.queue.splice(0, n)) if (sendEntry(key, entry)) slot.sent.push(now);
+      waiting ||= slot.queue.length > 0;
+    }
+    // A slot that waits looks again at each frame, not at a timer, so it goes at the first frame it may, whatever other slots wake.
+    if (waiting) scheduleEphFlush();
+  }
+
+  function sendEntry(key: string, entry: SlotEntry): boolean {
+    // One made with no floor shown has nowhere to go.
+    if (entry.sceneId === null) return false;
+    if (!entry.gesture) {
+      if (!sendRaw({ t: "eph", sceneId: entry.sceneId, e: entry.e }, false, false)) return false;
+      const open = openPreviews.get(key);
+      if (open) open.sentAt = clock.now();
+      return true;
+    }
+    const gesture = entry.gesture;
+    if (entry.ends) gestures.delete(gesture.g);
+    // The drag's first message on this socket names its members, and so does its first on a floor and its next after `need`.
+    const named = gesture.rosterOn !== entry.sceneId;
+    const e: GroupFrame = named ? { ...entry.e, with: gesture.members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })), from: { ...gesture.roster.from } } : entry.e;
+    if (!sendRaw({ t: "eph", sceneId: entry.sceneId, e }, false, false)) return false;
+    if (named) gesture.rosterOn = entry.sceneId;
+    gesture.sentOn = entry.sceneId;
+    return true;
+  }
+
+  function slotOf(key: string): Slot {
+    let slot = slots.get(key);
+    if (!slot) {
+      slot = { queue: [], sent: [], last: Number.NEGATIVE_INFINITY };
+      slots.set(key, slot);
+    }
+    return slot;
+  }
+
+  /** Whether a slot holds something still to send. */
+  function queued(key: string): boolean {
+    return takes ? (slots.get(key)?.queue.length ?? 0) > 0 : ephQueue.has(key);
+  }
+
+  function gestureSlot(gesture: Gesture): string {
+    return `drag:${gesture.tokenId}#${gesture.g}`;
+  }
+
+  /**
+   * A drag's frame, for every token it moves. The end goes to the floor its
+   * frames went to, and a frame on another floor than the last ends the
+   * drag on that floor first, as `sendEph` does for every preview.
+   */
+  function stepGesture(gesture: Gesture, e: GroupFrame): void {
+    if (gestures.get(gesture.g) !== gesture) return;
+    const keeps = keepsAlive(e);
+    const shown = room.store.getState().sceneId;
+    const sceneId = !keeps && gesture.sceneId !== null ? gesture.sceneId : shown;
+    const left = keeps && gesture.sceneId !== null && gesture.sceneId !== shown ? gesture.sceneId : null;
+    gesture.sceneId = sceneId;
+    gesture.last = keeps ? e : null;
+    gesture.queuedAt = clock.now();
+    armDragKeepAlive();
+    if (phase === "open") {
+      if (takes) queueGroup(gesture, e, sceneId, left);
+      else queueLone(gesture, e, sceneId, left);
+      scheduleEphFlush();
+    }
+    // An end that waits in a slot keeps its drag until it goes.
+    if (!keeps && !queued(gestureSlot(gesture))) gestures.delete(gesture.g);
+  }
+
+  function queueGroup(gesture: Gesture, e: GroupFrame, sceneId: string | null, left: string | null): void {
+    // An `off` socket sends no drag at all. Its drag still counts its frames, so a raised pace goes on from the next.
+    if (takes?.pace === "off") return;
+    const slot = slotOf(gestureSlot(gesture));
+    if (left !== null) {
+      // What waits for the floor left never goes, and the server ends there only what it was sent.
+      slot.queue = slot.queue.filter((q) => !(q.gesture && !q.ends && !q.pair && q.sceneId === left));
+      if (gesture.sentOn === left) slot.queue.push({ sceneId: left, e: { k: "dragCancel", tokenId: gesture.tokenId, g: gesture.g }, gesture, ends: false, pair: true });
+    }
+    // A move replaces a queued move. A start is never replaced, and an end goes after the move before it.
+    const tail = slot.queue.at(-1);
+    if (e.k === "dragMove" && tail?.gesture && tail.e.k === "dragMove" && tail.sceneId === sceneId) slot.queue.pop();
+    slot.queue.push({ sceneId, e, gesture, ends: !keepsAlive(e), pair: false });
+  }
+
+  /** For a server older than group frames: each token's own frames, each passing the lone check, as the page sent them before. */
+  function queueLone(gesture: Gesture, e: GroupFrame, sceneId: string | null, left: string | null): void {
+    for (const one of expandGroup(e, gesture.roster)) {
+      if (!loneEphSchema.safeParse(one).success) {
+        if (!reported.has(one.k)) {
+          reported.add(one.k);
+          console.error("raccoon: refusing to send a malformed ephemeral event", one);
+        }
+        continue;
+      }
+      const slot = ephSlot(one, () => ++pingSlot);
+      const end = left !== null ? endOf(one) : null;
+      if (left !== null && end) {
+        // Out of the queue first, so the old floor's end goes before the new floor's frame, the order the server needs.
+        ephQueue.delete(slot);
+        ephQueue.set(`${slot}@${left}`, { e: end, sceneId: left });
+      }
+      ephQueue.set(slot, { e: one, sceneId });
+    }
+  }
+
   function armKeepAlive(): void {
     if (openPreviews.size === 0) {
       keepAliveTimer.clear();
@@ -887,11 +1212,56 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     keepAliveTimer.set(EPH_KEEPALIVE_MS, () => {
       const now = clock.now();
       for (const [slot, open] of openPreviews) {
-        if (now - open.sentAt >= EPH_KEEPALIVE_MS && !ephQueue.has(slot)) ephQueue.set(slot, { e: open.e, sceneId: open.sceneId });
+        if (now - open.sentAt >= EPH_KEEPALIVE_MS && !queued(slot)) queueEph(slot, open.e, open.sceneId, null);
       }
       scheduleEphFlush();
       armKeepAlive();
     });
+  }
+
+  /**
+   * A drag held still repeats its last frame a keepalive after its last,
+   * each on its own time, so when one drag repeats never moves another's.
+   */
+  function armDragKeepAlive(): void {
+    let next = Number.POSITIVE_INFINITY;
+    for (const gesture of gestures.values()) if (gesture.last !== null) next = Math.min(next, gesture.queuedAt + EPH_KEEPALIVE_MS);
+    if (next === Number.POSITIVE_INFINITY) {
+      dragKeepAliveTimer.clear();
+      return;
+    }
+    dragKeepAliveTimer.set(Math.max(0, next - clock.now()), () => {
+      const now = clock.now();
+      for (const gesture of gestures.values()) {
+        const last = gesture.last;
+        if (last === null || now < gesture.queuedAt + EPH_KEEPALIVE_MS - KEEPALIVE_SLACK_MS) continue;
+        // Counted as sent whether or not it can go now, so a closed socket's drag waits a keepalive again.
+        gesture.queuedAt = now;
+        if (phase !== "open" || queued(takes ? gestureSlot(gesture) : `drag:${gesture.tokenId}`)) continue;
+        if (takes) queueGroup(gesture, last, gesture.sceneId, null);
+        else queueLone(gesture, last, gesture.sceneId, null);
+      }
+      scheduleEphFlush();
+      armDragKeepAlive();
+    });
+  }
+
+  /** Queues another preview's event, its slot's latest, after the old floor's end where the preview left one. */
+  function queueEph(slot: string, e: EphEvent, sceneId: string | null, left: EphEvent | null): void {
+    const leftOn = left ? openPreviews.get(slot)?.sceneId : null;
+    if (!takes) {
+      if (left && leftOn) {
+        // Out of the queue first, so the old floor's end goes before the new floor's frame, the order the server needs.
+        ephQueue.delete(slot);
+        ephQueue.set(`${slot}@${leftOn}`, { e: left, sceneId: leftOn });
+      }
+      ephQueue.set(slot, { e, sceneId });
+      return;
+    }
+    if (takes.pace === "off" && !sentWhenOff(e)) return;
+    // The old floor's end in a slot of its own goes at the next flush, so never after the new floor's frame.
+    if (left && leftOn) slotOf(`${slot}@${leftOn}`).queue = [{ e: left, sceneId: leftOn }];
+    slotOf(slot).queue = [{ e, sceneId }];
   }
 
   // ------------------------------------------------------------ the socket object
@@ -925,7 +1295,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       reconnectTimer.clear();
       ephDelay.clear();
       keepAliveTimer.clear();
+      dragKeepAliveTimer.clear();
       openPreviews.clear();
+      gestures.clear();
       unsubscribeEnv?.();
       unsubscribeEnv = null;
       unsubscribeStore?.();
@@ -971,6 +1343,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     },
 
     sendEph(e) {
+      // A page that takes group frames sends a drag only as one, by startDrag.
+      if (takes && isDrag(e)) return;
       const slot = ephSlot(e, () => ++pingSlot);
       const shown = room.store.getState().sceneId;
       const open = openPreviews.get(slot);
@@ -979,21 +1353,51 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       // only the old floor keeps it until its own timeout (docs/design/design-v1-floors.md 8.2).
       const sceneId = !keepsAlive(e) && open ? open.sceneId : shown;
       const left = open && open.sceneId !== null && open.sceneId !== shown ? endOf(e) : null;
-      if (keepsAlive(e)) {
-        openPreviews.set(slot, { e, sceneId, sentAt: open?.sentAt ?? Number.NEGATIVE_INFINITY });
-        armKeepAlive();
-      } else {
-        openPreviews.delete(slot);
-        armKeepAlive();
-      }
-      if (phase !== "open") return;
-      if (left && open?.sceneId) {
-        // Out of the queue first, so the old floor's end goes before the new floor's frame, the order the server needs.
-        ephQueue.delete(slot);
-        ephQueue.set(`${slot}@${open.sceneId}`, { e: left, sceneId: open.sceneId });
-      }
-      ephQueue.set(slot, { e, sceneId });
-      scheduleEphFlush();
+      if (phase === "open") queueEph(slot, e, sceneId, left);
+      if (keepsAlive(e)) openPreviews.set(slot, { e, sceneId, sentAt: open?.sentAt ?? Number.NEGATIVE_INFINITY });
+      else openPreviews.delete(slot);
+      armKeepAlive();
+      if (phase === "open") scheduleEphFlush();
+    },
+
+    startDrag(tokenId, from, members) {
+      const g = nextGesture++;
+      const gesture: Gesture = {
+        g,
+        tokenId,
+        roster: groupRoster(from, members),
+        members: members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })),
+        sceneId: null,
+        last: null,
+        queuedAt: Number.NEGATIVE_INFINITY,
+        rosterOn: null,
+        sentOn: null,
+      };
+      gestures.set(g, gesture);
+      let done = false;
+      stepGesture(gesture, { k: "dragStart", tokenId, g, x: from.x, y: from.y });
+      return {
+        move(step, at, now) {
+          if (done) return;
+          if (!sameRoster(gesture, at, now)) {
+            // A token's own spot moved during the drag, so the next message names the members again from where they now stand.
+            gesture.roster = groupRoster(at, now);
+            gesture.members = now.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y }));
+            gesture.rosterOn = null;
+          }
+          stepGesture(gesture, { ...step, k: "dragMove", tokenId, g });
+        },
+        end(at) {
+          if (done) return;
+          done = true;
+          stepGesture(gesture, { k: "groupEnd", tokenId, g, at: [...at] });
+        },
+        cancel() {
+          if (done) return;
+          done = true;
+          stepGesture(gesture, { k: "dragCancel", tokenId, g });
+        },
+      };
     },
 
     debug: {

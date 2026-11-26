@@ -1,6 +1,6 @@
 import { clientMessageSchema, outboundEph, type ClientOp, type EphEvent } from "#shared/protocol.ts";
 import { moveOps } from "../lib/group.ts";
-import type { RoomSocket } from "./socket.ts";
+import { loneDrag, type RoomSocket } from "./socket.ts";
 import type { RoomStore } from "./store.ts";
 import type { RoomActions } from "./types.ts";
 
@@ -33,8 +33,11 @@ export function dispatchGesture(actions: Pick<RoomActions, "dispatch" | "newId">
   return sent;
 }
 
-/** Room actions over a store and whatever carries its messages: the live socket, or the dev fixture's local server. */
-export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sendEph" | "switchScene">): RoomActions {
+/**
+ * Room actions over a store and whatever carries its messages: the live socket, or the dev fixture's local server.
+ * A carrier without `startDrag` gets each drag as every token's own frames.
+ */
+export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sendEph" | "switchScene"> & Partial<Pick<RoomSocket, "startDrag">>): RoomActions {
   /** Kinds already reported, so a broken preview sending 30 frames a second logs once. */
   const reported = new Set<string>();
   const actions: RoomActions = {
@@ -55,6 +58,7 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
       if (!drag) room.recordLocalEph(outboundEph(e));
       if (!opts?.localOnly) socket.sendEph(e);
     },
+    startDrag: (tokenId, from, members) => (socket.startDrag ? socket.startDrag(tokenId, from, members) : loneDrag(tokenId, from, members, (e) => actions.sendEph(e))),
     switchScene: (sceneId) => socket.switchScene(sceneId),
     showFloor: (sceneId) => room.showFloor(sceneId),
     // Undo while a gesture waits takes back that gesture, which the server never saw, and sends no undo.
