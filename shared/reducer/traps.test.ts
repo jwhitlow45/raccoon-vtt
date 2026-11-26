@@ -412,6 +412,19 @@ describe("Apply settles a springing per creature (6.2)", () => {
     assert.ok(!run(done, outcome(["bree"], ["bree"], "p6"), 11).ok, "one no longer waiting");
   });
 
+  test("from change format 66 a whole Apply on an occurrence that names creatures is refused and changes nothing, and one stored at 65 replays whole", () => {
+    for (const opVersion of [undefined, 66]) {
+      const r = run(hit(), outcome(undefined, ["thorn"]), 9, opVersion);
+      assert.ok(!r.ok && r.message === SETTLED_MEANWHILE, `at ${opVersion ?? "live"}`);
+    }
+    for (const opVersion of [65, 64, 1]) {
+      const r = run(hit(), outcome(undefined, ["thorn"]), 9, opVersion);
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      assert.deepEqual(waiting(r.state).map((d) => d.id), ["6:0"], `stored at ${opVersion}: the whole occurrence settles, Bree too`);
+      assert.equal(hp(r.state, "thorn"), 17);
+    }
+  });
+
   test("a whole Apply on an occurrence that names no one settles it, live and at 66: a pick page's count, and one that hits no one", () => {
     for (const due of [{ hits: [], hitsMore: 51 }, { hits: [] }]) {
       for (const opVersion of [undefined, 66, 65]) {

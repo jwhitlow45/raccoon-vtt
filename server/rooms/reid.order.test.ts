@@ -100,7 +100,7 @@ describe("lists kept in id order after the first load's new ids (reid.ts inIdOrd
       const hits = h.actor.committed.state.traps[trapId]!.rig!.due![0]!.hits;
       assert.deepEqual(hits, [NEW.thug, NEW.bandit], "in the order of the new ids");
       // The DM's rows keep this order, the names tying, so the outcome's targets do too.
-      const ev = await dm.apply({ t: "actor.outcome", plan: uuidv7(), trap: { trapId, due: DUE }, targets: hits.map((id) => ({ target: { tokenId: id }, amount: 3 })) });
+      const ev = await dm.apply({ t: "actor.outcome", plan: uuidv7(), trap: { trapId, due: DUE, tokenIds: hits }, targets: hits.map((id) => ({ target: { tokenId: id }, amount: 3 })) });
       assert.equal(ev.rejects, undefined);
       reads.push(p1Reads(h.actor.committed.state, w.p1.id));
     }

@@ -35,7 +35,7 @@ import { ASK_LOST, FORGET_ASK, MAX_NOTES, type Op, type OpOf, type ServerMessage
 import { JOIN_CHANGED, WING_MOVED, type WingClear } from "#shared/rules/wingClear.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, scene as testScene, template as testTemplate, token as testToken } from "#shared/testutil.ts";
+import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, scene as testScene, template as testTemplate, token as testToken, trap as testTrap } from "#shared/testutil.ts";
 import { ASK_CHAIN_MS, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { RESERVED_ID } from "#shared/reducer/tx.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
@@ -364,6 +364,92 @@ describe("replaying ops from before a rule tightened", () => {
       await actor.shutdown({ code: 1012, snapshot: false });
     } finally {
       db.freeze();
+    }
+  });
+});
+
+describe("a trap's Apply per creature across the deploy of change format 66 (docs/design/design-v1-traps.md 6.2)", () => {
+  /** Hidden Pit hit Thorn and Bree, whom the DM moved to another scene before Apply. */
+  function pitRoom(dm: Member) {
+    const state = createInitialState({ roomName: "Pit", dm });
+    const sceneId = state.meta.playerSceneId!;
+    const away = uuidv7();
+    state.scenes[away] = testScene(away, { name: "Cellar", order: 1 });
+    const thorn = uuidv7();
+    const bree = uuidv7();
+    state.tokens[thorn] = testToken(thorn, { sceneId, name: "Thorn", x: 4, y: 4, actor: { inline } });
+    state.tokens[bree] = testToken(bree, { sceneId: away, name: "Bree", actor: { inline } });
+    const due = "3:0";
+    const trapId = uuidv7();
+    const base = testTrap(trapId, { sceneId });
+    state.traps = { [trapId]: { ...base, rig: { ...base.rig!, damage: [{ formula: "1d6", type: "bludgeoning" }], due: [{ id: due, at: new Date().toISOString(), how: "enter", by: [thorn], hits: [bree, thorn].sort() }] } } };
+    const hp = (s: RoomState, id: string) => {
+      const a = s.tokens[id]!.actor;
+      return "inline" in a ? a.inline.hp.cur : null;
+    };
+    return { state, sceneId, thorn, bree, trapId, due, hp };
+  }
+
+  test("a new page settles Thorn, then an old page's queued whole Apply for Thorn is refused: Thorn takes it once, and Bree stays on the card", async () => {
+    const dm = member("DM", "dm");
+    const room = pitRoom(dm);
+    const db = new FakeDb({ state: room.state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const fresh = connect(actor, dm);
+      const old = connect(actor, dm);
+      await hello(actor, fresh.conn, { clientId: "new", resumeFrom: 1 });
+      await hello(actor, old.conn, { clientId: "old", resumeFrom: 1 });
+      const damage = [{ target: { tokenId: room.thorn }, amount: 3 }];
+      await actor.op(fresh.conn, 1, { t: "actor.outcome", plan: uuidv7(), trap: { trapId: room.trapId, due: room.due, tokenIds: [room.thorn] }, targets: damage });
+      const first = await answerTo(fresh.sent, 1);
+      assert.ok(first !== "stuck");
+      assert.equal(first.rejects, undefined);
+      await actor.op(old.conn, 1, { t: "actor.outcome", plan: uuidv7(), trap: { trapId: room.trapId, due: room.due }, targets: damage });
+      const second = await answerTo(old.sent, 1);
+      assert.ok(second !== "stuck");
+      assert.deepEqual(second.rejects, [{ n: 1, code: "invalid", message: "It was settled meanwhile." }]);
+      const committed = actor.committed.state;
+      assert.equal(room.hp(committed, room.thorn), 4, "Thorn took the pit's damage once");
+      assert.deepEqual(committed.traps[room.trapId]!.rig!.due!.map((d) => d.hits), [[room.bree]], "Bree's wait is kept");
+      assert.equal(room.hp(committed, room.bree), 7);
+      await actor.shutdown({ code: 1012, snapshot: false });
+    } finally {
+      db.freeze();
+    }
+  });
+
+  test("a whole Apply stored at change format 65 replays whole, and the same op live is refused", async () => {
+    const dm = member("DM", "dm");
+    const room = pitRoom(dm);
+    const op = { t: "actor.outcome", plan: uuidv7(), trap: { trapId: room.trapId, due: room.due }, targets: [{ target: { tokenId: room.thorn }, amount: 3 }] };
+    const opRows = [{ seq: "1", at: new Date(), actor_member_id: dm.id, actor_role: "dm", op, op_version: 65, pub: "1" }];
+    const db = new FakeDb({ state: room.state, opRows, dmGrants: [dm.id] });
+    try {
+      const actor = await within(2_000, RoomActor.load(deps(db)));
+      assert.ok(actor !== "stuck" && actor !== null, "the load finished");
+      assert.equal(actor.replayFailed, false);
+      assert.equal(actor.committed.state.traps[room.trapId]!.rig!.due, undefined, "the whole springing settled, Bree too, as it ran");
+      assert.equal(room.hp(actor.committed.state, room.thorn), 4);
+      await actor.shutdown({ code: 1012, snapshot: false });
+    } finally {
+      db.freeze();
+    }
+    const fresh = pitRoom(dm);
+    const again = new FakeDb({ state: fresh.state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(again));
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(table.conn, 1, { ...op, trap: { trapId: fresh.trapId, due: fresh.due }, targets: [{ target: { tokenId: fresh.thorn }, amount: 3 }] });
+      const answer = await answerTo(table.sent, 1);
+      assert.ok(answer !== "stuck");
+      assert.deepEqual(answer.rejects, [{ n: 1, code: "invalid", message: "It was settled meanwhile." }]);
+      await actor.shutdown({ code: 1012, snapshot: false });
+    } finally {
+      again.freeze();
     }
   });
 });

@@ -298,7 +298,7 @@ test("tracked trap outcome restores only its exact occurrence and refuses change
   const base = trap("pit");
   before.traps.pit = { ...base, state: "sprung", rig: { ...base.rig!, due: [{ id: "1:900000", at: AT, how: "enter", by: ["dragon"], hits: ["dragon"] }] } };
   const id = uuidv7(time);
-  const op = { ...outcome(id), trap: { trapId: "pit", due: "1:900000" } };
+  const op = { ...outcome(id), trap: { trapId: "pit", due: "1:900000", tokenIds: ["dragon"] } };
   const applied = accepted(before, op);
   assert.equal(applied.state.traps.pit!.rig!.due, undefined);
   const back = accepted(applied.state, restore(id, id, 1, "undo", applied.inverse!), 2);

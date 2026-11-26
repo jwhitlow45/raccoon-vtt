@@ -3,6 +3,7 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { type LogEntry, type LogEvent, type RoomState, type Scene, type Token, type TokenId, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
+import { trapSettlesNamed } from "../migrate.ts";
 import { cellWord, isHex, sceneGrid, shapeOfGrid, type Grid } from "../rules/grid.ts";
 import { hexInScene, sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
@@ -259,7 +260,10 @@ export function settleTrap(tx: Tx, trapId: string, dueId: string, sprung = false
  * and its effects never run.
  *
  * Without `tokenIds` an outcome settles the occurrence whole, as every op
- * stored before change format 66 did and replays so.
+ * stored before change format 66 did and replays so. From 66 one that
+ * names creatures refuses it, since a page from before that, whose queued
+ * Apply goes out before it reloads, would hurt a creature applied since
+ * again and end the wait of one on another scene (trapSettlesNamed).
  */
 export function settleTrapOutcome(tx: Tx, settle: { trapId: string; due: string; tokenIds?: readonly TokenId[] }, targets: readonly { target: ActorTarget }[] = []): void {
   const trap = ownEntry(tx.state.traps, settle.trapId);
@@ -267,6 +271,7 @@ export function settleTrapOutcome(tx: Tx, settle: { trapId: string; due: string;
   if (!trap || !due) throw invalid(SETTLED_MEANWHILE);
   const ids = settle.tokenIds;
   if (ids === undefined) {
+    if (due.hits.length > 0 && trapSettlesNamed(tx.env.opVersion)) throw invalid(SETTLED_MEANWHILE);
     writeSettled(tx, trap, due.id, false);
     return;
   }
