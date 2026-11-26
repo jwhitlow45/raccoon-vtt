@@ -110,6 +110,12 @@ When you type on a phone, the field and the buttons that go with it rise to sit 
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back. Above the row, a line tells you what the tool is doing or what it found. While the app is still working something out, such as a long walk or a search for a map's grid, that line says so in muted words beside a small spinner, such as "Finding the way…", and keeps its place, so nothing on the map jumps when the answer comes. Something that didn't work, such as "No grid found.", reads in the warning color.
 
+**Tap or click.** A device whose main pointer is a mouse or trackpad words the app's lines with "Click" where a phone says "Tap": "Click again to delete", "Click the caster.", "Click anywhere to start the sound." This guide quotes the phone's words and adds the mouse's where a line is one you will need to find. A name keeps the words you gave it, so a pin page called "Tap Room" stays as it is.
+
+**Buttons that ask twice.** **Clear all** in Draw, **Fog all** and **Reveal all** in Fog, **Clear build** in the map builder and a stamp's **Delete** change nothing the first time you press them. The button turns red and asks again, such as "Tap again: fog all" ("Click again: fog all" with a mouse), and the second press does it. If you don't press again within a few seconds, it goes back to what it was. When one of them waits behind **⋯**, the pop-up widens to hold the whole question, so no word is cut off.
+
+![A narrow window used with a mouse: the Fog tool's More options pop-up open, with Draft and Live, then Fog all turned red and reading "Click again: fog all", and Reveal all below it.](dm-guide/armed-confirm.webp)
+
 **Buttons tell you their keys.** On a computer, rest the pointer on a button, and its name appears with its key, such as **Fog (F)**, **Change the view (I)** or a token's **Hidden (H)**. A few buttons carry the key in their own words: the View menu's **Turn left (Q)** and **Turn right (E)**, **Show the shortcuts (?)** in **This device**, and the Outliner's **Search the scene (/)**. If you move a key to another one in the shortcut list, the buttons name your key instead. A phone or tablet shows the keys once you press one on a keyboard joined to it, and from then on it names them all, as a computer does.
 
 **Gray means "not right now".** A control you can't use at the moment is drawn in gray, and so is everything on a page that is waiting for something, such as a roll request while it sends, a class resource or a journal page while it saves, a pin while its **Done** goes through, or a group save that is checking with the server or has lost its connection. A menu opened from such a page grays its choices too, and they do nothing. The words that say how things stand keep their colors, so you can still read the page while you wait, and everything comes back once the wait is over.
@@ -169,6 +175,8 @@ These steps run a first session with one map, a few monsters and one fight, and 
 7. When the fight is over, press **End the fight** in Initiative, and tap it again to confirm.
 
 If you make a mistake along the way, **Undo** takes back what you did at the table or on the board, even a whole encounter you dropped on the map. Changes to a saved stat block, a scene's settings or the room's settings are taken back in **Setup history** instead, in the Menu (see [Undo, Redo and Setup history](#undo-redo-and-setup-history)).
+
+If the server updates while you play, a page on older code reloads itself once. It shows "RaccoonVTT was updated. Reloading…", waits until your changes are saved and no new creature is still waiting on the server's answer, and then reloads. A change a page on older code tries to add in the meantime may read "Not saved. This page is out of date. Reload it and try again."
 
 ## Use what helps your table
 
@@ -1096,6 +1104,8 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 Tap a token with the **Select** tool to open its **action bar**, which holds what you do to a token most often during play. For everything else about it, open the **Token** panel.
 
+Objects and markers draw under creatures, and a larger token draws under a smaller one, so a Medium creature standing on a Huge one stays in sight. Filled shapes you draw sit under lines and outlines, and text sits over both, so a fill never covers what is drawn or written on it. Of two filled boxes that overlap, the lower one on the map draws over the other.
+
 On a computer, a tablet or a phone held sideways, the bar opens as a window at the bottom right of the map. You can drag it by its header to move it out of your way.
 
 On a phone held upright, the bar rests as a strip across the foot of the map. It shows the token's name with its AC and HP under it, and one row of the controls you use most: the HP entry and **Apply**, with a **Use 9** chip once someone has rolled damage, then as many of **Conditions**, **Roll**, **Multi-select**, **Uses** and **Hidden** as fit. The sign before the HP field says what a plain number does, − for damage or + for healing, and a tap switches between them. To set the HP or add Temporary HP, pick **Set** or **Temp** in the expanded bar, or type the math, such as `=20` or `t5`. After Set or Temp, the sign shows = or T, and a tap on it goes back to −. The strip stays where it is while you pan, so you can bring any token into view above it, and when it opens it moves the map just far enough to keep its token in sight.
@@ -1199,7 +1209,7 @@ For more control over a condition, use **Add** in the **Conditions** section of 
 - **Spell**, for Concentrating ("Concentrating: Bless").
 - **Duration**: a number of rounds, until the start or end of a chosen creature's next turn, or, while a clock runs, a length of time such as 8 hours (see [Timed effects](#timed-effects)). A count of turns goes down as Initiative moves, and everyone is told when any duration ends.
 - **A Wisdom save at the end of each of its turns ends it**, with the save and its DC, for conditions such as Hold Person's. See [Alerts during a fight](#alerts-during-a-fight).
-- **Hidden from players**: nobody but you sees the condition, not even the creature's owner, and the log shows it to you alone.
+- **Hidden from players**: nobody but you sees the condition, not even the creature's owner, and the log shows it to you alone. Hiding a condition players could see reads to them as its removal, and showing it reads as its add. A save card for a hidden condition says "Poisoned is hidden from players. Asking shows Bree a save against it." and its own roll starts secret.
 - **Custom status**: your own label, an icon of up to 2 characters or an emoji, and a color.
 
 A creature can carry up to 32 conditions and statuses your players can see, and 32 more that you hide from them. The Unconscious it gets as it falls to 0 HP and starts dying counts in neither, and damage is never refused.
@@ -1550,7 +1560,7 @@ Started from an area, the page fills itself in from the spell and its caster: "F
 1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **Player view** sums up on one line whether players see the DC and the pass or fail, just as it does in Request a roll. Open it to change either. **Against a spell** gives creatures with Magic Resistance their Advantage.
 2. Check the damage (`8d6 Fire`). **On a pass** is **Half** or **None**. **On a fail** can add up to three conditions, with how long they last and an optional save at the end of each turn.
 3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
-4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed. Hold the button, right-click it or press `Shift+F10` on it for one roll with Advantage, Disadvantage, in secret or normally. The pick rolls the monsters this time only and never moves **Hide the monsters' rolls from players**, except on a page the pick itself just opened from **Saves for 4**, whose switch starts as the dice it sent. The players you ask still roll their own way.
+4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed. Hold the button, right-click it or press `Shift+F10` on it for one roll with Advantage, Disadvantage, in secret or normally. The pick rolls the monsters this time only and never moves **Hide the monsters' rolls from players**, except on a page the pick itself just opened from **Saves for 4**, whose switch starts as the dice it sent. The players you ask still roll their own way. When you have already marked every row **Fail**, **Pass** or **Skip**, nothing is left to roll or ask, so the button reads "Freeze the rows" and moves on with the rows as you set them.
 5. In **Damage**, press **Roll** to roll the dice, type amounts such as `28 fire + 14 radiant`, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row shows the damage it takes after its save and defenses. The damage **Roll** has the one-roll menu with **Roll secretly**, except for a player's spell, whose damage stays in the open.
 6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back." Press **Done** to close the page.
 
@@ -1725,6 +1735,8 @@ The label tells you a few more things:
 **Arrow keys and groups.** The arrow keys move the selected token one square at a time. They never walk around a wall, but they still count what they cross, so a step into rubble costs 10 ft. When you drag several tokens at once, they move in straight lines without looking for a way around, so drag the creature whose turn it is on its own when its movement matters.
 
 **The edge of the map.** A player's token dropped past the edge of the map lands on the nearest spot inside it, with its whole space on the map, and so does one moved with the arrow keys or in a group. On a hex scene it lands on the nearest hex that holds all of it, and a group dragged past an edge keeps its shape and slides along it. The server also refuses any move of a player's that would end outside the map. Your own drops are not held to it, so you can still park a token off the map, and a token you left there earlier, or that a smaller scene cut off, can be dragged back in by a player.
+
+![A player's phone after Thorn, a Large creature, was dropped past the map's right edge: Thorn stands against the edge with its whole space on the map.](dm-guide/map-edge.webp)
 
 **Between squares.** Sometimes a token should sit a little off its square, such as a rider leaning forward on a mount or a swarm spread across a room. Hold Alt (Option on a Mac) while you drag it, or on a phone tap **Place freely** in its bar and then drag. It stays where you let go, up to 3/8 of a square off its square, or 1/8 for a Tiny token, which already sits on half squares. The rules still count it in the square it would snap to, so its distance, its reach, the areas it stands in and the walls it crosses all read that square. A dashed outline shows that square whenever it matters: while the token is selected or being dragged, while a ruler starts or stops on it, and while an area you are aiming covers it. Tap **Snap to grid** in its bar to put it back, or drag it to another square, which snaps it as every drag does. On a phone with a large map fitted to the screen a square is only about 17 px wide, so zoom in first to place a token within its own square.
 
@@ -2004,6 +2016,20 @@ The **DM** chip in the top bar opens a menu of what you reach for during play, o
 - **Map phase** and **Preview** hold the scene's phases and **View as** each player. **Time** and **Now playing** join the menu once their chips have left a crowded bar.
 
 When the screens are dark, the **Players see black** chip opens its own menu. **End the blackout** lifts it. While you look at another scene, **Show players** and the scene's name moves the players there and lifts the blackout in one step, which is the reveal you built the scene for. If the move is refused, or a co-DM moves the players first, the blackout stays on and the menu says why, so no one sees the old scene lit. A player's chip opens a short menu of their own with their characters' sheets and the X-card, and **Volume** too once their speaker has left the bar.
+
+### The X-card
+
+The X-card lets anyone at the table say, without a word of explanation, that something should stop or be left out. **X-card** sits at the top of the **Menu** panel for you and for every player, and on a player's phone it is also in the menu their own chip opens. Tapping it opens a small card, and only a tap on the card's large X sends it, so a stray tap never does.
+
+Once it is sent, every device in the room shows the same card, the sender's included: "Someone used the X-card. Edit out what just happened, with no questions asked." The sender's menu closes, so their screen looks like everyone else's, and a table display shows the card too. The app saves nothing about the tap, not even in the Log, so nobody at the table, you included, can tell who sent it. Nothing covers the card: a handout you show while it is up waits until the card is dismissed, and a player behind the pause screen still has the X-card and sees the card as everyone does.
+
+![A player's phone after someone sent the X-card: the card slides up from the bottom with the large X, "Someone used the X-card. Edit out what just happened, with no questions asked." and Dismiss.](dm-guide/x-card.webp)
+
+Your card has two buttons more. **Pause the game** blacks out the players' screens (see [The DM menu](#the-dm-menu)), and **Stop the sound**, while anything plays, stops the music, the background sounds and every effect, however short, since it is a safety stop.
+
+![The DM's card on a computer: the same words with Dismiss and Pause the game.](dm-guide/x-card-dm.webp)
+
+A tap within 10 seconds of a card joins that card instead of showing another, and each device can send the X-card up to 6 times an hour. The X-card is John Stavropoulos's safety tool, credited on the About page.
 
 ### View as a player
 
