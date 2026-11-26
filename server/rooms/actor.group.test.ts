@@ -9,7 +9,7 @@ import { PreviewPool, SnapshotBudget } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { MOST_PREVIEWS_SENT } from "./ephemeral.ts";
-import { CANCEL_SENDS, CANCELS_SENDS, heldSends, MAX_VERSIONS } from "./gestures.ts";
+import { CANCEL_SENDS, CANCELS_SENDS, heldSends, HONEST_MEMBER_SENDS, MAX_VERSIONS } from "./gestures.ts";
 import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
 /*
@@ -541,6 +541,51 @@ describe("each member's share of the room's held frames (D-261126-265)", () => {
       { k: "dragEnd", tokenId: "m0", x: 11, y: 10 },
       { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
     ]);
+  });
+
+  test("an honest member's whole stall waits whole: a drag from A to B to A a second apart and its end, the next drag, a ruler, a laser and a camera", async (t) => {
+    const r = await room(t);
+    const dm = socketOf(r, r.f.dm, "dm");
+    await hello(r, dm, uuidv7());
+    const A = r.f.sceneId;
+    send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 10, y: 10 } });
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    const from = r.p1.sent.length;
+    const moves = (floor: string, x: number) => {
+      for (let i = 0; i < 3; i++) send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: x + i / 4, y: 10 }, floor);
+    };
+    moveTo(t, r.clock, T + 21);
+    moves(A, 11);
+    // Each floor change a second apart: the cancel on the floor left, then the roster on the floor reached.
+    for (const [at, left, reached] of [[T + 100, A, "vault"], [T + 1_100, "vault", A]] as const) {
+      moveTo(t, r.clock, at);
+      send(r, dm.conn, { k: "dragCancel", tokenId: "m0", g: 1 }, left);
+      send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 12, y: 10, with: [{ tokenId: "m1", x: 11, y: 10 }], from: { x: 10, y: 10 } }, reached);
+      moves(reached, 12);
+    }
+    moveTo(t, r.clock, T + 1_700);
+    send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 13, y: 10 }, { x: 14, y: 10 }] });
+    send(r, dm.conn, { k: "dragStart", tokenId: "m2", g: 2, x: 12, y: 10, with: [{ tokenId: "m3", x: 13, y: 10 }], from: { x: 12, y: 10 } });
+    send(r, dm.conn, { k: "dragMove", tokenId: "m2", g: 2, x: 12.5, y: 10 });
+    send(r, dm.conn, { k: "ruler", id: "r1", points: [{ x: 10, y: 10 }, { x: 15, y: 10 }], shared: true });
+    send(r, dm.conn, { k: "rulerEnd", id: "r1" });
+    for (let i = 0; i < 60; i++) {
+      send(r, dm.conn, { k: "laser", x: 10 + i / 60, y: 12, on: true });
+      send(r, dm.conn, { k: "view", x: 10 + i / 60, y: 10, w: 20, h: 12 });
+    }
+    assert.deepEqual([r.actor.heldOf(dm.conn).frames, r.actor.heldOf(dm.conn).memberSends], [12 + 120, HONEST_MEMBER_SENDS], "every frame waits, counted as the envelope counts it");
+    moveTo(t, r.clock, T + 1_820);
+    r.gate.open();
+    await flush();
+    const got = ephs(r.p1.sent.slice(from));
+    assert.deepEqual(got.filter((e) => e.k === "dragEnd" || e.k === "dragStart"), [
+      { k: "dragEnd", tokenId: "m0", x: 13, y: 10 },
+      { k: "dragEnd", tokenId: "m1", x: 14, y: 10 },
+      { k: "dragStart", tokenId: "m2", x: 12, y: 10 },
+      { k: "dragStart", tokenId: "m3", x: 13, y: 10 },
+    ]);
+    assert.deepEqual(got.filter((e) => e.k === "dragMove" && e.tokenId === "m2"), [{ k: "dragMove", tokenId: "m2", x: 12.5, y: 10 }]);
   });
 
   test("a DM's view as a player counts in the DM's share, never the player's", async (t) => {
