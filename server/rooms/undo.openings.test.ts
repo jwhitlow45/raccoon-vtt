@@ -5,7 +5,7 @@ import type { AreaTemplate, FallRecord, RoomState, Token, Viewer } from "#shared
 import { projectState } from "#shared/project.ts";
 import type { Op, RestoreEntry } from "#shared/protocol.ts";
 import { LINK_WORDS } from "#shared/rules/floorLinks.ts";
-import { DM, token } from "#shared/testutil.ts";
+import { DM, actor, character, token } from "#shared/testutil.ts";
 import { fallsKept, fallsRestored, TRAPPED_ON_THE_WAY, UndoStacks, withoutFallCards } from "./undo.ts";
 import { UndoTable } from "./undoTesting.ts";
 
@@ -374,3 +374,92 @@ describe("the helpers (4.5)", () => {
   });
 });
 
+
+describe("a creature falls once a step, and the undo keeps a card for one it leaves below (change format 67)", () => {
+  /** Shade, the DM's character at 20 HP, which every player may move here (Players move any), Upper floor reached. */
+  function shaded(state: RoomState, ...tokens: Token[]): RoomState {
+    const s = anyToken(withTokens(state, ...tokens));
+    return { ...s, characters: { ...s.characters, shade: character("shade", { name: "Shade", ownerIds: [], actor: actor() }) }, openFloors: { [UPPER]: { sceneId: UPPER, rev: 1 } } };
+  }
+  const shade = (id: string, over: Partial<Token> = {}): Token => up(id, { kind: "pc", name: "Shade", actor: { ref: "shade" }, ...over });
+  const names = (t: UndoTable, id: string) => {
+    const card = t.state.falls?.[id];
+    return card && [card.tokenId, ...(card.riders ?? [])];
+  };
+  const hp = (t: UndoTable) => t.state.characters.shade!.actor.hp.cur;
+
+  /**
+   * Ana walks Shade's token S past a trapdoor on Upper floor that does not stop her and onto the hole. The trapdoor drops
+   * H, Shade's other token, which the DM hid, so the drop is unseen and her step is her own, and S joins H's card.
+   */
+  function past(): UndoTable {
+    const td = trapdoor("td1", { zone: { cells: [{ x: 9, y: 6, w: 1, h: 1 }] }, rig: { ...trapdoor().rig!, stops: false, foundOnSpring: false } });
+    const t = new UndoTable(withTrapdoor(shaded(withOpening(tower({ tokens: {} })), shade("h-shade", { x: 9, y: 6, visibility: "dm" }), shade("s-shade", { x: 11, y: 6 })), td));
+    assert.equal(t.play(ANA, { t: "token.move", tokenId: "s-shade", x: 6, y: 6, route: [[9, 6, 0, 0], [6, 6, 0, 0]] }), "ok");
+    assert.deepEqual([where(t, "h-shade")?.sceneId, where(t, "s-shade")?.sceneId], [GROUND, GROUND]);
+    assert.equal(step(t).trapped, undefined, "Ana saw nothing of the drop");
+    return t;
+  }
+
+  test("Ana's undo of a root that joined the card of Shade's hidden token leaves it whole, and after the DM's Apply her redo asks nothing again", () => {
+    const t = past();
+    const [fallId, ...more] = cardIds(t);
+    assert.deepEqual([names(t, fallId!), more.length], [["h-shade", "s-shade"], 0], "one card for Shade");
+    assert.deepEqual(step(t).falls?.map((f) => [f.tokenId, f.fallId]), [["s-shade", fallId]]);
+    assert.equal(t.undo(ANA), "ok");
+    assert.equal(where(t, "s-shade")?.sceneId, UPPER);
+    assert.deepEqual(names(t, fallId!), ["h-shade", "s-shade"], "H still below, so Shade stays on the card whole");
+    assert.deepEqual(step(t, ANA, "redo").falls?.map((f) => f.card), [undefined], "the undo took nothing off");
+    assert.equal(t.play(DM, { t: "actor.outcome", plan: "p1", fall: { fallId: fallId!, tokenIds: ["h-shade"] }, targets: [{ target: { tokenId: "h-shade" }, amount: 3 }] }), "ok");
+    assert.deepEqual([hp(t), cardIds(t)], [17, []]);
+    assert.equal(t.redo(ANA), "ok");
+    assert.equal(where(t, "s-shade")?.sceneId, GROUND);
+    assert.deepEqual([hp(t), cardIds(t)], [17, []], "Shade took the fall once");
+  });
+
+  /** Ana's horse carries a goblin onto the hole, one card naming both, and the DM then changes the goblin so her undo leaves it below. */
+  function ridden(goblin: Partial<Token>, after: Op): { t: UndoTable; fallId: string } {
+    const t = new UndoTable(withTokens(holed({ x: 15, y: 15 }), up("horse", { size: "large", ownerIds: ["p1"], x: 2, y: 6 }), up("goblin", { x: 2, y: 6, attached: { to: "horse", kind: "ride" }, ...goblin })));
+    assert.equal(t.play(ANA, move("horse", 6, 6)), "ok");
+    const [fallId] = cardIds(t);
+    assert.deepEqual(t.state.falls?.[fallId!]?.riders, ["goblin"]);
+    assert.equal(t.play(DM, after), "ok");
+    return { t, fallId: fallId! };
+  }
+
+  const leftBelow: [string, Partial<Token>, Op][] = [
+    ["a rider the DM hid after the fall", {}, { t: "token.update", tokenId: "goblin", patch: { visibility: "dm" } }],
+    ["a hidden rider the DM took off the mount", { visibility: "dm" }, { t: "token.detach", tokenId: "goblin", x: 8, y: 6, elevation: 0 }],
+  ];
+
+  for (const [name, goblin, after] of leftBelow) {
+    test(`${name}: the root's undo keeps the card naming the rider, and the redo puts the root back after it`, () => {
+      const { t, fallId } = ridden(goblin, after);
+      assert.equal(t.undo(ANA), "ok");
+      assert.deepEqual([where(t, "horse")?.sceneId, where(t, "goblin")?.sceneId], [UPPER, GROUND]);
+      assert.deepEqual(names(t, fallId), ["goblin"], "the goblin's fall still waits");
+      assert.deepEqual(step(t, ANA, "redo").falls?.map((f) => f.card && [f.card.tokenId, f.card.riders]), [["horse", undefined]], "the redo carries the horse alone");
+      assert.equal(t.redo(ANA), "ok");
+      assert.deepEqual(names(t, fallId), ["goblin", "horse"]);
+    });
+
+    test(`${name}: after the DM applies the rider's fall, the redo writes the root's card`, () => {
+      const { t, fallId } = ridden(goblin, after);
+      assert.equal(t.undo(ANA), "ok");
+      assert.equal(t.play(DM, { t: "actor.outcome", plan: "p1", fall: { fallId, tokenIds: ["goblin"] }, targets: [{ target: { tokenId: "goblin" }, amount: 3 }] }), "ok");
+      assert.deepEqual(cardIds(t), []);
+      assert.equal(t.redo(ANA), "ok");
+      assert.deepEqual(names(t, fallId), ["horse"]);
+    });
+  }
+
+  test("fallsRestored carries the part of a card the undo took off: all of it where it went, none where it lost no one", () => {
+    const record: FallRecord = { tokenId: "horse", linkId: "o1", rev: 0, made: 90, from: UPPER, to: GROUND, fallId: "7:0" };
+    const card = { id: "7:0", rev: 0, tokenId: "horse", riders: ["goblin", "rat"], sceneId: GROUND, from: UPPER, ft: 10, made: 7 };
+    const before = { ...tower(), falls: { "7:0": card } };
+    const trimmed = { ...tower(), falls: { "7:0": { ...card, rev: 1, tokenId: "goblin", riders: undefined } } };
+    assert.deepEqual(fallsRestored([record], "undo", before, trimmed), [{ ...record, card: { ...card, tokenId: "horse", riders: ["rat"] } }]);
+    assert.deepEqual(fallsRestored([record], "undo", before, tower()), [{ ...record, card }]);
+    assert.deepEqual(fallsRestored([record], "undo", before, before), [record]);
+  });
+});

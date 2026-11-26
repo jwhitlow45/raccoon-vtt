@@ -68,4 +68,20 @@ describe("a step's fall records (FLR4-SOL-02)", () => {
     await ana.restore("play", "redo");
     assert.deepEqual(new Set(floors()), new Set([GROUND]), "the redo takes them down again");
   });
+
+  test("both of Thorn's tokens in one group move onto the hole make one card, which Ana's undo takes away and her redo writes once", async (t) => {
+    const base = withOpening(tower());
+    const state: RoomState = { ...base, tokens: { thorn: { ...base.tokens.thorn!, sceneId: UPPER, x: 6, y: 4 }, thorn2: { ...base.tokens.thorn!, id: "thorn2", sceneId: UPPER, x: 7, y: 4 } } };
+    const { actor, connect } = await scopeActor(t, state, { idGate: false });
+    const ana = await connect(state.members.p1!, "player");
+    const now = () => actor.committed.state;
+    const cards = () => Object.values(now().falls ?? {}).map((c) => [c.tokenId, ...(c.riders ?? [])]);
+    await ana.apply({ t: "token.moveMany", moves: [{ tokenId: "thorn", x: 6, y: 6 }, { tokenId: "thorn2", x: 7, y: 7 }] } satisfies Op);
+    assert.deepEqual(cards(), [["thorn", "thorn2"]], "one card for Thorn");
+    await ana.restore("play", "undo");
+    assert.deepEqual([now().tokens.thorn!.sceneId, now().tokens.thorn2!.sceneId, cards()], [UPPER, UPPER, []]);
+    await ana.restore("play", "redo");
+    assert.deepEqual([now().tokens.thorn!.sceneId, now().tokens.thorn2!.sceneId, cards()], [GROUND, GROUND, [["thorn", "thorn2"]]], "both records carried the card, written once");
+  });
 });
+
