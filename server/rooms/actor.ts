@@ -756,6 +756,8 @@ export class RoomActor {
    * map step measured every layer (#remember) clears it.
    */
   #capsPending = false;
+  /** The owed measure as the stored snapshot row holds it (caps_pending), so a stop stores the room once a batch that stored no op cleared it (#writeNow). */
+  #storedCapsPending = false;
   #snapshotSeq: number;
   #opsSinceSnapshot = 0;
   #snapshotTimer: NodeJS.Timeout | null = null;
@@ -1029,6 +1031,7 @@ export class RoomActor {
     if (reid) actor.#countSnapshotDue = false;
     if (capsPending) {
       actor.#capsPending = true;
+      actor.#storedCapsPending = true;
       actor.#sizes.capsUnmeasured();
     }
     await actor.reconcileKinds();
@@ -3964,7 +3967,7 @@ export class RoomActor {
     if (batch.ops.length > 0) this.#opsSinceSnapshot += batch.ops.length;
     // Its quota check runs without holding the queue, as a deletion step's does.
     if (write.snapshot) {
-      this.#snapshotStored(write.snapshot.seq);
+      this.#snapshotStored(write.snapshot.seq, write.snapshot.capsPending === true);
       void this.#recheckQuota();
     }
     release?.();
@@ -4259,12 +4262,16 @@ export class RoomActor {
     }
   }
 
-  /** A write of the committed state as it stands, at a stop or by a test's count, unless one is running or the stored one is current. */
+  /**
+   * A write of the committed state as it stands, at a stop or by a test's
+   * count, unless one is running or the stored one is current: its seq, and
+   * its owed measure, which a batch of refusals alone can clear with no op.
+   */
   #writeNow(): Promise<void> {
     if (this.#snapshotting) return this.#snapshotting;
     if (this.replayFailed) return Promise.resolve();
     const { state, seq } = this.#committed;
-    if (seq <= this.#snapshotSeq) return Promise.resolve();
+    if (seq <= this.#snapshotSeq && this.#capsPending === this.#storedCapsPending) return Promise.resolve();
     let json: string;
     try {
       json = snapshotJson(state);
@@ -4290,7 +4297,7 @@ export class RoomActor {
         await writeSnapshotJson(this.#pool, this.roomId, seq, json, capsPending);
         landed = true;
         this.#writesFailing = false;
-        this.#snapshotStored(seq);
+        this.#snapshotStored(seq, capsPending);
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
         if (!this.#writesFailing) {
@@ -4317,9 +4324,10 @@ export class RoomActor {
    * (#countSnapshot), and the rows to replay start after it. The size guard
    * is not told: it measures the staged state at each close (#shed).
    */
-  #snapshotStored(seq: number): void {
+  #snapshotStored(seq: number, capsPending: boolean): void {
     this.#countSnapshotDue = false;
     this.#snapshotSeq = seq;
+    this.#storedCapsPending = capsPending;
     this.#opsSinceSnapshot = this.#committed.seq - seq;
   }
 

@@ -258,3 +258,32 @@ test("a batch whose every-layer measure is refused with its forgetting leaves th
   await restartStored(t, again, { snapshot: true }, { idGate: false, mapStep: failing(0) });
   assert.equal(db.snapshot.capsPending, true, "the stop's snapshot still owes the measure");
 });
+
+test("a batch of refusals alone whose measure clears the owed mark stores the mark cleared at the stop, though no op was stored", async (t) => {
+  const { state, sceneId } = overShare();
+  // A share the party's layer fits, so the measure forgets nothing.
+  state.memoryShared = { [sceneId]: { sceneId, rev: 0, share: 10 * charge(state, sceneId) } };
+  const db = new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 });
+  const first = await storedActor(t, db, { idGate: false, mapStep: failing(1) });
+  // A batch that remembers what the party sees, whose measure fails, then a stop that stores the room still marked.
+  const again = await restartStored(t, first, { snapshot: false, flush: false }, { idGate: false, mapStep: failing(1) });
+  const dm = await again.connect(dmOf(state));
+  assert.equal((await dm.apply({ t: "scene.update", sceneId: otherScene(again.actor.committed.state, sceneId), patch: { name: "Elsewhere" } })).rejects, undefined);
+  const step = failing(0);
+  const third = await restartStored(t, again, { snapshot: true }, { idGate: false, mapStep: step });
+  assert.deepEqual([db.snapshot.seq, db.snapshot.capsPending], [third.actor.committed.seq, true]);
+  const seq = third.actor.committed.seq;
+  const dm3 = await third.connect(dmOf(state));
+  const refused = await dm3.send({ t: "scene.update", sceneId: "no-such-scene", patch: { name: "Nowhere" } });
+  assert.equal(refused.rejects?.length, 1);
+  assert.equal(step.measures, 1, "the refusal's batch measured every layer");
+  assert.equal(third.actor.committed.seq, seq, "and stored no op");
+  const writes = db.snapshotWrites;
+  const fourth = await restartStored(t, third, { snapshot: true }, { idGate: false, mapStep: failing(0) });
+  assert.deepEqual([db.snapshotWrites, db.snapshot.seq, db.snapshot.capsPending], [writes + 1, seq, false], "the stop stored the mark cleared");
+  const later = failing(0);
+  const fifth = await restartStored(t, fourth, { snapshot: true }, { idGate: false, mapStep: later });
+  const dm5 = await fifth.connect(dmOf(state));
+  assert.equal((await dm5.apply({ t: "scene.update", sceneId: otherScene(fifth.actor.committed.state, sceneId), patch: { name: "Elsewhere still" } })).rejects, undefined);
+  assert.equal(later.measures, 0, "a load after it measures only what moved");
+});
