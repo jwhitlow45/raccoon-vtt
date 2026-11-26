@@ -588,7 +588,8 @@ export class SnapshotBudget {
     }
     this.#sweep(now);
     const over = this.#overSince.get(sessionId);
-    if (over === undefined) {
+    // A session that stopped asking for a whole abuse window starts a new clock, whenever the sweep last ran.
+    if (over === undefined || now - over.last > this.limits.abuseMs) {
       this.#overSince.set(sessionId, { since: now, last: now });
       return false;
     }

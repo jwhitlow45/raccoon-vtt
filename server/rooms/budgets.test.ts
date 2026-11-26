@@ -264,6 +264,25 @@ describe("SnapshotBudget", () => {
     assert.equal(b.request("s1", true), false);
   });
 
+  test("a session that stopped asking for longer than the abuse window starts a new clock, with no sweep between", () => {
+    const c = clock(0);
+    const b = new SnapshotBudget({ abuseMs: 30_000 }, c.now);
+    assert.equal(b.request("s1", true), false);
+    c.tick(40_000);
+    assert.equal(b.request("s1", true), false, "two delayed requests 40 s apart are not abuse");
+    c.tick(29_000);
+    assert.equal(b.request("s1", true), false, "29 s from the new clock's start");
+    c.tick(2_000);
+    assert.equal(b.request("s1", true), true, "requests kept up for 30 s still are");
+    // Kept up every 10 s for 30 s, the same.
+    for (const at of [0, 10_000, 20_000]) {
+      c.tick(at === 0 ? 50_000 : 10_000);
+      assert.equal(b.request("s2", true), false, `at ${at}`);
+    }
+    c.tick(10_000);
+    assert.equal(b.request("s2", true), true);
+  });
+
   test("a session may have twice as many requests waiting at once as it may hold sockets, and an address likewise", () => {
     assert.deepEqual([DEFAULT_SNAPSHOT_BUDGET.sessionWaiting, DEFAULT_SNAPSHOT_BUDGET.ipWaiting], [2 * DEFAULT_SOCKET_CAPS.perSession, 2 * DEFAULT_SOCKET_CAPS.perIp]);
     const b = new SnapshotBudget({ sessionWaiting: 2, ipWaiting: 3 }, () => 0);
