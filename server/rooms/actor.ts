@@ -44,6 +44,7 @@ import { rideEndOps } from "./rideEnd.ts";
 import { cancelLost, cancelPreviews, holdsPreview, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOps, floorsExplored } from "./explore.ts";
 import { buildSnapshot, publishBatch, takeKeptRejects, type Reject, type Restored, type Stamped } from "./fanout.ts";
+import { compactLink, wholeLink, type ViewLink } from "./viewRing.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
   ARCHIVE_ALWAYS,
@@ -728,7 +729,7 @@ export class RoomActor {
   /** The clocks the command being handled was queued with, which its number, its lines' times and `lastOpAt` come from. */
   #moment: Moment | null = null;
   /** The published views readers answer from (#keepView), oldest first, the load's first until it ages out. */
-  #views: Array<{ view: RoomView; load: boolean }>;
+  #views: Array<{ view: RoomView; load: boolean; link: ViewLink }>;
   /** Readers waiting for their tick to be covered (asOf), at most MAX_WAITING_READERS. */
   #waiting = new Set<Waiter>();
   /** Each socket's live frames held until their ticks are covered, in arrival order (ephemeral). */
@@ -919,7 +920,7 @@ export class RoomActor {
     this.#numberClock = this.#opts.numberClock ?? this.#opts.now;
     this.#ownNumberClock = (this.#opts.numberClock ?? null) !== null;
     // The load's view answers every reader that arrived before it, since nothing changed while the room was unloaded.
-    this.#views = [{ view: { tick: this.#readerTick(this.loadedAt), ...this.#committed }, load: true }];
+    this.#views = [{ view: { tick: this.#readerTick(this.loadedAt), ...this.#committed }, load: true, link: wholeLink(this.#committed.state) }];
     this.#standingClock = this.#opts.standingClock === true;
     // A clock set back across a restart, or an imported file, leaves numbers ahead of it, and the room counts by one
     // until the clock passes them. The operator is told once, as the room loads.
@@ -1591,11 +1592,13 @@ export class RoomActor {
   #keepView(view: RoomView): void {
     // Each published state keeps alive what was worked out for it, such as each scene's sight (shared/rules/vision.ts
     // keys its results by the state), outside those caches' byte caps. Readers and frames nearly always take the newest
-    // view, so a view a newer one follows keeps a copy of its state's fields: the same room to read, while the published
-    // state and what was worked out for it go once nothing else holds them.
+    // view, so a view a newer one follows keeps only what it differs by from that one (viewRing.ts): the same room to
+    // read, while the published state, what was worked out for it and its copies of the records a batch wrote go once
+    // nothing else holds them.
+    const link = wholeLink(view.state);
     const newest = this.#views.at(-1);
-    if (newest) this.#views[this.#views.length - 1] = { ...newest, view: { ...newest.view, state: { ...newest.view.state } } };
-    this.#views.push({ view, load: false });
+    if (newest) this.#views[this.#views.length - 1] = { ...newest, view: { ...newest.view, state: compactLink(newest.link, link) } };
+    this.#views.push({ view, load: false, link });
     const floor = this.#numberClock() - RETAIN_MS;
     let first = this.#views.findIndex((entry) => !entry.load && entry.view.tick >= floor);
     if (first < 0) first = this.#views.length;
