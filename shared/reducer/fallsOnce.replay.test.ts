@@ -20,7 +20,8 @@ import { AT, DM, actor, character, token } from "../testutil.ts";
  * undo and redo, and Ana's horse falling with a hidden rider that the
  * undo leaves below. The fixture holds each room and its ops as stored,
  * the undo and redo built from the stored run as the server built them,
- * and a hash of every result at each format. Write it again with
+ * and a hash of every result at each format, against which the same ops
+ * as live ops land otherwise. Write it again with
  * REPLAY_FALLS_ONCE=write only from the build the stored ops were written
  * by.
  */
@@ -170,6 +171,21 @@ describe("stored ops of change formats 64 to 66 replay to what they made (fallsO
     assert.deepEqual(cardsAfter(horse!, 0).sort(), ["horse shade1", "shade2"]);
     assert.deepEqual([cardsAfter(group!, 0).length, cardsAfter(group!, 1).length, cardsAfter(group!, 2).length], [2, 0, 2]);
     assert.deepEqual([cardsAfter(rider!, 0), cardsAfter(rider!, 1)], [["horse goblin"], []]);
+  });
+
+  test("live, each op on the room as format 66 left it lands otherwise where two tokens of one character fall, and the rider's undo", () => {
+    // Each op reads the room its stored run left before it, so one op's change never moves what the next is asked on.
+    const differs: string[] = [];
+    for (const [i, c] of pinned.chains.entries()) {
+      let state = c.initial;
+      for (const [k, s] of c.ops.entries()) {
+        const old = resultHash(state, s, 66);
+        if (resultHash(state, s, undefined).hash !== old.hash) differs.push(`${i}:${k}`);
+        state = old.state;
+      }
+    }
+    // Every first op folds, and of the undos only the one that leaves its rider below keeps a card.
+    assert.deepEqual(differs, ["0:0", "1:0", "2:0", "3:0", "4:0", "5:0", "6:1"]);
   });
 
   test("the pinned rooms are the rooms this file builds, so a change to the fixtures shows here", () => {
