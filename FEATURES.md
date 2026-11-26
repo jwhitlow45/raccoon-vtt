@@ -725,6 +725,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 ### Several tokens at once
 
 - Select several tokens with Shift or Ctrl and a click (Cmd on a Mac), with "Multi-select" in a token's action bar or the Initiative panel, or with a box drag: Shift or Ctrl and a drag on empty map with a mouse, or any drag on empty map while Multi-select is on. Drag any of them to move them all.
+- One drag moves at most 100 tokens, counting the selected tokens and everything they carry. A drag of more says "Drag at most 100 tokens at once." and moves nothing, and the selection stays. The arrow keys move a group of any size.
 - With Multi-select on, a tap on empty map hides the group's action bar and keeps the group, and "Actions" in the Multi-select bar brings it back. A tap on a token in the group takes it out. Done ends Multi-select and lets go of the group, and so do Escape and Android's Back while the bar is hidden.
 - The group's action bar offers one HP entry for all of them, Conditions, and elevation up and down 5 ft.
 - The DM also gets Roll, which opens the Dice panel's group rolls, Request a roll, Hidden, Locked, Start a fight or Add to the fight (objects stay out of the fight), Delete, and More: ring color, size, layer, image, how players see HP, hiding names from players, "Always visible, even under fog", and owners.
