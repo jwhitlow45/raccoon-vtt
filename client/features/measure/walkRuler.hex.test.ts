@@ -4,6 +4,7 @@ import type { RoomState } from "#shared/model.ts";
 import { hexAnchor, occupiedHexes } from "#shared/rules/footprint.ts";
 import { hexCenter, hexKey, type Hex } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
+import { heights } from "#shared/discoveryTestutil.ts";
 import { measureWalk } from "./walkRuler.ts";
 
 /**
@@ -35,6 +36,16 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.ok(m.legs[0]!.corners.length > 0, "it bends");
       assert.ok(m.totalFt > 50, `${m.totalFt} ft: longer than the 50 ft straight through the rock`);
       assert.equal(m.totalFt % 5, 0, "whole hexes");
+    });
+
+    test("a walk onto a rise no stairs reach holds on the hex before its foot, not through none (LP42R-FOLLOW 2)", () => {
+      const s = hexWallRoom(shape, bounds.w, bounds.h, []);
+      s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: false };
+      // A band of hexes 10 ft up across the whole run from 9 to 12.
+      heights(s, g.orient === "rows" ? { x: 9, y: 0, w: 4, h: H } : { x: 0, y: 9, w: H, h: 4 }, 10);
+      const m = measureWalk({ view: s, sceneId: "s1", stops: [hexCenter(g, at(4, 8)), hexCenter(g, at(11, 8))], viewer: { role: "player" }, everything: false })!;
+      assert.equal(m.legs[0]!.none, false, "a leg that walks to the foot");
+      assert.equal(m.totalFt, 20, "four hexes, from 4 to 8 along the run, the last hex before the rise");
     });
 
     test("from open ground it starts on the hex under its first stop, wherever in that hex the stop lies", () => {
