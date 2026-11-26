@@ -141,8 +141,9 @@ function nameOf(tx: Tx, token: Token): string {
  * Go up or Go down (`token.climb`, 3): the creature takes the end on its
  * floor to the same squares of the other floor, on the ground its far end
  * keeps, with what sits on it and their areas. A squeezed climber keeps its
- * squeeze only where its full space would leave the squares, and its
- * placement between squares goes. Its path folds the turn's legs and adds
+ * squeeze only where its full space would leave the end's squares or, from
+ * op version 67 on squares, the floor it lands on (climbKeepsSqueeze), and
+ * its placement between squares goes. Its path folds the turn's legs and adds
  * the climb as a leg of its own (withPath). What it drags stays, and the
  * link pass lets it go, as at a teleport. Fly up and Fly down take an
  * opening the same way, for a creature in the air under or over it

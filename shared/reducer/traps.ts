@@ -354,9 +354,10 @@ function openBelow(tx: Tx, trap: Trap): boolean {
 
 /**
  * A trapdoor's drop (4.6, D-261119-112): each victim (`dropVictims`) whose
- * space lies inside the floor below (`spaceInScene`) falls there onto the
- * ground under its space, full size unless its full space would leave that
- * floor (reducer/floorLinks.ts dropThrough), what sits on it riding
+ * space lies inside the floor below (`spaceInScene`, from op version 67 a
+ * squeezed one's squeezed space on squares) falls there onto the ground
+ * under its space, full size unless from 67 its full space would leave
+ * that floor (reducer/floorLinks.ts dropThrough), what sits on it riding
  * down, with a card naming the creatures that rode down with it
  * (D-261120-007), its drop measured from the ground it stood on. The
  * squares do not change. Victims seated on a holder that does not count
