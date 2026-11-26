@@ -131,6 +131,23 @@ for (const blocking of [false, true]) {
   });
 }
 
+describe("a teleport lands full size, whatever squeeze the token carries (MOVELEDGE-ASTRA-1)", () => {
+  test("a squeezed Large creature's teleport to the edge is refused on squares, as a full one's is", () => {
+    for (const squeeze of [false, true]) {
+      const state = table(true, (s) => (s.tokens.big = { ...s.tokens.big!, ...(squeeze ? { squeeze: true } : {}) } as Token));
+      assert.equal(answer(state, { t: "token.move", tokenId: "big", x: 38.5, y: 5, teleport: "wall" }), `forbidden: ${TELEPORT_OFF_MAP}`, `squeezed ${squeeze}`);
+      assert.equal(answer(state, { t: "token.move", tokenId: "big", x: 38, y: 5, teleport: "wall" }), "ok", `squeezed ${squeeze}`);
+    }
+  });
+
+  test("and on hexes, at a corner where only the squeezed hex would fit", () => {
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexColumns", bounds: { w: 20, h: 14 } }) } });
+    const c = hexCenter(COLUMNS, { col: 0, row: 0 });
+    state.tokens.own = { ...token("own", { name: "Thorn", kind: "pc", size: "large", x: c.x - 0.5, y: c.y - 0.5, ownerIds: ["p1"] }), squeeze: true } as Token;
+    assert.equal(answer(state, { t: "token.move", tokenId: "own", x: c.x - 0.5, y: c.y - 0.5, teleport: "wall" }), `forbidden: ${TELEPORT_OFF_MAP}`);
+  });
+});
+
 describe("a plain move on hexes", () => {
   const hexState = (setup?: (s: RoomState) => void): RoomState => {
     const state = room({ scenes: { s1: scene("s1", { gridShape: "hexColumns", bounds: { w: 20, h: 14 } }) } });

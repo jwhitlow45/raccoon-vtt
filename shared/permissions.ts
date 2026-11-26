@@ -11,7 +11,7 @@ import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove, planWalks, walkedIn, wayOf, type MovedToken } from "./rules/moveLeg.ts";
-import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
+import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken, type PlacedToken } from "./rules/footprint.ts";
 import { standsInScene } from "./rules/sceneEdge.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hexAt, hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
@@ -3166,7 +3166,9 @@ function hexStopAgrees(c: Check, op: OpOf<"token.move">): Decision {
 
 /** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design/design-v1-hex-grids.md 4.2). */
 function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point): boolean {
-  return standsInScene(sceneGrid(scene), scene.bounds, { ...token, x: at.x, y: at.y });
+  // Only the footprint fields: a stored token's runtime `squeeze` would shrink the footprint read here, and a teleport or placement lands full size.
+  const full: PlacedToken = { size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) };
+  return standsInScene(sceneGrid(scene), scene.bounds, full);
 }
 
 /** A player's refusals at a door (docs/design/design-v1-maps-vision.md 4.1), the way players learn about locks. */
