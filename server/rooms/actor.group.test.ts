@@ -4,11 +4,11 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { Member } from "#shared/model.ts";
 import { clientMessageSchema, type EphEvent, type EphEventOut, type GroupFrame, type ServerMessage } from "#shared/protocol.ts";
 import { scene, token } from "#shared/testutil.ts";
-import { RETAIN_MS, RoomActor, type ActorDeps } from "./actor.ts";
+import { MAX_ROOM_HELD_SENDS, RETAIN_MS, RoomActor, type ActorDeps } from "./actor.ts";
 import { PreviewPool, SnapshotBudget } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { MAX_VERSIONS } from "./gestures.ts";
+import { heldSends, MAX_VERSIONS } from "./gestures.ts";
 import { ScopeClient, scopeFixture, StoredRoomDb, until } from "./undoScopeTesting.ts";
 
 /*
@@ -252,6 +252,107 @@ describe("group frames held for their tick", () => {
     }
     assert.deepEqual(runs[0], runs[1]);
     assert.deepEqual((runs[0]!.at(-1) as EphEventOut[]).at(-1), { k: "dragStart", tokenId: "m1", x: 11, y: 10 });
+  });
+});
+
+describe("held frames of one slot while their tick waits (D-261126-208)", () => {
+  /** A DM device of the test's own whose frames wait through a batch at T + 20 that commits once the gate opens. */
+  async function held(t: TestContext) {
+    const r = await room(t);
+    const dm = socketOf(r, r.f.dm, "dm");
+    await hello(r, dm, uuidv7());
+    const T = T0 + 1_000;
+    await heldBatch(t, r, T);
+    moveTo(t, r.clock, T + 21);
+    const from = r.p1.sent.length;
+    const release = async () => {
+      r.gate.open();
+      await flush();
+      return ephs(r.p1.sent.slice(from));
+    };
+    return { r, dm, release };
+  }
+  const start = (g: number, at: number) => ({ k: "dragStart", tokenId: "m0", g, x: at, y: 10, with: [{ tokenId: "m1", x: at + 1, y: 10 }], from: { x: at, y: 10 } });
+  const move = (g: number, x: number) => ({ k: "dragMove", tokenId: "m0", g, x, y: 10 });
+
+  test("each newer move takes the older one's place, and starts and ends keep theirs, gesture by gesture", async (t) => {
+    const { r, dm, release } = await held(t);
+    send(r, dm.conn, start(1, 10));
+    for (let x = 11; x <= 15; x++) send(r, dm.conn, move(1, x));
+    send(r, dm.conn, { k: "groupEnd", tokenId: "m0", g: 1, at: [{ x: 15, y: 10 }, { x: 16, y: 10 }] });
+    send(r, dm.conn, start(2, 15));
+    for (let x = 16; x <= 18; x++) send(r, dm.conn, move(2, x));
+    assert.equal(r.actor.heldOf(dm.conn).frames, 5, "a start, its latest move and its end, then a start and its latest move");
+    assert.equal(r.actor.heldOf(dm.conn).roomSends, 5 * heldSends(move(1, 0) as GroupFrame));
+    const got = await release();
+    assert.equal(r.actor.heldOf(dm.conn).roomSends, 0, "what routed counts no more");
+    assert.deepEqual(got, [
+      { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
+      { k: "dragMove", tokenId: "m0", x: 15, y: 10 },
+      { k: "dragMove", tokenId: "m1", x: 16, y: 10 },
+      { k: "dragEnd", tokenId: "m0", x: 15, y: 10 },
+      { k: "dragEnd", tokenId: "m1", x: 16, y: 10 },
+      { k: "dragStart", tokenId: "m0", x: 15, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 16, y: 10 },
+      { k: "dragMove", tokenId: "m0", x: 18, y: 10 },
+      { k: "dragMove", tokenId: "m1", x: 19, y: 10 },
+    ]);
+  });
+
+  test("a move that carries a roster takes a plain move's place and stays, and the rosters the replaced moves bound are let go", async (t) => {
+    const { r, dm, release } = await held(t);
+    send(r, dm.conn, start(1, 10));
+    send(r, dm.conn, move(1, 11));
+    send(r, dm.conn, move(1, 12));
+    // A new roster on the move after them, then plain moves under it.
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 13, y: 10, with: [{ tokenId: "m2", x: 12, y: 10 }], from: { x: 10, y: 10 } });
+    send(r, dm.conn, move(1, 14));
+    send(r, dm.conn, move(1, 15));
+    assert.equal(r.actor.heldOf(dm.conn).frames, 3, "the start, the move with its roster, and the latest move");
+    assert.equal(dm.conn.gestures.retained.versions, 2);
+    assert.deepEqual(await release(), [
+      { k: "dragStart", tokenId: "m0", x: 10, y: 10 },
+      { k: "dragStart", tokenId: "m1", x: 11, y: 10 },
+      { k: "dragCancel", tokenId: "m1" },
+      { k: "dragMove", tokenId: "m0", x: 13, y: 10 },
+      { k: "dragMove", tokenId: "m2", x: 15, y: 10 },
+      { k: "dragMove", tokenId: "m0", x: 15, y: 10 },
+      { k: "dragMove", tokenId: "m2", x: 17, y: 10 },
+    ]);
+    assert.deepEqual(dm.conn.gestures.retained, { versions: 1, bytes: dm.conn.gestures.retained.bytes }, "the first roster went once its start routed, the open one stays");
+  });
+
+  test("a ruler's newer frame takes the older one's place, and its end stays after it", async (t) => {
+    const { r, dm, release } = await held(t);
+    for (let i = 0; i < 5; i++) send(r, dm.conn, { k: "ruler", id: "r1", points: [{ x: 10, y: 10 }, { x: 11 + i, y: 10 }], shared: true });
+    send(r, dm.conn, { k: "rulerEnd", id: "r1" });
+    assert.equal(r.actor.heldOf(dm.conn).frames, 2);
+    const got = await release();
+    assert.deepEqual(got.map((e) => (e.k === "ruler" ? `ruler ${e.points[1]!.x}` : e.k)), ["ruler 15", "rulerEnd"]);
+  });
+
+  test("a move on another floor, or after a start, waits after the frame before it", async (t) => {
+    const { r, dm } = await held(t);
+    send(r, dm.conn, start(1, 10));
+    send(r, dm.conn, move(1, 11));
+    send(r, dm.conn, { k: "dragMove", tokenId: "m0", g: 1, x: 12, y: 10 }, "vault");
+    send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 12, y: 10 });
+    send(r, dm.conn, move(1, 13));
+    assert.equal(r.actor.heldOf(dm.conn).frames, 5);
+  });
+
+  test("past what the room's held frames may send one receiver, a frame drops, counted by its kind whatever its roster holds", async (t) => {
+    const most = Math.floor(MAX_ROOM_HELD_SENDS / heldSends({ k: "dragStart", tokenId: "m0", g: 1, x: 0, y: 0 } as GroupFrame));
+    for (const members of [0, 99]) {
+      const { r, dm } = await held(t);
+      const roster = Array.from({ length: members }, (_, i) => ({ tokenId: `x${i}`, x: i, y: 0 }));
+      send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10, y: 10, with: roster, from: { x: 10, y: 10 } });
+      // Starts neither replace nor go, so each waits until the room's count is spent.
+      for (let i = 0; i < most + 20; i++) send(r, dm.conn, { k: "dragStart", tokenId: "m0", g: 1, x: 10 + i / 8, y: 10 });
+      assert.equal(r.actor.heldOf(dm.conn).frames, most, `${members} members`);
+      t.mock.timers.reset();
+    }
   });
 });
 
