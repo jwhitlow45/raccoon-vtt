@@ -1,5 +1,5 @@
 import { sightOf, type EntityKey } from "./keys.ts";
-import type { FallRecord, LogEntry, RoomState, Viewer } from "./model.ts";
+import type { FallId, FallRecord, LogEntry, RoomState, TokenId, Viewer } from "./model.ts";
 import type { Op, RefusalCode, RestoreEntry } from "./protocol.ts";
 import {
   actorDamageMany,
@@ -176,6 +176,13 @@ export type Applied = {
    * stood before, which a player's step keeps beside its climb.
    */
   falls?: FallRecord[];
+  /**
+   * Each drop's and fall's landing in the op with the card that took it
+   * (reducer/falls.ts Landing): the card that names the token, the one it
+   * joined, or a full one that left it off, which checks of the one-card
+   * rule read, since a token left off a full card is on no card's names.
+   */
+  cardsTook?: { tokenId: TokenId; fallId: FallId }[];
 };
 
 export type Refusal = { ok: false; code: RefusalCode; message: string };
@@ -199,6 +206,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
   let trapWrote: Set<EntityKey> | undefined;
   let plain: ApplyResult | undefined;
   let falls: FallRecord[] = [];
+  let cardsTook: { tokenId: TokenId; fallId: FallId }[] = [];
   // Openings land creatures from op version 64, on the server's state alone: a projected copy holds `sight` (docs/design/design-v1-floors.md phase 4, 4.1).
   const openings = opensOps(env.opVersion) && sightOf(state) === undefined ? beginOpenings(tx, state) : null;
   try {
@@ -256,6 +264,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (openings) {
       const landed = landAfter(tx, state, op, openings);
       falls = landed.falls;
+      cardsTook = openings.landings.flatMap((l) => (l.card !== undefined ? [{ tokenId: l.tokenId, fallId: l.card }] : []));
       if (landed.trapKeys.size > 0) {
         traps = { ...traps, wrote: true };
         trapWrote = new Set([...(trapWrote ?? []), ...landed.trapKeys]);
@@ -297,6 +306,7 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     ...(trapWrote && trapWrote.size > 0 ? { trapWrote } : {}),
     ...(traps?.wrote || plain ? { withoutTraps: () => (plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true })) } : {}),
     ...(falls.length > 0 ? { falls } : {}),
+    ...(cardsTook.length > 0 ? { cardsTook } : {}),
     ...(tx.walksDropped().size > 0 ? { walksDropped: tx.walksDropped() } : {}),
   };
 }
