@@ -1,6 +1,6 @@
 # Creature numbers: the meeting order
 
-Status: design, 2026-11-26. It amends the meeting order of [design-v1-creature-numbers.md](design-v1-creature-numbers.md) sections 3, 5 and 6, and steps neither OP_VERSION nor SNAPSHOT_VERSION. Decisions D-261126-020 to 024.
+Status: built, 2026-11-26. It amends the meeting order of [design-v1-creature-numbers.md](design-v1-creature-numbers.md) sections 3, 5 and 6, and steps neither OP_VERSION nor SNAPSHOT_VERSION. Decisions D-261126-020 to 024.
 
 ## 1. The problem
 
@@ -77,4 +77,7 @@ No step. The stored shape is unchanged, `sys.meet` keeps its schema, and the red
 
 ## 11. As built
 
-Filled in by the lane's docs commit.
+- The order is one comparator, `meetingOrder(state)`, which `previewNumbers`, `meetingRuns` and `numberingUpgrade` share, so the brackets, the step and the upgrade never rank apart. It reads a floor's `vision.perPlayer` itself, since shared/project.ts, which holds `perPlayerScene`, imports shared/numbering.ts. A scene without floors ranks as level 0.
+- `meetCandidates` still returns its creatures in id order, and the lists come from `meetingRuns`. Rule 2's first member that takes 1 is still found by id, since a group has at most one member without a number.
+- The random twin runs on the room's state, not on the actor: the DM's op, the meet step's ops from server/rooms/meet.ts and P1's copy from `projectState`, with the real sight rules. So it runs thousands of seeds in seconds (`NUMBERING_ORDER_RUNS`), and the actor-level twin covers P1's frames. Its invariants are O1 to O4 in server/rooms/numbering.order.test.ts.
+- The reducer tests' batch helper applies one `sys.meet` per list, as the actor does.
