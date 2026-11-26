@@ -316,10 +316,17 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
   if (!canSqueeze(token) || isHex(g)) return null;
   const size = footprintSize(token);
   const to = snapPosition(g, raw.x, raw.y, size);
-  const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
-  // A squeeze past the scene's edge is no opening: the drop lands full size inside it (keptOnScene).
+  let spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
+  // A player's squeezed spot is pulled in until its squeezed box is inside the scene, so a drop past the edge lands where a drop on the last square does and not a cell further back. The shift is whole cells, so the spot stays on its lattice.
   const scene = state.scenes[token.sceneId];
-  if (scene && state.role !== "dm" && !standsInScene(g, scene.bounds, { ...token, x: spot.x, y: spot.y, squeeze: true })) return null;
+  if (scene && state.role !== "dm") {
+    const squeezed = squeezedSize(token);
+    const c = storedCenter({ ...token, x: spot.x, y: spot.y });
+    const [left, top] = [c.x - squeezed.w / 2, c.y - squeezed.h / 2];
+    const pull = (at: number, side: number, bound: number) => (at < 0 ? -at : at + side > bound ? bound - side - at : 0);
+    spot = { x: spot.x + pull(left, squeezed.w, scene.bounds.w), y: spot.y + pull(top, squeezed.h, scene.bounds.h) };
+    if (!standsInScene(g, scene.bounds, { ...token, x: spot.x, y: spot.y, squeeze: true })) return null;
+  }
   const land = landing(state, walkerOf(state, token), { ...spot, elevation: dropLanding(state, token, spot) }, mode);
   return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
 }

@@ -244,6 +244,26 @@ describe("a squeeze along the map's edge, from change format 66 (D-261126-226, 2
     });
   }
 
+  // A corridor one square wide that ends at the scene's edge (30 by 30), walled on both sides, the ogre parked in it.
+  const ending = [
+    { side: "east", edges: { ...line("n", 5, 10, 30), ...line("n", 6, 10, 30) }, parked: { x: 20, y: 4.5 }, last: { x: 28.5, y: 4.5 }, aims: [{ x: 28.6, y: 4.6 }, { x: 29.4, y: 4.6 }, { x: 31.3, y: 4.6 }, { x: 60, y: 4.6 }] },
+    { side: "south", edges: { ...line("w", 5, 10, 30), ...line("w", 6, 10, 30) }, parked: { x: 4.5, y: 10 }, last: { x: 4.5, y: 28.5 }, aims: [{ x: 4.6, y: 28.6 }, { x: 4.6, y: 29.4 }, { x: 4.6, y: 31.3 }, { x: 4.6, y: 60 }] },
+  ] as const;
+
+  for (const c of ending) {
+    test(`a Large creature dropped past the edge where a corridor ends on the ${c.side} lands where a drop on its last square does, and the server takes it`, () => {
+      const ogre = thorn({ size: "large", ...c.parked });
+      const state = world({ edges: c.edges, tokens: [ogre] });
+      for (const mode of ["walk", "free"] as const) {
+        for (const aim of c.aims) {
+          const plan = planOne(seenRoom(state), ogre, aim, mode);
+          assert.deepEqual(plan.moves, [{ tokenId: "thorn", ...c.last, squeeze: true }], `${mode} ${JSON.stringify(aim)}`);
+          for (const op of moveOpsOf(plan.moves)) assert.equal(canApply(opSchema.parse(op), P1, state, deps).ok, true, `${mode}: ${JSON.stringify(op)}`);
+        }
+      }
+    });
+  }
+
   test("beside the side in the open a drop never squeezes, so the box is kept on the scene full size", () => {
     const ogre = thorn({ size: "large", x: 7, y: 3 });
     const state = world({ tokens: [ogre] });
