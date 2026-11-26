@@ -31,7 +31,7 @@ const UPLOAD_PEAK_MIB = 750;
 const CONTAINER_MIB = 1_536;
 /** The fewest rooms 400 sockets fill, at 64 a room (budgets.ts DEFAULT_SOCKET_CAPS). */
 const ROOMS = Math.ceil(400 / 64);
-/** What the release of 10 sockets' 60 moves of 100 tokens to a full room may hold on the heap as it starts to send, its records and the frames they name. */
+/** What the release of 10 sockets' 60 moves of 100 tokens to a full room may hold on the heap as it starts to send: its records and the group frames they name. */
 const RELEASE_MOST = 40 * 1024 * 1024;
 
 setFlagsFromString("--expose-gc");
@@ -144,7 +144,7 @@ test("154 full sockets and 246 off, each at its caps through an uncovered tick, 
  * holds as it starts to send is measured, and every preview message is
  * numbered in the order the room sent it, with the socket it went to.
  */
-async function release(t: TestContext, senders: readonly { shown: number; hidden: number }[]) {
+async function release(t: TestContext, senders: readonly { shown: number; hidden: number }[], moves: "60 at 30 a second" | "to the held cap" = "60 at 30 a second") {
   const f = scopeFixture();
   const tokens = senders.map((s, i) => [
     ...Array.from({ length: s.shown }, (_, k) => ({ id: `s${i}-${k}`, x: (k % 40) + 0.5, y: 10 + 4 * i + Math.floor(k / 40), hidden: false })),
@@ -172,6 +172,7 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
     return actor.shutdown({ code: 1012, snapshot: false });
   });
   let numbered = 0;
+  let bytes = 0;
   const sent: { n: number; to: number; text: string }[] = [];
   const conns: Connection[] = [];
   for (let i = 0; i < 64; i++) {
@@ -183,6 +184,7 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
       send: (text: string) => {
         if (!text.startsWith('{"t":"eph"')) return;
         const n = numbered++;
+        bytes += text.length;
         // The last socket is the watching player: its messages are kept whole, the rest only counted.
         if (to === 63) sent.push({ n, to, text });
       },
@@ -210,32 +212,36 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
   clock.now = T0 + 25;
   await new Promise((resolve) => setTimeout(resolve, 60));
   await flush();
-  for (let m = 0; m < 60; m++) {
-    clock.now = T0 + 25 + Math.round((m * 1000) / 30);
+  // At the held cap, each sender's frames come at once, within its ephemeral burst of 400 (budgets.ts EPH_RATE).
+  const capped = moves === "to the held cap";
+  const more = (conn: Connection, m: number) => (capped ? actor.heldOf(conn).bytes + 3 * 1024 <= MAX_HELD_BYTES && m < MAX_HELD_FRAMES : m < 60);
+  for (let m = 0; conns.slice(0, senders.length).some((c) => more(c, m)); m++) {
+    if (!capped) clock.now = T0 + 25 + Math.round((m * 1000) / 30);
     for (const [i, list] of tokens.entries()) {
+      if (!more(conns[i]!, m)) continue;
       const [first, ...rest] = list;
       if (m === 0) send(conns[i]!, { k: "dragStart", tokenId: first!.id, g: 1, x: first!.x, y: first!.y, with: rest.map((r) => ({ tokenId: r.id, x: r.x, y: r.y })), from: { x: first!.x, y: first!.y } });
       else send(conns[i]!, { k: "dragMove", tokenId: first!.id, g: 1, x: first!.x + m / 8, y: first!.y });
     }
   }
-  for (const conn of conns.slice(0, senders.length)) assert.equal(actor.heldOf(conn).frames, 60);
+  if (!capped) for (const conn of conns.slice(0, senders.length)) assert.equal(actor.heldOf(conn).frames, 60);
 
   // The release, measured as its outbox starts to send, when everything it sends waits in it.
   const base = used();
-  const runs: { events: number; records: number; bytes: number; heap: number }[] = [];
+  const runs: { groups: number; events: number; records: number; bytes: number; heap: number }[] = [];
   Outbox.prototype.deliver = function (this: Outbox) {
     const staged = this.staged;
     if (staged.records > 1_000) runs.push({ ...staged, heap: used() - base });
     deliver.call(this);
   };
-  clock.now = T0 + 25 + 1_970;
+  clock.now = capped ? T0 + 1_000 : T0 + 25 + 1_970;
   gate!();
   for (let i = 0; i < 400 && conns.slice(0, senders.length).some((c) => actor.heldOf(c).frames > 0); i++) {
     await new Promise((resolve) => setTimeout(resolve, 5));
     await flush();
   }
   assert.ok(conns.slice(0, senders.length).every((c) => actor.heldOf(c).frames === 0), "every frame released");
-  return { runs, sent, numbered };
+  return { runs, sent, numbered, bytes };
 }
 
 /** The runs a socket's messages came in: each a stretch of messages the room sent it with none to any other socket between. */
@@ -253,7 +259,7 @@ test("a release of 10 sockets' 60 held moves of 100 tokens each to 63 receivers 
   assert.equal(numbered, 10 * 60 * 100 * 63, "every token's frame reached every other socket");
   assert.equal(runs.length, 1, "the release is one pass");
   const [run] = runs;
-  t.diagnostic(`${run!.records} records of ${run!.events} events: ${(run!.bytes / MiB).toFixed(1)} MiB as counted, ${(run!.heap / MiB).toFixed(1)} MiB on the heap`);
+  t.diagnostic(`${run!.records} records of ${run!.groups} group frames: ${(run!.bytes / MiB).toFixed(1)} MiB as counted, ${(run!.heap / MiB).toFixed(1)} MiB on the heap`);
   assert.ok(run!.heap <= RELEASE_MOST, `${run!.heap}`);
 });
 
@@ -269,4 +275,14 @@ test("4 sockets dragging at 30 a second, one with 0 or 99 members a player does 
   assert.deepEqual(twins[0]!.runs, [3 * 60 * 100 + 60], "one run");
   assert.deepEqual(twins[1]!.runs, twins[0]!.runs);
   assert.deepEqual(twins[1]!.texts, twins[0]!.texts);
+});
+
+test("a release at the held caps: 64 sockets, each with every move of 100 tokens its queue holds, to 63 receivers", { timeout: 600_000 }, async (t: TestContext) => {
+  const { runs, numbered, bytes } = await release(t, Array.from({ length: 64 }, () => ({ shown: 100, hidden: 0 })), "to the held cap");
+  assert.equal(runs.length, 1, "the release is one pass");
+  const [run] = runs;
+  t.diagnostic(`${numbered} messages, ${run!.records} records of ${run!.groups} group frames: ${(run!.bytes / MiB).toFixed(1)} MiB as counted, ${(run!.heap / MiB).toFixed(1)} MiB on the heap`);
+  // What the same release hands the sockets to send, which their send buffers then hold until the network takes it.
+  t.diagnostic(`the messages' text: ${(bytes / MiB).toFixed(0)} MiB`);
+  assert.ok(run!.heap <= 250 * MiB, `${run!.heap}`);
 });
