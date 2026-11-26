@@ -9,7 +9,8 @@ import type { SaveOutcomeFields } from "#shared/saveOutcomeContract.ts";
 import { AT, character, DM, env, P1, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { targetKey } from "../../rolls/logic.ts";
-import { apply, newPage, roll, rollAgain, sourceIds, type Command, type Page, type ServerRoll, type Source } from "./chain.ts";
+import { apply, followSelection, newPage, roll, rollAgain, sourceIds, type Command, type Page, type ServerRoll, type Source } from "./chain.ts";
+import { readSaveDraft, writeSaveDraft } from "./draftStorage.ts";
 import { askAgain, rerollSaves } from "./reroll.ts";
 import { groupRows, type RowBase } from "./rows.ts";
 
@@ -149,5 +150,37 @@ test("a creature two of whose tokens the room found rolls as the same token, wha
     const [a, b] = [rolledFor(kind, ["bree1", "bree2"]), rolledFor(kind, ["bree2", "bree1"])];
     assert.equal(a, b, kind);
     assert.ok(a.includes("bree1"), `${kind}: P1 reads the roll, named by one token`);
+  }
+});
+
+test("picks of two tokens of one creature roll as the same token live, once the selection is cleared and after a reload", () => {
+  const view = room({
+    characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+    tokens: Object.fromEntries(["bree1", "bree2"].map((id) => [id, token(id, { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } })])),
+  });
+  const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view, srd: { monsters: [], rolls: {} } };
+  /** The token the page's server roll names for Bree, its rows read from `ids`. */
+  const target = (p: Page, ids: readonly string[]) => {
+    const rows = groupRows(dice, ids, { kind: "save", ability: "dex" }, false, new Map());
+    const states = Object.fromEntries(rows.map((r) => [r.holder, { way: "server" as const }]));
+    const sent = roll({ ...p, states }, { rows, server: rows.map(serverOf), tag: "dice", requestIds: () => "ask", openRequests: 0, taken: [], at: AT }).send.find((c) => c.kind === "dice");
+    assert.ok(sent?.kind === "dice");
+    return sent.rolls.map((r) => targetKey(r.creature as { tokenId?: string; characterId?: string }));
+  };
+  const stored = new Map<string, string>();
+  const before = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), removeItem: (k: string) => void stored.delete(k) } });
+  try {
+    const picked = ["bree2", "bree1"];
+    for (const source of [{ kind: "selection", tokenIds: [], live: true }, { kind: "trap", trapId: "trap", due: "d", tokenIds: [], live: true }] satisfies Source[]) {
+      const live = followSelection({ ...page(), source }, picked);
+      assert.ok(writeSaveDraft("room", { version: 2, page: live }));
+      const reloaded = readSaveDraft("room")!.page;
+      const seen = [target(live, sourceIds(live.source, picked)), target(live, sourceIds(live.source, [])), target(reloaded, sourceIds(reloaded.source, []))];
+      assert.deepEqual(seen, [["t:bree1"], ["t:bree1"], ["t:bree1"]], `${source.kind}: live, cleared, reloaded`);
+    }
+  } finally {
+    if (before) Object.defineProperty(globalThis, "sessionStorage", before);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
   }
 });
