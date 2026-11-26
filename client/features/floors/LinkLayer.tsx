@@ -117,7 +117,7 @@ export const LinkLayer = memo(function LinkLayer(props: LayerProps) {
         const top = nameAnchor(o, "top");
         const drop = feet.get(link.id) ?? null;
         const dropPill: PillSpec | null = hole && drop !== null && named ? { value: dropChip(drop), x: top.x, y: top.y, above: true, size: "map", small: true } : null;
-        return { id: link.id, o, hole, dir, first, dropPill };
+        return { id: link.id, o, hole, dir, first, dropPill, lower: link.kind === "opening" && dir === "up" };
       }),
     [list, scenes, grid, far, hushed, feet, shown],
   );

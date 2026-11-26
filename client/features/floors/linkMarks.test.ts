@@ -534,13 +534,27 @@ describe("a hole's pills keep off the other holes and their pills (LP47B-ISO-1)"
     assert.deepEqual(spotsOf(tokenSpots(null, UPPER)), []);
   });
 
-  test("a floor with no hole gives no tokens, so a move there walks none: its lower ends and its stairs keep their own edges (LP48FIXA-R1)", () => {
+  test("a floor with no opening gives no tokens, so a move there walks none: its stairs keep their own edges (LP48FIXA-R1)", () => {
     const placed = tower({ tokens: { thorn: thornToken(), up: thornToken({ id: "up", sceneId: UPPER, x: 6, y: 2 }) } });
     assert.equal(tokenSpots(placed, GROUND), "", "no ends at all");
     assert.equal(tokenSpots(withStairs(placed), GROUND), "", "stairs up");
     assert.equal(tokenSpots(withStairs(placed), UPPER), "", "stairs down");
-    assert.equal(tokenSpots(withOpening(placed), GROUND), "", "an opening's lower end");
+    assert.equal(tokenSpots(withOpening(placed), GROUND), "3,3,1,1", "an opening's lower end, whose name keeps off the creature there");
     assert.equal(tokenSpots(withOpening(placed), UPPER), "6,2,1,1", "the hole's floor");
+  });
+
+  test("a hole's lower end keeps its own edge, and its name leaves it only where a creature stands under it, in Top-down and at every turn of Isometric", () => {
+    const o = outlineOf(grid, { x: 8, y: 4, w: 2, h: 1 });
+    const lower: EndPills = { id: "l", o, hole: false, lower: true, first: { name: "Up to Nave", x: o.x + o.w / 2, y: o.y, above: true, size: "map", small: true, maxLines: 1, stack: true }, dropPill: null };
+    const rat = { x: 8, y: 3, w: 1, h: 1 };
+    for (const iso of [null, flat(0), flat(1), flat(2), flat(3)] as const) {
+      assert.deepEqual(placeEnds([lower], [], SCALE, iso, () => true).get("l"), { pill: lower.first, chip: null }, "no creature: its edge");
+      const moved = placeEnds([lower], [], SCALE, iso, () => true, [rat]).get("l")!.pill!;
+      const drawn = drawnBox(moved, SCALE, iso, true, true);
+      assert.ok(!meet(drawn, tokenBox(rat, iso)), `the name at ${JSON.stringify(moved)} covers the creature`);
+      // A creature clear of the name changes nothing.
+      assert.deepEqual(placeEnds([lower], [], SCALE, iso, () => true, [{ x: 0, y: 0, w: 1, h: 1 }]).get("l"), { pill: lower.first, chip: null });
+    }
   });
 
   test("an end whose pills fit no corner keeps its own edge, and Top-down keeps each end's own edge where nothing is covered", () => {
