@@ -9070,8 +9070,7 @@ async function armedConfirmLines(page: Page, sweep: Sweep, tool: string, label: 
     return { over: button.scrollWidth - button.clientWidth, past: words.getBoundingClientRect().right - button.getBoundingClientRect().right, shown: (words.textContent ?? "").trim() };
   });
   if (cut.over > 1 || cut.past > 1) out.push(`${sweep.at} ${tool} ${label}: the armed "${cut.shown}" is cut off (scrolls ${cut.over} px, ends ${cut.past} px past the button)`);
-  // Fog's ⋯ at 320 x 568 and 130% already stood 6.1 px off in its Shape choice before this check (Brush beside the two-line Builder room), armed or not: a follow-up, so that one popover is not measured.
-  if (!(tool === "Fog" && sweep.at.endsWith("320x568-130"))) await sweep.measure(page, `fu11-armed-${tool.toLowerCase()}-${label.toLowerCase().replace(/ /g, "-")}`, scope);
+  await sweep.measure(page, `fu11-armed-${tool.toLowerCase()}-${label.toLowerCase().replace(/ /g, "-")}`, scope);
   await shots.take(page, `alignment-fu11-armed-${tool.toLowerCase()}-${label.toLowerCase().replace(/ /g, "-")}-${sweep.at}`);
   await escapeAll(page);
   return out;

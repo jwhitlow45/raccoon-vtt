@@ -115,6 +115,8 @@ export default function FogOptions() {
                 <ChoiceTiles<FogShapeKind>
                   label="Shape"
                   value={s.shape}
+                  // Even rows: Builder room takes two lines on a phone, and uneven tiles stood 6 px apart in height at 320 px and 130%.
+                  even
                   options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} /> }))}
                   onChange={(shape) => set({ shape, poly: [], rect: null, stroke: [], note: null })}
                 />
