@@ -1894,6 +1894,8 @@ function BarFrame(props: {
         boxShadow: theme.shadow.pane,
         color: theme.color.text,
         fontSize: theme.font.body14,
+        // The group bar often stands over the tokens it names, so a mouse drag that starts on it selects none of its words (LP53).
+        ...(props.opening === "group" ? { userSelect: "none" as const, WebkitUserSelect: "none" as const } : {}),
         zIndex: attachRaised || viewAsRaised ? theme.z.popover : overBars && typing !== null ? theme.z.overBars : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >

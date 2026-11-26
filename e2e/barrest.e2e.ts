@@ -1649,6 +1649,18 @@ restFile(null, () => {
         if ((await collapseButton(group).count()) > 0) await collapseButton(group).tap();
         await group.locator("[data-rest-row]").getByRole("textbox", { name: "HP change" }).fill("7");
         assert.equal(await said(group), "7 damage, not Goblin 1, Goblin 2", `${view.width} x ${view.height}`);
+        // The frame selects no words, and every field in it still selects text, which iOS Safari needs to focus and type in it (LP53).
+        const selects = await group.evaluate((frame) => {
+          type El = { tagName: string; getAttribute(n: string): string | null };
+          type Style = { userSelect: string; webkitUserSelect?: string };
+          const style = (globalThis as unknown as { getComputedStyle(el: unknown): Style }).getComputedStyle;
+          const fields = [...(frame as unknown as { querySelectorAll(s: string): Iterable<El> }).querySelectorAll("input, textarea, [contenteditable]")];
+          const of = (el: unknown) => `${style(el).userSelect}/${style(el).webkitUserSelect ?? ""}`;
+          return { frame: of(frame), fields: fields.map((el) => `${el.getAttribute("aria-label") ?? el.tagName}: ${of(el)}`) };
+        });
+        assert.equal(selects.frame, "none/none", "the group bar's frame selects no words");
+        assert.ok(selects.fields.some((f) => f.startsWith("HP change: ")), `the HP field is among the bar's fields: ${selects.fields.join(", ")}`);
+        assert.deepEqual(selects.fields.filter((f) => /: none|\/none/.test(f)), [], "a field in the group bar selects no text");
         // One line holds it at 390, and at 320 x 568 at 130% it needs the title's two lines or the note, by its drawn width.
         const place = await group.locator("[data-rest-status]").getAttribute("data-rest-place");
         if (view.scale > 1) assert.ok(place === "title" || place === "note", `the sentence needs more than the line: ${place}`);

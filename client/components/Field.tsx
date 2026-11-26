@@ -22,6 +22,9 @@ export function fieldStyle(state: { error?: boolean; disabled?: boolean } = {}):
     color: state.disabled ? theme.color.textDisabled : theme.color.text,
     fontSize: theme.font.input,
     fontFamily: theme.font.body,
+    // iOS Safari can refuse focus and typing in a field whose ancestor selects no text, as the group bar's frame does.
+    userSelect: "text",
+    WebkitUserSelect: "text",
   };
 }
 
