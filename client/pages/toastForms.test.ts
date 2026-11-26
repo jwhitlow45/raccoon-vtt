@@ -177,3 +177,12 @@ test("QOL L1: a toast's buttons that wait on the server follow their label, the 
   assert.match(row, /data-toast-sends="" hidden=""/, "mounted in the one row, and hidden");
   assert.doesNotMatch(row, /role="alert"/);
 });
+
+test("LP52 toast twice: a toast's box is no live region, so its words in the page twice (the box and the visually hidden status) are heard once", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const toast: Toast = { id: 8, text: "Deleted Goblin 2. Ctrl+Z brings it back while the room has space.", tone: "info" };
+  for (const form of [undefined, "row" as const]) {
+    const markup = renderToStaticMarkup(React.createElement(ToastNote, { toast, onDismiss() {}, ...(form ? { form } : {}) }));
+    assert.doesNotMatch(markup, /role="(status|alert)"|aria-live/, `the ${form ?? "stack"} form says nothing aloud of its own`);
+  }
+});
