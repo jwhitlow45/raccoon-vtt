@@ -3144,6 +3144,72 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     }
   });
 
+  test("UIPOLISH-ISO-1. a 14 x 9 hex map fitted in Top-down is fitted in Isometric too on a 390 x 844 phone at 100% and 130%, and a camera the viewer moved keeps its zoom across the switch", async () => {
+    const sceneId = uuidv7();
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "UIPOLISH hex fit", bounds: { w: 14, h: 9 }, gridShape: "hexRows" } });
+    await ops.send({ t: "room.setPlayerScene", sceneId });
+    await waitFor("Pat on the 14 x 9 scene", () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
+    const state = await patContext.storageState();
+    const phone = await browser.newContext({ storageState: state, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const mouse = await browser.newContext({ storageState: state, viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+    for (const c of [phone, mouse]) await c.addInitScript(HOOK_FLAG);
+    type Cam = { x: number; y: number; scale: number };
+    const open = async (page: Page, scale: number) => {
+      await page.goto(pat.url());
+      await page.evaluate((z) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(z)), scale);
+      await reopenRoom(page);
+      await page.getByRole("button", { name: "Fit the map to the screen" }).waitFor();
+      await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+      await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("topDown"));
+      await untilShown(page, "top-down");
+    };
+    const toIso = async (page: Page): Promise<Cam> => {
+      await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("isometric"));
+      await untilShown(page, "isometric 0");
+      return (await waitFor("the drawn camera", () => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { drawn(): Cam | null } }).__rvttIsoHook.drawn()))) as Cam;
+    };
+    try {
+      const fitScales: number[] = [];
+      for (const scale of [1, 1.3]) {
+        const page = await phone.newPage();
+        consoles.phone.attach(page);
+        await open(page, scale);
+        await shots.take(page, `uipolish-iso-fit-before-${scale}`);
+        const cam = await toIso(page);
+        await page.waitForTimeout(300);
+        const settled = (await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { drawn(): Cam | null } }).__rvttIsoHook.drawn())) as Cam;
+        const box = await mapCanvasBox(page, { visible: true });
+        const iso = isometric(0);
+        const corners = [[0, 0], [14, 0], [0, 9], [14, 9]].map(([x, y]) => toView(iso, { x: x!, y: y! }));
+        const screen = corners.map((c) => ({ x: settled.x + c.x * settled.scale, y: settled.y + c.y * settled.scale }));
+        for (const c of screen) {
+          assert.ok(c.x >= 0 && c.x <= box.width, `${scale}: a corner at x ${c.x.toFixed(1)} lies inside the ${box.width} px canvas`);
+          assert.ok(c.y >= 0 && c.y <= box.height, `${scale}: a corner at y ${c.y.toFixed(1)} lies inside the ${box.height} px canvas`);
+        }
+        assert.ok(cam.scale > 0);
+        fitScales.push(settled.scale);
+        await shots.take(page, `uipolish-iso-fit-after-${scale}`);
+        await page.close();
+      }
+      // A camera the viewer zoomed in is held: its zoom stays what the zoom left it, wider than the fit's.
+      const page = await mouse.newPage();
+      consoles.keys.attach(page);
+      await open(page, 1);
+      const canvas = await mapCanvasBox(page, { visible: true });
+      await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+      await page.mouse.wheel(0, -300);
+      await page.waitForTimeout(400);
+      const held = await toIso(page);
+      assert.ok(held.scale > fitScales[0]! * 1.3, `a zoomed camera keeps its zoom (${held.scale.toFixed(1)} against the fit's ${fitScales[0]!.toFixed(1)})`);
+      await page.close();
+    } finally {
+      await phone.close();
+      await mouse.close();
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId }).catch(() => {});
+      await ops.send({ t: "scene.delete", sceneId }).catch(() => {});
+    }
+  });
+
   test("ISO-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
