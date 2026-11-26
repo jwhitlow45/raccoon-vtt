@@ -289,6 +289,129 @@ describe("drag frames to a server that takes groups", () => {
     assert.deepEqual(s.eph().map((m) => [m.sceneId, m.e.k]), [[TOWER, "groupEnd"]]);
   });
 
+  test("a drag that goes to another floor and back before one flush sends only its frame there, on the roster the server still holds", () => {
+    const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
+    const s = setup({ state });
+    s.socket.start();
+    s.connect("full", TOWER);
+    const drag = s.socket.startDrag("g1", { x: 3, y: 3 }, members(2));
+    s.runFrames();
+    s.eph();
+    s.tick(40);
+    s.store.showFloor(UPPER);
+    drag.move({ x: 4, y: 3 }, { x: 3, y: 3 }, members(2));
+    s.store.showFloor(TOWER);
+    drag.move({ x: 5, y: 3 }, { x: 3, y: 3 }, members(2));
+    s.runFrames();
+    assert.deepEqual(s.eph().map((m) => m.e), [{ k: "dragMove", tokenId: "g1", g: 0, x: 5, y: 3 }]);
+  });
+
+  test("the first frame after the old floor's cancel names the drag's members, though it goes on the floor they were last named on", () => {
+    const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
+    // One message a flush, so the cancel goes before the frame paired with it, which a switch back then replaces.
+    const s = setup({ state, ephPerSecond: () => 1 });
+    s.socket.start();
+    s.connect("full", TOWER);
+    const drag = s.socket.startDrag("g1", { x: 3, y: 3 }, members(2));
+    s.runFrames();
+    s.eph();
+    s.store.showFloor(UPPER);
+    drag.move({ x: 4, y: 3 }, { x: 3, y: 3 }, members(2));
+    s.tick(1_000);
+    assert.deepEqual(s.eph().map((m) => [m.sceneId, m.e.k]), [[TOWER, "dragCancel"]]);
+    s.store.showFloor(TOWER);
+    drag.move({ x: 5, y: 3 }, { x: 3, y: 3 }, members(2));
+    s.tick(1_000);
+    const sent = s.eph();
+    assert.deepEqual(sent.map((m) => [m.sceneId, m.e.k, "with" in m.e]), [[TOWER, "dragMove", true]]);
+  });
+
+  test("a start still queued when the next move's roster changes goes with its own roster, and the move names the new one", () => {
+    const s = setup();
+    s.socket.start();
+    s.connect();
+    const drag = s.socket.startDrag("g1", { x: 3, y: 3 }, [{ tokenId: "m", x: 10, y: 5 }]);
+    drag.move({ x: 4, y: 4 }, { x: 3, y: 4 }, [{ tokenId: "m", x: 10, y: 6 }]);
+    s.runFrames();
+    for (let i = 0; i < 4; i++) s.tick();
+    assert.deepEqual(s.eph().map((m) => m.e), [
+      { k: "dragStart", tokenId: "g1", g: 0, x: 3, y: 3, with: [{ tokenId: "m", x: 10, y: 5 }], from: { x: 3, y: 3 } },
+      { k: "dragMove", tokenId: "g1", g: 0, x: 4, y: 4, with: [{ tokenId: "m", x: 10, y: 6 }], from: { x: 3, y: 4 } },
+    ]);
+  });
+
+  for (const preview of [
+    { name: "a ruler", frame: (x: number): EphEvent => ({ k: "ruler", id: "r1", points: [{ x, y: 1 }] }), end: "rulerEnd" },
+    { name: "an area", frame: (x: number): EphEvent => ({ k: "aoe", id: "a1", shape: "sphere", origin: { x, y: 2, z: 0 }, yaw: 0, size: 20 }), end: "aoeEnd" },
+  ]) {
+    test(`${preview.name} that goes on past a floor switch ends on the old floor first, in the same flush, whether or not its slot was due`, () => {
+      const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
+      for (const wait of [100, 5]) {
+        const s = setup({ state });
+        s.socket.start();
+        s.connect("full", TOWER);
+        s.socket.sendEph(preview.frame(1));
+        s.runFrames();
+        s.eph();
+        s.clock.advance(wait);
+        s.store.showFloor(UPPER);
+        s.socket.sendEph(preview.frame(2));
+        for (let i = 0; i < 4; i++) s.tick();
+        const sent = s.eph();
+        assert.deepEqual(sent.map((m) => [m.sceneId, m.e.k]), [
+          [TOWER, preview.end],
+          [UPPER, preview.frame(0).k],
+        ], `${wait} ms after its last frame`);
+        assert.equal(sent[0]!.at, sent[1]!.at, "in one flush");
+        // Back before a flush: only the frame, on the floor it went to last.
+        s.tick(100);
+        s.store.showFloor(TOWER);
+        s.socket.sendEph(preview.frame(3));
+        s.store.showFloor(UPPER);
+        s.socket.sendEph(preview.frame(4));
+        s.runFrames();
+        assert.deepEqual(s.eph().map((m) => [m.sceneId, m.e.k]), [[UPPER, preview.frame(0).k]]);
+        // Its end goes to the floor its frames went to.
+        s.tick(100);
+        s.store.showFloor(TOWER);
+        s.socket.sendEph({ k: preview.end, id: preview.name === "a ruler" ? "r1" : "a1" } as EphEvent);
+        s.tick(100);
+        assert.deepEqual(s.eph().map((m) => [m.sceneId, m.e.k]), [[UPPER, preview.end]]);
+        // A frame queued on another floor and an end before the flush: the end goes to the floor the frames went to, alone.
+        s.socket.sendEph(preview.frame(5));
+        s.tick(100);
+        s.eph();
+        s.store.showFloor(UPPER);
+        s.socket.sendEph(preview.frame(6));
+        s.socket.sendEph({ k: preview.end, id: preview.name === "a ruler" ? "r1" : "a1" } as EphEvent);
+        s.tick(100);
+        assert.deepEqual(s.eph().map((m) => [m.sceneId, m.e.k]), [[TOWER, preview.end]]);
+      }
+    });
+  }
+
+  test("a ruler carried over stairs ends on the floor it left before it goes on above, in one flush", () => {
+    const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
+    const s = setup({ state });
+    s.socket.start();
+    s.connect("full", TOWER);
+    const actions = createRoomActions(s.store, s.socket);
+    actions.sendEph({ k: "ruler", id: "r1", points: [{ x: 3, y: 3, tokenId: "g1" }, { x: 8.5, y: 3.5 }], shared: true, walk: true });
+    s.runFrames();
+    s.eph();
+    s.tick(100);
+    const prior = { ft: 35, diag: { h: 0, v: 0 }, walker: { size: "medium" as const }, anchors: ["g1"], ends: ["l1"] };
+    s.store.showFloor(UPPER);
+    actions.sendEph({ k: "ruler", id: "r1", points: [{ x: 8.5, y: 3.5 }], shared: true, walk: true, prior });
+    s.runFrames();
+    const sent = s.eph();
+    assert.deepEqual(sent.map((m) => [m.sceneId, m.e.k]), [
+      [TOWER, "rulerEnd"],
+      [UPPER, "ruler"],
+    ]);
+    assert.equal(sent[0]!.at, sent[1]!.at);
+  });
+
   test("a floor switch before anything went on the old floor ends nothing there", () => {
     const state = tower({ tokens: { g1: token("g1", { sceneId: TOWER }) } });
     const s = setup({ state });
@@ -589,6 +712,9 @@ describe("random drags, ends, floor switches, reconnects and needs", () => {
         } else if (roll < 0.82) {
           const d = open[Math.floor(r() * open.length)];
           if (d) s.last().emit({ t: "need", id: d.id, g: live.indexOf(d) });
+        } else if (roll < 0.9) {
+          // A ruler beside the drags, which floor switches carry along, and now and then ends.
+          s.socket.sendEph(r() < 0.85 ? { k: "ruler", id: "r1", points: [{ x: r() * 10, y: r() * 10 }] } : { k: "rulerEnd", id: "r1" });
         }
         s.tick(r() * 40);
         collect();
@@ -604,6 +730,22 @@ describe("random drags, ends, floor switches, reconnects and needs", () => {
         const g = live.indexOf(d);
         const last = groups.filter((m) => m.socket === socketIndex && m.e.g === g).at(-1);
         assert.ok(last && (last.e.k === "groupEnd" || last.e.k === "dragCancel"), `${where}: drag ${g}'s end never went`);
+      }
+      // The ruler's frames: a frame on another floor than its last follows that floor's end in the same flush, and an end goes where its frames went.
+      const rulerOn = new Map<number, string>();
+      for (const [i, m] of all.entries()) {
+        if (m.e.k !== "ruler" && m.e.k !== "rulerEnd") continue;
+        const on = rulerOn.get(m.socket) ?? null;
+        if (m.e.k === "rulerEnd") {
+          if (on !== null) assert.equal(m.sceneId, on, `${where}: the ruler ended on another floor than its frames'`);
+          rulerOn.delete(m.socket);
+          continue;
+        }
+        if (on !== null && on !== m.sceneId) {
+          const before = all[i - 1];
+          assert.ok(before && before.e.k === "rulerEnd" && before.sceneId === on && before.at === m.at, `${where}: the ruler went on another floor before its end on the old one`);
+        }
+        rulerOn.set(m.socket, m.sceneId);
       }
       const bySlot = new Map<string, (Sent & { socket: number; e: GroupFrame })[]>();
       for (const m of groups) {
@@ -622,6 +764,7 @@ describe("random drags, ends, floor switches, reconnects and needs", () => {
             assert.ok(was.e.k === "dragCancel" && was.at === now.at, `${where}: ${key} left a floor without its cancel first`);
           }
           assert.ok(was.e.k !== "groupEnd" && !(was.e.k === "dragCancel" && was.sceneId === now.sceneId), `${where}: ${key} sent after its end`);
+          if (was.e.k === "dragCancel") assert.ok("with" in now.e, `${where}: ${key} went on after a cancel without its members`);
         }
       }
     }

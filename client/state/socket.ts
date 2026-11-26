@@ -41,12 +41,15 @@ const KEEPALIVE_SLACK_MS = 0.001;
 
 /*
  * What one socket lets itself send, under the server's frame budget
- * (server/rooms/budgets.ts FrameBudget: 100 frames and 256 KiB a second, with
- * a burst of twice that), so the server never drops an op's frame unread and
- * the op never waits for OP_ANSWER_MS to go again (H3-FOG-BURST). Half the
- * burst and three quarters of the rate: frames the network or a busy server
- * bunches up, and the frames other than ops that always go, still fit in
- * what the server holds.
+ * (server/rooms/budgets.ts FrameBudget: 200 frames a second with a burst of
+ * 400 for every frame, and 256 KiB a second with a burst of 512 KiB for
+ * every frame but a preview), so the server never drops an op's frame
+ * unread and the op never waits for OP_ANSWER_MS to go again
+ * (H3-FOG-BURST). A server older than group frames counted 100 frames and
+ * 256 KiB a second, with a burst of twice that, for every frame, previews
+ * included. Half that burst and three quarters of that rate keep within
+ * both: frames the network or a busy server bunches up, and the frames
+ * other than ops that always go, still fit in what either holds.
  */
 export const SEND_BYTES_PER_SEC = 192 * 1024;
 export const SEND_BYTES_BURST = 256 * 1024;
@@ -314,12 +317,19 @@ function groupRoster(from: { readonly x: number; readonly y: number }, members: 
   return { from: { x: from.x, y: from.y }, ids: members.map((m) => m.tokenId), starts };
 }
 
-function sameRoster(gesture: { roster: GroupRoster; members: readonly DragMember[] }, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): boolean {
-  if (gesture.roster.from.x !== from.x || gesture.roster.from.y !== from.y || gesture.members.length !== members.length) return false;
+function sameRoster(version: RosterVersion, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): boolean {
+  if (version.roster.from.x !== from.x || version.roster.from.y !== from.y || version.members.length !== members.length) return false;
   return members.every((m, i) => {
-    const was = gesture.members[i]!;
+    const was = version.members[i]!;
     return was.tokenId === m.tokenId && was.x === m.x && was.y === m.y;
   });
+}
+
+/** A drag's roster as it stood when a frame was made: each frame names the version it moves by. */
+type RosterVersion = { readonly n: number; readonly roster: GroupRoster; readonly members: readonly DragMember[] };
+
+function rosterVersion(n: number, from: { readonly x: number; readonly y: number }, members: readonly DragMember[]): RosterVersion {
+  return { n, roster: groupRoster(from, members), members: members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })) };
 }
 
 /**
@@ -404,26 +414,38 @@ function timeAnswer(json: unknown): { k: number; at: number } | null {
 type Gesture = {
   readonly g: number;
   readonly tokenId: string;
-  roster: GroupRoster;
-  members: readonly DragMember[];
+  /** Its roster now, which a frame made from here on moves by. */
+  roster: RosterVersion;
   /** The floor its frames go to, null before its first. */
   sceneId: string | null;
   /** Its latest start or move, which the keepalive repeats, or null once it ended. */
   last: GroupFrame | null;
   queuedAt: number;
-  /** On this socket: the floor its members were last named on, null when its next message names them. */
-  rosterOn: string | null;
+  /**
+   * On this socket: the roster version last named and the floor it went on,
+   * or null when the drag's next message names it, as after a cancel the
+   * server closes its rosters by.
+   */
+  named: { readonly on: string; readonly n: number } | null;
   /** On this socket: the floor of its last message sent, null before one. */
   sentOn: string | null;
 };
 
 /** A queued message: another preview's event, or a drag's frame, which names the drag's members when it goes if the socket needs them. */
 type SlotEntry =
-  | { readonly sceneId: string | null; readonly e: EphEvent; readonly gesture?: undefined }
+  | {
+      readonly sceneId: string | null;
+      readonly e: EphEvent;
+      readonly gesture?: undefined;
+      /** An old floor's end, which goes in the same flush as the new floor's frame queued after it. */
+      readonly pair?: boolean;
+    }
   | {
       readonly sceneId: string | null;
       readonly e: GroupFrame;
       readonly gesture: Gesture;
+      /** The roster the frame was made with, named on it when the socket does not hold that one. */
+      readonly roster: RosterVersion;
       /** The drag's own end, after which it is gone. */
       readonly ends: boolean;
       /** An old floor's cancel, which goes in the same flush as the new floor's frame queued after it. */
@@ -491,6 +513,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const ephQueue = new Map<string, { e: EphEvent; sceneId: string | null }>();
   /** With `takes`: each slot's queue and its own window, so what one preview sends never moves another's frames. */
   const slots = new Map<string, Slot>();
+  /** With `takes`: the floor each preview other than a drag last sent a frame to on this socket, where its end goes. */
+  const previewFloors = new Map<string, string>();
   /** Previews in progress other than drags, by slot, with their floor and when each was last sent. */
   const openPreviews = new Map<string, { e: EphEvent; sceneId: string | null; sentAt: number }>();
   /** Drags in progress, and ended ones whose end is still queued, by gesture number. */
@@ -588,7 +612,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     budget = new SendBudget(clock);
     // So is what it holds of each drag's members. What the last socket was told, and each preview's window, went with it (detach).
     for (const gesture of gestures.values()) {
-      gesture.rosterOn = null;
+      gesture.named = null;
       gesture.sentOn = null;
     }
     socket.onopen = () => {
@@ -990,7 +1014,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         return;
       case "need": {
         const gesture = gestures.get(msg.g);
-        if (gesture && gesture.tokenId === msg.id) gesture.rosterOn = null;
+        if (gesture && gesture.tokenId === msg.id) gesture.named = null;
         return;
       }
       case "pong":
@@ -1067,8 +1091,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
   /** Empties every slot, and forgets each drag whose end was waiting in one. `windows` false keeps what each sent, for the same socket. */
   function dropSlots(windows = true): void {
-    if (windows) slots.clear();
-    else for (const slot of slots.values()) slot.queue = [];
+    if (windows) {
+      slots.clear();
+      previewFloors.clear();
+    } else for (const slot of slots.values()) slot.queue = [];
     for (const [g, gesture] of gestures) if (gesture.last === null) gestures.delete(g);
   }
 
@@ -1090,7 +1116,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         continue;
       }
       // An old floor's cancel and the new floor's frame go together, the cancel first, as the server needs them.
-      const n = head.gesture && head.pair && slot.queue.length > 1 && rate >= 2 ? 2 : 1;
+      const n = head.pair && slot.queue.length > 1 && rate >= 2 ? 2 : 1;
       const over = slot.sent.length + n - rate;
       const due = Math.max(slot.last + gap - now, over > 0 ? slot.sent[over - 1]! + 1000 - now : 0);
       if (due > 0) {
@@ -1112,15 +1138,26 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       if (!sendRaw({ t: "eph", sceneId: entry.sceneId, e: entry.e }, false, false)) return false;
       const open = openPreviews.get(key);
       if (open) open.sentAt = clock.now();
+      if (keepsAlive(entry.e)) previewFloors.set(key, entry.sceneId);
+      else previewFloors.delete(key);
       return true;
     }
     const gesture = entry.gesture;
     if (entry.ends) gestures.delete(gesture.g);
-    // The drag's first message on this socket names its members, and so does its first on a floor and its next after `need`.
-    const named = gesture.rosterOn !== entry.sceneId;
-    const e: GroupFrame = named ? { ...entry.e, with: gesture.members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })), from: { ...gesture.roster.from } } : entry.e;
+    // A drag's first message on this socket names its members, and so do its first on a floor, its first after a cancel or
+    // `need`, and its first made with a changed roster: always the roster the frame was made with.
+    const was = gesture.named;
+    const naming = was === null || was.on !== entry.sceneId || was.n !== entry.roster.n;
+    const { members, roster } = entry.roster;
+    const e: GroupFrame = naming ? { ...entry.e, with: members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })), from: { ...roster.from } } : entry.e;
     if (!sendRaw({ t: "eph", sceneId: entry.sceneId, e }, false, false)) return false;
-    if (named) gesture.rosterOn = entry.sceneId;
+    // The old floor's cancel ends the drag there and closes every roster the server holds for it, so the next frame names its own.
+    if (entry.pair) {
+      gesture.named = null;
+      gesture.sentOn = null;
+      return true;
+    }
+    if (naming) gesture.named = { on: entry.sceneId, n: entry.roster.n };
     gesture.sentOn = entry.sceneId;
     return true;
   }
@@ -1159,7 +1196,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     gesture.queuedAt = clock.now();
     armDragKeepAlive();
     if (phase === "open") {
-      if (takes) queueGroup(gesture, e, sceneId, left);
+      if (takes) queueGroup(gesture, e, sceneId);
       else queueLone(gesture, e, sceneId, left);
       scheduleEphFlush();
     }
@@ -1167,24 +1204,32 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     if (!keeps && !queued(gestureSlot(gesture))) gestures.delete(gesture.g);
   }
 
-  function queueGroup(gesture: Gesture, e: GroupFrame, sceneId: string | null, left: string | null): void {
+  /**
+   * Queues a drag's frame in its slot. A start or a move on another floor
+   * than the last one sent is put against that floor alone, however many
+   * switches came before the flush: what waits for any other floor never
+   * goes, and one cancel on the floor sent last goes first, in the same
+   * flush, or none where nothing went or it is the same floor again.
+   */
+  function queueGroup(gesture: Gesture, e: GroupFrame, sceneId: string | null): void {
     // An `off` socket sends no drag at all. Its drag still counts its frames, so a raised pace goes on from the next.
     if (takes?.pace === "off") return;
     const slot = slotOf(gestureSlot(gesture));
-    if (left !== null) {
-      // What waits for the floor left never goes, and the server ends there only what it was sent.
-      slot.queue = slot.queue.filter((q) => !(q.gesture && !q.ends && !q.pair && q.sceneId === left));
-      if (gesture.sentOn === left) slot.queue.push({ sceneId: left, e: { k: "dragCancel", tokenId: gesture.tokenId, g: gesture.g }, gesture, ends: false, pair: true });
+    if (keepsAlive(e)) {
+      const kept = slot.queue.filter((q) => !q.pair && (!keepsAlive(q.e) || q.sceneId === sceneId));
+      const sentOn = gesture.sentOn;
+      slot.queue =
+        sentOn !== null && sentOn !== sceneId ? [{ sceneId: sentOn, e: { k: "dragCancel", tokenId: gesture.tokenId, g: gesture.g }, gesture, roster: gesture.roster, ends: false, pair: true }, ...kept] : kept;
     }
     // A move replaces a queued move. A start is never replaced, and an end goes after the move before it.
     const tail = slot.queue.at(-1);
     if (e.k === "dragMove" && tail?.gesture && tail.e.k === "dragMove" && tail.sceneId === sceneId) slot.queue.pop();
-    slot.queue.push({ sceneId, e, gesture, ends: !keepsAlive(e), pair: false });
+    slot.queue.push({ sceneId, e, gesture, roster: gesture.roster, ends: !keepsAlive(e), pair: false });
   }
 
   /** For a server older than group frames: each token's own frames, each passing the lone check, as the page sent them before. */
   function queueLone(gesture: Gesture, e: GroupFrame, sceneId: string | null, left: string | null): void {
-    for (const one of expandGroup(e, gesture.roster)) {
+    for (const one of expandGroup(e, gesture.roster.roster)) {
       if (!loneEphSchema.safeParse(one).success) {
         if (!reported.has(one.k)) {
           reported.add(one.k);
@@ -1238,7 +1283,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         // Counted as sent whether or not it can go now, so a closed socket's drag waits a keepalive again.
         gesture.queuedAt = now;
         if (phase !== "open" || queued(takes ? gestureSlot(gesture) : `drag:${gesture.tokenId}`)) continue;
-        if (takes) queueGroup(gesture, last, gesture.sceneId, null);
+        if (takes) queueGroup(gesture, last, gesture.sceneId);
         else queueLone(gesture, last, gesture.sceneId, null);
       }
       scheduleEphFlush();
@@ -1259,9 +1304,18 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       return;
     }
     if (takes.pace === "off" && !sentWhenOff(e)) return;
-    // The old floor's end in a slot of its own goes at the next flush, so never after the new floor's frame.
-    if (left && leftOn) slotOf(`${slot}@${leftOn}`).queue = [{ e: left, sceneId: leftOn }];
-    slotOf(slot).queue = [{ e, sceneId }];
+    // Against the floor the preview's last frame went to on this socket, however many switches came before the flush.
+    const sentOn = previewFloors.get(slot);
+    const queue = slotOf(slot);
+    if (!keepsAlive(e)) {
+      // An end goes where the frames went.
+      queue.queue = [{ e, sceneId: sentOn ?? sceneId }];
+      return;
+    }
+    // A frame on another floor goes after that floor's end, in the same flush and the preview's own slot, so the end never
+    // reaches the server after the frame and takes the new floor's preview with it.
+    const end = sentOn !== undefined && sentOn !== sceneId ? endOf(e) : null;
+    queue.queue = end ? [{ e: end, sceneId: sentOn!, pair: true }, { e, sceneId }] : [{ e, sceneId }];
   }
 
   // ------------------------------------------------------------ the socket object
@@ -1365,12 +1419,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       const gesture: Gesture = {
         g,
         tokenId,
-        roster: groupRoster(from, members),
-        members: members.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })),
+        roster: rosterVersion(0, from, members),
         sceneId: null,
         last: null,
         queuedAt: Number.NEGATIVE_INFINITY,
-        rosterOn: null,
+        named: null,
         sentOn: null,
       };
       gestures.set(g, gesture);
@@ -1379,12 +1432,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       return {
         move(step, at, now) {
           if (done) return;
-          if (!sameRoster(gesture, at, now)) {
-            // A token's own spot moved during the drag, so the next message names the members again from where they now stand.
-            gesture.roster = groupRoster(at, now);
-            gesture.members = now.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y }));
-            gesture.rosterOn = null;
-          }
+          // A token's own spot moved during the drag: frames from here on move by a new roster, which the first of them names.
+          if (!sameRoster(gesture.roster, at, now)) gesture.roster = rosterVersion(gesture.roster.n + 1, at, now);
           stepGesture(gesture, { ...step, k: "dragMove", tokenId, g });
         },
         end(at) {
