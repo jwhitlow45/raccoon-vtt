@@ -7,7 +7,7 @@ import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
 import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
 import { holderOf } from "../targets.ts";
-import { askOp } from "../../rolls/logic.ts";
+import { askOp, targetKey } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { renamed } from "../../../state/ids.ts";
 import type { SaveOutcomeFields, SavePageAskFields, SavePageCloseFields } from "#shared/saveOutcomeContract.ts";
@@ -51,6 +51,20 @@ export type Source =
   | { kind: "area"; templateId: string; floors?: string[] }
   | { kind: "trap"; trapId: string; due: string; tokenIds: string[]; live?: true }
   | { kind: "fall"; fallId: string; tokenIds: string[] };
+
+/**
+ * Creatures in the order every list the page sends names them: by id. The
+ * page shows its rows by the DM's own names, ties in the order their source
+ * gave them (a trap's springing or a fall card keeps the server's), so a
+ * request, a dice line or the lines an outcome writes would otherwise list
+ * players' creatures by names and an order only the DM holds.
+ */
+export function byCreature<T>(of: (item: T) => { tokenId?: string; characterId?: string }): (a: T, b: T) => number {
+  return (a, b) => {
+    const [x, y] = [targetKey(of(a)), targetKey(of(b))];
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
+}
 
 /** The name players read in what the page sends them (Fill.publicName). */
 export function publicName(fill: Pick<Fill, "name" | "publicName">): string {
@@ -266,7 +280,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   const envelopePage = invocationPage(page, input.override);
   const test = page.test;
   const live = input.rows.filter((r) => stateOf(next, r).mark !== "skip");
-  const asked = live.filter((r) => stateOf(next, r).way === "ask" && r.askRef);
+  const asked = live.filter((r) => stateOf(next, r).way === "ask" && r.askRef).sort(byCreature((r) => r.askRef!));
   const requestsNeeded = Math.ceil(asked.length / LIMITS.rollTargets);
   const room = LIMITS.openRollsPerRoom - input.openRequests;
   if (requestsNeeded > room) return { page, send: [], error: `Close ${requestsNeeded - room} request${requestsNeeded - room === 1 ? "" : "s"} first.` };
@@ -274,7 +288,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   const untyped = live.find((r) => stateOf(next, r).way === "server" && !input.server.some((s) => s.holder === r.holder));
   if (untyped) return { page, send: [], error: `Type ${untyped.name}'s bonus, or pick Type.` };
   const send: Command[] = [];
-  const serverRows = input.server.filter((s) => live.some((r) => r.holder === s.holder && stateOf(next, r).way === "server"));
+  const serverRows = input.server.filter((s) => live.some((r) => r.holder === s.holder && stateOf(next, r).way === "server")).sort(byCreature((s) => s.target));
   if (serverRows.length > 0) {
     const d20 = d20Of(test, page.spell)!;
     const label = cutLabel(page.fill ? `${rollName(envelopePage)}, ${testLabel(d20)}` : testLabel(d20));
@@ -420,7 +434,7 @@ export function rollAgain(page: Page, input: { holders: readonly string[]; serve
   const again = input.server.filter((s) => input.holders.includes(s.holder) && (() => {
     const st = page.states[s.holder];
     return st?.status === "notRolled" || st?.status === "unknown";
-  })());
+  })()).sort(byCreature((s) => s.target));
   if (again.length === 0) return { page, send: [] };
   const envelopePage = invocationPage(page, input.override);
   const d20 = d20Of(page.test, page.spell)!;
@@ -548,7 +562,8 @@ export function apply(page: Page, plan: OpOf<"actor.outcome"> & SaveOutcomeField
   // An ask resolved elsewhere, or closed with an end the page cannot read, is never applied (docs/design/design-v1-player-save-spell.md 3.3).
   if (page.cast?.blocked) return { page, send: [], error: page.cast.blocked };
   // The plan closes the ask the page holds now, and only that one, so a page that let its ask go closes none.
-  const { cast: _built, ...rest } = plan;
+  const { cast: _built, ...built } = plan;
+  const rest = { ...built, targets: [...built.targets].sort(byCreature((t) => t.target)), ...(built.fall ? { fall: { ...built.fall, tokenIds: [...built.fall.tokenIds].sort() } } : {}) };
   const op: OpOf<"actor.outcome"> & SaveOutcomeFields = page.cast ? { ...rest, cast: page.cast.ask.id } : rest;
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
   const send: Command[] = [];

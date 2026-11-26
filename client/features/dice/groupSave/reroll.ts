@@ -9,7 +9,7 @@ import type { SavePageAskFields } from "#shared/saveOutcomeContract.ts";
 import { askOp, targetKey, targetRef } from "../../rolls/logic.ts";
 import { asSave, withExtra } from "../options.ts";
 import { overrideRollSources, rollModeTo, type RollModeOverride } from "../rollMode.ts";
-import type { Page, ServerRoll, Step } from "./chain.ts";
+import { byCreature, type Page, type ServerRoll, type Step } from "./chain.ts";
 import { d20Of, type RowBase, type RowState } from "./rows.ts";
 
 type RequestRef = Page["requests"][number] & { selected?: string[]; replaces?: string[]; dc?: number };
@@ -51,14 +51,15 @@ export function rerollSaves(page: Page, input: { holders: readonly string[]; ser
   const to = rollModeTo(ordinary, ordinary, input.override);
   const dc = dcOnLine(to, page.dc ?? undefined, page.switches.dcShown);
   const label = againLabel(page, LIMITS.diceLabelChars);
-  const rolls = rows.map(row => {
+  const sent = [...rows].sort(byCreature(row => row.target));
+  const rolls = sent.map(row => {
     const roll = server.get(row.holder)!;
     return asSave({ formula: withExtra(d20Formula(roll.bonus), roll.extra), creature: roll.target, label, sources: overrideRollSources(roll.sources, [], input.override) }, test);
   });
   const states = { ...page.states };
   for (const row of rows) states[row.holder] = { ...withoutResult(stateOf(page, row)), batch: { tag: input.tag, part: 0 } };
   return {
-    page: { ...page, states, rolls: [...page.rolls, { tag: input.tag, holders: rows.map(row => row.holder), state: "sending" }] },
+    page: { ...page, states, rolls: [...page.rolls, { tag: input.tag, holders: sent.map(row => row.holder), state: "sending" }] },
     send: [{ kind: "dice", tag: input.tag, rolls, to, ...(dc === undefined ? {} : { dc }) }],
   };
 }
@@ -101,7 +102,7 @@ export function askAgain(page: Page, input: { holders: readonly string[]; reques
   const selected = page.rows.filter(row => {
     const state = stateOf(page, row);
     return input.holders.includes(row.holder) && state.way === "ask" && row.askRef && !state.gone && state.mark !== "skip" && !row.skip;
-  });
+  }).sort(byCreature(row => row.askRef!));
   if (selected.length === 0 || page.test.kind === "none") return { page, send: [] };
   if (page.dmRolls.some(roll => roll.state === "sending" && selected.some(row => row.holder === roll.holder))) return { page, send: [], error: "Wait for the current roll to finish." };
   const groups = partitions(page, selected, input.requests);
@@ -136,7 +137,7 @@ export function askAgain(page: Page, input: { holders: readonly string[]; reques
       resultShown: page.switches.resultShown,
       ...(page.spell && page.test.kind === "save" ? { spell: true } : {}),
       note: againLabel(page, LIMITS.rollNoteChars),
-      targets: [...targets.values()],
+      targets: [...targets.values()].sort(byCreature((t) => t)),
     }, id, 0);
     if (!made.ok) return { page, send: [], error: made.error };
     const replaces = old.map(ask => ({ id: ask.id, expectHash: guardHash(keys.roll(ask.id), ask) }));
