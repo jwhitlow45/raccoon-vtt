@@ -307,8 +307,8 @@ describe("the shortcut table", () => {
     assert.deepEqual(calls.ops.at(-1)?.op, { t: "token.updateMany", tokenIds: ["t1", "t2"], patch: { locked: true } });
     assert.equal(run(e, press({ key: "Delete", code: "Delete" })), "delete");
     assert.deepEqual(calls.ops.at(-1)?.op, { t: "token.deleteMany", tokenIds: ["t1", "t2"] });
-    assert.deepEqual(calls.notes, ["Deleted 2 tokens. Ctrl+Z brings them back."]);
-    assert.equal(deletedText(["Goblin 2"]), "Deleted Goblin 2. Ctrl+Z brings it back.");
+    assert.deepEqual(calls.notes, ["Deleted 2 tokens. Ctrl+Z brings them back while the room has space."]);
+    assert.equal(deletedText(["Goblin 2"]), "Deleted Goblin 2. Ctrl+Z brings it back while the room has space.");
     const player = env({ role: "player", selected: ["t2"] });
     assert.equal(run(player.env, press({ key: "Backspace", code: "Backspace" })), null);
     assert.equal(run(player.env, press({ key: "h", code: "KeyH" })), null);

@@ -386,9 +386,14 @@ function elevatable(env: ShortcutEnv): Token[] {
   return selectedTokens(env).filter((t) => tokenAccess({ role: env.role, memberId: s.you?.memberId, view: s.view, token: t }).canEditToken("elevation"));
 }
 
-/** "Deleted Goblin 2. Ctrl+Z brings it back." or "Deleted 3 tokens. Ctrl+Z brings them back." */
+/**
+ * "Deleted Goblin 2. Ctrl+Z brings it back while the room has space." or the same for several tokens.
+ * The client cannot see whether the room is past the line where an Undo is refused, so the toast says what it needs.
+ */
 export function deletedText(names: readonly string[]): string {
-  return names.length === 1 ? `Deleted ${names[0]}. Ctrl+Z brings it back.` : `Deleted ${names.length} tokens. Ctrl+Z brings them back.`;
+  return names.length === 1
+    ? `Deleted ${names[0]}. Ctrl+Z brings it back while the room has space.`
+    : `Deleted ${names.length} tokens. Ctrl+Z brings them back while the room has space.`;
 }
 
 /** The scene this page shows, with what the view keys read of it. */
