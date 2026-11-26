@@ -373,6 +373,82 @@ describe("SnapshotBudget", () => {
     assert.deepEqual(heard, ["s2 1000", "s3 2000"]);
   });
 
+  test("settling many requests due at once reads each one's due time a few times, not once for every other request", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);
+    const n = 2_000;
+    let reads = 0;
+    const heard: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const keys = b.keys(`s${i}`, `ip-${i}`, false);
+      b.record(keys, 1, i % 7);
+      const request = b.wait(`X|s${i}|a`, keys, 1_000 + (i % 7), 0, (o) => void heard.push(`s${i} ${o.at}`));
+      let due = request.due;
+      Object.defineProperty(request, "due", {
+        get: () => (reads++, due),
+        set: (value: number) => void (due = value),
+      });
+    }
+    // Every request fits at its due time, earliest first and in arrival order among equals.
+    assert.equal(b.mayWait(b.keys("other", "ip-other", false), 1_006), true);
+    const order = Array.from({ length: n }, (_, i) => i).sort((x, y) => (x % 7) - (y % 7) || x - y);
+    assert.deepEqual(heard, order.map((i) => `s${i} ${1_000 + (i % 7)}`));
+    assert.equal(b.waiting, 0);
+    assert.ok(reads < 20 * n, `${reads} reads of a due time for ${n} requests`);
+  });
+
+  test("a dropped request's due time neither settles nor sets the timer, and the next request's does", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const c = clock(0);
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, c.now);
+    const heard: string[] = [];
+    for (const [session, due] of [["s1", 1_000], ["s2", 1_500], ["s3", 1_500]] as const) {
+      const keys = b.keys(session, `ip-${session}`, false);
+      b.record(keys, 1, due - 1_000);
+      b.wait(`X|${session}|a`, keys, due, 0, (o) => void heard.push(`${session} ${o.at}`));
+    }
+    b.drop("X|s1|a", 0);
+    // The same id waits again, now after s3, so it settles after s3 though its due time matches.
+    b.wait("X|s2|a", b.keys("s2", "ip-s2", false), 1_500, 0, (o) => void heard.push(`s2 again ${o.at}`));
+    c.tick(1_000);
+    t.mock.timers.tick(1_000);
+    assert.deepEqual(heard, []);
+    c.tick(500);
+    t.mock.timers.tick(500);
+    assert.deepEqual(heard, ["s3 1500", "s2 again 1500"]);
+    assert.equal(b.waiting, 0);
+  });
+
+  test("requests dropped long before their due time leave the due heap near the size of those still waiting", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 60_000 }, () => 0);
+    const keys = b.keys("s1", "ip-1", false);
+    b.record(keys, 1, 0);
+    b.wait("X|s1|kept", keys, 60_000, 0);
+    for (let i = 0; i < 500; i++) {
+      b.wait(`X|s1|${i}`, keys, 60_001 + i, 0);
+      b.drop(`X|s1|${i}`, 0);
+    }
+    assert.equal(b.waiting, 1);
+    assert.ok(b.places <= 2 * b.waiting + 16, `${b.places} places for ${b.waiting} request`);
+  });
+
+  test("a request told to wait again keeps its turn ahead of a later request due at the same time", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const c = clock(0);
+    const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, c.now);
+    const heard: string[] = [];
+    const a = b.keys("sa", "ip-a", false);
+    b.record(a, 1, 500);
+    b.wait("X|sa|a", a, 1_000, 0, (o) => void heard.push(`sa ${o.kind} ${o.at}`));
+    const later = b.keys("sb", "ip-b", false);
+    b.record(later, 1, 500);
+    b.wait("X|sb|a", later, 1_500, 0, (o) => void heard.push(`sb ${o.kind} ${o.at}`));
+    c.tick(1_500);
+    t.mock.timers.tick(1_500);
+    assert.deepEqual(heard, ["sa waits 1000", "sa fits 1500", "sb fits 1500"]);
+  });
+
   test("the budget's own timer settles a request at its due time with no call to the budget, and holds no process open", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const b = new SnapshotBudget({ sessionCount: 1, windowMs: 1_000 }, () => 0);

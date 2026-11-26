@@ -278,6 +278,47 @@ export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
 type Spent = { at: number; bytes: number };
 
 /**
+ * A waiting request's place in the due heap: its due time and arrival order.
+ * A request that was dropped or replaced since then leaves its place behind,
+ * and the heap skips it when it comes to the top. A request that waits again
+ * is placed again under its first arrival, so it keeps its turn among equal
+ * due times.
+ */
+type DuePlace = { due: number; order: number; request: WaitingRequest };
+
+/** Whether `a` comes due before `b`: the earlier due time, then the earlier arrival, as one scan of the requests in arrival order picks. */
+function before(a: DuePlace, b: DuePlace): boolean {
+  return a.due < b.due || (a.due === b.due && a.order < b.order);
+}
+
+function heapPush(heap: DuePlace[], place: DuePlace): void {
+  let i = heap.push(place) - 1;
+  while (i > 0) {
+    const parent = (i - 1) >> 1;
+    if (!before(heap[i]!, heap[parent]!)) break;
+    [heap[i], heap[parent]] = [heap[parent]!, heap[i]!];
+    i = parent;
+  }
+}
+
+function heapPop(heap: DuePlace[]): void {
+  const last = heap.pop();
+  if (last === undefined || heap.length === 0) return;
+  heap[0] = last;
+  let i = 0;
+  for (;;) {
+    const l = 2 * i + 1;
+    const r = l + 1;
+    let top = i;
+    if (l < heap.length && before(heap[l]!, heap[top]!)) top = l;
+    if (r < heap.length && before(heap[r]!, heap[top]!)) top = r;
+    if (top === i) return;
+    [heap[i], heap[top]] = [heap[top]!, heap[i]!];
+    i = top;
+  }
+}
+
+/**
  * The snapshot budget (design 10.4): every snapshot the server builds counts
  * against its session and its IP, the IP by count alone (keys). A request
  * over budget is delayed, never refused, until the oldest entries leave the
@@ -309,6 +350,13 @@ export class SnapshotBudget {
   /** The delayed requests waiting, by id, and how many count against each key's bound. */
   #requests = new Map<string, WaitingRequest>();
   #waiting = new Map<string, number>();
+  /**
+   * The waiting requests by due time, so a call settles the k requests due by
+   * then in O(k log n), not a scan of every request for each one. With many
+   * sessions in a pinned room, n grows with the sessions.
+   */
+  #due: DuePlace[] = [];
+  #arrivals = 0;
   #settling = false;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #timerAt = Number.POSITIVE_INFINITY;
@@ -331,6 +379,11 @@ export class SnapshotBudget {
   /** Delayed requests waiting, for tests. */
   get waiting(): number {
     return this.#requests.size;
+  }
+
+  /** Places in the due heap, those left behind included, for tests. */
+  get places(): number {
+    return this.#due.length;
   }
 
   /**
@@ -421,6 +474,7 @@ export class SnapshotBudget {
     this.drop(id, now);
     const request: WaitingRequest = { id, keys, due, onDue };
     this.#requests.set(id, request);
+    heapPush(this.#due, { due, order: this.#arrivals++, request });
     for (const k of keys) bump(this.#waiting, k.key, 1);
     this.#arm(now);
     return request;
@@ -435,8 +489,29 @@ export class SnapshotBudget {
     this.#settle(now);
     const held = this.#requests.get(id);
     if (!held) return;
-    this.#requests.delete(id);
-    for (const k of held.keys) bump(this.#waiting, k.key, -1);
+    this.#forget(held);
+  }
+
+  #forget(request: WaitingRequest): void {
+    this.#requests.delete(request.id);
+    for (const k of request.keys) bump(this.#waiting, k.key, -1);
+    // Places left behind are skipped at the top, and rebuilt away once they outnumber the requests, so the heap stays near n.
+    if (this.#due.length > 2 * this.#requests.size + 16) {
+      const live = this.#due.filter((place) => this.#holds(place));
+      this.#due = [];
+      for (const place of live) heapPush(this.#due, place);
+    }
+  }
+
+  /** Whether `place` is still its request's place: the request still waits. Settling takes a place out before it places the request again. */
+  #holds(place: DuePlace): boolean {
+    return this.#requests.get(place.request.id) === place.request;
+  }
+
+  /** The earliest request still waiting, its places left behind dropped on the way. */
+  #earliest(): DuePlace | null {
+    while (this.#due.length > 0 && !this.#holds(this.#due[0]!)) heapPop(this.#due);
+    return this.#due[0] ?? null;
   }
 
   /**
@@ -449,18 +524,19 @@ export class SnapshotBudget {
     this.#settling = true;
     try {
       for (;;) {
-        let next: WaitingRequest | null = null;
-        for (const request of this.#requests.values()) if (request.due <= now && (next === null || request.due < next.due)) next = request;
-        if (next === null) break;
+        const place = this.#earliest();
+        if (place === null || place.due > now) break;
+        heapPop(this.#due);
+        const next = place.request;
         const at = next.due;
         const delay = this.#delayAt(next.keys, at);
         let outcome: DueOutcome;
         if (delay > 0) {
           next.due = at + delay;
+          heapPush(this.#due, { due: next.due, order: place.order, request: next });
           outcome = { at, kind: "waits", delay };
         } else {
-          this.#requests.delete(next.id);
-          for (const k of next.keys) bump(this.#waiting, k.key, -1);
+          this.#forget(next);
           outcome = { at, kind: "fits", sent: this.#reserveAt(next.keys, at) };
         }
         try {
@@ -483,8 +559,7 @@ export class SnapshotBudget {
    * time it fires, each at its own due time, and sets the next from then.
    */
   #arm(now: number): void {
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const request of this.#requests.values()) earliest = Math.min(earliest, request.due);
+    const earliest = this.#earliest()?.due ?? Number.POSITIVE_INFINITY;
     if (earliest === this.#timerAt) return;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
