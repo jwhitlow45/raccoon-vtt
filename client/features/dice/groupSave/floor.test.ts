@@ -85,7 +85,7 @@ describe("a trap card from another floor applies", () => {
     const plan = buildPlan(page, dice, [{ amount: 4 }], IDS);
     assert.ok(plan);
     assert.deepEqual(plan.targets.map((t) => t.damage?.parts[0]?.amount), [4, 4]);
-    assert.deepEqual(plan.trap, { trapId: "pit", due: "20:0" });
+    assert.deepEqual(plan.trap, { trapId: "pit", due: "20:0", tokenIds: ["gob", "thorn"] });
     assert.equal(applyWaits(page, dice, [{ amount: 4 }]), null);
   });
 

@@ -10,7 +10,7 @@ import { actor, character, customMonster, DM, env, room, token, trap as trapOf }
 import type { DiceView } from "../creature.ts";
 import { apply, followSelection, mark, newPage, roll, sourceIds, type Page } from "./chain.ts";
 import { trapFill, UNFOUND_TRAP } from "./fills.ts";
-import { buildPlan } from "./plan.ts";
+import { buildPlan, pageBound } from "./plan.ts";
 import { groupRows, type RowBase } from "./rows.ts";
 
 const { trapStart } = await import("../../traps/TrapSaveStart.tsx");
@@ -93,7 +93,7 @@ describe("a trap's group save", () => {
     let rolled: Page = { ...page, phase: "rolled", rows };
     for (const r of rows) rolled = mark(rolled, r.holder, "fail");
     const plan = buildPlan(rolled, dice, [{ amount: 4 }], { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000a", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000b" })!;
-    assert.deepEqual(plan.trap, { trapId: t.id, due: "20:0" });
+    assert.deepEqual(plan.trap, { trapId: t.id, due: "20:0", tokenIds: ["gob", "thorn"] });
     const state = world(t);
     const first = applyOp(state, plan, DM, env(30));
     assert.ok(first.ok);
@@ -109,7 +109,7 @@ describe("a trap's group save", () => {
     let rolled: Page = { ...page, phase: "rolled", rows };
     for (const r of rows) rolled = mark(rolled, r.holder, "pass");
     const plan = buildPlan(rolled, dice, null, { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000d", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000e" })!;
-    assert.deepEqual([plan.targets, plan.trap], [[], { trapId: t.id, due: "20:0" }]);
+    assert.deepEqual([plan.targets, plan.trap], [[], { trapId: t.id, due: "20:0", tokenIds: ["gob", "thorn"] }]);
     assert.ok(opSchema.safeParse(plan).success, "the server takes an outcome that only settles a springing");
     assert.equal(opSchema.safeParse({ ...plan, trap: undefined }).success, false, "one that settles nothing names a creature");
     const first = applyOp(world(t), plan, DM, env(30));
@@ -144,7 +144,7 @@ describe("a trap's group save", () => {
     let rolled: Page = { ...page, phase: "rolled", rows };
     for (const r of rows) rolled = mark(rolled, r.holder, "fail");
     const plan = buildPlan(rolled, dice, [{ amount: 4 }], { plan: "0192f0a8-6c1e-7a4b-9c3d-000000000011", newId: () => "0192f0a8-6c1e-7a4b-9c3d-000000000012" })!;
-    assert.deepEqual(plan.trap, { trapId: "pit", due: "20:0" });
+    assert.deepEqual(plan.trap, { trapId: "pit", due: "20:0" }, "a pick page settles it whole, naming no one");
     assert.equal(plan.targets.length, 51);
     const applied = applyOp(state, plan, DM, env(30));
     assert.ok(applied.ok, applied.ok ? "" : applied.message);
@@ -159,5 +159,78 @@ describe("a trap's group save", () => {
     assert.deepEqual(sourceIds(fixed, ["c"]), ["gob", "thorn"], "in id order, as every list the room found");
     const none = trapStart(named, { id: "21:0", at: "", how: "hand", by: [], hits: [] }).source;
     assert.deepEqual(sourceIds(none, ["c"]), [], "it hits no one");
+  });
+
+  const ids = (n: number) => ({ plan: `0192f0a8-6c1e-7a4b-9c3d-${String(n).padStart(12, "0")}`, newId: () => `0192f0a8-6c1e-7a4b-9c3d-${String(n + 1).padStart(12, "0")}` });
+  const hpOf = (state: RoomState, id: string) => {
+    const a = state.tokens[id]!.actor;
+    return "inline" in a ? a.inline.hp.cur : state.characters[a.ref]!.actor.hp.cur;
+  };
+
+  test("Apply names only the creatures its page reached, so one on another scene stays on the occurrence until it is back", () => {
+    const t = presetTrap("hidden-pit");
+    const full = world(t);
+    // The DM's copy holds the scene in view: the goblin was moved to another scene before the page opened.
+    const away: RoomState = { ...full, tokens: { thorn: full.tokens.thorn! } };
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view: away, srd: { monsters: [], rolls: {} } };
+    const filled = trapFill(t);
+    const source = trapStart(t, t.rig!.due![0]!).source;
+    const rows = groupRows(dice, sourceIds(source, []), filled.test, false, new Map());
+    assert.deepEqual(rows.map((r) => r.tokenId), ["thorn"]);
+    let page: Page = { ...newPage({ id: "p", sceneId: "s1", source, test: filled.test, dc: filled.dc, secret: true, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: filled.outcome }), phase: "rolled", rows };
+    page = mark(page, rows[0]!.holder, "fail");
+    const plan = buildPlan(page, dice, [{ amount: 4 }], ids(40))!;
+    assert.deepEqual(plan.trap, { trapId: t.id, due: "20:0", tokenIds: ["thorn"] });
+    const server = { ...full, tokens: { ...full.tokens, gob: { ...full.tokens.gob!, sceneId: "s2" } } };
+    const applied = applyOp(server, plan, DM, env(30));
+    assert.ok(applied.ok, applied.ok ? "" : applied.message);
+    assert.deepEqual(applied.state.traps[t.id]!.rig!.due!.map((d) => d.hits), [["gob"]]);
+    assert.deepEqual([hpOf(applied.state, "thorn"), hpOf(applied.state, "gob")], [16, 30]);
+  });
+
+  test("a skipped row and a pass that takes nothing are settled with the ones applied", () => {
+    const t = presetTrap("falling-net");
+    const { page, rows, dice } = pageFor(t, true);
+    let rolled: Page = { ...page, phase: "rolled", rows };
+    rolled = mark(rolled, rows.find((r) => r.tokenId === "thorn")!.holder, "skip");
+    rolled = mark(rolled, rows.find((r) => r.tokenId === "gob")!.holder, "pass");
+    const plan = buildPlan(rolled, dice, null, ids(50))!;
+    assert.deepEqual([plan.targets, plan.trap?.tokenIds], [[], ["gob", "thorn"]]);
+    const applied = applyOp(world(t), plan, DM, env(30));
+    assert.ok(applied.ok, applied.ok ? "" : applied.message);
+    assert.equal(applied.state.traps[t.id]!.rig!.due, undefined, "the occurrence is settled");
+  });
+
+  test("a creature's other token the occurrence names leaves with it, on the page's scene", () => {
+    const t = presetTrap("hidden-pit", { rig: { ...presetTrap("hidden-pit").rig!, due: [{ id: "20:0", at: "", how: "cross", by: ["thorn"], hits: ["gob", "thorn", "thorn2"] }] } });
+    const view = world(t);
+    view.tokens.thorn2 = token("thorn2", { kind: "pc", name: "Thorn", ownerIds: ["p1"], actor: { ref: "c1" }, x: 5, y: 5 });
+    const dice: DiceView = { you: { memberId: "dm1", role: "dm" }, view, srd: { monsters: [], rolls: {} } };
+    const filled = trapFill(t);
+    const source = trapStart(t, t.rig!.due![0]!).source;
+    const rows = groupRows(dice, sourceIds(source, []), filled.test, false, new Map());
+    assert.equal(rows.length, 2, "one row for Thorn's two tokens");
+    let page: Page = { ...newPage({ id: "p", sceneId: "s1", source, test: filled.test, dc: filled.dc, secret: true, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: filled.outcome }), phase: "rolled", rows };
+    page = mark(page, rows.find((r) => r.tokenId === "thorn")!.holder, "fail");
+    page = mark(page, rows.find((r) => r.tokenId === "gob")!.holder, "skip");
+    const plan = buildPlan(page, dice, [{ amount: 4 }], ids(60))!;
+    assert.deepEqual(plan.trap?.tokenIds, ["gob", "thorn", "thorn2"]);
+  });
+
+  test("the bound sizes a named trap page's op with every creature the occurrence names, which a pick page never sends", () => {
+    // Long ids, so the 50 names the op can carry weigh several rows.
+    const long = (prefix: string, i: number) => `${prefix}${String(i).padStart(3, "0")}${"x".repeat(56)}`;
+    const named = Array.from({ length: 50 }, (_, i) => long("h", i));
+    const t = presetTrap("collapsing-roof");
+    const filled = trapFill(t);
+    const rowsOf = (n: number): RowBase[] => Array.from({ length: n }, (_, i) => ({ holder: `token:${long("r", i)}`, target: { tokenId: long("r", i) }, tokenId: long("r", i), name: `Goblin ${i}`, ways: ["type"], bonus: null, skip: false }));
+    const pageOf = (live: boolean) =>
+      newPage({ id: "p", sceneId: "s1", source: { kind: "trap", trapId: t.id, due: "20:0", tokenIds: named, ...(live ? { live: true as const } : {}) }, test: filled.test, dc: filled.dc, secret: true, spell: filled.spell, switches: { dcShown: false, resultShown: true }, fill: filled.fill, outcome: { ...filled.outcome, damage: "2d10 bludgeoning + 1d6 fire + 1d6 cold + 1d6 acid", conditions: ["prone", "restrained", "poisoned"], saveEnds: { ability: "con", dc: 15 } } });
+    // The fewest rows whose op is past the bound.
+    const most = (live: boolean) => Array.from({ length: 100 }, (_, i) => i + 1).find((n) => pageBound(pageOf(live), rowsOf(n)) !== null);
+    const fixed = most(false);
+    const picked = most(true);
+    assert.ok(fixed !== undefined && picked !== undefined, `past the bound at ${fixed} and ${picked} rows`);
+    assert.ok(fixed < picked, `a named page is past the bound at ${fixed} rows, a pick page at ${picked}`);
   });
 });

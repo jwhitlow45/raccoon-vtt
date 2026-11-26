@@ -184,12 +184,23 @@ export const UNHURT_FALL = "No damage from the fall, so not Prone";
  * What the outcome settles beside its targets. A fall card's names the
  * creatures `settled` takes off it (FLR4INT-ASTRA-05), every token the
  * page started with by default, rows and their creatures' other tokens
- * alike (FLR4INT-ASTRA-08), which is the widest the op can be.
+ * alike (FLR4INT-ASTRA-08), which is the widest the op can be. A trap's
+ * names them as a fall card's does where its occurrence names creatures
+ * (docs/design/design-v1-traps.md 6.2), since the server settles such an
+ * occurrence only per creature. A live page's picks and an occurrence
+ * that names no one settle it whole, with none.
  */
-function closingOf(page: Page, settled: readonly string[] = page.source.kind === "fall" ? page.source.tokenIds : []): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
+function closingOf(page: Page, settled: readonly string[] = namesCreatures(page) ? page.source.tokenIds : []): Pick<OpOf<"actor.outcome">, "cast" | "trap" | "fall"> {
   if (page.cast) return { cast: page.cast.ask.id };
   if (page.source.kind === "fall") return { fall: { fallId: page.source.fallId, tokenIds: [...settled] } };
-  return page.source.kind === "trap" ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
+  if (page.source.kind !== "trap") return {};
+  return { trap: { trapId: page.source.trapId, due: page.source.due, ...(namesCreatures(page) ? { tokenIds: [...settled] } : {}) } };
+}
+
+/** Whether the page's source names the creatures its Apply settles one by one: a fall card's, and a trap's that is not a live pick page and names any. */
+function namesCreatures(page: Page): page is Page & { source: { tokenIds: string[] } } {
+  if (page.source.kind === "fall") return true;
+  return page.source.kind === "trap" && !page.source.live && page.source.tokenIds.length > 0;
 }
 
 /**
@@ -377,7 +388,7 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   if (offFloorWords(page, dice) !== null) return null;
   const rows: PlanRow[] = [];
   const seen = new Set<string>();
-  // The creatures a fall card's outcome takes off it: each row it reached, skipped ones too, since the DM chose that.
+  // The creatures a fall card's or a trap's outcome takes off it: each row it reached, skipped ones too, since the DM chose that.
   const settled: string[] = [];
   const settledHolders = new Set<string>();
   for (const listed of page.rows) {
@@ -400,9 +411,9 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   }
   // A row stands for its creature, so a card's other tokens of a creature it settled, as two riders that
   // show one character, leave the card with it where the page reaches them. Left on, the card would apply
-  // that creature's fall again (FLR4INT-ASTRA-08). The server takes off the ones on another scene with
-  // their creature too (settleFallOutcome, FLR4-SOL-22).
-  if (page.source.kind === "fall") {
+  // that creature's fall again (FLR4INT-ASTRA-08), and a trap's occurrence its damage. The server takes off
+  // the ones on another scene with their creature too (settleFallOutcome, settleTrapOutcome, FLR4-SOL-22).
+  if (namesCreatures(page)) {
     for (const id of page.source.tokenIds) {
       const token = dice.view.tokens[id];
       if (token && !settled.includes(id) && settledHolders.has(holderOf(token)) && onPageScene(page, token, dice)) settled.push(id);
@@ -413,8 +424,9 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design/design-v1-traps.md 4.4).
   const closing = closingOf(page, settled);
   // A fall card is settled as a springing is, even where no one is hurt (docs/design/design-v1-floors.md phase 4, 4.4), but
-  // only for a creature the page reached: one it no longer reaches stays on the card.
-  if (targets.length === 0 && closing.trap === undefined && (closing.fall === undefined || settled.length === 0)) return null;
+  // only for a creature the page reached: one it no longer reaches stays on the card, as on a trap's that names creatures.
+  const settles = closing.trap !== undefined ? closing.trap.tokenIds === undefined || settled.length > 0 : closing.fall !== undefined && settled.length > 0;
+  if (targets.length === 0 && !settles) return null;
   // Saves rolled in secret keep a Legendary Resistance's use line from players (docs/design/design-v1-combat-controls.md 8).
   return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...closing, targets, ...(page.secret ? { quiet: true as const } : {}) };
 }
