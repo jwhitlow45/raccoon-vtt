@@ -3175,18 +3175,25 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         consoles.phone.attach(page);
         await open(page, scale);
         await shots.take(page, `uipolish-iso-fit-before-${scale}`);
-        const cam = await toIso(page);
+        await toIso(page);
         await page.waitForTimeout(300);
         const settled = (await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { drawn(): Cam | null } }).__rvttIsoHook.drawn())) as Cam;
         const box = await mapCanvasBox(page, { visible: true });
         const iso = isometric(0);
         const corners = [[0, 0], [14, 0], [0, 9], [14, 9]].map(([x, y]) => toView(iso, { x: x!, y: y! }));
         const screen = corners.map((c) => ({ x: settled.x + c.x * settled.scale, y: settled.y + c.y * settled.scale }));
+        // The fit clears the top bar and the toolbar, so the corners belong in the rect between them, not only in the canvas.
+        const bars = await page.evaluate(() => {
+          const doc = (globalThis as unknown as { document: { querySelector(s: string): { getBoundingClientRect(): { top: number; bottom: number } } | null } }).document;
+          return { top: doc.querySelector("[data-rvtt-topbar]")?.getBoundingClientRect().bottom ?? 0, bottom: doc.querySelector('nav[aria-label="Tools"]')?.getBoundingClientRect().top ?? 1e9 };
+        });
+        const cleared = { top: Math.max(0, bars.top - box.y), bottom: Math.min(box.height, bars.bottom - box.y) };
+        assert.ok(cleared.bottom > cleared.top, `${scale}: the bars leave the map room (${JSON.stringify(cleared)})`);
         for (const c of screen) {
           assert.ok(c.x >= 0 && c.x <= box.width, `${scale}: a corner at x ${c.x.toFixed(1)} lies inside the ${box.width} px canvas`);
-          assert.ok(c.y >= 0 && c.y <= box.height, `${scale}: a corner at y ${c.y.toFixed(1)} lies inside the ${box.height} px canvas`);
+          // Half a pixel for the fit's rounding.
+          assert.ok(c.y >= cleared.top - 0.5 && c.y <= cleared.bottom + 0.5, `${scale}: a corner at y ${c.y.toFixed(1)} lies between the bars, ${cleared.top.toFixed(1)} to ${cleared.bottom.toFixed(1)}`);
         }
-        assert.ok(cam.scale > 0);
         fitScales.push(settled.scale);
         await shots.take(page, `uipolish-iso-fit-after-${scale}`);
         await page.close();
