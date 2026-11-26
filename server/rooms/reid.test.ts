@@ -12,7 +12,7 @@ import { RoomIdKeys } from "./idKeys.ts";
 import { loadRoom } from "./persistence.ts";
 import { ReidPlan, reidDue, renamedState, renamedText, v7IdsIn, type ArchivedLine } from "./reid.ts";
 import { parseRoomState } from "./stateSchema.ts";
-import { storedActor, StoredRoomDb } from "./undoScopeTesting.ts";
+import { scopeObserver, storedActor, StoredRoomDb } from "./undoScopeTesting.ts";
 
 /**
  * A room stored below SEALED_IDS_SNAPSHOT_VERSION gives its version 7 ids
@@ -288,6 +288,29 @@ describe("the first load on this build", () => {
     const late = await dm.send({ t: "token.update", tokenId: ids.dmGoblin, patch: { x: 4 } });
     assert.equal(late.rejects?.[0]?.code, "gone");
     assert.equal(h.actor.committed.state.tokens[goblin]!.x, 9);
+  });
+
+  test("a player who owns a renamed thing moves it by its new id, while its old id names nothing for them or a DM's preview of them", async (t) => {
+    const { state, ids } = oldRoom();
+    const db = new StoredRoomDb(state, { version: SEALED_IDS_SNAPSHOT_VERSION - 1, seq: 9 });
+    const h = await storedActor(t, db, { idGate: false });
+    const after = h.actor.committed.state;
+    const goblin = Object.keys(after.tokens).find((id) => state.tokens[id] === undefined && after.tokens[id]!.sceneId === ids.mat)!;
+    const dm = await h.connect(state.members[ids.dm]!);
+    assert.equal((await dm.apply({ t: "token.update", tokenId: goblin, patch: { visibility: "all", ownerIds: [ids.p1] } })).rejects, undefined);
+    const p1 = await h.connect(state.members[ids.p1]!);
+    const y = h.actor.committed.state.tokens[goblin]!.y;
+    const old = await p1.send({ t: "token.move", tokenId: ids.dmGoblin, x: 4, y });
+    assert.equal(old.rejects?.[0]?.code, "gone", "the player's op is never read through the renames");
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 3);
+    assert.equal((await p1.apply({ t: "token.move", tokenId: goblin, x: 4, y })).rejects, undefined);
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 4);
+    // The DM's preview of that player is a player's socket, whose op is not read through them either.
+    const preview = await scopeObserver(h.actor, { memberId: ids.dm, role: "dm", previewOf: ids.p1 });
+    await h.actor.op(preview.conn, 1, { t: "token.move", tokenId: ids.dmGoblin, x: 5, y });
+    for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.actor.committed.state.tokens[goblin]!.x, 4, "the preview's op did not move it");
+    assert.equal(h.actor.committed.state.tokens[ids.dmGoblin], undefined);
   });
 
   test("C31: a room whose replay fails renames nothing and stores nothing", async (t) => {
