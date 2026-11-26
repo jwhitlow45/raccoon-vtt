@@ -134,15 +134,18 @@ export function heldSends(e: EphEvent | GroupFrame): number {
 
 /**
  * What a member's devices hold through a stall of RETAIN_MS at the most
- * when every frame they send is a device's own (D-261126-265), by the
- * charges above: a drag that changes floor and ends (its latest move on
- * the old floor, its cancel there, the new floor's move with its roster
- * and the latest one after it, and its end), the next drag started (its
- * start and latest move), a ruler and its end, and a laser and a camera
- * each sent 30 times a second, as a device sends a preview at the most.
+ * when every frame they send is a device's own (D-261126-265,
+ * D-261126-271), by the charges above: a drag that changes floor twice,
+ * once a second as a hand does at the most, and ends (on each floor it
+ * leaves, its latest move and its cancel, on each floor it reaches, its
+ * move with the roster and the latest one after it, and its end), the
+ * next drag started (its start and latest move), a ruler and its end, and
+ * a laser and a camera each sent 30 times a second, as a device sends a
+ * preview at the most.
  */
+const FLOOR_CHANGE = GROUP_SENDS.dragCancel + GROUP_SENDS.dragMove + GROUP_SENDS.dragMove;
 export const HONEST_MEMBER_SENDS =
-  GROUP_SENDS.dragMove + GROUP_SENDS.dragCancel + GROUP_SENDS.dragMove + GROUP_SENDS.dragMove + GROUP_SENDS.groupEnd +
+  GROUP_SENDS.dragMove + 2 * FLOOR_CHANGE + GROUP_SENDS.groupEnd +
   GROUP_SENDS.dragStart + GROUP_SENDS.dragMove +
   CAPPED + WIDE.rulerEnd +
   60 * (WIDE.laser + WIDE.view);

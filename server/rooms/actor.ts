@@ -342,23 +342,23 @@ export const MAX_HELD_BYTES_OFF = OFF_ALLOWANCE_BYTES;
  * The most a room's held frames may send any one receiver once their tick
  * is covered, each counted at its most by its kind and what its routing
  * may cancel (gestures.ts heldSends, chargeCancels), never by what it names:
- * about 20 group frames at 100 tokens. So a tick's release hands its 63
- * receivers at most 126 MiB of messages, and each receiver 2 MiB, far below
- * a socket's send buffer bound (ws.ts DEFAULT_BUFFERED_LIMIT). Moves take
- * the place of older ones while they wait (heldSlot), and a gesture whose
- * start and end both wait goes whole, so a room's honest drags through a
- * stalled tick hold a few frames each.
+ * about 26 group frames at 100 tokens. So a tick's release hands its 63
+ * receivers at most 164 MiB of messages, and each receiver 2.6 MiB, far
+ * below a socket's send buffer bound (ws.ts DEFAULT_BUFFERED_LIMIT). Moves
+ * take the place of older ones while they wait (heldSlot), and a gesture
+ * whose start and end both wait goes whole, so a room's honest drags
+ * through a stalled tick hold a few frames each.
  */
-export const MAX_ROOM_HELD_SENDS = 2 * 1024 * 1024;
+export const MAX_ROOM_HELD_SENDS = 2_660 * 1024;
 /**
  * The share of the room's count one member's held frames may take, all its
- * sockets together (D-261126-265): over what an honest member's devices
- * hold through a stall (gestures.ts HONEST_MEMBER_SENDS, 754 KiB). So one
- * member's frames, whatever they show, never drop another's, and two
- * members at their share still leave a third its drag's start and move.
- * A DM's view as a player counts as the DM.
+ * sockets together (D-261126-265, D-261126-271): over what an honest
+ * member's devices hold through a stall (gestures.ts HONEST_MEMBER_SENDS,
+ * 1,043 KiB). So one member's frames, whatever they show, never drop
+ * another's, and two members at their share still leave a third its
+ * drag's start and move. A DM's view as a player counts as the DM.
  */
-export const MEMBER_HELD_SHARE = 768 * 1024;
+export const MEMBER_HELD_SHARE = 1_080 * 1024;
 
 /** A socket's held frames in arrival order, their charges, and the member whose share they count in (MEMBER_HELD_SHARE). */
 type HeldQueue = { list: HeldFrame[]; bytes: number; readonly member: string };
