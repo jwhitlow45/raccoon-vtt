@@ -461,7 +461,7 @@ describe("a creature falls once a step (change format 67, fallsOnce)", () => {
     assert.deepEqual(named(r.state).sort(), [`goblin ${UPPER}>${GROUND} 10`, `shade1 shade2 ${UPPER}>${GROUND} 10`]);
   });
 
-  test("a horse carrying one token of Shade and the other falling alone share the horse's card, whichever falls first", () => {
+  test("a horse carrying one token of Shade and the other falling alone share one card, whichever falls first", () => {
     // In id order the horse (a) falls before Shade's other token (s), or after it (z), which then carries Shade's rider over.
     for (const [horse, alone] of [["a-horse", "shade2"], ["z-horse", "shade2"]] as const) {
       const wide = withOpening(empty(), { rect: { x: 6, y: 6, w: 4, h: 4 } });
@@ -645,6 +645,25 @@ describe("a creature falls once a step (change format 67, fallsOnce)", () => {
     const one = Object.values(fell.state.falls!)[0]!;
     const less = run(fell.state, { t: "token.delete", tokenId: "thorn2" });
     assert.equal(applied(less, undoOp(two, ["thorn"], [fell.falls![0]!]), ANA).state.falls?.[one.id], undefined);
+  });
+
+  test("a redo writes no card back for a part that names only a token the DM deleted since", () => {
+    // The card names Shade's hidden H, a goblin that fell with H, and Ana's S, which joined it. The DM deleted the goblin after the
+    // fall, Ana's undo of S then took the gone goblin off and left Shade whole, and the DM applied Shade's fall.
+    const card = fallCard({ id: `${nextSeq()}:0`, tokenId: "h-shade", riders: ["goblin", "s-shade"] });
+    const state = withFalls(withShade(holed(), shade("h-shade", { sceneId: GROUND, x: 10, y: 10, visibility: "dm" }), shade("s-shade", { sceneId: GROUND, x: 6, y: 6 })), card);
+    const was = { ...state, tokens: { ...state.tokens, "s-shade": { ...state.tokens["s-shade"]!, sceneId: UPPER } } };
+    const record = fallRecord({ tokenId: "s-shade", fallId: card.id });
+    const undone = applied(state, undoOp(was, ["s-shade"], [record]), ANA);
+    assert.deepEqual(named(undone.state), [`h-shade s-shade ${UPPER}>${GROUND} 10`], "the gone goblin is off the card, Shade whole on it");
+    const settled = run(undone.state, { t: "actor.outcome", plan: "p1", fall: { fallId: card.id, tokenIds: ["h-shade"] }, targets: [{ target: { tokenId: "h-shade" }, amount: 3 }] });
+    assert.equal(settled.falls?.[card.id], undefined);
+    const part = { ...card, tokenId: "goblin" };
+    delete part.riders;
+    const redone = applied(settled, redoOp(state, ["s-shade"], [{ ...record, card: part }]), ANA);
+    assert.equal(redone.state.falls?.[card.id], undefined, "no card naming only the deleted goblin");
+    // At change format 66 the redo wrote its record's card as it was.
+    assert.ok(applied(settled, redoOp(state, ["s-shade"], [{ ...record, card: part }]), ANA, 66).state.falls?.[card.id]);
   });
 });
 

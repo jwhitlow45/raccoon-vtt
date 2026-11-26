@@ -358,7 +358,8 @@ export function dropGoneCards(tx: Tx, before: RoomState): void {
  * back up. The redo writes back only the part a record carries, the part
  * its undo took off (server/rooms/undo.ts fallsRestored): its names after
  * those of the card where it still stands and lacks them, else as the
- * card. So damage already applied is never asked for twice. Ops before
+ * card where one of its tokens is still in the room. So damage already
+ * applied is never asked for twice. Ops before
  * version 67 (fallsOnce) removed the card whole and wrote the record's
  * card over any standing, and replay so. Any restore then evicts as a new
  * card does, since a DM's undo of a delete or a Dismiss puts back cards
@@ -383,7 +384,8 @@ export function restoreFallCards(tx: Tx, op: OpOf<"sys.restore">, before: RoomSt
     } else if (record.card !== undefined) {
       const standing = once ? ownEntry(tx.state.falls, record.card.id) : undefined;
       if (standing === undefined) {
-        tx.write(keys.fall(record.card.id), record.card);
+        // A part whose every token has left the room since names no fall left to take, so no card comes back for it.
+        if (!once || namesOf(record.card).some((id) => ownEntry(tx.state.tokens, id) !== undefined)) tx.write(keys.fall(record.card.id), record.card);
         continue;
       }
       const lacking = namesOf(record.card).filter((id) => !namesOf(standing).includes(id));
