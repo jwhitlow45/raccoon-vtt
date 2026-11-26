@@ -5,6 +5,8 @@ import { before, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { trap as makeTrap } from "#shared/testutil.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
+import { FogView } from "../../canvas/relief/fogView.ts";
+import type { IsoGround } from "../../canvas/relief/context.ts";
 import { viewPill } from "../../canvas/relief/isoText.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { isometric, type Turn } from "../../lib/view.ts";
@@ -58,7 +60,7 @@ function round(turn: Turn, seed: { trapX: number; trapY: number; textX: number; 
   const text: Box = hit ? { ...base, y0: base.y0 - 1.2, y1: base.y1 - 1.2 } : base;
   const nudged = isoTrapNamePill(original, SQUARES, trap, {}, { view, ground, boxes: [text] }, SCALE, () => true, FRAMES);
   // What the link layer reads (isoTrapNameMarkers): the pick with no token text to keep off.
-  const iso = { turn, ground, fog: { all: true } } as unknown as Parameters<typeof isoTrapNameMarkers>[7];
+  const iso: IsoGround = { turn, ground, fog: new FogView(null, "s1", { w: 30, h: 20 }), heights: false, uprightLabels: new Set(), place: "upright" };
   const markers = read === "fixed" ? isoTrapNameMarkers(SQUARES, "s1", { t: trap }, {}, SCALE, true, FRAMES, iso, REST_VIEW) : [nudged];
   const placed = placeEnds([hole()], markers, SCALE, { turn, ground }, () => true);
   return [placed.get("h")!.pill!, placed.get("h")!.chip!];
