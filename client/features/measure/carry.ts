@@ -167,12 +167,13 @@ export function climbFeet(view: Pick<RoomState, "scenes" | "characters">, walker
  * The walker's shape on the landing: its size, a custom walker's sides, and
  * whether it lands squeezed, as a climb lands it (climbKeepsSqueeze).
  */
-export function landedShape(view: Pick<RoomState, "scenes">, walker: Token, link: Pick<FloorLink, "sceneId" | "rect">): RulerPrior["walker"] {
+export function landedShape(view: Pick<RoomState, "scenes">, walker: Token, link: Pick<FloorLink, "sceneId" | "rect" | "to">, shift: { dx: number; dy: number } | null = null): RulerPrior["walker"] {
   const sides = walker.size === "custom" ? footprintSize(walker) : null;
+  const at = { x: walker.x + (shift?.dx ?? 0), y: walker.y + (shift?.dy ?? 0) };
   return {
     size: walker.size,
     ...(sides ? { w: sides.w, h: sides.h } : {}),
-    ...(climbKeepsSqueeze(view, walker, link) ? { squeeze: true as const } : {}),
+    ...(climbKeepsSqueeze(view, walker, link, at, undefined) ? { squeeze: true as const } : {}),
   };
 }
 
@@ -204,7 +205,7 @@ export function carryOver(input: {
     // The end whole, so a player's copy prices it by its `rise`.
     ft: count(end.ft + climbFeet(input.view, end.walker, { ...offer.link, to: offer.to }, input.privateRuler)),
     diag: { h: count(end.counter.h), v: count(end.counter.v) },
-    walker: landedShape(input.view, end.walker, offer.link),
+    walker: landedShape(input.view, end.walker, { ...offer.link, to: offer.to }, offer.shift),
     anchors: [...input.anchors],
     ends: [...(input.carry?.prior.ends ?? []), offer.link.id],
   };

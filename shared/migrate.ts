@@ -1563,7 +1563,9 @@ export const opMigrations: MigrationStep[] = [
     // A creature falls once a step (FALL_ONCE_OP_VERSION): no stored op changes shape, so the step is the identity. From
     // this version (fallsOnce) a token a fall card would name joins the op's first eligible card that names another token
     // of its creature, and a player's undo takes a creature off a fall card only where it moved back every token of it
-    // the card names, the redo putting that part back. Ops stored before replay as they ran.
+    // the card names, the redo putting that part back. And on squares a squeezed creature that climbs, falls or drops
+    // through a trapdoor keeps its squeeze where its full space, unsnapped, would leave the floor it lands on (LP53-FALL-1).
+    // Ops stored before replay as they ran.
     // Deploy: back up the database just before. Rollback needs the backup only for a room with changes at this version
     // after its last snapshot, which an older build refuses.
     from: 66,
@@ -2788,9 +2790,13 @@ export const FALL_ONCE_OP_VERSION = 67;
  * Whether a creature falls once a step (docs/design/design-v1-floors.md
  * phase 4): from op version 67 two tokens of one creature that fall in one
  * op share a card, and a player's undo trims a card by the creatures it
- * moved back rather than removing it whole. Ops stored before wrote a card
- * a root and removed cards whole, and replay so. Live ops carry no stored
- * version and take today's rule.
+ * moved back rather than removing it whole. On squares a squeezed creature
+ * that climbs, falls or drops keeps its squeeze where its full space,
+ * unsnapped, would leave the floor it lands on (rules/floorLinks.ts
+ * climbKeepsSqueeze, reducer/floorLinks.ts dropThrough). Ops stored before
+ * wrote a card a root, removed cards whole and landed such a creature full
+ * size, and replay so. Live ops carry no stored version and take today's
+ * rule.
  */
 export function fallsOnce(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < FALL_ONCE_OP_VERSION);

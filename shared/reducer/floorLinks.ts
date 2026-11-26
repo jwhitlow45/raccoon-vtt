@@ -1,12 +1,14 @@
 import { keys } from "../keys.ts";
+import { fallsOnce } from "../migrate.ts";
 import type { CellRect, FloorLink, RoomState, SceneId, Token } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { ownEntry } from "../records.ts";
 import { publicLabel } from "../numbering.ts";
-import { climbCost, climbKeepsSqueeze, landingOf, LINK_WORDS, linkProblem, rectGround, standsOn, throughOpening } from "../rules/floorLinks.ts";
+import { climbCost, climbKeepsSqueeze, fullLeavesFloor, landingOf, LINK_WORDS, linkProblem, rectGround, standsOn, throughOpening } from "../rules/floorLinks.ts";
 import { onHolder } from "../rules/attach.ts";
 import { sameScene } from "../rules/floors.ts";
 import { sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { isSqueezed } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { withDrop } from "../rules/moveLeg.ts";
 import { areasFollow, carriedAlong, judgedIn, placeCarried, withPath } from "./tokens.ts";
@@ -188,7 +190,7 @@ export function landThrough(tx: Tx, token: Token, link: FloorLink, how: "climb" 
   tx.scene(link.to);
   const along = carriedAlong(tx, { t: "token.climb", tokenId: token.id, linkId: link.id });
   const next: Token = { ...token, sceneId: link.to, ...landingOf(tx.state, token, link, far) };
-  if (!climbKeepsSqueeze(tx.state, token, link)) delete next.squeeze;
+  if (!climbKeepsSqueeze(tx.state, token, link, next, tx.env.opVersion)) delete next.squeeze;
   delete next.nudge;
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
   const fall = how === "fall";
@@ -200,18 +202,23 @@ export function landThrough(tx: Tx, token: Token, link: FloorLink, how: "climb" 
 
 /**
  * A trapdoor's drop of one creature (phase 4, 4.6): onto the same squares
- * of the floor below, on the ground under its full space there, since a
- * change of floor leaves a squeeze behind (as Move to floor lands it),
- * with what sits on it riding down and their areas following. What it
- * drags stays, for the link pass. Its path folds the turn's legs and adds
+ * of the floor below, on the ground under its space there, since a change
+ * of floor leaves a squeeze behind (as Move to floor lands it), with what
+ * sits on it riding down and their areas following. From op version 67
+ * (migrate.ts fallsOnce) a squeezed creature whose full space would leave
+ * the floor below keeps its squeeze, as a fall through an opening lands it
+ * (rules/floorLinks.ts climbKeepsSqueeze, LP53-FALL-1). What it drags
+ * stays, for the link pass. Its path folds the turn's legs and adds
  * nothing, as a fall's.
  */
 export function dropThrough(tx: Tx, token: Token, below: SceneId): void {
-  tx.scene(below);
+  const floor = tx.scene(below);
   const { squeeze: _squeeze, nudge: _nudge, ...full } = token;
-  const elevation = footprintGround(tx.state.buildChunks, { ...full, sceneId: below });
+  const keeps = isSqueezed(token) && fallsOnce(tx.env.opVersion) && fullLeavesFloor(floor, full);
+  const landed: Token = keeps ? { ...full, squeeze: true } : full;
+  const elevation = footprintGround(tx.state.buildChunks, { ...landed, sceneId: below });
   const along = carriedAlong(tx, withDrop({ t: "token.climb", tokenId: token.id, linkId: token.id }, { sceneId: below, x: token.x, y: token.y, elevation }));
-  const next: Token = { ...full, sceneId: below, elevation };
+  const next: Token = { ...landed, sceneId: below, elevation };
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
   tx.write(keys.token(token.id), withPath(tx, token, next, judged, false, undefined, undefined, undefined, undefined, true));
   placeCarried(tx, along, judged);

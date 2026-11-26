@@ -1,11 +1,12 @@
 import { LIMITS } from "../limits.ts";
+import { fallsOnce } from "../migrate.ts";
 import type { CellRect, FloorLink, FloorLinkId, RoomState, Scene, SceneId, Token, Viewer } from "../model.ts";
 import { FLOOR_HEIGHT, STAIRS_SIDE_WORDS } from "../protocol.ts";
 import { parseKey, writeEntity, type EntityKey } from "../keys.ts";
 import { ownEntry } from "../records.ts";
 import { isWritable } from "../writable.ts";
 import { floorLinkRules, floorsOf, sameScene } from "./floors.ts";
-import { canSqueeze, footprintRect, isSqueezed, occupiedHexes, squeezedSize, type PlacedToken } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, occupiedHexes, squeezedSize, type PlacedToken } from "./footprint.ts";
 import { inScene, isHex, sceneGrid, type Grid } from "./grid.ts";
 import { footprintGround, groundAt } from "./heights.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
@@ -495,14 +496,34 @@ function standing(view: RoomState, token: Token, link: LinkEnd): Stand | null {
 /**
  * Whether a squeezed climber lands squeezed (3, D-261108-094): where its
  * full space would leave the squares it keeps its squeeze, else it stands
- * full size on the far floor's same squares.
+ * full size on the far floor's same squares. The end's squares are judged
+ * by the snapped full space, which rounds a squeeze along the map's edge
+ * back inside it, so from op version 67 (migrate.ts fallsOnce) it also
+ * keeps its squeeze where its full space, unsnapped where it lands (`at`),
+ * would leave the far floor (`fullLeavesFloor`, LP53-FALL-1). Ops stored
+ * before landed it full size, half off the floor, and replay so.
  */
-export function climbKeepsSqueeze(state: Pick<RoomState, "scenes">, token: Token, link: Pick<FloorLink, "sceneId" | "rect">): boolean {
+export function climbKeepsSqueeze(state: Pick<RoomState, "scenes">, token: Token, link: Pick<FloorLink, "sceneId" | "rect" | "to">, at: { x: number; y: number }, opVersion: number | undefined): boolean {
   if (!isSqueezed(token)) return false;
   const scene = ownEntry(state.scenes, link.sceneId);
   if (scene === undefined) return true;
   const { squeeze: _squeeze, ...full } = token;
-  return !placeOn(sceneGrid(scene), full, link.rect).inside;
+  if (!placeOn(sceneGrid(scene), full, link.rect).inside) return true;
+  const far = ownEntry(state.scenes, link.to);
+  return fallsOnce(opVersion) && far !== undefined && fullLeavesFloor(far, { ...full, ...at });
+}
+
+/**
+ * Whether a creature's full space at its stored place, never snapped, would
+ * leave a floor: its box past a side of the squares, as the map draws it and
+ * as Move to floor judges a landing (client moveToFloor.ts fitsOn). A stand
+ * on hexes never lies off its scene, so on hexes it never does.
+ */
+export function fullLeavesFloor(scene: Pick<Scene, "bounds" | "gridShape">, token: PlacedToken): boolean {
+  if (isHex(sceneGrid(scene))) return false;
+  const { w, h } = footprintSize(token);
+  const E = 1e-9;
+  return token.x < -E || token.y < -E || token.x + w > scene.bounds.w + E || token.y + h > scene.bounds.h + E;
 }
 
 /** The token's actor: its own, or its character's. */

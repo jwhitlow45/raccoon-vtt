@@ -207,7 +207,7 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       const far = link && ownEntry(before.floorLinks, link.pair);
       if (!token || !link || !far || link.sceneId !== token.sceneId) return [];
       const named = straight(token, { sceneId: link.to, ...landingOf(before, token, link, far) }, "climb");
-      return [climbKeepsSqueeze(before, token, link) ? { ...named, squeezed: true } : named];
+      return [climbKeepsSqueeze(before, token, link, named.to, env.opVersion) ? { ...named, squeezed: true } : named];
     }
     default:
       return [];
