@@ -1,4 +1,4 @@
-import { ephCaps, type EphEvent, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
+import { ephCaps, isGroupFrame, MAX_DRAG_TOKENS, type EphEvent, type GroupFrame, type GroupRoster } from "#shared/protocol.ts";
 
 /*
  * What a socket's group drag frames keep on the server (design 7.6): each
@@ -59,6 +59,61 @@ export function heldCharge(e: EphEvent | GroupFrame): number {
       return ephCaps.charges.measure;
     default:
       return ephCaps.charges.other;
+  }
+}
+
+/*
+ * What one receiver may be sent for a held message at the most, by its kind
+ * alone (RoomActor's room budget, MAX_ROOM_HELD_SENDS): a group frame's at
+ * the most tokens one drag moves, 256 bytes a token's message with ids of
+ * 64 characters and numbers of 24, and the longest route on its lead,
+ * never its roster's count. A lone drag, ruler or area at its wire cap and
+ * a header, anything else at its held charge.
+ */
+const SENDS_PER_TOKEN = 256;
+/** A route's 200 numbers (shared/protocol.ts MAX_PATH_NUMBERS), each 24 characters and a comma at the most. */
+const SENDS_ROUTE = 200 * 25;
+
+export function heldSends(e: EphEvent | GroupFrame): number {
+  if (isGroupFrame(e)) return MAX_DRAG_TOKENS * SENDS_PER_TOKEN + SENDS_ROUTE;
+  switch (e.k) {
+    case "dragStart":
+    case "dragMove":
+    case "dragEnd":
+    case "ruler":
+    case "aoe":
+      return ephCaps.charges.measure;
+    default:
+      return ephCaps.charges.other;
+  }
+}
+
+/**
+ * Where a held message may take an older one's place (design 7.6, D-261126-208):
+ * its gesture's, ruler's or area's slot, whether it is a newer frame of the
+ * kind that replaces (a move, a ruler, an area), and whether a newer one
+ * may replace it. A group move that carries a roster replaces but stays,
+ * and starts, ends and cancels neither replace nor go. Read from the
+ * message's kind, gesture, id and whether it carries a roster, never from
+ * its roster's members.
+ */
+export type HeldSlot = { readonly key: string; readonly replaces: boolean; readonly replaceable: boolean };
+
+export function heldSlot(e: EphEvent | GroupFrame): HeldSlot | null {
+  if (isGroupFrame(e)) {
+    const move = e.k === "dragMove";
+    return { key: `drag#${e.g}`, replaces: move, replaceable: move && e.with === undefined };
+  }
+  switch (e.k) {
+    case "ruler":
+    case "aoe":
+      return { key: `${e.k}:${e.id}`, replaces: true, replaceable: true };
+    case "rulerEnd":
+      return { key: `ruler:${e.id}`, replaces: false, replaceable: false };
+    case "aoeEnd":
+      return { key: `aoe:${e.id}`, replaces: false, replaceable: false };
+    default:
+      return null;
   }
 }
 
@@ -204,7 +259,26 @@ export type StoredGroupFrame = {
 export type StoredText = { readonly stored: "text"; readonly latin1: string };
 
 /** A frame as it waits for its tick (actor.ts RoomActor.ephemeral): its kept form, the version it bound and its moments, and its charge. */
-export type HeldFrame = { sceneId: string; e: EphEvent | StoredGroupFrame | StoredText; version: RosterVersion | null; arrived: number; a: number; at: number; bytes: number };
+export type HeldFrame = {
+  sceneId: string;
+  e: EphEvent | StoredGroupFrame | StoredText;
+  version: RosterVersion | null;
+  arrived: number;
+  a: number;
+  at: number;
+  bytes: number;
+  /** Its pressed token or id, which a newer frame of its slot must name to take its place. */
+  names: string;
+  slot: HeldSlot | null;
+  /** What one receiver may be sent for it at the most (heldSends). */
+  sends: number;
+};
+
+/** A frame as it is put in its socket's held queue (RoomActor.ephemeral): its kept form, its charges and its slot. */
+export function holdFrame(sceneId: string, e: EphEvent | GroupFrame, version: RosterVersion | null, arrived: number, a: number, at: number): HeldFrame {
+  const names = "tokenId" in e ? e.tokenId : "id" in e ? e.id : "";
+  return { sceneId, e: heldForm(e), version, arrived, a, at, bytes: heldCharge(e), names, slot: heldSlot(e), sends: heldSends(e) };
+}
 
 const absent = (v: number | undefined): number => v ?? Number.NaN;
 const present = (v: number): number | undefined => (Number.isNaN(v) ? undefined : v);

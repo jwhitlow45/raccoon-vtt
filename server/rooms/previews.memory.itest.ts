@@ -5,12 +5,12 @@ import { runInNewContext } from "node:vm";
 import { uuidv7 } from "#shared/ids.ts";
 import { clientMessageSchema, type EphEvent, type GroupFrame } from "#shared/protocol.ts";
 import { token } from "#shared/testutil.ts";
-import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES, RoomActor } from "./actor.ts";
+import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES, MAX_ROOM_HELD_SENDS, RoomActor } from "./actor.ts";
 import { FULL_ALLOWANCE_BYTES, OFF_ALLOWANCE_BYTES, PreviewPool, SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import { Outbox } from "./ephemeral.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { MAX_VERSIONS } from "./gestures.ts";
+import { heldSends, MAX_VERSIONS } from "./gestures.ts";
 import { fullRoom } from "./limitsTesting.ts";
 import { scopeFixture, StoredRoomDb } from "./undoScopeTesting.ts";
 
@@ -31,8 +31,12 @@ const UPLOAD_PEAK_MIB = 750;
 const CONTAINER_MIB = 1_536;
 /** The fewest rooms 400 sockets fill, at 64 a room (budgets.ts DEFAULT_SOCKET_CAPS). */
 const ROOMS = Math.ceil(400 / 64);
-/** What the release of 10 sockets' 60 moves of 100 tokens to a full room may hold on the heap as it starts to send: its records and the group frames they name. */
-const RELEASE_MOST = 40 * 1024 * 1024;
+/**
+ * The most a tick's release holds at once: the messages it hands 63
+ * receivers, at most MAX_ROOM_HELD_SENDS each, and what waits to be sent as
+ * it starts, its records and the group frames they name (measured below).
+ */
+const RELEASE_MOST = 63 * MAX_ROOM_HELD_SENDS + 8 * 1024 * 1024;
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -51,7 +55,7 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve));
 }
 
-test("154 full sockets and 246 off, each at its caps through an uncovered tick, fit their charges and the container", { timeout: 600_000 }, async (t: TestContext) => {
+test("154 full sockets and 246 off, each at its caps or the room's count through an uncovered tick, fit their charges and the container", { timeout: 600_000 }, async (t: TestContext) => {
   const f = scopeFixture();
   const ids = Array.from({ length: 100 }, (_, i) => `t-${i}`);
   for (const [i, id] of ids.entries()) f.state.tokens[id] = token(id, { sceneId: f.sceneId, x: i % 40, y: 10 + Math.floor(i / 40) });
@@ -111,12 +115,13 @@ test("154 full sockets and 246 off, each at its caps through an uncovered tick, 
   let g = 10;
   for (const [i, conn] of conns.entries()) {
     if (i < 154) {
-      // Its rosters at their cap, each of 99 members of the widest ids, then moves at their widest to its held cap.
+      // Its rosters at their cap, each of 99 members of the widest ids, then moves at their widest to its held cap, or as many
+      // as the room's count of held frames takes (MAX_ROOM_HELD_SENDS).
       for (let v = 0; v < MAX_VERSIONS; v++, g++) send(conn, { k: "dragStart", tokenId: wide(5_000_000 + i), g, x: N, y: N, with: Array.from({ length: 99 }, (_, m) => ({ tokenId: wide(i * 10_000 + v * 100 + m), x: N, y: N })), from: { x: N, y: N } });
-      while (actor.heldOf(conn).frames < MAX_HELD_FRAMES && actor.heldOf(conn).bytes + 3 * 1024 <= MAX_HELD_BYTES) send(conn, { k: "dragMove", tokenId: wide(5_000_000 + i), g: g - 1, x: N, y: N, free: true, fts: Array.from({ length: 99 }, () => N), lead: { i: 98, x: N, y: N, path: Array.from({ length: 200 }, () => N), ft: N, squeeze: true } });
+      for (let k = 0; k < MAX_HELD_FRAMES && actor.heldOf(conn).frames < MAX_HELD_FRAMES && actor.heldOf(conn).bytes + 3 * 1024 <= MAX_HELD_BYTES; k++) send(conn, { k: "dragMove", tokenId: wide(5_000_000 + i), g: g - 1, x: N, y: N, free: true, fts: Array.from({ length: 99 }, () => N), lead: { i: 98, x: N, y: N, path: Array.from({ length: 200 }, () => N), ft: N, squeeze: true } });
       assert.equal(conn.gestures.retained.versions, MAX_VERSIONS);
     } else {
-      for (let k = 0; actor.heldOf(conn).bytes + 512 <= MAX_HELD_BYTES_OFF; k++) send(conn, { k: "laser", x: k / 1000, y: 1, on: true });
+      for (let k = 0; k < MAX_HELD_FRAMES && actor.heldOf(conn).bytes + 512 <= MAX_HELD_BYTES_OFF; k++) send(conn, { k: "laser", x: k / 1000, y: 1, on: true });
     }
   }
   const held = used() - held0;
@@ -126,7 +131,7 @@ test("154 full sockets and 246 off, each at its caps through an uncovered tick, 
   const rooms = Array.from({ length: ROOMS }, () => structuredClone(room));
   const perRoom = (used() - r0) / ROOMS;
   assert.equal(rooms.length, ROOMS);
-  // A tick's release keeps what it sends in the same process, at most RELEASE_MOST as it starts to send.
+  // A tick's release holds what it sends in the same process, at most RELEASE_MOST.
   const total = process.memoryUsage().rss / MiB + (ROOMS * perRoom) / MiB + UPLOAD_PEAK_MIB + RELEASE_MOST / MiB;
   t.diagnostic(`held previews and rosters: ${(held / MiB).toFixed(1)} MiB, charged ${(charged / MiB).toFixed(1)} MiB`);
   t.diagnostic(`receivers' preview state: ${(receivers / MiB).toFixed(1)} MiB`);
@@ -144,11 +149,14 @@ test("154 full sockets and 246 off, each at its caps through an uncovered tick, 
  * holds as it starts to send is measured, and every preview message is
  * numbered in the order the room sent it, with the socket it went to.
  */
-async function release(t: TestContext, senders: readonly { shown: number; hidden: number }[], moves: "60 at 30 a second" | "to the held cap" = "60 at 30 a second") {
+async function release(t: TestContext, senders: readonly { shown: number; hidden: number }[], moves: "60 at 30 a second" | "to the room's count" = "60 at 30 a second") {
   const f = scopeFixture();
+  // To the room's count, every frame is as long as it gets: ids of 36 characters, numbers of 17 digits and a route of 200 on its lead.
+  const most = moves === "to the room's count";
+  const fine = most ? 0.123456789012345 : 0.5;
   const tokens = senders.map((s, i) => [
-    ...Array.from({ length: s.shown }, (_, k) => ({ id: `s${i}-${k}`, x: (k % 40) + 0.5, y: 10 + 4 * i + Math.floor(k / 40), hidden: false })),
-    ...Array.from({ length: s.hidden }, (_, k) => ({ id: `h${i}-${k}`, x: (k % 40) + 0.5, y: 40 + 4 * i + Math.floor(k / 40), hidden: true })),
+    ...Array.from({ length: s.shown }, (_, k) => ({ id: most ? uuidv7() : `s${i}-${k}`, x: (k % 40) + fine, y: 10 + 4 * i + Math.floor(k / 40), hidden: false })),
+    ...Array.from({ length: s.hidden }, (_, k) => ({ id: `h${i}-${k}`, x: (k % 40) + fine, y: 40 + 4 * i + Math.floor(k / 40), hidden: true })),
   ]);
   for (const list of tokens) for (const m of list) f.state.tokens[m.id] = token(m.id, { sceneId: f.sceneId, x: m.x, y: m.y, ...(m.hidden ? { visibility: "dm" as const } : {}) });
   const clock = { now: T0 };
@@ -212,19 +220,19 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
   clock.now = T0 + 25;
   await new Promise((resolve) => setTimeout(resolve, 60));
   await flush();
-  // At the held cap, each sender's frames come at once, within its ephemeral burst of 400 (budgets.ts EPH_RATE).
-  const capped = moves === "to the held cap";
-  const more = (conn: Connection, m: number) => (capped ? actor.heldOf(conn).bytes + 3 * 1024 <= MAX_HELD_BYTES && m < MAX_HELD_FRAMES : m < 60);
-  for (let m = 0; conns.slice(0, senders.length).some((c) => more(c, m)); m++) {
-    if (!capped) clock.now = T0 + 25 + Math.round((m * 1000) / 30);
+  // To the room's count, each sender's frames come at once, within its ephemeral burst of 400 (budgets.ts EPH_RATE), and each
+  // carries a roster, so none takes an older one's place, until the room's held frames may send no more (MAX_ROOM_HELD_SENDS).
+  const route = Array.from({ length: 200 }, (_, n) => (n % 40) + 0.123456789012345);
+  for (let m = 0; m < (most ? 10 : 60); m++) {
+    if (!most) clock.now = T0 + 25 + Math.round((m * 1000) / 30);
     for (const [i, list] of tokens.entries()) {
-      if (!more(conns[i]!, m)) continue;
       const [first, ...rest] = list;
-      if (m === 0) send(conns[i]!, { k: "dragStart", tokenId: first!.id, g: 1, x: first!.x, y: first!.y, with: rest.map((r) => ({ tokenId: r.id, x: r.x, y: r.y })), from: { x: first!.x, y: first!.y } });
+      const roster = { with: rest.map((r) => ({ tokenId: r.id, x: r.x, y: r.y })), from: { x: first!.x, y: first!.y } };
+      if (most) send(conns[i]!, { k: "dragMove", tokenId: first!.id, g: 1, x: first!.x + m / 7, y: first!.y, lead: { i: 0, x: rest[0]!.x + m / 7, y: rest[0]!.y, path: route, ft: 12345.6789012345 }, ...roster });
+      else if (m === 0) send(conns[i]!, { k: "dragStart", tokenId: first!.id, g: 1, x: first!.x, y: first!.y, ...roster });
       else send(conns[i]!, { k: "dragMove", tokenId: first!.id, g: 1, x: first!.x + m / 8, y: first!.y });
     }
   }
-  if (!capped) for (const conn of conns.slice(0, senders.length)) assert.equal(actor.heldOf(conn).frames, 60);
 
   // The release, measured as its outbox starts to send, when everything it sends waits in it.
   const base = used();
@@ -234,7 +242,7 @@ async function release(t: TestContext, senders: readonly { shown: number; hidden
     if (staged.records > 1_000) runs.push({ ...staged, heap: used() - base });
     deliver.call(this);
   };
-  clock.now = capped ? T0 + 1_000 : T0 + 25 + 1_970;
+  clock.now = most ? T0 + 1_000 : T0 + 25 + 1_970;
   gate!();
   for (let i = 0; i < 400 && conns.slice(0, senders.length).some((c) => actor.heldOf(c).frames > 0); i++) {
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -256,7 +264,8 @@ function runsOf(sent: readonly { n: number }[]): number[] {
 
 test("a release of 10 sockets' 60 held moves of 100 tokens each to 63 receivers waits as records and frames, well within the container", { timeout: 600_000 }, async (t: TestContext) => {
   const { runs, numbered } = await release(t, Array.from({ length: 10 }, () => ({ shown: 100, hidden: 0 })));
-  assert.equal(numbered, 10 * 60 * 100 * 63, "every token's frame reached every other socket");
+  // Each sender's moves took each other's place while they waited: its start and its latest move remain.
+  assert.equal(numbered, 10 * 2 * 100 * 63, "every token's frame reached every other socket");
   assert.equal(runs.length, 1, "the release is one pass");
   const [run] = runs;
   t.diagnostic(`${run!.records} records of ${run!.groups} group frames: ${(run!.bytes / MiB).toFixed(1)} MiB as counted, ${(run!.heap / MiB).toFixed(1)} MiB on the heap`);
@@ -271,18 +280,21 @@ test("4 sockets dragging at 30 a second, one with 0 or 99 members a player does 
     twins.push({ texts: sent.map((m) => JSON.stringify((JSON.parse(m.text) as { e: unknown }).e)), runs: runsOf(sent) });
     t.diagnostic(`${hidden} not shown: ${runs[0]!.records} records, ${(runs[0]!.bytes / MiB).toFixed(1)} MiB as counted, ${(runs[0]!.heap / MiB).toFixed(1)} MiB on the heap`);
   }
-  assert.equal(twins[0]!.texts.length, 3 * 60 * 100 + 60);
-  assert.deepEqual(twins[0]!.runs, [3 * 60 * 100 + 60], "one run");
+  assert.equal(twins[0]!.texts.length, 3 * 2 * 100 + 2);
+  assert.deepEqual(twins[0]!.runs, [3 * 2 * 100 + 2], "one run");
   assert.deepEqual(twins[1]!.runs, twins[0]!.runs);
   assert.deepEqual(twins[1]!.texts, twins[0]!.texts);
 });
 
-test("a release at the held caps: 64 sockets, each with every move of 100 tokens its queue holds, to 63 receivers", { timeout: 600_000 }, async (t: TestContext) => {
-  const { runs, numbered, bytes } = await release(t, Array.from({ length: 64 }, () => ({ shown: 100, hidden: 0 })), "to the held cap");
+test("the most one release hands out: 64 sockets whose frames all carry rosters, routes and the longest ids and numbers, stopped by the room's count", { timeout: 600_000 }, async (t: TestContext) => {
+  const { runs, numbered, bytes } = await release(t, Array.from({ length: 64 }, () => ({ shown: 100, hidden: 0 })), "to the room's count");
   assert.equal(runs.length, 1, "the release is one pass");
   const [run] = runs;
+  const frames = Math.floor(MAX_ROOM_HELD_SENDS / heldSends({ k: "dragMove", tokenId: "p", g: 1, x: 0, y: 0 } as GroupFrame));
+  assert.equal(run!.groups, frames, "the room held what its count allows");
   t.diagnostic(`${numbered} messages, ${run!.records} records of ${run!.groups} group frames: ${(run!.bytes / MiB).toFixed(1)} MiB as counted, ${(run!.heap / MiB).toFixed(1)} MiB on the heap`);
-  // What the same release hands the sockets to send, which their send buffers then hold until the network takes it.
-  t.diagnostic(`the messages' text: ${(bytes / MiB).toFixed(0)} MiB`);
-  assert.ok(run!.heap <= 250 * MiB, `${run!.heap}`);
+  // What the same release hands its sockets to send, which their send buffers hold until the network takes it.
+  t.diagnostic(`the messages' text: ${(bytes / MiB).toFixed(1)} MiB, ${(bytes / 63 / MiB).toFixed(2)} MiB a receiver`);
+  assert.ok(bytes / 63 <= MAX_ROOM_HELD_SENDS, "each receiver gets at most the room's count");
+  assert.ok(run!.heap + bytes <= RELEASE_MOST, `${run!.heap + bytes}`);
 });

@@ -6,7 +6,7 @@ import { clientMessageSchema, ephCaps, expandGroup, MAX_EPH_BYTES, rosterOf, typ
 import { serializedBytes } from "#shared/limits.ts";
 import { MAX_HELD_BYTES, MAX_HELD_BYTES_OFF, MAX_HELD_FRAMES } from "./actor.ts";
 import { FULL_ALLOWANCE_BYTES, OFF_ALLOWANCE_BYTES } from "./budgets.ts";
-import { GESTURE_STALE_MS, GestureVersions, heldCharge, heldForm, MAX_VERSION_BYTES, MAX_VERSIONS, NEED_EVERY_MS, routedForm, versionCharge, type HeldFrame } from "./gestures.ts";
+import { GESTURE_STALE_MS, GestureVersions, heldCharge, heldForm, holdFrame, MAX_VERSION_BYTES, MAX_VERSIONS, NEED_EVERY_MS, routedForm, versionCharge, type HeldFrame } from "./gestures.ts";
 
 /** A frame as the socket layer hands it over, through the client schema. */
 function frame(e: unknown): GroupFrame | EphEvent {
@@ -180,7 +180,7 @@ describe("what the server keeps, measured against its charges", () => {
   const wide = (i: number, j: number) => String.fromCharCode(0x4e00 + (i % 500), 0x4e00 + (j % 500), 0x4e00 + Math.floor(i / 500)) + "一".repeat(61);
   const N = -1.2345678901234567e-100;
   const nums = (count: number) => Array.from({ length: count }, (_, i) => N * (i + 1));
-  const held = (e: GroupFrame | EphEvent, i: number): HeldFrame => ({ sceneId: "s1", e: heldForm(e), version: null, arrived: i, a: i, at: i, bytes: heldCharge(e) });
+  const held = (e: GroupFrame | EphEvent, i: number): HeldFrame => holdFrame("s1", e, null, i, i, i);
 
   test("a roster version and each member it stores", () => {
     const measured = (m: number, n: number) => {
