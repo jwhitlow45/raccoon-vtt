@@ -1,8 +1,8 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { SQUARES } from "#shared/rules/grid.ts";
-import type { Trap } from "#shared/model.ts";
+import { SQUARES, type Grid } from "#shared/rules/grid.ts";
+import type { BuildChunk, Trap } from "#shared/model.ts";
 import { trap as makeTrap } from "#shared/testutil.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
 import type { IsoGround } from "../../canvas/relief/context.ts";
@@ -35,15 +35,15 @@ const rig = makeTrap("x").rig;
 const trapOf = (id: string, name: string, cells: { x: number; y: number; w: number; h: number }[]): Trap => makeTrap(id, { name, zone: { cells }, rig });
 
 /** What a shown name covers as it draws, by kind: another name, another trap's squares or badge, a frame, a link's pill, or a creature's box. */
-function coversOf(traps: Record<string, Trap>, names: Map<string, PillSpec | null>, frames: readonly Outline[], iso: IsoGround, scale: number, view: Box | null, boxes: readonly Box[], pills: readonly PillSpec[]): string[] {
+function coversOf(traps: Record<string, Trap>, names: Map<string, PillSpec | null>, frames: readonly Outline[], iso: IsoGround, scale: number, view: Box | null, boxes: readonly Box[], pills: readonly PillSpec[], grid: Grid = SQUARES, chunks: Readonly<Record<string, BuildChunk>> = {}): string[] {
   const out: string[] = [];
   const shown = [...names].flatMap(([id, p]) => (p ? [{ id, box: drawnBox(p, scale, iso, true, true, view) }] : []));
   shown.forEach((a, i) => {
     for (const b of shown.slice(i + 1)) if (meet(a.box, b.box)) out.push(`${a.id} on ${b.id}'s name`);
     for (const t of Object.values(traps)) {
       if (t.id === a.id) continue;
-      if ("cells" in t.zone && t.zone.cells.some((r) => boxCoversOutline(a.box, cornersOf(outlineOf(SQUARES, r)), iso))) out.push(`${a.id} on ${t.id}'s squares`);
-      if (isoTrapBadges(SQUARES, SCENE, { [t.id]: t }, {}, scale, true, iso).some((b) => meet(a.box, b))) out.push(`${a.id} on ${t.id}'s badge`);
+      if ("cells" in t.zone && t.zone.cells.some((r) => boxCoversOutline(a.box, cornersOf(outlineOf(grid, r)), iso))) out.push(`${a.id} on ${t.id}'s squares`);
+      if (isoTrapBadges(grid, SCENE, { [t.id]: t }, chunks, scale, true, iso).some((b) => meet(a.box, b))) out.push(`${a.id} on ${t.id}'s badge`);
     }
     if (frames.some((o) => boxCoversOutline(a.box, cornersOf(o), iso))) out.push(`${a.id} on a frame`);
     if (pills.some((p) => meet(a.box, drawnBox(p, scale, iso, true, true, view)))) out.push(`${a.id} on a link's pill`);
@@ -140,4 +140,60 @@ test("two traps side by side whose names would meet: the first keeps its spot an
   assert.deepEqual(coversOf({ b: second }, new Map([["b", squeezed!]]), [], iso, 26, null, sides, []), []);
   const shut = isoTrapNames(SQUARES, SCENE, { b: second }, {}, 26, true, [], iso, null, { view, ground, boxes: [{ x0: -20, y0: -20, x1: 20, y1: 20 }] }).get("b");
   assert.equal(shut, null, "with no room at all the name hides");
+});
+
+test("a wire, a door and squares crowded round two creatures keep off each other and the creatures at every turn, each wire and door name pointing at its own line (ISOLAB F3)", () => {
+  const chunks: Record<string, BuildChunk> = { "s1:0,0": { sceneId: SCENE, cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls: [{ id: "door", a: [3, 2], b: [3, 4], f: { kind: "door", state: "closed", secret: false, discovered: false } }] } };
+  const traps: Record<string, Trap> = {
+    a: trapOf("a", "Hidden Pit", [{ x: 1, y: 2, w: 2, h: 1 }]),
+    b: makeTrap("b", { name: "Tripwire Across The Hall", zone: { wire: { a: [1, 3], b: [5, 3] } }, rig }),
+    c: makeTrap("c", { name: "Poison Needle Door", zone: { door: { cx: 0, cy: 0, id: "door" } }, rig }),
+  };
+  let lines = 0;
+  for (const scale of [20, 40]) for (const turn of [0, 1, 2, 3] as const) {
+    const iso = isoAt(turn);
+    const view = isometric(turn);
+    const boxes = [{ x: 2, y: 3 }, { x: 4, y: 2 }].map((p) => {
+      const v = drawnBox({ x: p.x + 0.5, y: p.y + 0.5, size: "map" }, scale, iso, true, true);
+      return { x0: v.x0 - 0.5, y0: v.y0 - 1, x1: v.x0 + 0.5, y1: v.y0 + 0.2 };
+    });
+    const names = isoTrapNames(SQUARES, SCENE, traps, chunks, scale, true, [], iso, null, { view, ground, boxes });
+    assert.deepEqual(coversOf(traps, names, [], iso, scale, null, boxes, [], SQUARES, chunks), [], `turn ${turn} at ${scale} px`);
+    const onLine = (p: PillSpec, a: [number, number], b: [number, number]) => Math.abs((b[0] - a[0]) * (p.y - a[1]) - (b[1] - a[1]) * (p.x - a[0])) < 1e-9 && p.x >= Math.min(a[0], b[0]) - 1e-9 && p.x <= Math.max(a[0], b[0]) + 1e-9;
+    const wire = names.get("b");
+    const door = names.get("c");
+    if (wire) assert.ok(onLine(wire, [1, 3], [5, 3]), `turn ${turn}: the wire's name points at the wire`);
+    if (door) assert.ok(onLine({ ...door, x: door.y, y: door.x }, [2, 3], [4, 3]), `turn ${turn}: the door's name points at the door`);
+    lines += (wire ? 1 : 0) + (door ? 1 : 0);
+  }
+  assert.ok(lines > 0, "some wire or door name shows");
+});
+
+for (const orient of ["rows", "columns"] as const) test(`on hex ${orient} a crowd's names keep off each other, the other traps' hexes and badges and the frames at every turn (ISOLAB F3)`, () => {
+  const grid = { shape: "hex", orient } as Grid;
+  const traps: Record<string, Trap> = {
+    a: trapOf("a", "Hidden Pit", [{ x: 2, y: 2, w: 2, h: 1 }]),
+    b: trapOf("b", "Corner Dart Trap Of Long Name", [{ x: 4, y: 3, w: 1, h: 1 }]),
+    c: trapOf("c", "Edge snare", [{ x: 2, y: 4, w: 1, h: 1 }]),
+    d: trapOf("d", "Tripwire", [{ x: 5, y: 2, w: 1, h: 1 }]),
+  };
+  const frames = linkFrames(grid, SCENE, { h: { id: "h", sceneId: SCENE, rect: { x: 3, y: 4, w: 2, h: 1 } } });
+  for (const scale of [20, 40]) for (const turn of [0, 1, 2, 3] as const) {
+    const iso = isoAt(turn);
+    const names = isoTrapNames(grid, SCENE, traps, {}, scale, true, frames, iso, null);
+    assert.deepEqual(coversOf(traps, names, frames, iso, scale, null, [], [], grid), [], `turn ${turn} at ${scale} px`);
+    assert.equal(names.size, 4);
+  }
+});
+
+test("under the fog a name the stand rule lays flat keeps Top-down's spot and is never a marker for the link layer (ISOLAB F3)", () => {
+  const traps: Record<string, Trap> = { a: trapOf("a", "Hidden Pit", [{ x: 2, y: 2, w: 2, h: 1 }]), b: trapOf("b", "Tripwire", [{ x: 3, y: 3, w: 1, h: 1 }]) };
+  const frames = linkFrames(SQUARES, SCENE, { h: { id: "h", sceneId: SCENE, rect: { x: 4, y: 2, w: 2, h: 1 } } });
+  for (const turn of [0, 1, 2, 3] as const) {
+    // A viewer who has revealed nothing: no pill stands anywhere.
+    const fogged: IsoGround = { ...isoAt(turn), fog: new FogView({}, SCENE, { w: 16, h: 12 }) };
+    const names = isoTrapNames(SQUARES, SCENE, traps, {}, 40, false, frames, fogged, null);
+    for (const t of Object.values(traps)) assert.deepEqual(names.get(t.id), trapNamePill(SQUARES, t, {}, 40, false, frames), `turn ${turn}: ${t.name} lies flat where Top-down puts it`);
+    assert.deepEqual(isoTrapNameMarkers(SQUARES, SCENE, traps, {}, 40, false, frames, fogged, null), [], `turn ${turn}: no marker`);
+  }
 });
