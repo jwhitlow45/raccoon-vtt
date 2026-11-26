@@ -43,11 +43,26 @@ test("a drawing's points are scanned once however many drawings it is compared w
     });
     return drawing(ID(n), { kind: "free", points: proxied, style });
   };
-  const list = Array.from({ length: 50 }, (_, n) => counted(n % 10, [(n * 7) % 5, (n * 3) % 4, 9, 9]));
+  const list = Array.from({ length: 50 }, (_, n) => counted(n % 10, [(n * 7) % 5, (n * 3) % 4, 9 + n, 9]));
   const sorted = [...list].sort(drawingOrder);
   assert.equal(reads, 50 * 4 * 2, "one scan each (bounds reads a value for its low and its high), not one per comparison");
-  const reference = [...list].sort((a, b) => (a.points[1]! - b.points[1]! || a.points[0]! - b.points[0]! || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  const reference = [...list].sort((a, b) => (a.points[1]! - b.points[1]! || a.points[0]! - b.points[0]! || b.points[2]! - a.points[2]! || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
   assert.deepEqual(sorted.map((d) => d.id), reference.map((d) => d.id));
+});
+
+test("drawings that share a corner never order by id: the taller, then the wider box draws first, then the points, and the id only for twins", () => {
+  const style = { stroke: "#ffffff", width: 2, opacity: 1, fill: "#ff000055" };
+  const box = (n: number, w: number, h: number, x = 1) => drawing(ID(n), { kind: "rect", points: [x, 1, x + w, 1 + h], style });
+  const list = [box(0, 2, 2), box(1, 4, 4), box(2, 3, 3), box(3, 4, 2), box(4, 2, 2)];
+  const expected = [box(1, 4, 4), box(2, 3, 3), box(3, 4, 2), box(4, 2, 2), box(0, 2, 2)].map((d) => d.id);
+  // Each order of the same list lays the boxes in one order, whatever their ids say.
+  for (const rotated of [list, [...list].reverse(), [list[2]!, list[4]!, list[0]!, list[3]!, list[1]!]]) {
+    assert.deepEqual([...rotated].sort(drawingOrder).map((d) => d.id), expected);
+  }
+  const differ = [drawing(ID(0), { kind: "free", points: [1, 1, 5, 2, 3, 3], style: { stroke: "#ffffff", width: 2, opacity: 1 } }), drawing(ID(1), { kind: "free", points: [1, 1, 5, 2, 4, 3], style: { stroke: "#ffffff", width: 2, opacity: 1 } })];
+  const lone = (n: number, stroke: string) => drawing(ID(n), { kind: "rect", points: [1, 1, 2, 2], style: { stroke, width: 2, opacity: 1 } });
+  assert.deepEqual([...differ].sort(drawingOrder).map((d) => d.id), [ID(0), ID(1)]);
+  assert.deepEqual([lone(0, "#00ff00"), lone(1, "#ff0000")].sort(drawingOrder).map((d) => d.id), [ID(0), ID(1)], "the same box in two colors orders by color, here 00ff00 before ff0000");
 });
 
 test("objects draw under creatures, a larger one under a smaller one, then by id", () => {

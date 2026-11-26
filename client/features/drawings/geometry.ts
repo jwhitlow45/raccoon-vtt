@@ -258,31 +258,45 @@ function drawingRank(d: Pick<Drawing, "kind" | "style">): number {
  * The order a scene's drawings draw in, bottom first: filled shapes, then
  * strokes (free, line, arrow, an unfilled rectangle, ellipse or polygon),
  * then text, so a fill never covers a line or words drawn over it. Each
- * kind draws in board order, by the top, then the left, of its box, then
- * by id: a version 8 id is random, so id order alone would lay a new box
- * under an older one as often as over it, and differently in every room.
+ * kind draws in board order, by the top, then the left, of its box. Of
+ * two boxes with one corner the larger draws first, so the smaller is
+ * never hidden under it. Then the points and the colors decide, and the
+ * id only when two drawings are the same to the eye: a version 8 id is
+ * random, so it can never say which of two boxes is the newer, and id
+ * order alone would lay a new box under an older one as often as over it,
+ * and differently in every room.
  */
 export function drawingOrder(a: Pick<Drawing, "id" | "kind" | "style" | "points">, b: Pick<Drawing, "id" | "kind" | "style" | "points">): number {
   const rank = drawingRank(a) - drawingRank(b);
   if (rank !== 0) return rank;
   const ba = boxCorner(a.points);
   const bb = boxCorner(b.points);
-  return ba.y0 - bb.y0 || ba.x0 - bb.x0 || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const box = ba.y0 - bb.y0 || ba.x0 - bb.x0 || bb.y1 - ba.y1 || bb.x1 - ba.x1;
+  if (box !== 0) return box;
+  const n = Math.min(a.points.length, b.points.length);
+  for (let i = 0; i < n; i++) {
+    const d = a.points[i]! - b.points[i]!;
+    if (d !== 0) return d;
+  }
+  return a.points.length - b.points.length || compareText(a.style.stroke, b.style.stroke) || compareText(a.style.fill ?? "", b.style.fill ?? "") || compareText(a.id, b.id);
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**
- * The top left of a drawing's box, found once per points array. A sort
+ * A drawing's box, found once per points array. A sort
  * compares each drawing about log n times, and a drawing can hold tens of
  * thousands of point values, so scanning them in every comparison cost a
  * pass over every point per frame. State is never changed in place, so a
  * points array keeps its box for as long as it lives.
  */
-const corners = new WeakMap<readonly number[], { x0: number; y0: number }>();
-function boxCorner(points: readonly number[]): { x0: number; y0: number } {
+const corners = new WeakMap<readonly number[], { x0: number; y0: number; x1: number; y1: number }>();
+function boxCorner(points: readonly number[]): { x0: number; y0: number; x1: number; y1: number } {
   let found = corners.get(points);
   if (!found) {
-    const { x0, y0 } = bounds(points);
-    found = { x0, y0 };
+    found = bounds(points);
     corners.set(points, found);
   }
   return found;
