@@ -24,7 +24,12 @@ import type { Scene } from "#shared/model.ts";
 export type SceneLoad = {
   /** The scene this device asked for and has no contents of yet. */
   requested: string | null;
-  /** The server delayed the snapshot (`wait`, design 10.4) or refused the request for now (`retry`). */
+  /**
+   * The server delayed the snapshot (`wait`, design 10.4) or refused the
+   * request for now (`retry`). With nothing requested, it is the snapshot
+   * of a first load the server holds, which is loading, not a lost
+   * connection (design 7.5).
+   */
   slow: boolean;
 };
 
@@ -39,6 +44,8 @@ export type SceneLoadEvent =
   | { t: "slow" }
   /** The snapshot deadline passed (design 7.5). The socket reconnects and asks again. */
   | { t: "timeout" }
+  /** The socket closed or was given up before its snapshot. A scene asked for is asked again by the next hello. */
+  | { t: "lost" }
   /**
    * A snapshot arrived for `sceneId`. `next` is the scene the socket sent
    * straight after it, when the DM picked again while this one was in flight.
@@ -57,14 +64,16 @@ export function stepSceneLoad(load: SceneLoad, e: SceneLoadEvent): { load: Scene
     case "cancel":
       return { load: SCENE_LOAD_IDLE, failed: null };
     case "slow":
-      if (load.requested === null || load.slow) return { load, failed: null };
+      if (load.slow) return { load, failed: null };
       return { load: { ...load, slow: true }, failed: null };
     case "timeout":
-      if (load.requested === null) return { load, failed: null };
+      if (load.requested === null) return { load: SCENE_LOAD_IDLE, failed: null };
       return { load: SCENE_LOAD_IDLE, failed: { sceneId: load.requested, reason: "timeout" } };
+    case "lost":
+      return { load: load.requested === null ? SCENE_LOAD_IDLE : load, failed: null };
     case "snapshot":
       if (e.next !== null) return { load: load.requested === e.next ? load : { requested: e.next, slow: false }, failed: null };
-      if (load.requested === null) return { load, failed: null };
+      if (load.requested === null) return { load: SCENE_LOAD_IDLE, failed: null };
       if (load.requested === e.sceneId) return { load: SCENE_LOAD_IDLE, failed: null };
       // The server sends the player scene when the one asked for is gone.
       return { load: SCENE_LOAD_IDLE, failed: { sceneId: load.requested, reason: "refused" } };

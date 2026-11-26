@@ -346,6 +346,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   /** The scene the in-flight `scene` or `hello` asked for. */
   let requestedScene: string | null = null;
   let sceneInFlight = false;
+  /** Whether the hello waiting for its snapshot went on a socket that was open, a resync's or a scene switch's. */
+  let helloWhileOpen = false;
 
   // Ephemeral sending. Each event keeps the floor it was made on, the floor shown then, so a switch before the flush sends it on its own floor (docs/design/design-v1-floors.md 8.2).
   const ephQueue = new Map<string, { e: EphEvent; sceneId: string | null }>();
@@ -474,7 +476,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     paceTimer.clear();
     unansweredK = null;
     sceneInFlight = false;
+    helloWhileOpen = false;
     ephQueue.clear();
+    // A first load the server held said "Still loading…": without the socket it is connecting again.
+    room.trackScene({ t: "lost" });
     room.suspend();
     if (phase !== "ended" && phase !== "disposed") phase = "idle";
   }
@@ -628,7 +633,10 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     phase = "hello";
     // For a scene switch the deadline already covers the whole exchange.
     if (!deadline.pending) startDeadline();
-    if (wasOpen) staleTimer.set(STALE_SNAPSHOT_MS, () => setConnection("reconnecting"));
+    if (wasOpen) {
+      helloWhileOpen = true;
+      staleTimer.set(STALE_SNAPSHOT_MS, () => setConnection("reconnecting"));
+    }
   }
 
   function startDeadline(): void {
@@ -690,6 +698,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     }
     deadline.clear();
     staleTimer.clear();
+    helloWhileOpen = false;
     phase = "open";
     everOpen = true;
     attempt = 0;
@@ -801,6 +810,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
         if (phase === "hello" || sceneInFlight) {
           deadline.set(msg.ms + SNAPSHOT_DEADLINE_MS, () => giveUp("no snapshot"));
           room.trackScene({ t: "slow" });
+          // The server is holding the snapshot, so the socket is live: one that was open stays open (design 7.5).
+          if (helloWhileOpen) {
+            staleTimer.clear();
+            setConnection("open");
+          }
         }
         return;
       case "build":

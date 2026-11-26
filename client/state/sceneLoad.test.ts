@@ -47,8 +47,17 @@ describe("stepSceneLoad: what starts, updates and clears a switch", () => {
     assert.deepEqual(run([{ t: "request", sceneId: "b" }, { t: "slow" }, { t: "request", sceneId: "c" }]).load, { requested: "c", slow: false });
   });
 
-  test("a wait with nothing requested changes nothing", () => {
-    assert.equal(run([{ t: "slow" }]).load, SCENE_LOAD_IDLE);
+  test("a wait with nothing requested, a first load the server holds, is slow until its snapshot, a timeout or a lost socket", () => {
+    assert.deepEqual(run([{ t: "slow" }]).load, { requested: null, slow: true });
+    for (const end of [{ t: "snapshot", sceneId: "a", next: null }, { t: "timeout" }, { t: "lost" }] as const) {
+      const { load, failures } = run([{ t: "slow" }, end]);
+      assert.equal(load, SCENE_LOAD_IDLE, end.t);
+      assert.deepEqual(failures, [], end.t);
+    }
+  });
+
+  test("a lost socket keeps a scene asked for, which the next hello asks for again", () => {
+    assert.deepEqual(run([{ t: "request", sceneId: "b" }, { t: "slow" }, { t: "lost" }]).load, { requested: "b", slow: true });
   });
 
   test("going back to the scene on screen cancels it", () => {

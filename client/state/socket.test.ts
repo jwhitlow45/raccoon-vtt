@@ -458,6 +458,63 @@ describe("snapshot deadline", () => {
   });
 });
 
+describe("a snapshot the server holds (wait)", () => {
+  test("a scene switch whose snapshot waits keeps the open socket open until the snapshot, and the map says it is still loading", () => {
+    const s = setup();
+    s.socket.start();
+    s.connect();
+    s.socket.switchScene("s2");
+    s.last().take("scene");
+    s.last().emit({ t: "resync", reason: "scene" });
+    s.last().take("hello");
+    s.clock.advance(2_000);
+    s.last().emit({ t: "wait", ms: 8_000 });
+    s.clock.advance(2_000);
+    s.last().emit({ t: "wait", ms: 6_000 });
+    for (let t = 0; t < 6_000; t += 500) {
+      s.clock.advance(500);
+      assert.equal(s.conn(), "open", `at ${4_000 + t + 500} ms`);
+    }
+    assert.deepEqual(s.room.store.getState().sceneLoad, { requested: "s2", slow: true });
+    s.last().emit(s.snapshot("s2"));
+    assert.equal(s.conn(), "open");
+    assert.equal(s.sockets.length, 1);
+  });
+
+  test("a resync whose wait comes after the dot turned amber turns it back", () => {
+    const s = setup({ viewer: P1 });
+    s.socket.start();
+    s.connect();
+    s.last().emit({ t: "resync", reason: "watermark" });
+    s.clock.advance(STALE_SNAPSHOT_MS);
+    assert.equal(s.conn(), "reconnecting");
+    s.last().emit({ t: "wait", ms: 4_000 });
+    assert.equal(s.conn(), "open");
+    s.clock.advance(STALE_SNAPSHOT_MS * 2);
+    assert.equal(s.conn(), "open");
+  });
+
+  test("a first load the server holds reads as connecting and still loading, and a lost socket ends the hold", () => {
+    const s = setup();
+    s.socket.start();
+    s.last().open();
+    s.last().take("hello");
+    s.clock.advance(2_000);
+    s.last().emit({ t: "wait", ms: 40_000 });
+    assert.equal(s.conn(), "connecting");
+    assert.deepEqual(s.room.store.getState().sceneLoad, { requested: null, slow: true });
+    s.last().drop(1006);
+    assert.deepEqual(s.room.store.getState().sceneLoad, { requested: null, slow: false });
+    s.clock.advance(1_000);
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "wait", ms: 4_000 });
+    s.last().emit(s.snapshot());
+    assert.equal(s.conn(), "open");
+    assert.deepEqual(s.room.store.getState().sceneLoad, { requested: null, slow: false });
+  });
+});
+
 describe("scene switching", () => {
   test("one scene in flight, and the latest pick wins", () => {
     const s = setup();

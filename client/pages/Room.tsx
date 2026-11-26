@@ -1521,6 +1521,8 @@ function MapArea(props: {
 }) {
   const { gate, role } = props;
   const anyScene = useRoomView((s) => s.view !== null && Object.keys(s.view.scenes).length > 0);
+  // A first load whose snapshot the server holds (sceneLoad.ts): it says so, as a scene switch does.
+  const held = useRoomView((s) => s.sceneLoad?.requested === null && s.sceneLoad.slow);
   if (gate.kind === "ready") {
     return (
       <>
@@ -1545,7 +1547,7 @@ function MapArea(props: {
   // Centered in what the bars and a phone's open sheet leave clear: under a half open sheet the middle of the whole stage hides the words (BUGSS-PHONE-SHEET).
   const { top, bottom, right } = props.gateClear;
   const pad = theme.space(6);
-  return <div style={{ ...SCENE_GATE_STYLE, padding: `${top}px ${right + pad}px ${bottom}px ${pad}px` }}>{gate.kind === "wait" ? <Loading text={message} /> : message}</div>;
+  return <div style={{ ...SCENE_GATE_STYLE, padding: `${top}px ${right + pad}px ${bottom}px ${pad}px` }}>{gate.kind === "wait" ? <Loading text={message} detail={held ? "Still loading…" : null} /> : message}</div>;
 }
 
 /**
@@ -1824,10 +1826,12 @@ function useFontsLoaded(): number {
 function Banner() {
   const connection = useRoomView((s) => s.connection);
   const due = useReconnectDue(connection);
+  // The server answered with a wait and holds the first snapshot, so the connection works and the map says "Still loading…".
+  const held = useRoomView((s) => s.connection === "connecting" && s.sceneLoad?.requested === null && s.sceneLoad.slow);
   const slot = useModalSlot("connection");
   const compact = useLayoutSize().height < SHORT_LANDSCAPE_MAX;
   // Nothing at all while it is not due: an empty box would still take a gap in the stack, 8 px a short screen does not have.
-  if (!due) return null;
+  if (!due || held) return null;
   return inModal(
     <div style={{ pointerEvents: "auto", width: "100%", maxWidth: theme.layout.notice, minWidth: 0 }}>
       <ReconnectNotice state={connection} compact={compact} />
