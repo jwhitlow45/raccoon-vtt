@@ -1533,8 +1533,9 @@ async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: numbe
     await sweep.measure(page, "dungeon-stocked-rows", stockRows);
     await sweep.measure(page, "dungeon-dialog-stocked", dialog);
     await shots.take(page, `alignment-${sweep.at}-dungeon-dialog-stocked`);
-    await monsterMarks.getByRole("button", { name: "None", exact: true }).click();
+    // The room's characters first, while the party row still shows: with no level among them Monsters is held at None again, else None puts it back.
     await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
+    if (!held) await monsterMarks.getByRole("button", { name: "None", exact: true }).click();
     await settled(preview);
     await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
