@@ -278,20 +278,29 @@ describe("websocket: reconnects and watermarks", () => {
 
   /**
    * Resolves once the room has handled its op `n`, set before the op is sent: the op is queued and taken from the queue,
-   * so what it staged waits in the open batch. A sleep would stretch on a slow machine toward the batch's close. The
-   * deadline runs from the call, so an op that never reaches the room fails the test rather than hanging it.
+   * so what it staged waits in the open batch. It resolves in the same turn of the event loop as the room takes the op,
+   * so a test that awaits it goes on before any timer runs, the batch's close among them: a poll, as a sleep, could let a
+   * batch boundary of the real clock pass first. The deadline runs from the call, so an op that never reaches the room
+   * fails the test rather than hanging it.
    */
-  async function handled(roomId: string, n: number, ms?: number): Promise<void> {
+  async function handled(roomId: string, n: number, ms = 10_000): Promise<void> {
     const actor = t.manager.get(roomId)!;
     const own = actor.op;
-    let queued = false;
-    actor.op = async (...args: Parameters<RoomActor["op"]>) => {
-      await own.apply(actor, args);
-      if (args[1] === n) queued = true;
-    };
+    let timer: NodeJS.Timeout | undefined;
+    const taken = new Promise<void>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms waiting for op ${n} to be handled`)), ms);
+      actor.op = async (...args: Parameters<RoomActor["op"]>) => {
+        await own.apply(actor, args);
+        if (args[1] !== n) return;
+        // An op the room left queued would be taken in a later turn, after timers that may close its batch.
+        if (actor.queueLength === 0) resolve();
+        else reject(new Error(`the room left op ${n} queued, so its batch could close before the test goes on`));
+      };
+    });
     try {
-      await until(() => queued && actor.queueLength === 0, `op ${n} to be handled`, ms);
+      await taken;
     } finally {
+      clearTimeout(timer);
       delete (actor as { op?: unknown }).op;
     }
   }
@@ -340,7 +349,7 @@ describe("websocket: reconnects and watermarks", () => {
     const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
-    // The open batch still closes on real time after handled() resolves, so the unload follows at once.
+    // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
     await t.manager.unload(roomId, 4010, false);
     assert.equal((await s.waitClosed()).code, 4010);
     const stored = await t.pool.query("select 1 from client_watermarks where room_id = $1", [roomId]);
@@ -367,7 +376,7 @@ describe("websocket: reconnects and watermarks", () => {
     const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
-    // The open batch still closes on real time after handled() resolves, so the unload follows at once.
+    // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
     await t.manager.unload(roomId, 4010, false);
     await s.waitClosed();
     const again = await t.connect(roomId, dm);
