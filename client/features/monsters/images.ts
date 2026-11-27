@@ -2,7 +2,7 @@ import type { IconImage, ImageRef, RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import { SRD_TOKEN_ICONS } from "#shared/srd/tokenIcons.ts";
-import { sameImage as sameImageRef } from "#shared/imageRef.ts";
+import { copyImage, imageModelId, sameImage as sameImageRef } from "#shared/imageRef.ts";
 
 /**
  * Default images for monsters (features section 15): the image every token
@@ -61,9 +61,16 @@ export function sameImage(a: ImageRef | undefined, b: ImageRef | undefined): boo
   return sameImageRef(a, b);
 }
 
-/** What makes two images the same picture whatever their crop: the asset, or the icon's key. */
+/**
+ * What makes two images the same picture whatever their crop: the asset, or
+ * the icon's key, and the sheet of the 3D model it carries, so a token with
+ * a model of its own on the monster's picture counts as set by hand
+ * (docs/design/design-v1-token-models.md 4.2).
+ */
 function pictureOf(image: ImageRef): string {
-  return "icon" in image ? `icon:${image.icon}` : `asset:${image.assetId}`;
+  const picture = "icon" in image ? `icon:${image.icon}` : `asset:${image.assetId}`;
+  const model = imageModelId(image);
+  return model === undefined ? picture : `${picture} model:${model}`;
 }
 
 /**
@@ -74,6 +81,8 @@ function pictureOf(image: ImageRef): string {
  * wolf head on red.
  */
 function isShippedIcon(image: ImageRef, shipped: ImageRef | undefined): boolean {
+  // The shipped icon has no model, so one wearing a model was given it by hand (D-261127-413).
+  if (image.model) return false;
   return shipped !== undefined && "icon" in image && "icon" in shipped && image.icon === shipped.icon && image.color.toLowerCase() === shipped.color.toLowerCase();
 }
 
@@ -172,9 +181,13 @@ export function optInLabel(plan: ApplyPlan): string {
  * about a token changes. The caller sends them as one gesture
  * (dispatchGesture in client/state/actions.ts), so one undo takes them all
  * back.
+ *
+ * Each token takes the monster's image whole, its 3D model or the lack of
+ * one included, so a token is left wearing exactly this image and no
+ * longer counts as another one. A token with a model of its own is in
+ * `own` or `played`, so only the DM's say replaces it.
  */
 export function applyOps(plan: ApplyPlan, image: ImageRef, includeOwn: boolean): ClientOp[] {
   const ids = includeOwn ? [...plan.plain, ...plan.own, ...plan.played] : plan.plain;
-  const copy = (): ImageRef => ("icon" in image ? { icon: image.icon, color: image.color } : { assetId: image.assetId, crop: { ...image.crop } });
-  return ids.map((tokenId) => ({ t: "token.update", tokenId, patch: { image: copy() } }));
+  return ids.map((tokenId) => ({ t: "token.update", tokenId, patch: { image: copyImage(image) } }));
 }

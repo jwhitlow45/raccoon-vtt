@@ -6,6 +6,7 @@ import { hexInScene, hexKey, referenceHex, snapAnchor, type Hex, type HexGrid } 
 import { monsterActor, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import { footprint, hexRing } from "../../lib/scene.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
+import { copyImage } from "#shared/imageRef.ts";
 
 /**
  * Builds the `token.create` and `character.create` inputs for every way the
@@ -431,9 +432,4 @@ export function occupiedBoxes(tokens: Iterable<Pick<Token, "sceneId" | "x" | "y"
     boxes.push({ x: t.x, y: t.y, w: fp.w, h: fp.h });
   }
   return boxes;
-}
-
-/** A copy of an image a new token can wear, so no two tokens share one crop object. */
-function copyImage(image: ImageRef): ImageRef {
-  return "icon" in image ? { icon: image.icon, color: image.color } : { assetId: image.assetId, crop: { ...image.crop } };
 }

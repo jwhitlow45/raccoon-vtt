@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import type { Token, Viewer } from "#shared/model.ts";
+import type { ImageRef, ModelRef, Token, Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -252,6 +252,26 @@ describe("other token sources", () => {
     assert.equal(state.tokens.g2!.number, 2);
     assert.equal(state.tokens.g2!.fogExemptAuto, false);
     assert.deepEqual(state.tokens.g2!.rangeRings, [30, 120]);
+  });
+
+  test("placing a monster and duplicating a token keep every image's 3D model, on an upload and an icon, sharing no object (docs/design/design-v1-token-models.md 3.4)", () => {
+    const model = (assetId: string): ModelRef => ({ assetId, side: 1.4, anchorY: 0.82, boxes: Array.from({ length: 8 }, (_, i): [number, number, number, number] => [10 + i, 5, 90 - i, 95]) });
+    const upload: ImageRef = { assetId: "face", crop: { cx: 0.1, cy: -0.2, zoom: 1.5 }, model: model("sheet-face") };
+    const icon: ImageRef = { icon: "lorc/wolf-head", color: "#336699", model: model("sheet-icon") };
+    for (const image of [upload, icon]) {
+      const placed = monsterToken(byId("goblin-warrior"), { hp: null, hidden: false, inLair: false }, { id: "t1", sceneId: "s1", at: { x: 2, y: 3 }, image });
+      valid({ t: "token.create", token: placed });
+      assert.deepEqual(placed.image, image, "placed");
+      assert.notEqual(placed.image?.model, image.model);
+      assert.notEqual(placed.image?.model?.boxes[0], image.model!.boxes[0]);
+    }
+    const source = token("g1", { image: upload, altImages: [icon, { assetId: "other", crop: { cx: 0, cy: 0, zoom: 1 } }] });
+    const copy = duplicateToken(source, { id: "g2", at: { x: 4, y: 3 }, chunks: room().buildChunks });
+    valid({ t: "token.create", token: copy });
+    assert.deepEqual(copy.image, upload, "the duplicate's picture");
+    assert.deepEqual(copy.altImages, source.altImages, "its other images");
+    assert.notEqual(copy.image?.model, upload.model);
+    assert.notEqual(copy.altImages?.[0]?.model, icon.model);
   });
 
   test("a duplicate starts with no spent uses, damage types, turn record or unshaped numbers, so the op the bar sends is one the server takes (docs/design/design-v1-combat-controls.md 2.4)", () => {

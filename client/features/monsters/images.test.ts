@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import type { Token } from "#shared/model.ts";
+import type { ImageRef, ModelRef, Token } from "#shared/model.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
@@ -248,5 +248,61 @@ describe("applying a new image to a monster's tokens", () => {
     let after = state;
     for (const op of applyOps(before, input.image, true)) after = apply(after, op, DM);
     assert.deepEqual(planApply({ ...input, tokens: Object.values(after.tokens) }), { plain: [], own: [], played: [], done: 2 });
+  });
+});
+
+describe("a monster's image with a 3D model (docs/design/design-v1-token-models.md 3.4 and 4.2)", () => {
+  const BOX: [number, number, number, number] = [20, 10, 80, 95];
+  const model = (assetId = "sheet", over: Partial<ModelRef> = {}): ModelRef => ({ assetId, side: 1.4, anchorY: 0.82, boxes: Array.from({ length: 8 }, () => [...BOX] as [number, number, number, number]), ...over });
+  const withModel = (image: ImageRef, sheet = "sheet", over: Partial<ModelRef> = {}): ImageRef => ({ ...image, model: model(sheet, over) });
+  const input = (tokens: Token[], image: ImageRef, previous: ImageRef[] = []) => ({ tokens, sceneId: "s1", ref: { srdId: "goblin-warrior" }, monsters: {}, image, previous });
+
+  test("Apply carries the model on an upload and an icon, each token taking a copy of its own, and leaves nothing to apply", () => {
+    for (const image of [withModel(imageRef("goblin-pic")), withModel({ icon: "lorc/wolf-head", color: "#336699" }, "icon-sheet")]) {
+      const state = setup();
+      state.tokens = { bare: goblinToken("bare"), plain: goblinToken("plain", { image: imageRef("goblin-pic") }) };
+      const p = planApply(input(Object.values(state.tokens), image, [imageRef("goblin-pic")]));
+      assert.deepEqual(p, { plain: ["bare", "plain"], own: [], played: [], done: 0 });
+      const ops = applyOps(p, image, false);
+      for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success);
+      let after = state;
+      for (const op of ops) after = apply(after, op, DM);
+      for (const id of ["bare", "plain"]) assert.deepEqual(after.tokens[id]!.image, image, id);
+      const [first, second] = ops.map((op) => (op.t === "token.update" ? op.patch.image : null));
+      assert.notEqual(first?.model, image.model, "a copy, not the monster's own object");
+      assert.notEqual(first?.model, second?.model);
+      assert.deepEqual(planApply(input(Object.values(after.tokens), image)), { plain: [], own: [], played: [], done: 2 });
+    }
+  });
+
+  test("a Goblin on its shipped icon with a model of its own is set by hand, and one wearing an earlier default with its model is the monster's", () => {
+    const shipped = shippedImage({ srdId: "goblin-warrior" })!;
+    const earlier = withModel(imageRef("old-goblin"), "old-sheet");
+    const tokens = [
+      goblinToken("ownModel", { image: withModel(shipped, "own-sheet") }),
+      goblinToken("shipped", { image: shipped }),
+      goblinToken("earlier", { image: earlier }),
+      // The earlier picture under a model it never had was given one by hand.
+      goblinToken("otherModel", { image: withModel(imageRef("old-goblin"), "hand-sheet") }),
+    ];
+    assert.deepEqual(planApply(input(tokens, imageRef("goblin-pic"), [earlier])), { plain: ["earlier", "shipped"], own: ["otherModel", "ownModel"], played: [], done: 0 });
+    // Apply replaces only on the DM's say, then with the new image whole.
+    const p = planApply(input(tokens, imageRef("goblin-pic"), [earlier]));
+    const patched = applyOps(p, imageRef("goblin-pic"), true).map((op) => (op.t === "token.update" ? op.patch.image : null));
+    assert.deepEqual(patched, [imageRef("goblin-pic"), imageRef("goblin-pic"), imageRef("goblin-pic"), imageRef("goblin-pic")]);
+  });
+
+  test("a token on the same sheet with another side, anchor or boxes is not already wearing the image", () => {
+    const image = withModel(imageRef("goblin-pic"));
+    const tokens = [
+      goblinToken("same", { image: withModel(imageRef("goblin-pic")) }),
+      goblinToken("side", { image: withModel(imageRef("goblin-pic"), "sheet", { side: 2 }) }),
+      goblinToken("anchor", { image: withModel(imageRef("goblin-pic"), "sheet", { anchorY: 0.5 }) }),
+      goblinToken("boxes", { image: withModel(imageRef("goblin-pic"), "sheet", { boxes: [[0, 0, 100, 100], ...model().boxes.slice(1)] }) }),
+      goblinToken("none", { image: imageRef("goblin-pic") }),
+    ];
+    const p = planApply(input(tokens, image));
+    assert.equal(p.done, 1);
+    assert.deepEqual([...p.plain, ...p.own].sort(), ["anchor", "boxes", "none", "side"]);
   });
 });
