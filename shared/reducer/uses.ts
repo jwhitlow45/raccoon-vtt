@@ -1,12 +1,14 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import { healRevivesDead } from "../migrate.ts";
-import type { Actor, ClassResource, Encounter, EncounterSnapshot, InitEntry, LogEvent, PromptKey, Settled, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
+import { healRevivesDead, usesStamped } from "../migrate.ts";
+import type { Actor, Character, ClassResource, Encounter, EncounterSnapshot, HitDieSize, InitEntry, LogEvent, PromptKey, Settled, Spent, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
 import { promptRefusal } from "../permissions.ts";
 import { stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import { applyHeal } from "../rules/hp.ts";
+import { REST_NEEDS_HP } from "../rules/rest.ts";
+import { diceOf, dieKey, slotsOf, spentWithin } from "../rules/spellSlots.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { invalid, type ResolvedActor, type Tx } from "./tx.ts";
 import { ownEntry } from "../records.ts";
@@ -27,6 +29,34 @@ export const NO_LEGENDARY_LEFT = "No Legendary Actions left.";
 export const NO_RESISTANCE = "No Legendary Resistance left.";
 export const NO_RESOURCES = "Only a character has class resources.";
 export const AMOUNT_FOR_A_POOL = "Only a pool spends an amount.";
+
+export const NO_CLASSES = "Add the character's classes first.";
+export const NO_SLOTS_HERE = "Only a character has spell slots and Hit Point Dice.";
+export const NO_PACT_LEFT = "No Pact Magic slots left.";
+
+export function noSlotsLeft(level: number): string {
+  return `No level ${level} spell slots left.`;
+}
+
+export function hasNoSlots(name: string, level: number): string {
+  return `${name} has no level ${level} spell slots.`;
+}
+
+export function hasNoPact(name: string): string {
+  return `${name} has no Pact Magic slots.`;
+}
+
+export function noDiceLeft(die: HitDieSize): string {
+  return `No d${die} Hit Point Dice left.`;
+}
+
+export function hasNoDice(name: string, die: HitDieSize): string {
+  return `${name} has no d${die} Hit Point Dice.`;
+}
+
+export function hpFull(name: string): string {
+  return `${name}'s HP is full.`;
+}
 
 export function onceRefusal(name: string): string {
   return `${name} can't be taken again until the start of its next turn.`;
@@ -82,6 +112,17 @@ export function addUseLine(tx: Tx, resolved: ResolvedActor, line: Omit<UseLine, 
  */
 export function actorUse(tx: Tx, op: UseOp): void {
   const resolved = tx.resolveActor(op.target);
+  const before = resolved.character;
+  useOf(tx, resolved, op);
+  // From change format 68 a use that changed the character moves its use stamp, and one that changed nothing leaves it
+  // (docs/design/design-v1-slots.md 5, D-261127-404). Every branch writes only when it changes something.
+  if (before && usesStamped(tx.env.opVersion)) {
+    const after = tx.character(before.id);
+    if (after !== before) tx.write(keys.character(before.id), stamped(after));
+  }
+}
+
+function useOf(tx: Tx, resolved: ResolvedActor, op: UseOp): void {
   const use = op.use;
   switch (use.kind) {
     case "legendary":
@@ -94,7 +135,124 @@ export function actorUse(tx: Tx, op: UseOp): void {
       return resourceUse(tx, resolved, use, op);
     case "regenerate":
       return regenerate(tx, resolved, use);
+    case "slot":
+    case "pact":
+      return slotUse(tx, resolved, use, op);
+    case "hitDie":
+      return hitDieUse(tx, resolved, use, op);
   }
+}
+
+/** The character with its use stamp moved by one (docs/design/design-v1-slots.md 5). */
+export function stamped<C extends Pick<Character, "useRev">>(character: C): C {
+  return { ...character, useRev: (character.useRev ?? 0) + 1 };
+}
+
+/** The character with its spent counts set, the field gone when nothing is spent. */
+export function withSpent<C extends Pick<Character, "spent">>(character: C, spent: Spent | undefined): C {
+  const next = { ...character };
+  if (spent) next.spent = spent;
+  else delete next.spent;
+  return next;
+}
+
+/** The character a slot or die use reads: refused for a creature with no character, or a character with no classes. */
+function classedCharacter(tx: Tx, resolved: ResolvedActor): Character {
+  if (!resolved.character) throw invalid(NO_SLOTS_HERE);
+  const character = tx.character(resolved.character.id);
+  if (!character.classes) throw invalid(NO_CLASSES);
+  return character;
+}
+
+/** Writes a character's spent counts, always in their normal form within its classes' counts. */
+function writeSpent(tx: Tx, character: Character, spent: Spent): void {
+  tx.write(keys.character(character.id), withSpent(character, spentWithin(spent, character.classes)));
+}
+
+/**
+ * Spends one spell slot of a level, or a Pact Magic slot, or with `back`
+ * gives one back (docs/design/design-v1-slots.md 3.2). A give back never
+ * passes the count, and one with nothing to give changes nothing. Its line
+ * reaches only the DM and the character's owners.
+ */
+function slotUse(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"], { kind: "slot" | "pact" }>, op: UseOp): void {
+  const character = classedCharacter(tx, resolved);
+  const counts = slotsOf(character.classes);
+  const spent = character.spent ?? {};
+  const pact = use.kind === "pact";
+  const max = pact ? (counts.pact?.slots ?? 0) : counts.slots[use.level - 1]!;
+  const level = pact ? (counts.pact?.level ?? 0) : use.level;
+  if (max === 0) throw invalid(pact ? hasNoPact(character.name) : hasNoSlots(character.name, use.level));
+  const was = pact ? (spent.pact ?? 0) : (spent.slots?.[use.level - 1] ?? 0);
+  let used: number;
+  if (op.back) {
+    if (was === 0) return;
+    used = was - 1;
+  } else {
+    if (was >= max) throw invalid(pact ? NO_PACT_LEFT : noSlotsLeft(use.level));
+    used = was + 1;
+  }
+  const slots = Array.from({ length: counts.slots.length }, (_, i) => spent.slots?.[i] ?? 0);
+  if (!pact) slots[use.level - 1] = used;
+  writeSpent(tx, character, { ...spent, slots, ...(pact ? { pact: used } : {}) });
+  addUseLine(tx, resolved, { type: "use", what: use.kind, level, left: max - used, max, hidden: true, ...(op.back ? { back: true as const } : {}) });
+}
+
+/**
+ * Spends one Hit Point Die for the HP its typed roll gives back, or with
+ * `back` gives one back (docs/design/design-v1-slots.md 3.3, 6). A spend
+ * needs the creature alive with at least 1 HP and below its most, as a
+ * rest does. The heal writes an ordinary HP line, and the die's own line
+ * reaches only the DM and the character's owners.
+ */
+function hitDieUse(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"], { kind: "hitDie" }>, op: UseOp): void {
+  const character = classedCharacter(tx, resolved);
+  const key = dieKey(use.die);
+  const max = diceOf(character.classes)[key] ?? 0;
+  if (max === 0) throw invalid(hasNoDice(character.name, use.die));
+  const spent = character.spent ?? {};
+  const was = spent.dice?.[key] ?? 0;
+  if (op.back) {
+    if (was === 0) return;
+    writeSpent(tx, character, { ...spent, dice: { ...spent.dice, [key]: was - 1 } });
+    addUseLine(tx, resolved, { type: "use", what: "hitDie", die: use.die, left: max - was + 1, max, hidden: true, back: true });
+    return;
+  }
+  spendDie(tx, resolved, character, use.die, use.heal!);
+}
+
+/**
+ * Spends one die of `die`'s size and heals by `heal`, at least 1 (docs/design/design-v1-slots.md 6):
+ * a typed roll's or the server's. Refused, before anything changes, with
+ * no die of that size left, below 1 HP or not alive, and at full HP.
+ */
+export function dieRefusal(character: Character, actor: Actor, die: HitDieSize): string | null {
+  if (!character.classes) return NO_CLASSES;
+  const key = dieKey(die);
+  const max = diceOf(character.classes)[key] ?? 0;
+  if (max === 0) return hasNoDice(character.name, die);
+  if (actor.life !== "alive" || actor.hp.cur < 1) return REST_NEEDS_HP;
+  if (actor.hp.cur >= actor.hp.max) return hpFull(character.name);
+  if ((character.spent?.dice?.[key] ?? 0) >= max) return noDiceLeft(die);
+  return null;
+}
+
+export function spendDie(tx: Tx, resolved: ResolvedActor, character: Character, die: HitDieSize, heal: number): void {
+  const refusal = dieRefusal(character, resolved.actor, die);
+  if (refusal !== null) throw invalid(refusal);
+  const key = dieKey(die);
+  const max = diceOf(character.classes)[key]!;
+  const spent = character.spent ?? {};
+  const used = (spent.dice?.[key] ?? 0) + 1;
+  writeSpent(tx, character, { ...spent, dice: { ...spent.dice, [key]: used } });
+  addUseLine(tx, resolved, { type: "use", what: "hitDie", die, left: max - used, max, hidden: true });
+  const actor = tx.character(character.id).actor;
+  const healed = applyHeal(actor, Math.max(1, heal), healRevivesDead(tx.state.meta.settings, tx.env.opVersion));
+  if (healed.actor === actor) return;
+  tx.putActor(resolved, healed.actor);
+  const left = { ...healed.actor.hp };
+  const revert = hpRevertOf(actor, healed.actor, tx.state.encounter?.entries ?? []);
+  tx.addActorEvents(resolved, healed.events.map((e) => (e.type === "hp" ? { ...e, left, revert } : e)));
 }
 
 /** The creature's name as a refusal gives it: its character's, for a token that plays one. */

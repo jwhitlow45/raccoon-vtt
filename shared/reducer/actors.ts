@@ -1,4 +1,4 @@
-import { classChangesWriteLines, clockTicks, combatUses, healRevivesDead, playerLimitsOps, reviveToOne } from "../migrate.ts";
+import { classChangesWriteLines, clockTicks, combatUses, healRevivesDead, playerLimitsOps, reviveToOne, usesStamped } from "../migrate.ts";
 import { CLOCK_TOO_FAR, clockNow } from "../calendar.ts";
 import { HIDDEN_EFFECTS_FULL, LIMITS } from "../limits.ts";
 import type { Effect, EffectEnds, RoomState } from "../model.ts";
@@ -22,11 +22,11 @@ import {
   type ActorEvent,
 } from "../rules/hp.ts";
 import { EFFECTS_PER_CLASS, effectsFit, effectsFitChanged, type EffectsFit } from "../rules/effects.ts";
-import { applyRest, restedResources } from "../rules/rest.ts";
+import { applyRest, restedResources, restedSpent } from "../rules/rest.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { keys, parseKey } from "../keys.ts";
 import { Refuse, gone, invalid, type ResolvedActor, type Tx } from "./tx.ts";
-import { typeUnion } from "./uses.ts";
+import { stamped, typeUnion, withSpent } from "./uses.ts";
 import { creatureRef } from "./rolls.ts";
 import { damageDefenses } from "../rules/damageDefenses.ts";
 import { dealtTypes, rowDamage } from "../rules/typedDamage.ts";
@@ -87,6 +87,11 @@ export function actorRest(tx: Tx, op: OpOf<"actor.rest">): void {
     let next = character;
     const resources = restedResources(character.resources, op.kind);
     if (resources !== character.resources) next = { ...next, resources };
+    // Spell slots and Hit Point Dice come back by the rest's kind, and from change format 68 every rest moves the use stamp,
+    // even one that gives nothing back, so a re-sync's Undo from before it is refused (docs/design/design-v1-slots.md 5).
+    const spent = restedSpent(character.spent, op.kind);
+    if (spent !== character.spent) next = withSpent(next, spent);
+    if (usesStamped(tx.env.opVersion)) next = stamped(next);
     // A Long Rest records when it ended by the room's clock and which clock read it (docs/design/design-v1-calendar.md 4.5),
     // whoever rests the character. It never moves the clock: two players resting would move it twice.
     const clock = tx.state.clock;

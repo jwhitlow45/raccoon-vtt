@@ -1,4 +1,4 @@
-import type { Actor, ClassResource, Effect } from "../model.ts";
+import type { Actor, ClassResource, Effect, Spent } from "../model.ts";
 import { effectEvent, hpLabel, withNewPool, type ActorEvent, type HpResult } from "./hp.ts";
 
 /**
@@ -22,9 +22,13 @@ import { effectEvent, hpLabel, withNewPool, type ActorEvent, type HpResult } fro
  *   and one of a "short, one" resource. A Long Rest brings back every mark
  *   and every resource, and clears the damage types taken.
  *
- * What the app does not track is left to the sheet: spent Hit Point Dice
- * and a reduced HP maximum, which the app keeps no separate normal value
- * for.
+ * - Spell slots and Hit Point Dice (docs/design/design-v1-slots.md 3.4): a
+ *   Short Rest brings back every Pact Magic slot, a Long Rest every spell
+ *   slot, Pact Magic slot and Hit Point Die ("You regain all lost Hit Points
+ *   and all spent Hit Point Dice").
+ *
+ * What the app does not track is left to the sheet: a reduced HP maximum,
+ * which the app keeps no separate normal value for.
  */
 
 export type RestKind = "short" | "long";
@@ -97,4 +101,17 @@ export function restedResources(resources: readonly ClassResource[] | undefined,
     return { ...r, used };
   });
   return changed ? next : (resources as ClassResource[]);
+}
+
+/**
+ * A character's spent counts after a rest (docs/design/design-v1-slots.md 5):
+ * a Long Rest gives every one back, a Short Rest the Pact Magic slots. The
+ * very same value when nothing comes back.
+ */
+export function restedSpent(spent: Spent | undefined, kind: RestKind): Spent | undefined {
+  if (!spent) return undefined;
+  if (kind === "long") return undefined;
+  if (spent.pact === undefined) return spent;
+  const { pact: _pact, ...rest } = spent;
+  return Object.keys(rest).length > 0 ? rest : undefined;
 }
