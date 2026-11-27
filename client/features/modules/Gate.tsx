@@ -2,10 +2,11 @@ import { Children, cloneElement, isValidElement, useEffect, useMemo, type ReactE
 import { Button } from "../../components/Button.tsx";
 import { readKnownRooms } from "../../lib/knownRooms.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomScope } from "../../state/scope.ts";
-import { INITIAL_LOCAL } from "../../state/types.ts";
-import { useRoomStore, useRoomUi, useRoomYouIfAny } from "../../state/view.ts";
+import { useRoomScope, type RoomScope } from "../../state/scope.ts";
+import { INITIAL_LOCAL, type LocalUi } from "../../state/types.ts";
+import { useRoomStore, useRoomUi, useRoomYouIfAny, type RoomUi } from "../../state/view.ts";
 import { BUILD_MODES, builderSlot, pickBuildMode } from "../builder/store.ts";
+import { groupSaveSlot } from "../dice/groupSave/store.ts";
 import { usePreview } from "../dm/previewContext.ts";
 import { claimShown, EVERYTHING, hiddenAt, hiddenModules, moduleShown, showLabel, toolShown } from "./gate.ts";
 import type { Holder, Home, ModuleId, Role } from "./registry.ts";
@@ -105,17 +106,51 @@ export function HiddenHere(props: { home: Home; holder?: Holder }): ReactNode {
 /** The side panel's default tab, where a hidden part's tab closes to. */
 const DEFAULT_TAB = INITIAL_LOCAL.tab;
 
+/** What ending a hidden part's work reads and changes: the room's local state and its setters, and the Room page's scope. */
+export type HiddenGuardRoom = {
+  local(): LocalUi;
+  ui: Pick<RoomUi, "setTool" | "openPanel" | "splitPanels" | "closePanel">;
+  scope: RoomScope;
+};
+
 /**
- * Room's part when a part hides, here or from another window
- * (design section 5, Effect, and 8, D-261127-130, 302, 393): an active tool
- * of a hidden part goes back to Select, where the canvas's activation
- * effect then cancels its gesture and runs its `deactivate`, the builder
- * leaves Add a wing, an Areas group save moves to Dice whole, and an open
- * panel of a hidden part closes, a tab to the default tab and a phone's
- * sheet for good. It runs when the hidden parts change, never on every
- * render, so a link that opened a hidden panel once (D-261127-129) keeps
- * it until the viewer leaves it. Stored tab rows, splits, views and keys
- * stay as they are.
+ * Ends what a hidden part was doing on this page (design section 5, Effect,
+ * and 8, D-261127-130, 302, 393): an active tool of a hidden part goes back
+ * to Select, where the canvas's activation effect then cancels its gesture
+ * and runs its `deactivate`, the builder leaves Add a wing for its first
+ * mode, an Areas group save moves to Dice whole, and an open panel of a
+ * hidden part closes, a tab to the default tab and a phone's sheet for
+ * good. Stored tab rows, splits, views and keys stay as they are.
+ */
+export function endHidden(room: HiddenGuardRoom, role: Role, choices: FeatureChoices, wide: boolean): void {
+  const { ui, scope } = room;
+  const start = room.local();
+  if (!toolShown(start.tool, role, choices, start.toolBorrowed === true)) ui.setTool("select");
+  if (!moduleShown("dungeon", role, choices) && scope.get(builderSlot).store.getState().mode === "wing") pickBuildMode(scope, BUILD_MODES[0]!.value, choices);
+  const shown = (id: string) => claimShown("panel", id, role, choices);
+  // Closing an open group save would lose a game-affecting page, so it moves to Dice where Areas stood, with its page, requests, answers and draft.
+  const save = scope.get(groupSaveSlot);
+  if (!shown("areas") && save.getState().shownIn === "areas") {
+    save.setState({ shownIn: "dice" });
+    const at = room.local();
+    if (wide ? at.tab === "areas" : at.panel === "areas") ui.openPanel("dice", wide ? { pane: "top" } : undefined);
+    else if (wide && at.below === "areas") ui.openPanel("dice", { pane: "below" });
+  }
+  if (wide) {
+    if (!shown(room.local().tab)) ui.openPanel(DEFAULT_TAB, { pane: "top" });
+    const below = room.local().below;
+    if (below !== null && !shown(below)) ui.splitPanels(false);
+  } else {
+    const panel = room.local().panel;
+    if (panel !== null && !shown(panel)) ui.closePanel();
+  }
+}
+
+/**
+ * Room's part when a part hides, here or from another window (endHidden).
+ * It runs when the hidden parts change, never on every render, so a link
+ * that opened a hidden panel once (D-261127-129) keeps it until the viewer
+ * leaves it.
  */
 export function useHiddenGuard(wide: boolean): void {
   const { role, choices } = useFeaturesHere();
@@ -126,22 +161,7 @@ export function useHiddenGuard(wide: boolean): void {
   const key = hidden ? [...hidden].join(" ") : "";
   useEffect(() => {
     if (role === null || key === "") return;
-    const local = store.getState().local;
-    if (!toolShown(local.tool, role, choices, local.toolBorrowed === true)) ui.setTool("select");
-    if (!moduleShown("dungeon", role, choices)) {
-      const builder = scope.get(builderSlot).store;
-      if (builder.getState().mode === "wing") pickBuildMode(scope, BUILD_MODES[0]!.value);
-    }
-    const shown = (id: string) => claimShown("panel", id, role, choices);
-    const now = () => store.getState().local;
-    if (wide) {
-      if (!shown(now().tab)) ui.openPanel(DEFAULT_TAB, { pane: "top" });
-      const below = now().below;
-      if (below !== null && !shown(below)) ui.splitPanels(false);
-    } else {
-      const panel = now().panel;
-      if (panel !== null && !shown(panel)) ui.closePanel();
-    }
-    // Every input is read through `key`, the hidden parts, and `wide`, so a new choices object with the same parts hidden changes nothing.
+    endHidden({ local: () => store.getState().local, ui, scope }, role, choices, wide);
+    // `key` stands for `choices`: a new choices object with the same parts hidden changes nothing.
   }, [key, wide, role, store, ui, scope]);
 }

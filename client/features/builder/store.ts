@@ -3,6 +3,8 @@ import type { CellRect, FloorLink, TerrainId } from "#shared/model.ts";
 import type { IconName } from "../../components/Icon.tsx";
 import { LINK_MODE } from "../floors/linkWords.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
+import { claimShown } from "../modules/gate.ts";
+import type { FeatureChoices } from "../modules/store.ts";
 import type { BrushSize, Point } from "./cells.ts";
 import type { WingGhost } from "./wingGhost.ts";
 import type { WingJoin, WingTap } from "./wingPick.ts";
@@ -116,8 +118,12 @@ export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: s
   { value: "link", label: LINK_MODE, short: LINK_MODE, icon: "stairwell" },
 ];
 
-/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line, a wing's area and join with its pane, and the note. A selected stamp stays selected. */
-export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
+/**
+ * A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line, a wing's area and join with its pane, and the note. A selected stamp stays selected.
+ * Add a wing is the Dungeon generator's, so it is refused while that part is hidden on this device, whoever asks (docs/design/design-v1-features.md 8, D-261127-395). The builder is the DM's alone.
+ */
+export function pickBuildMode(scope: RoomScope, mode: BuildMode, choices?: FeatureChoices): void {
+  if (!claimShown("builderMode", mode, "dm", choices)) return;
   scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, linkDraft: null, ...NO_WING });
 }
 

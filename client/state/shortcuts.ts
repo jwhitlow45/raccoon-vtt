@@ -32,6 +32,8 @@ import { fightAhead, type RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./view.ts";
 import { labelsOf } from "./labels.ts";
+import { claimShown } from "../features/modules/gate.ts";
+import type { FeatureChoices } from "../features/modules/store.ts";
 
 /**
  * The room's keyboard shortcuts (features 13, docs/design/design-v1-dm-tools.md
@@ -792,9 +794,21 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
 ];
 
-/** The shortcuts a role has, for the sheet. */
-export function shortcutsFor(role: "dm" | "player"): Shortcut[] {
-  return SHORTCUTS.filter((s) => s.roles.includes(role));
+/**
+ * The shortcuts a role has, for the sheet and the search. A part hidden on
+ * this device takes its rows off (docs/design/design-v1-features.md 7), and
+ * its keys do nothing (shortcutFor) while staying reserved (keyBindings.ts).
+ */
+export function shortcutsFor(role: "dm" | "player", choices?: FeatureChoices): Shortcut[] {
+  return SHORTCUTS.filter((s) => s.roles.includes(role) && claimShown("shortcut", s.id, role, choices));
+}
+
+/** Whether a part hidden on this device takes any of the role's rows off the sheet, which the Keys section then says. */
+export function rowsLeftOut(role: "dm" | "player", choices?: FeatureChoices): boolean {
+  return (
+    SHORTCUTS.some((s) => s.roles.includes(role) && !claimShown("shortcut", s.id, role, choices)) ||
+    BEHAVIORS.some((b) => b.roles.includes(role) && (!claimShown("behavior", b.id, role, choices) || (b.surface !== undefined && !claimShown("surface", b.surface, role, choices))))
+  );
 }
 
 /**
@@ -1586,14 +1600,15 @@ function sheetRow(b: Behavior): SheetRow {
  * has, Android's Back button on Android, then each surface's keys. A section with no row for the role
  * and the device is left out. Each key is the one in effect on this device.
  */
-export function sheetSections(role: "dm" | "player", device: SheetDevice, keys: KeyMap = shortcutKeys()): SheetSection[] {
-  const mine = BEHAVIORS.filter((b) => b.roles.includes(role));
+export function sheetSections(role: "dm" | "player", device: SheetDevice, keys: KeyMap = shortcutKeys(), choices?: FeatureChoices): SheetSection[] {
+  // A part hidden on this device takes its rows and its surfaces' sections off (docs/design/design-v1-features.md 7).
+  const mine = BEHAVIORS.filter((b) => b.roles.includes(role) && claimShown("behavior", b.id, role, choices) && (b.surface === undefined || claimShown("surface", b.surface, role, choices)));
   const room = mine.filter((b) => b.surface === undefined);
   const sections: SheetSection[] = [
     {
       title: "Keys",
       intro: KEYS_INTRO,
-      rows: [...shortcutsFor(role).map((s) => keyRow(s, roleKeys(role, keys))), ...room.filter((b) => b.device === "keys").map(sheetRow)],
+      rows: [...shortcutsFor(role, choices).map((s) => keyRow(s, roleKeys(role, keys))), ...room.filter((b) => b.device === "keys").map(sheetRow)],
     },
     { title: MOUSE_SECTION, rows: device.mouse ? room.filter((b) => b.device === "mouse").map(sheetRow) : [] },
     { title: POINTER_SECTION, intro: POINTER_INTRO, rows: room.filter((b) => b.device === "pointer").map(sheetRow) },
@@ -1640,7 +1655,7 @@ function isSelectBox(target: unknown): boolean {
  * A single key is found by the character it types first, and only then by
  * the Latin letter of its place (keyBindings.ts pressKeys).
  */
-export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates, keys: KeyMap = shortcutKeys()): Shortcut | null {
+export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates, keys: KeyMap = shortcutKeys(), choices?: FeatureChoices): Shortcut | null {
   if (e.defaultPrevented || e.repeat || gates.preview || gates.dialogOpen || e.altKey) return null;
   const typing = isTextField(e.target);
   const modifier = e.ctrlKey || e.metaKey;
@@ -1648,6 +1663,8 @@ export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates,
   const bound = (k: string) => mine.find((s) => s.key !== undefined && sameKey(keys[s.id] ?? s.key, k));
   const shortcut = (modifier ? undefined : pressKeys(e).map(bound).find((s) => s !== undefined)) ?? mine.find((s) => s.match?.(e, roleKeys(env.role, keys)) === true);
   if (!shortcut) return null;
+  // A hidden part's key keeps its row, so the press is that row's and does nothing, never another row's.
+  if (!claimShown("shortcut", shortcut.id, env.role, choices)) return null;
   if (typing && !takenInField(shortcut, e, gates.apple === true)) return null;
   if (shortcut.navigation && ownsNavigationKeys(e.target)) return null;
   return !shortcut.when || shortcut.when(env) ? shortcut : null;

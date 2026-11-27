@@ -12,6 +12,7 @@ import { BLANK_KINDS, placementSlot, setPending } from "./tokens/placement.ts";
 import { pickZone, trapSlot, ZONE_KINDS, zoneKinds } from "./traps/store.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { labelsOf } from "../state/labels.ts";
+import { claimShown } from "./modules/gate.ts";
 
 /**
  * Each tool's main choice, which a second press of the tool's key moves
@@ -152,7 +153,9 @@ export const builderCycle: ToolCycle = {
     // Between floors needs a floor next to this one, as the builder's row offers it (builder/Options.tsx).
     const view = env.getState().view;
     const linked = view && linkTargets(view, env.getState().sceneId).length > 0 ? BUILD_SAID : BUILD_SAID.filter((o) => o.value !== "link");
-    const options = wingOff(scene) === null ? linked : linked.map((o) => (o.value === "wing" ? { ...o, disabled: true } : o));
+    // Add a wing leaves the press's choices while the Dungeon generator is hidden on this device (D-261127-395).
+    const offered = linked.filter((o) => claimShown("builderMode", o.value, env.role));
+    const options = wingOff(scene) === null ? offered : offered.map((o) => (o.value === "wing" ? { ...o, disabled: true } : o));
     return { options, value: st.mode, ...(held ? { held } : {}) };
   },
   pick(env, value) {

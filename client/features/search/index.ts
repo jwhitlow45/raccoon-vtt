@@ -20,6 +20,8 @@ import { indexed, MAX_ROWS, parseQuery, rank, type Indexed } from "./match.ts";
 import { recentEntries } from "./recent.ts";
 import { ROW_WORDS, TOKEN_KIND_WORD } from "./words.ts";
 import { labelsOf } from "../../state/labels.ts";
+import { claimShown, searchKey } from "../modules/gate.ts";
+import type { FeatureChoices } from "../modules/store.ts";
 
 /**
  * The room search's index for one viewer (docs/design/design-v1-qol.md 5, What keeps it current),
@@ -98,6 +100,8 @@ export type IndexInput = {
    * from a server or a backup that had them, are offered only then.
    */
   soundFiles: boolean;
+  /** This page's parts choices (features/modules/gate.ts): EVERYTHING in a preview. Left out, this device's. */
+  choices?: FeatureChoices;
 };
 
 export type SearchIndex = {
@@ -152,9 +156,16 @@ class Builder {
   readonly byId = new Map<string, Indexed>();
   readonly suggested: { at: number; n: number; entry: SearchEntry }[] = [];
 
+  /** Whether an entry's id stays in the index: a part hidden on this device takes its entries out (docs/design/design-v1-features.md 6, Search). */
+  readonly shown: (id: string) => boolean;
+
+  constructor(shown: (id: string) => boolean = () => true) {
+    this.shown = shown;
+  }
+
   /** Adds an entry. A second with the same id is dropped: ids are unique in an index (entry.ts), and the first source wins. */
   add(item: Indexed, suggest?: number): void {
-    if (this.byId.has(item.entry.id)) return;
+    if (this.byId.has(item.entry.id) || !this.shown(item.entry.id)) return;
     this.byId.set(item.entry.id, item);
     this.items.push(item);
     if (suggest !== undefined) this.suggested.push({ at: suggest, n: this.suggested.length, entry: item.entry });
@@ -210,10 +221,12 @@ export function buildIndex(input: IndexInput): SearchIndex {
   const role = searchRole(state);
   const memberId = state.you?.memberId ?? null;
   const ctx: SearchContext = { role, memberId, state, wide: input.wide, ...(input.dmMenu ? { dmMenu: input.dmMenu } : null) };
-  const b = new Builder();
+  // Floors' claims hold on a scene in view with one floor (features/modules/registry.ts), so a floored scene keeps its Floors rows.
+  const oneFloor = state.view !== null && state.sceneId !== null && floorsOf(state.view, state.sceneId).length <= 1;
+  const b = new Builder((id) => claimShown("search", searchKey(id), role, input.choices, { oneFloor }));
 
   const panelWords = mergedPanelWords(input.catalogs);
-  for (const p of panelsFor(role, input.wide, input.panelOptions)) {
+  for (const p of panelsFor(role, input.wide, { ...input.panelOptions, ...(input.choices ? { choices: input.choices } : null) })) {
     const words = panelWords.get(p.id);
     const entry: SearchEntry = {
       id: `panel:${p.id}`,
@@ -229,7 +242,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     b.add(words ? indexed(entry) : keptIndexed(p, () => entry), suggest);
   }
 
-  for (const s of shortcutsFor(role)) {
+  for (const s of shortcutsFor(role, input.choices)) {
     // The arrows and Page keys need a direction and a selection the search cannot give.
     if (s.navigation || !input.keys.applies(s)) continue;
     const title = keyTitle(s, role);
