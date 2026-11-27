@@ -1,10 +1,13 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isAssetImage, keepModel } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import type { Initials } from "../../lib/tokenView.ts";
 import { useRoomView } from "../../state/view.ts";
+import { ModelSheet } from "../models/ModelSheet.tsx";
+import { ConfirmButton } from "../tokens/ui.tsx";
 import { DEFAULT_CROP, type Crop } from "./crop.ts";
 import { CreditLine } from "./CreditLine.tsx";
 import { CropEditor } from "./CropEditor.tsx";
@@ -50,13 +53,35 @@ export function ImageField(props: {
    * elsewhere, where the pair shares a line if the width holds it.
    */
   extra?: { beside?: ReactNode; below?: ReactNode };
+  /**
+   * Several wearers at once, the group edit sheet's: every change is worked
+   * out from each one's own image (`onEach`), so each keeps its own picture
+   * and 3D model where the change keeps them, and `onChange` is not called
+   * (docs/design/design-v1-token-models.md 3.4).
+   */
+  group?: { images: readonly (ImageRef | undefined)[]; onEach(change: (current: ImageRef | undefined) => ImageRef | null): void };
 }) {
-  const [step, setStep] = useState<{ kind: "pick" } | { kind: "crop"; assetId: string; initial: Crop } | null>(null);
+  const [step, setStep] = useState<{ kind: "pick" } | { kind: "crop"; assetId: string; initial: Crop } | { kind: "model" } | null>(null);
   // A shipped icon has no crop (docs/design/design-v1-dm-tools.md 3.12).
   const value = props.value && isAssetImage(props.value) ? props.value : undefined;
   const set = props.value !== undefined;
   const roomId = useRoomView((s) => s.roomId);
   const row = useAssetRow(roomId, value?.assetId);
+  const modelButton = useRef<HTMLButtonElement>(null);
+  const removeHelp = useId();
+  // The latest image, for a model sheet that saves after another member changed it.
+  const latest = useRef(props.value);
+  latest.current = props.value;
+  const { group, onChange } = props;
+  /** A change worked out from the image it replaces: one wearer's here, or each one's in a group. */
+  const each = (change: (current: ImageRef | undefined) => ImageRef | null) => {
+    if (group) group.onEach(change);
+    else onChange(change(latest.current));
+  };
+  /** A new picture, crop or icon keeps the 3D model the old one carried (keepModel). */
+  const picked = (next: ImageRef) => each((current) => keepModel(next, current));
+  const wearers = useMemo(() => group?.images ?? [props.value], [group?.images, props.value]);
+  const hasModel = props.value?.model !== undefined;
 
   const change = (
     // Words alone, so the pair still fits beside the picture in the side panel and on a 390 px phone (docs/design/design-v1-icons.md 4.1).
@@ -71,13 +96,22 @@ export function ImageField(props: {
           Crop
         </Button>
       ) : null}
-      {set ? (
-        <Button size="sm" variant="danger" icon="delete" onClick={() => props.onChange(null)}>
+      <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
+        3D model
+      </Button>
+      {set && hasModel ? (
+        // The model goes with its picture and cannot be rebuilt from the room, so this asks twice (D-261127-388).
+        <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => each(() => null)}>
+          Remove
+        </ConfirmButton>
+      ) : set ? (
+        <Button size="sm" variant="danger" icon="delete" onClick={() => each(() => null)}>
           Remove
         </Button>
       ) : null}
     </>
   );
+  const removeLine = set && hasModel && props.canEdit ? <Help id={removeHelp}>Removes the picture and its 3D model.</Help> : null;
   const buttons = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
   const width = props.previewSize ?? 64;
   const preview = <ImagePreview image={props.value} shape={props.shape} aspect={props.aspect} width={width} ring={props.ring} initials={props.initials} />;
@@ -109,13 +143,17 @@ export function ImageField(props: {
               {change}
               {props.extra.beside}
             </div>
-            {value || set ? <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{fix}</div> : null}
+            <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{fix}</div>
+            {removeLine ? <div style={{ width: 0, minWidth: "100%" }}>{removeLine}</div> : null}
             {props.extra.below ? <div style={{ width: 0, minWidth: "100%" }}>{props.extra.below}</div> : null}
           </div>
         ) : props.canEdit ? (
-          <div style={buttons}>
-            {change}
-            {fix}
+          <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+            <div style={buttons}>
+              {change}
+              {fix}
+            </div>
+            {removeLine}
           </div>
         ) : null}
         {step?.kind === "pick" ? (
@@ -124,7 +162,7 @@ export function ImageField(props: {
             onClose={() => setStep(null)}
             onPick={(image) => setStep({ kind: "crop", assetId: image.id, initial: DEFAULT_CROP })}
             onPickIcon={(icon) => {
-              props.onChange(keepModel(icon, props.value));
+              picked(icon);
               setStep(null);
             }}
           />
@@ -137,11 +175,12 @@ export function ImageField(props: {
             aspect={props.aspect}
             onCancel={() => setStep(null)}
             onSave={(crop) => {
-              props.onChange(keepModel({ assetId: step.assetId, crop }, props.value));
+              picked({ assetId: step.assetId, crop });
               setStep(null);
             }}
           />
         ) : null}
+        {step?.kind === "model" ? <ModelSheet wearers={wearers} onCommit={each} onClose={() => setStep(null)} opener={modelButton} ring={props.ring} /> : null}
       </div>
       {value && row?.credit ? <CreditLine credit={row.credit} stored={row} crop={{ crop: value.crop, aspect: props.aspect }} /> : null}
     </div>

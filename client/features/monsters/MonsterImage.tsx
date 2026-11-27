@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { ImageRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -13,6 +13,8 @@ import { CropEditor } from "../images/CropEditor.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
 import { iconCredit } from "../images/icons.ts";
+import { ModelSheet } from "../models/ModelSheet.tsx";
+import { ConfirmButton } from "../tokens/ui.tsx";
 import { applyOps, optInCount, optInLabel, planApply, sameImage, type MonsterRef } from "./images.ts";
 import { isAssetImage, keepModel } from "#shared/imageRef.ts";
 
@@ -24,7 +26,7 @@ import { isAssetImage, keepModel } from "#shared/imageRef.ts";
  * rest of the block.
  */
 
-type Step = { kind: "pick" } | { kind: "crop"; assetId: string; initial: Crop };
+type Step = { kind: "pick" } | { kind: "crop"; assetId: string; initial: Crop } | { kind: "model" };
 
 /**
  * The image's preview with Set, Crop and Remove. Picking runs the image
@@ -54,6 +56,12 @@ export function MonsterImageField(props: {
     setStepState(next);
     props.onOpen?.(next !== null);
   };
+  const modelButton = useRef<HTMLButtonElement>(null);
+  const removeHelp = useId();
+  // The model goes with the picture and cannot be rebuilt from the room, so taking both off asks twice (D-261127-388).
+  const twoTaps = set && props.value?.model !== undefined;
+  // The image the monster shows now, the shipped icon included, which a 3D model added here turns into the room's own.
+  const wearers = useMemo(() => [shown], [shown]);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
@@ -67,7 +75,14 @@ export function MonsterImageField(props: {
             Crop
           </Button>
         ) : null}
-        {set && props.fallback ? (
+        <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
+          3D model
+        </Button>
+        {twoTaps ? (
+          <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => props.onChange(null)}>
+            {props.fallback ? "Use the default icon" : "Remove image"}
+          </ConfirmButton>
+        ) : set && props.fallback ? (
           <Button size="sm" onClick={() => props.onChange(null)}>
             Use the default icon
           </Button>
@@ -75,6 +90,11 @@ export function MonsterImageField(props: {
           <Button variant="danger" size="sm" onClick={() => props.onChange(null)}>
             Remove image
           </Button>
+        ) : null}
+        {twoTaps ? (
+          <Help id={removeHelp} style={{ flexBasis: "100%" }}>
+            Removes the picture and its 3D model.
+          </Help>
         ) : null}
       </div>
       {step?.kind === "pick" ? (
@@ -100,6 +120,9 @@ export function MonsterImageField(props: {
             setStep(null);
           }}
         />
+      ) : null}
+      {step?.kind === "model" ? (
+        <ModelSheet wearers={wearers} onCommit={(change) => props.onChange(change(shown))} onClose={() => setStep(null)} opener={modelButton} ring={theme.color.hostile} />
       ) : null}
     </div>
   );
