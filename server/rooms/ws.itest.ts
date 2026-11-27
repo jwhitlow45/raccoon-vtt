@@ -310,15 +310,6 @@ describe("websocket: reconnects and watermarks", () => {
     }
   }
 
-  /** Until the real clock is just short of a batch boundary, so an op sent now lands in a batch about to close. */
-  async function beforeBoundary(batchMs = 400): Promise<void> {
-    for (;;) {
-      const into = Date.now() % batchMs;
-      if (into >= batchMs - 4 && into <= batchMs - 2) return;
-      await new Promise((r) => setImmediate(r));
-    }
-  }
-
   test("the handled probe fails at its deadline when its op never comes, and gives the room its own op back", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Never sent");
@@ -351,7 +342,6 @@ describe("websocket: reconnects and watermarks", () => {
       }
     };
     const staged = handled(roomId, 1);
-    await beforeBoundary();
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
     await t.manager.unload(roomId, 4010, false);
@@ -392,8 +382,6 @@ describe("websocket: reconnects and watermarks", () => {
     await s.snapshot("c1");
     // The refusal is staged but the batch never commits: the room dies first.
     const staged = handled(roomId, 1);
-    // Sent just short of a batch boundary of the real clock, the closest the batch's close can come to the unload.
-    await beforeBoundary();
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
     // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
@@ -421,8 +409,6 @@ describe("websocket: reconnects and watermarks", () => {
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
     const staged = handled(roomId, 1);
-    // Sent just short of a batch boundary of the real clock, the closest the batch's close can come to the unload.
-    await beforeBoundary();
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
     // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
