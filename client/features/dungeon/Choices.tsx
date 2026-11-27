@@ -1,11 +1,15 @@
 import { useId, type ReactNode } from "react";
+import type { PartyGroup } from "#shared/model.ts";
 import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
+import { DIFFICULTIES, type Difficulty } from "#shared/srd/xp-budget.ts";
+import { DIFFICULTY_LABEL, partyBudgets } from "../encounters/budget.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Held } from "../../components/Held.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { copyText } from "../../lib/clipboard.ts";
 import { theme } from "../../lib/theme.ts";
 import { NumberInput } from "../scenes/controls.tsx";
@@ -24,6 +28,9 @@ import {
   LIT_PRESETS,
   LIT_STEP,
   MIN_ROOMS,
+  MONSTER_PRESETS,
+  MONSTERS_MAX,
+  MONSTERS_STEP,
   roomCap,
   SECRET_PRESETS,
   SECRETS_MAX,
@@ -32,10 +39,12 @@ import {
   TRAPS_MAX,
   type DungeonSettings,
   type GridKind,
+  type StockChoices,
 } from "./settings.ts";
 import {
   DEAD_ENDS_HELP,
   DENSITY_HELP,
+  difficultyHelp,
   DRESSING_HELP,
   HEIGHTS_HELP,
   heightsWords,
@@ -45,6 +54,11 @@ import {
   LIT_HELP,
   litWords,
   LOOPS_HELP,
+  MONSTERS_HELD,
+  MONSTERS_HELP,
+  MONSTERS_THEME,
+  monstersWords,
+  overLimitLine,
   PARTY_LEVEL_HELP,
   roomsHint,
   SECRETS_CAVE,
@@ -52,6 +66,7 @@ import {
   secretsWords,
   SEED_BAD,
   SEED_HELP,
+  SEED_HELP_STOCKED,
   SEED_OTHER_VERSION,
   THEME_HELP,
   TRAPS_HELP,
@@ -75,6 +90,26 @@ const HEIGHT_MARKS: readonly Preset[] = Object.entries(HEIGHT_PRESETS).map(([lab
 const TRAP_MARKS: readonly Preset[] = Object.entries(TRAP_PRESETS).map(([label, value]) => ({ label, value }));
 const SECRET_MARKS: readonly Preset[] = Object.entries(SECRET_PRESETS).map(([label, value]) => ({ label, value }));
 const LIT_MARKS: readonly Preset[] = Object.entries(LIT_PRESETS).map(([label, value]) => ({ label, value }));
+const MONSTER_MARKS: readonly Preset[] = Object.entries(MONSTER_PRESETS).map(([label, value]) => ({ label, value }));
+
+/**
+ * The Monsters rows (docs/design/design-v1-dungeon-stock.md 1): the
+ * choices, which sit beside the settings, the party they budget for, and
+ * whether Monsters is held at None for a party with no level. `party` is
+ * the party editor, and `below` what stands under the rows: the list's
+ * load failing, and the creature limit.
+ */
+export type StockRow = {
+  value: StockChoices;
+  onChange(next: StockChoices): void;
+  held: boolean;
+  groups: readonly PartyGroup[];
+  party: ReactNode;
+  below?: ReactNode;
+};
+
+/** The Party level row while it follows the party (D-261127-219, 229): held, with where its band came from. */
+export type BandRow = { held: boolean; lines: readonly string[] };
 
 /** The seed row: the text as typed, and what stands under it while edits stand (the edits line). */
 export type SeedRow = { text: string; onChange(text: string): void; below?: ReactNode };
@@ -97,6 +132,10 @@ export type ChoicesProps = {
   flat?: boolean;
   /** The seed row, last. Left out, there is none. */
   seed?: SeedRow;
+  /** The Monsters rows, after Dressing. Left out, there are none. */
+  stock?: StockRow;
+  /** The Party level row's hold while it follows the party. */
+  band?: BandRow;
 };
 
 /** The most rooms the rows offer: the size's cap, and on hexes at most MAX_HEX_ROOMS (2.5). */
@@ -195,13 +234,18 @@ export function Choices(props: ChoicesProps) {
           onChange={(traps) => set({ traps })}
         />
         {value.traps === 0 ? null : (
-          <Choice<LevelBand>
-            name="Party level"
-            value={value.band}
-            onChange={(band) => set({ band })}
-            options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
-            help={PARTY_LEVEL_HELP}
-          />
+          // While Monsters is on, the band is the party's, so the traps and the fights are for one party (D-261127-217).
+          <Held held={props.band?.held === true} style={{ display: "grid", minWidth: 0 }}>
+            <Choice<LevelBand>
+              name="Party level"
+              value={value.band}
+              onChange={(band) => set({ band })}
+              options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
+              help={PARTY_LEVEL_HELP}
+            >
+              {props.band?.held ? props.band.lines.map((line) => <Help key={line}>{line}</Help>) : null}
+            </Choice>
+          </Held>
         )}
         {/* Caves have no doors. The DM's own pick stays in the choices and comes back with the next theme. */}
         <Held held={cave} style={{ display: "grid", minWidth: 0 }}>
@@ -236,14 +280,81 @@ export function Choices(props: ChoicesProps) {
           options={DRESSINGS.map((v) => ({ value: v, label: CHOICE_NAMES.dressing[v] }))}
           help={DRESSING_HELP}
         />
+        {props.stock ? <StockRows row={props.stock} theme={value.theme} rooms={rooms} /> : null}
         <Switch label="DM key" help={keyHeld ? KEY_FULL : KEY_HELP} checked={value.key && !keyHeld} disabled={keyHeld} onChange={(key) => set({ key })} />
       </Held>
-      {props.seed ? <SeedField row={props.seed} disabled={props.held} /> : null}
+      {props.seed ? <SeedField row={props.seed} disabled={props.held} stocked={props.stock !== undefined && !props.stock.held && props.stock.value.monsters > 0} /> : null}
     </div>
   );
 }
 
 export default Choices;
+
+/**
+ * The creature limit's line (D-261127-280). Its polite live region always
+ * stands, out of the layout, so a screen reader hears the count as edits
+ * move it without an alert's interruption, and the line shows only past
+ * the limit, so within it the rows keep their spacing.
+ */
+export function LimitLine(props: { over: number }) {
+  const line = props.over > 0 ? overLimitLine(props.over) : "";
+  return (
+    <>
+      <span aria-live="polite" style={VISUALLY_HIDDEN}>
+        {line}
+      </span>
+      {line ? (
+        <p aria-hidden data-stock-limit="" style={{ margin: 0, color: theme.color.dangerText, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>
+          {line}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Monsters, its help and the theme's line, then Difficulty with the live
+ * budget and the party. Held at None while the party has no level, the
+ * DM's pick kept, with the party below to give it one.
+ */
+function StockRows(props: { row: StockRow; theme: DungeonSettings["theme"]; rooms: number }) {
+  const { row } = props;
+  const share = row.held ? 0 : row.value.monsters;
+  const setStock = (patch: Partial<StockChoices>) => row.onChange({ ...row.value, ...patch });
+  const budgets = partyBudgets(row.groups);
+  return (
+    <div data-choice="monsters" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
+      <Held held={row.held} style={{ display: "grid", minWidth: 0 }}>
+        <PresetSlider
+          name="Monsters"
+          value={share}
+          min={0}
+          max={MONSTERS_MAX}
+          step={MONSTERS_STEP}
+          presets={MONSTER_MARKS}
+          words={monstersWords(share, props.rooms)}
+          help={row.held ? MONSTERS_HELD : share === 0 ? undefined : `${MONSTERS_HELP} ${MONSTERS_THEME[props.theme]}`}
+          onChange={(monsters) => setStock({ monsters })}
+        />
+      </Held>
+      {share > 0 ? (
+        <Choice<Difficulty>
+          name="Difficulty"
+          value={row.value.difficulty}
+          onChange={(difficulty) => setStock({ difficulty })}
+          options={DIFFICULTIES.map((d) => ({ value: d, label: DIFFICULTY_LABEL[d] }))}
+          help={difficultyHelp(row.value.difficulty, budgets[row.value.difficulty], row.groups)}
+        />
+      ) : null}
+      {share > 0 || row.held ? (
+        <Named name="Party">
+          {() => <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 }}>{row.party}</div>}
+        </Named>
+      ) : null}
+      {row.below}
+    </div>
+  );
+}
 
 const NAME_STYLE = { fontSize: theme.font.body14, fontWeight: theme.weight.strong } as const;
 
@@ -284,13 +395,13 @@ export function Choice<T extends string>(props: {
 }
 
 /** The seed's field. Copy seed copies the seed as read, in its usual form, whatever spacing or case was typed. */
-function SeedField(props: { row: SeedRow; disabled: boolean }) {
+function SeedField(props: { row: SeedRow; disabled: boolean; stocked: boolean }) {
   const id = useId();
   const hintId = useId();
   const parsed = parseSeed(props.row.text);
   const seed: Seed | null = parsed.ok ? parsed.seed : null;
   const error = parsed.ok ? null : SEED_BAD;
-  const note = parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : SEED_HELP;
+  const note = parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : props.stocked ? SEED_HELP_STOCKED : SEED_HELP;
   const copy = () => {
     if (seed !== null) void copyText(formatSeed(seed));
   };

@@ -79,3 +79,66 @@ test("a row change patches only what it changed, so a Rooms past the cap stays t
   assert.deepEqual(changed(before, { ...before, density: "dense" }), { density: "dense" });
   assert.deepEqual(changed(before, { ...before, rooms: 5, w: 99 }), { rooms: 5 });
 });
+
+/*
+ * DSTOCK (docs/design/design-v1-dungeon-stock.md 1): the Monsters rows after
+ * Dressing and before DM key, held at None without a leveled party, and the
+ * Party level row held while it follows the party.
+ */
+const { MONSTERS_HELD, MONSTERS_HELP, MONSTERS_THEME, SEED_HELP, SEED_HELP_STOCKED } = await import("./words.ts");
+
+function stocked(stock: { monsters?: number; held?: boolean; band?: { held: boolean; lines: string[] }; theme?: DungeonSettings["theme"]; traps?: number } = {}): string {
+  return renderToStaticMarkup(
+    h(Choices, {
+      value: { ...DEFAULT_SETTINGS, theme: stock.theme ?? "dungeon", traps: stock.traps ?? 2 },
+      onChange: nothing,
+      held: false,
+      grid: "squares",
+      wing: false,
+      seed: { text: "9K7Q-H2MX-A9F3-TWQ5", onChange: nothing },
+      stock: { value: { monsters: stock.monsters ?? 50, difficulty: "moderate" }, onChange: nothing, held: stock.held ?? false, groups: [{ count: 4, level: 3 }], party: h("p", null, "PARTY-SLOT"), below: h("p", null, "BELOW-SLOT") },
+      ...(stock.band ? { band: stock.band } : {}),
+    }),
+  );
+}
+
+test("DSTOCK-C: above None the rows stand after Dressing and before DM key, with the help, the theme's line, the live budget and the party", () => {
+  const html = stocked();
+  const words = text(html);
+  assert.ok(words.indexOf("Dressing") < words.indexOf("Monsters") && words.indexOf("Monsters") < words.indexOf("DM key"));
+  assert.ok(words.includes(MONSTERS_HELP) && words.includes(MONSTERS_THEME.dungeon));
+  assert.match(words, /About 6 rooms of 12 get monsters/);
+  assert.ok(words.includes("Moderate: 900 XP a room for 4 characters at level 3."));
+  assert.ok(words.includes("PARTY-SLOT") && words.includes("BELOW-SLOT"));
+  assert.ok(words.includes(SEED_HELP_STOCKED), "the seed's promise names the party");
+  assert.ok(text(stocked({ theme: "sewer" })).includes(MONSTERS_THEME.sewer));
+});
+
+test("DSTOCK-C: at None the rows are Monsters alone, and the seed's promise is as it was", () => {
+  const words = text(stocked({ monsters: 0 }));
+  assert.match(words, /No monsters/);
+  assert.ok(!words.includes("Difficulty") && !words.includes("PARTY-SLOT") && !words.includes(MONSTERS_HELP));
+  assert.ok(words.includes(SEED_HELP) && !words.includes(SEED_HELP_STOCKED));
+});
+
+test("DSTOCK-C: with no leveled party Monsters is held at None with its line and the party under it, the DM's pick kept", () => {
+  const html = stocked({ held: true });
+  const words = text(html);
+  assert.ok(words.includes(MONSTERS_HELD));
+  assert.ok(words.includes("PARTY-SLOT"), "the party to give a level to");
+  assert.ok(!words.includes("Difficulty"));
+  const slider = html.match(/<input[^>]*aria-valuetext="No monsters"[^>]*>/)?.[0] ?? "";
+  assert.match(slider, /disabled=""/);
+  assert.ok(words.includes(SEED_HELP) && !words.includes(SEED_HELP_STOCKED));
+});
+
+test("DSTOCK-C: while the band follows the party, Party level is held with where it came from", () => {
+  const html = stocked({ band: { held: true, lines: ["Set from the party: levels 1 to 4.", "The party is now level 5. The band moves when you next change the party or Monsters."] } });
+  const words = text(html);
+  assert.ok(words.includes("Set from the party: levels 1 to 4.") && words.includes("The party is now level 5."));
+  const band = html.slice(html.indexOf("Party level"), html.indexOf("Set from the party"));
+  assert.match(band, /disabled=""/, "the band's choices are held");
+  const free = stocked({ band: { held: false, lines: ["Set from the party: levels 1 to 4."] } });
+  assert.ok(!text(free).includes("Set from the party"));
+  assert.doesNotMatch(free.slice(free.indexOf("Party level"), free.indexOf("Secret doors")), /disabled=""/);
+});
