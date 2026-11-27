@@ -12,7 +12,7 @@ import { uvttFile } from "../uvtt/encode.ts";
 import type { ExportCheck } from "../uvtt/steps.ts";
 import { uvttGeometry, type UvttHead } from "../uvtt/write.ts";
 import { fromServer, hasBuildOn, type ExportView } from "./content.ts";
-import { everyFloorScale, everyFloorZip, floorName, makingText, reachedText, sharedBounds, tooMuchText, useExportFloors, type FloorsChoice } from "./everyFloor.ts";
+import { everyFloorScale, everyFloorZip, floorName, floorsKey, makingText, reachedText, sharedBounds, tooMuchText, useExportFloors, type FloorsChoice } from "./everyFloor.ts";
 import { vttFileName, vttZipNames } from "./fileName.ts";
 import { MadeFile, Overtaken, Row, type Made } from "./made.tsx";
 import { floorPicture } from "./picture.ts";
@@ -70,11 +70,15 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   // Every floor shares one scale, lowered for all of them when the chosen one does not fit each (D-261127-352).
   const scale = everyFloor ? everyFloorScale(everyFloor.floors, size.requested, VTT_LIMITS) : size.pxPerCell;
   const fits = scale >= 1;
-  const floors = everyFloor ? everyFloor.floors : scene;
+  const floors = everyFloor ? everyFloor.floors : [scene];
+  // The floor list is rebuilt on every op, so the check below follows the floors' key and reads the latest list from a ref.
+  const floorsNow = useRef(floors);
+  floorsNow.current = floors;
+  const key = floorsKey(floors);
   // Whether a wall or door in the DM's build is short enough that the import may close it up (write.ts SHORT_LATTICE), for the loss line before a file is made.
   const short = useMemo(
-    () => (Array.isArray(floors) ? floors : [floors]).some((f) => uvttGeometry({ scene: f, chunks: sceneChunks(allChunks, f.id), rule: f.autoWalls ?? "all", lights: [], feetPerCell, pxPerCell: 1 }, "dm").counts.short),
-    [allChunks, feetPerCell, floors],
+    () => floorsNow.current.some((f) => uvttGeometry({ scene: f, chunks: sceneChunks(allChunks, f.id), rule: f.autoWalls ?? "all", lights: [], feetPerCell, pxPerCell: 1 }, "dm").counts.short),
+    [allChunks, feetPerCell, key],
   );
 
   const forget = () => {
@@ -109,7 +113,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
     const head: UvttHead =
       view === "player"
         ? uvttGeometry({ scene: floor, chunks: picture.content.chunks, rule: picture.rule, lights: [], feetPerCell, pxPerCell: floorSize.pxPerCell }, "player")
-        : uvttGeometry({ scene: floor, chunks: sceneChunks(room.buildChunks, floor.id), rule: floor.autoWalls ?? "all", lights: lightsOn(room.lights, floor.id), feetPerCell, pxPerCell: floorSize.pxPerCell }, "dm");
+        : uvttGeometry({ scene: floor, chunks: sceneChunks(room.buildChunks, floor.id), rule: floor.autoWalls ?? "all", lights: floorLights(room.lights, floor.id), feetPerCell, pxPerCell: floorSize.pxPerCell }, "dm");
     let check: ExportCheck | null;
     try {
       check = await checkImport(head, feetPerCell);
@@ -252,7 +256,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   );
 }
 
-/** The floor's lights, which the DM view writes when they are on (write.ts leaves the others out and counts them). */
-function lightsOn(lights: RoomState["lights"], sceneId: string): Light[] {
+/** Every light on the floor, on or off: write.ts writes those that are on and counts the rest. */
+function floorLights(lights: RoomState["lights"], sceneId: string): Light[] {
   return Object.values(lights).filter((l): l is Light => l !== undefined && l.sceneId === sceneId);
 }

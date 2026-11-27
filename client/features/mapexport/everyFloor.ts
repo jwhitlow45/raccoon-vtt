@@ -132,6 +132,16 @@ export async function everyFloorZip<T extends { blob: Blob }>(input: {
 }
 
 /**
+ * What a made file depends on beside the options: which floors it holds,
+ * their names, sizes and grids. The floor list is rebuilt on every change
+ * to the view, so this stands in for it wherever work should follow the
+ * floors and not each op.
+ */
+export function floorsKey(floors: readonly Pick<Scene, "id" | "name" | "floor" | "bounds" | "gridShape">[]): string {
+  return floors.map((f) => `${f.id}\u0000${floorName(f)}\u0000${f.bounds.w}x${f.bounds.h}\u0000${f.gridShape ?? ""}`).join("\u0001");
+}
+
+/**
  * The floors the export would hold, from the whole view, with whether any
  * of them has a map or a build to draw, for the Floors row and the button.
  * Null on a scene of one floor, which has no Floors row, and while the
@@ -144,8 +154,6 @@ export function useExportFloors(scene: Scene, version: ExportView, open: boolean
     const { floors, total } = exportedFloors(view, scene.id, version);
     if (total < 2) return null;
     const anything = floors.some((f) => f.map !== undefined || hasBuildOn(f.id, view.buildChunks, view.labels, view.stamps));
-    // What a made file depends on beside the options: which floors it holds, their names and their sizes.
-    const key = floors.map((f) => `${f.id}\u0000${floorName(f)}\u0000${f.bounds.w}x${f.bounds.h}\u0000${f.gridShape ?? ""}`).join("\u0001");
-    return { floors, total, anything, key };
+    return { floors, total, anything, key: floorsKey(floors) };
   }, [view, scene.id, scene.floor, version]);
 }

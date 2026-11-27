@@ -11,7 +11,7 @@ import { floorPicture, PLAYER_VIEW_FAILED } from "./picture.ts";
 import { ExportError } from "./render.ts";
 import { MAX_EXPORT_PIXELS } from "./size.ts";
 import { loweredText, lossLine, vttNotes, type FloorFile } from "./vttNotes.ts";
-import { everyFloorScale } from "./everyFloor.ts";
+import { everyFloorScale, floorsKey } from "./everyFloor.ts";
 import { VTT_LIMITS } from "./size.ts";
 
 /*
@@ -248,4 +248,12 @@ describe("Export as VTT file's Every floor on a long scene (UVTT-O-1, D-261127-3
     const tall = Array.from({ length: 8 }, () => ({ w: 100, h: 80 }));
     assert.match(loweredText(tall, everyFloorScale(tall.map((bounds) => ({ bounds })), 100, VTT_LIMITS), "square", true), /within 67 million pixels for every floor together\./);
   });
+});
+
+test("the floors' key stays the same for the same floors rebuilt, and changes with a floor's size or name (UVTT-O-4)", () => {
+  const state = tower();
+  const floors = exportedFloors(state, TOWER, "dm").floors;
+  assert.equal(floorsKey(floors.map((f) => ({ ...f, bounds: { ...f.bounds } }))), floorsKey(floors));
+  assert.notEqual(floorsKey([{ ...floors[0]!, bounds: { w: 99, h: 9 } }, ...floors.slice(1)]), floorsKey(floors));
+  assert.notEqual(floorsKey([{ ...floors[0]!, floor: { ...floors[0]!.floor!, name: "Cellar" } }, ...floors.slice(1)]), floorsKey(floors));
 });
