@@ -20,7 +20,7 @@ import type { RollModeOverride } from "../rollMode.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import type { FillInput } from "../groupSave/fills.ts";
 import { parseParts } from "../groupSave/outcome.ts";
-import type { CastBlock, OptionState } from "../optionState.ts";
+import type { CastBlock, OptionState, SlotOffer } from "../optionState.ts";
 
 /**
  * A player's ask for saves (docs/design/design-v1-player-save-spell.md 3.1 and
@@ -111,10 +111,35 @@ export { sameSpell };
  * it is the row's, and `own` is false. Elsewhere the block shows its own,
  * as for Hold Person. A cantrip and a save action have none.
  */
-export function blockLevel(input: { level: number | undefined; rowSlot: number | null; picked: number | undefined }): { min: number; value: number; own: boolean } | null {
+export function blockLevel(input: { level: number | undefined; rowSlot: number | null; picked: number | undefined; start?: number | null }): { min: number; value: number; own: boolean } | null {
   if (input.level === undefined || input.level < 1) return null;
   if (input.rowSlot !== null) return { min: input.level, value: input.rowSlot, own: false };
-  return { min: input.level, value: Math.max(input.level, Math.min(9, input.picked ?? input.level)), own: true };
+  // Where Pact Magic is the only pool that covers the spell, it starts at the Pact level (docs/design/design-v1-slots.md 3.2, D-261127-401).
+  return { min: input.level, value: Math.max(input.level, Math.min(9, input.picked ?? input.start ?? input.level)), own: true };
+}
+
+/** A slot offer's key in the roll options' store: the creature's and the spell's, so another ask from that spell replaces it. */
+export function offerKey(creature: string, spell: string): string {
+  return `${creature}|${spell.toLowerCase()}`;
+}
+
+/**
+ * The offers after an ask is sent (D-261127-279, 362): the spell's offer set
+ * at the casting level sent where some pool of the character can cast it
+ * there (`pools`, slots/logic.ts offerPools), else taken away, since an
+ * ask from that spell ends the last one's offer either way.
+ */
+export function offersAfterSend(offers: Readonly<Record<string, SlotOffer>>, input: { key: string; spell: string; characterId: string | undefined; level: number | undefined; pools: number }): Record<string, SlotOffer> {
+  const id = offerKey(input.key, input.spell);
+  const { [id]: _old, ...rest } = offers;
+  if (input.characterId === undefined || input.level === undefined || input.pools === 0) return rest;
+  return { ...rest, [id]: { key: input.key, spell: input.spell, characterId: input.characterId, level: input.level } };
+}
+
+/** The offers less one: after its Use, or its Dismiss. */
+export function offerGone(offers: Readonly<Record<string, SlotOffer>>, key: string, spell: string): Record<string, SlotOffer> {
+  const { [offerKey(key, spell)]: _gone, ...rest } = offers;
+  return rest;
 }
 
 /** A spell's level: its row's for a spell on the stat block, else its area preset's. */

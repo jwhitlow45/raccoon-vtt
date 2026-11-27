@@ -57,7 +57,18 @@ export type OptionState = {
    * groups below, which fold, so the text lives here and not in either.
    */
   bonus: Record<string, string>;
+  /**
+   * The slot offer of each sent ask for saves (docs/design/design-v1-slots.md 3.2,
+   * D-261127-362), by `${creature key}|${spell}`: kept here, apart from the
+   * block, which closes once its ask waits, so it stands through the waiting
+   * line, the DM's acceptance and an immediate resolution, until a Use,
+   * Dismiss, another ask from that spell, or leaving the room.
+   */
+  offers: Record<string, SlotOffer>;
 };
+
+/** What a sent ask offers to spend: the character that cast it and the casting level sent. */
+export type SlotOffer = { key: string; spell: string; characterId: string; level: number };
 
 /** What a player's ask for saves is for, as its block opened. */
 export type CastBlock = {
@@ -79,7 +90,7 @@ export type CastBlock = {
 };
 
 export const optionSlot = scopeSlot(() =>
-  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, castFocused: 0, bonus: {} })),
+  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, castFocused: 0, bonus: {}, offers: {} })),
 );
 
 export function useOptionStore() {

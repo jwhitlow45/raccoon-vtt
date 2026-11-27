@@ -34,6 +34,7 @@ import {
   askInput,
   blockDone,
   blockLevel,
+  offersAfterSend,
   casterToken,
   castSendsSlot,
   fillLine,
@@ -62,6 +63,8 @@ import {
 } from "./cast.ts";
 import { useCastTracker } from "./alerts.ts";
 import { useLabels } from "../../../state/labels.ts";
+import { offerPools, pactStart } from "../../slots/logic.ts";
+import { characterIdOfCreature } from "../../slots/SlotOffer.tsx";
 
 /**
  * A player's ask for saves in the Dice panel (docs/design/design-v1-player-save-spell.md
@@ -295,7 +298,9 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const template = spec.area ? view.templates[spec.area] : undefined;
   const { rev: _templateRev, ...templateSource } = template ?? {};
   const named = props.named;
-  const level = blockLevel({ level: spellLevel(named, spec.spell), rowSlot: props.rowSlot, picked: spec.slot });
+  const casterCharacter = view.characters[characterIdOfCreature(view, spec.creature) ?? ""];
+  const ownLevel = spellLevel(named, spec.spell);
+  const level = blockLevel({ level: ownLevel, rowSlot: props.rowSlot, picked: spec.slot, start: pactStart(casterCharacter?.classes, ownLevel) });
   const slot = level?.value;
   const fromArea = template ? areaFill(dice, { spell: template.spell, casterId: caster?.id ?? template.casterId, label: template.label }, slot) : null;
   const fill = fromArea ?? (named ? actionFill(dice, named, { key: spec.key, ...(caster ? { tokenId: caster.id } : {}) }) : null);
@@ -351,7 +356,10 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
     if (!input || reason !== null) return;
     const id = askFor(env, { key: spec.key, spell: spec.spell, ...(spec.roll !== undefined ? { roll: spec.roll } : {}), ...(spec.area !== undefined ? { area: spec.area } : {}), ask: input, rolls: withRoll ? rolls : null, ...(override ? { override } : {}) });
     if (id === null) return;
-    store.setState((s) => (s.cast === spec ? { cast: { ...spec, sent: id } } : {}));
+    // The slot offer lives apart from the block, which closes once its ask waits (docs/design/design-v1-slots.md 3.2, D-261127-362).
+    const characterId = characterIdOfCreature(view, spec.creature);
+    const pools = slot === undefined ? 0 : offerPools(characterId !== undefined ? view.characters[characterId] : undefined, slot).length;
+    store.setState((s) => ({ ...(s.cast === spec ? { cast: { ...spec, sent: id } } : {}), offers: offersAfterSend(s.offers, { key: spec.key, spell: spec.spell, characterId, level: slot, pools }) }));
     props.onSent?.();
   };
   const again = () => {

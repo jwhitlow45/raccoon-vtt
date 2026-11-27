@@ -103,6 +103,8 @@ import { damageTo } from "./groupSave/plan.ts";
 import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, useCloseSettledBlock, WaitingAsks } from "./cast/CastBlock.tsx";
+import { pactStart } from "../slots/logic.ts";
+import { SlotOffers } from "../slots/SlotOffer.tsx";
 import { useCastTracker } from "./cast/alerts.ts";
 import { phaseOf } from "./cast/cast.ts";
 import { acceptsRollMode, effectiveRollMode, type RollModeCapability, type RollModeOverride } from "./rollMode.ts";
@@ -599,6 +601,8 @@ function OptionGroups(props: Shown) {
           <RowCast dice={dice} creatureKey={ctx.key} creature={creature} name={props.name} blocked={ctx.blocked} named={null} rowSlot={null} blockHere />
         </div>
       ) : null}
+      {/* An area spell with no row of its own offers its slot here, under the creature's options (D-261127-403). */}
+      <SlotOffers creatureKey={ctx.key} others={spells.map((r) => r.name)} />
       <Group label="Saves and checks" search="dice.saves" {...groupFold("saves")} summary={markedSummary(ctx, foldSummaryParts({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves))}>
         {reminders([...saveTests, ...checkTests])}
         <Grid label="Saves" note={numbers ? saveNote : undefined}>
@@ -1102,7 +1106,8 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const noneId = useId();
   const character = "characterId" in ctx.creature ? ctx.dice.view.characters[ctx.creature.characterId] : undefined;
   const slots = character && props.named.section === "spells" ? pcSlots(character, props.named.key) : null;
-  const slot = slots ? Math.max(slots.from, Math.min(9, slotPicked ?? slots.from)) : null;
+  // Where Pact Magic is the only pool that covers the spell, its level starts at the Pact level (docs/design/design-v1-slots.md 3.2, D-261127-401).
+  const slot = slots ? Math.max(slots.from, Math.min(9, slotPicked ?? pactStart(character?.classes, slots.from) ?? slots.from)) : null;
   const named = slots && slot !== null ? slots.at(slot) : props.named;
   const on = useMemo(() => new Set(riders ?? []), [riders]);
   const rechargeUse = ctx.spends ? rechargeUseOf(props.named, ctx.uses) : null;
@@ -1285,6 +1290,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           onSent={() => markRecharge(false)}
         />
       ) : null}
+      {player && props.named.section === "spells" ? <SlotOffers creatureKey={ctx.key} spell={props.named.name} /> : null}
     </div>
   );
 }
