@@ -276,20 +276,34 @@ describe("websocket: reconnects and watermarks", () => {
 
   /**
    * Resolves once the room has handled its op `n`, set before the op is sent: the op is queued and taken from the queue,
-   * so what it staged waits in the open batch. A sleep would stretch on a slow machine toward the batch's close.
+   * so what it staged waits in the open batch. A sleep would stretch on a slow machine toward the batch's close. The
+   * deadline runs from the call, so an op that never reaches the room fails the test rather than hanging it.
    */
-  function handled(roomId: string, n: number): Promise<void> {
+  async function handled(roomId: string, n: number, ms?: number): Promise<void> {
     const actor = t.manager.get(roomId)!;
     const own = actor.op;
-    return new Promise((resolve, reject) => {
-      actor.op = async (...args: Parameters<RoomActor["op"]>) => {
-        await own.apply(actor, args);
-        if (args[1] !== n) return;
-        delete (actor as { op?: unknown }).op;
-        until(() => actor.queueLength === 0, `op ${n} to be handled`).then(resolve, reject);
-      };
-    });
+    let queued = false;
+    actor.op = async (...args: Parameters<RoomActor["op"]>) => {
+      await own.apply(actor, args);
+      if (args[1] === n) queued = true;
+    };
+    try {
+      await until(() => queued && actor.queueLength === 0, `op ${n} to be handled`, ms);
+    } finally {
+      delete (actor as { op?: unknown }).op;
+    }
   }
+
+  test("the handled probe fails at its deadline when its op never comes, and gives the room its own op back", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Never sent");
+    const s = await t.connect(roomId, dm);
+    await s.snapshot("c1");
+    const actor = t.manager.get(roomId)!;
+    await assert.rejects(handled(roomId, 1, 300), /timed out after 300 ms waiting for op 1 to be handled/);
+    assert.ok(!Object.hasOwn(actor, "op"), "the room's op is its own again");
+    s.close();
+  });
 
   test("a client that reconnects while its op is staged gets its snapshot at the commit, with the op settled, and a resend of it is acked at the next close with no change", async () => {
     const dm = t.client();
@@ -324,6 +338,7 @@ describe("websocket: reconnects and watermarks", () => {
     const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
+    // The open batch still closes on real time after handled() resolves, so the unload follows at once.
     await t.manager.unload(roomId, 4010, false);
     assert.equal((await s.waitClosed()).code, 4010);
     const stored = await t.pool.query("select 1 from client_watermarks where room_id = $1", [roomId]);
@@ -350,6 +365,7 @@ describe("websocket: reconnects and watermarks", () => {
     const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
+    // The open batch still closes on real time after handled() resolves, so the unload follows at once.
     await t.manager.unload(roomId, 4010, false);
     await s.waitClosed();
     const again = await t.connect(roomId, dm);
