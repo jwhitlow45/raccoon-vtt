@@ -53,6 +53,18 @@ function sceneOf(state: ProjectedState): string {
   return state.meta.playerSceneId ?? Object.keys(state.scenes)[0] ?? "";
 }
 
+/**
+ * Until `done` holds, within a deadline of real time that only a hang outlasts. What a test waits on is an event of the
+ * server, which a loaded machine delays, so neither a sleep nor a count of turns bounds it.
+ */
+async function until(done: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await done())) {
+    if (Date.now() > deadline) assert.fail(`timed out after ${ms} ms waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 describe("websocket: hello, ops and acks", () => {
   let t: Engine;
   before(async () => {
@@ -985,9 +997,19 @@ describe("websocket: refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => 
 describe("roster reads as of their moment", () => {
   let t: Engine;
   before(async () => {
-    t = await startEngine();
+    // The test gives one actor a roster from the past. The engine's 200 ms idle unload would load the room afresh, and the
+    // new actor reads the roster as it is, so the room stays loaded however long a slow machine takes.
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
+
+  /** Whether a query of this database waits on a lock of the grants table, as a grant read behind the test's lock does. */
+  async function grantReadWaits(): Promise<boolean> {
+    const { rows } = await t.pool.query<{ n: number }>(
+      "select count(*)::int as n from pg_locks where relation = 'grants'::regclass and not granted and database = (select oid from pg_database where datname = current_database())",
+    );
+    return rows[0]!.n > 0;
+  }
 
   test("a View as upgrade reads the roster as of its arrival, before its grant read waits, and the gateway as of its call", async () => {
     const dm = t.client();
@@ -1016,11 +1038,18 @@ describe("roster reads as of their moment", () => {
         (s) => (s.close(), "open"),
         (err: Error) => err.message,
       );
-      await new Promise((r) => setTimeout(r, 50));
-      const released = Date.now();
-      await holder.query("rollback");
-      holder.release();
-      assert.equal(await upgrade, "upgrade refused: 403", "Quin was no player of the roster the room gave");
+      let released: number;
+      try {
+        // The upgrade has arrived once its grant read waits on the lock, however slow the machine.
+        await until(grantReadWaits, "the grant read to wait on the lock");
+      } finally {
+        released = Date.now();
+        await holder.query("rollback");
+        holder.release();
+      }
+      const verdict = await upgrade;
+      assert.equal(t.manager.get(roomId), actor, "the room kept the actor whose roster the test gave");
+      assert.equal(verdict, "upgrade refused: 403", "Quin was no player of the roster the room gave");
       const at = asked.pop()!;
       assert.ok(at >= sent && at < released, `the arrival ${at} is before the grant read let go at ${released}`);
       const called = Date.now();
