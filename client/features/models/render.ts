@@ -296,7 +296,7 @@ const OUTLINE_STEPS = (() => {
  * A dark outline 1.5 px out round the drawing, at 70%, so a grey figure
  * reads on a grey floor, in the image's own RGBA bytes (not premultiplied,
  * as getImageData gives them). It goes where nothing is drawn, and under
- * a partly drawn pixel at the drawing's edge, one with a clear 4-neighbour,
+ * a partly drawn pixel at the drawing's edge, one with a clear 4-neighbor,
  * so an antialiased edge shows no floor between the figure and its ring.
  * A pixel drawn whole, or inside a see-through surface, keeps its color and
  * alpha, so a see-through cloak stays as see-through as its material
