@@ -11,20 +11,23 @@ import { CULL_STEP_PX, cullFit, cullOf } from "./cull.ts";
 const SIZE = { width: 390, height: 844 };
 
 describe("the cull box and how a camera stands to it", () => {
-  test("a steady pan across a computer's canvas relays out, and so repaints the relief whole, at most once per 256 px it crosses on each axis", () => {
-    // ISOPAN: at 128 px a steady pan on a 100 by 100 dungeon dropped a frame about every 16.
+  test("a steady pan across a computer's canvas relays out, and so repaints the relief whole, at most once per 256 px it crosses on each axis, wherever it starts in its steps", () => {
+    // ISOPAN: at 128 px a steady pan on a 100 by 100 dungeon dropped a frame about every 16. Steps are screen px, so one zoom stands for all.
     const size = { width: 1440, height: 900 };
-    for (const scale of [14, 32, 60]) {
-      let relayouts = 0;
-      let last = cullOf({ x: -5000, y: -3000, scale }, size).key;
-      // 1,536 px across and 768 px down at 8 and 4 px a frame, as a mouse drags.
-      for (let m = 1; m <= 192; m++) {
-        const key = cullOf({ x: -5000 - m * 8, y: -3000 - m * 4, scale }, size).key;
-        if (key !== last) relayouts++;
-        last = key;
+    const scale = 32;
+    for (let ox = 0; ox < 256; ox += 16) {
+      for (let oy = 0; oy < 256; oy += 64) {
+        let relayouts = 0;
+        let last = cullOf({ x: -5000 - ox, y: -3000 - oy, scale }, size).key;
+        // 1,536 px across and 768 px down at 8 and 4 px a frame, as a mouse drags.
+        for (let m = 1; m <= 192; m++) {
+          const key = cullOf({ x: -5000 - ox - m * 8, y: -3000 - oy - m * 4, scale }, size).key;
+          if (key !== last) relayouts++;
+          last = key;
+        }
+        // One for each 256 px on each axis, and one more on each for where the start lies in its step.
+        assert.ok(relayouts <= 1536 / 256 + 768 / 256 + 2, `from ${ox}, ${oy} px into the step: ${relayouts} relayouts`);
       }
-      // At most one for each 256 px on each axis, and one more on each for where the start lies in its step.
-      assert.ok(relayouts <= 1536 / 256 + 768 / 256 + 2, `${scale} px a cell: ${relayouts} relayouts`);
     }
   });
 
