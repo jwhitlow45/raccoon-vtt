@@ -97,6 +97,7 @@ import { footAnchor, headAnchor } from "./anchors.ts";
 import { holdViewStill, refitAcrossView } from "./sceneCamera.ts";
 import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, drawnRing, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
+import { dragLeftBoard } from "./dragLeft.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan, gripRel } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
@@ -1166,10 +1167,15 @@ export function MapStage(props: {
   // A switch of floor or scene unmounts the dragged nodes, and Konva's remove ends their drag as a drop, which would land
   // them at the switch with the button still down (LP53-DRAG-1). The store's listener runs at the switch, before React
   // draws the new board, so the drag ends as a cancel first: each token goes back and the rest of the gesture sends nothing.
+  // A dragged token another device takes off this board, to another floor or out of the room, unmounts its node the same
+  // way while the floor shown stays (LP54-DRAG-1).
   useEffect(
     () =>
       store.subscribe((now, before) => {
-        if (now.sceneId !== before.sceneId) stopTokenDrag();
+        if (now.sceneId !== before.sceneId) return stopTokenDrag();
+        const drag = dragRef.current;
+        const tokens = now.floorView?.tokens;
+        if (drag && !drag.cancelled && tokens !== before.floorView?.tokens && dragLeftBoard(tokens, sceneRef.current.id, [drag.tokenId, drag.lead.id, ...drag.followers.map((f) => f.token.id)])) stopTokenDrag();
       }),
     [store, stopTokenDrag],
   );
@@ -1596,6 +1602,13 @@ export function MapStage(props: {
     };
     /** Puts the dropped tokens where the plan lands them, each carried one by its named holder's offset, and sends the moves and the drag's end. */
     const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, outgoing: OutgoingDrag | null, plan: DropPlan, free: { place: ClientOp | null; placed: boolean } = { place: null, placed: false }) => {
+      // A drop whose route was searched after the let go can find a token taken off this board since, which its move would land
+      // on another floor at the drop's spot (LP54-DRAG-1): it lands nothing, as a cancel.
+      const ids = [token.id, ...followers.map((f) => f.token.id), ...plan.moves.map((m) => m.tokenId)];
+      if (dragLeftBoard(store.getState().floorView?.tokens, sceneRef.current.id, ids)) {
+        putBack(node, token, followers, outgoing);
+        return;
+      }
       const group = parts.named;
       const moves = plan.moves;
       const landed = new Map(moves.map((m) => [m.tokenId, m]));
