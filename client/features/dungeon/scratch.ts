@@ -417,6 +417,19 @@ export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingB
     console.error("raccoon: a planned wing could not be landed", err);
     return { ok: false, error: "bug" };
   }
+  if (!landed.ok && landing && /over a limit/.test(landed.why)) {
+    // Creatures past the scene's tokens: the wing lands again without them, so the pane keeps its ghost, facts and room panel, and its
+    // claim check shows the creature limit with Add off, where a refusal would have said the scene is too full of walls (D-261127-334).
+    let bare: Landed;
+    try {
+      bare = landWing(plan, base, settings.band, key && { input: key, settings });
+    } catch {
+      bare = landed;
+    }
+    if (bare.ok) {
+      return { ok: true, plan, ops: bare.ops, room: bare.room, summary: summarize(plan, isHexGrid(plan.grid) ? planned.leaves : undefined), ...panelOf(planned, settings, seed, base.scene.gridShape), clear, unstocked: true };
+    }
+  }
   if (!landed.ok) {
     // The scene's counts with the wing's past a cap the planner's allowance did not hold, such as the sight cap: the scene is too full.
     if (/over a limit|over the split|over the sight cap/.test(landed.why)) return { ok: false, error: "fit", problem: "full" };

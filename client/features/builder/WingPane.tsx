@@ -65,7 +65,7 @@ export type WingMade = { ops: ClientOp[]; room: RoomState; ids: ReadonlyMap<stri
 
 /** A plan of the wing: its ghost, the foot's counts and what Add the wing sends with what its asks carry, or why there is none, in words when the planner says. */
 export type WingPlan =
-  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; layout?: DungeonEdits["layout"]; stones?: number }
+  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; layout?: DungeonEdits["layout"]; stones?: number; unstocked?: true }
   | { ok: false; error: "fit" | "bug"; words?: string; why?: string };
 
 /** Plans the wing for the choices, seed and room edits on its base. Only the newest call's answer is shown. */
@@ -154,7 +154,7 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const scratchScene = answer.room.scenes[sceneId];
     if (!scratchScene) return { ok: false, error: "bug" };
     const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: ghostRooms(answer.plan, answer.facts) });
-    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout, stones: answer.plan.stones.length };
+    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout, stones: answer.plan.stones.length, ...(answer.unstocked ? { unstocked: true as const } : {}) };
   };
 }
 
@@ -491,7 +491,8 @@ export default function WingPane(props: {
   const status = sendLine ?? said ?? planLine;
   // The creature limit is checked on every render, and again at Add the wing against the live scene (D-261127-280).
   const overBy = share > 0 && plan?.ok ? overLimitBy(plan.facts ?? [], edits.edits?.rooms ?? null, tokensLeft, plan.stones ?? 0) : 0;
-  const stockWaits = share > 0 && (source.pool === null || overBy > 0);
+  // A wing whose creatures did not land (scratch.ts `unstocked`) is never added, whatever the check says.
+  const stockWaits = share > 0 && (source.pool === null || overBy > 0 || (plan?.ok === true && plan.unstocked === true));
   const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null && !stockWaits;
   const add = async () => {
     if (!ready || !plan?.ok || !plan.made || !plan.clear || !send) return;

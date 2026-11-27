@@ -128,3 +128,33 @@ test("DSTOCK-W: a stock or party change drops the edits only when the band moves
   assert.match(add, /const live = tokensLeftNow\(roomStore, scene\.id\);\s*if \(share > 0 && live !== null && overLimitBy\(plan\.facts \?\? \[\], edits\.edits\?\.rooms \?\? null, live, plan\.stones \?\? 0\) > 0\) return;/);
   assert.match(pane, /\}, \[planner, base, settings, seed, feetPerCell, builder, edits\.edits, stocked\]\);/);
 });
+
+test("DSTOCK-W: a wing whose creatures pass the scene's 500 tokens keeps its ghost, facts and room panel, shows the limit and keeps Add off (STOCK-ASTRA-02)", async () => {
+  const { loadMonsters } = await import("#shared/srd/monsters.ts");
+  const { stockPool } = await import("../dungeon/stockPools.ts");
+  const { WING_SETTINGS } = await import("../dungeon/handPlans.ts");
+  const { overLimitBy } = await import("../dungeon/stockSource.ts");
+  const { token } = await import("#shared/testutil.ts");
+  const open = squareWingBase();
+  const sceneId = open.scene.id;
+  // 498 tokens stand on the scene, stacked in its corner, so 2 are left for the wing's creatures.
+  const tokens = Object.fromEntries(Array.from({ length: 498 }, (_, i) => [`t${i}`, token(`t${i}`, { sceneId, x: 0, y: 0 })]));
+  const base = { ...open, state: { ...open.state, tokens: { ...open.state.tokens, ...tokens } } };
+  const settings = { ...WING_SETTINGS, traps: 0 };
+  const seed = "1Q8V2DR4HJ0Y7ZB3";
+  const plain = wingPreviewOf(settings, seed, base, { feetPerCell: 5 }, null);
+  assert.ok(plain.ok, "the unstocked wing fits");
+  const stock = { choices: { monsters: 100, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool: stockPool(await loadMonsters(), "dungeon", { srdImages: {} }), tokensLeft: 2 };
+  const planner = wingPlanner(
+    () => null,
+    () => undefined,
+    async (s, sd, context, key, edits, st) => wingPreviewOf(s, sd, base, context, key, edits, st),
+  );
+  const plan = await planner({ settings, seed, base, feetPerCell: 5, stock });
+  assert.ok(plan.ok, "the stocked wing is still a plan, not the scene too full");
+  assert.equal(plan.unstocked, true);
+  assert.ok((plan.facts ?? []).some((f) => f.monsters?.on), "its room facts keep the fights");
+  assert.ok(plan.made !== null && plan.made.ops.every((op) => !(op.t === "token.create" && op.token.kind === "monster")), "no creature lands");
+  assert.ok(overLimitBy(plan.facts ?? [], null, 2, plan.stones ?? 0) > 0, "the limit line shows");
+  assert.match(pane, /const stockWaits = share > 0 && \(source\.pool === null \|\| overBy > 0 \|\| \(plan\?\.ok === true && plan\.unstocked === true\)\);/);
+});
