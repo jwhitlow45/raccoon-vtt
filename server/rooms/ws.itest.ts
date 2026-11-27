@@ -10,7 +10,7 @@ import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
 import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
-import { ViewBusyError } from "./actor.ts";
+import { ViewBusyError, type RoomActor } from "./actor.ts";
 import { failCommits, numberOf, Socket, startEngine, type Engine } from "./testing.ts";
 import { MAX_PENDING_BATCHES } from "./actor.ts";
 
@@ -274,6 +274,23 @@ describe("websocket: reconnects and watermarks", () => {
   });
   after(() => t.close());
 
+  /**
+   * Resolves once the room has handled its op `n`, set before the op is sent: the op is queued and taken from the queue,
+   * so what it staged waits in the open batch. A sleep would stretch on a slow machine toward the batch's close.
+   */
+  function handled(roomId: string, n: number): Promise<void> {
+    const actor = t.manager.get(roomId)!;
+    const own = actor.op;
+    return new Promise((resolve, reject) => {
+      actor.op = async (...args: Parameters<RoomActor["op"]>) => {
+        await own.apply(actor, args);
+        if (args[1] !== n) return;
+        delete (actor as { op?: unknown }).op;
+        until(() => actor.queueLength === 0, `op ${n} to be handled`).then(resolve, reject);
+      };
+    });
+  }
+
   test("a client that reconnects while its op is staged gets its snapshot at the commit, with the op settled, and a resend of it is acked at the next close with no change", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Staged");
@@ -304,8 +321,9 @@ describe("websocket: reconnects and watermarks", () => {
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
     // The refusal is staged but the batch never commits: the room dies first.
+    const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
-    await new Promise((r) => setTimeout(r, 50));
+    await staged;
     await t.manager.unload(roomId, 4010, false);
     assert.equal((await s.waitClosed()).code, 4010);
     const stored = await t.pool.query("select 1 from client_watermarks where room_id = $1", [roomId]);
@@ -329,8 +347,9 @@ describe("websocket: reconnects and watermarks", () => {
     const { roomId } = await dm.createRoom("Resend");
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
+    const staged = handled(roomId, 1);
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
-    await new Promise((r) => setTimeout(r, 50));
+    await staged;
     await t.manager.unload(roomId, 4010, false);
     await s.waitClosed();
     const again = await t.connect(roomId, dm);
