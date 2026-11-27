@@ -34,6 +34,8 @@ const LARGEST = FIXTURE.dungeons.find((d) => d.name === "largest")!;
 /** Phase 2's hand plans (client/features/dungeon/handPlans.ts): two rooms dressed, with a stone and the key, and the 100-op plan. */
 const DRESSED = FIXTURE.dungeons.find((d) => d.name === "dressed")!;
 const HUNDRED = FIXTURE.dungeons.find((d) => d.name === "hundred")!;
+/** The stocked dungeon (docs/design/design-v1-dungeon-stock.md 9): Half its rooms stocked, each creature a hidden token. */
+const STOCKED = FIXTURE.dungeons.find((d) => d.name === "stocked")!;
 /** Phase 3's hex dungeons, Hex rows and Hex columns, each with a secret room and a pit (dungeon generator phase 3, 9). */
 const HEX = FIXTURE.dungeons.filter((d) => d.name === "hex-secret" || d.name === "hex-columns");
 
@@ -160,10 +162,11 @@ describe("a generated dungeon on the server", () => {
   });
   after(() => t.close());
 
-  test("DG-B: the fixture's version is the generator's, and every dungeon fits Make's 100 ops", () => {
+  test("DG-B: the fixture's version is the generator's, and every dungeon fits Make's 140 ops, its own within 100 besides its creatures", () => {
     assert.equal(typeof FIXTURE.generatorVersion, "number");
     for (const d of FIXTURE.dungeons) {
-      assert.ok(d.ops.length <= 100, `${d.name}: ${d.ops.length} ops`);
+      assert.ok(d.ops.length <= 140, `${d.name}: ${d.ops.length} ops`);
+      assert.ok(d.ops.filter((op) => !(op.t === "token.create" && op.token.kind === "monster")).length <= 100, `${d.name}: its own ops`);
       // A wing (phase 3) lands on a scene it does not make: dungeon.wing.itest.ts lands it.
       assert.equal(d.ops[0]?.t === "scene.create", d.name !== "wing" && d.name !== "hex-wing", d.name);
       assert.ok(!JSON.stringify(d.ops).includes("defaultView"), "no starting view");
@@ -673,6 +676,86 @@ describe("a dressed dungeon on the server (phase 2)", () => {
     assert.equal(count(live.pins, m.sceneId), 0);
     assert.equal(Object.values(live.journal).some((p) => p.folder === "Dungeon keys"), false);
     coSocket.close();
+    tb.dmSocket.close();
+  });
+});
+
+const isCreature = (op: Op): boolean => op.t === "token.create" && op.token.kind === "monster";
+
+/** `n` hidden tokens on `sceneId`, the scene's group filled near its cap as a long campaign might. */
+function filler(sceneId: string, n: number): Op[] {
+  const actor = { inline: { hp: { cur: 7, max: 7, temp: 0 }, life: "alive" as const, ac: 15, speeds: { walk: 30 }, initBonus: 2, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } };
+  return Array.from({ length: n }, (_, i) => ({ t: "token.create", token: { id: uuidv7(), sceneId, kind: "object", name: `Crate ${i}`, size: "medium", x: i % 20, y: Math.floor(i / 20), visibility: "dm", actor } }) as Op);
+}
+
+/** Sends the filler on several of the DM's sockets at once, each paced on its own, so filling a group near 500 takes seconds, not minutes. */
+async function fillGroup(t: Engine, tb: Table, ops: readonly Op[]): Promise<void> {
+  const sockets = await Promise.all(Array.from({ length: 6 }, async (_, i) => {
+    const s = await t.connect(tb.roomId, tb.dm);
+    await s.snapshot(`filler-${i}`);
+    return s;
+  }));
+  const per = Math.ceil(ops.length / sockets.length);
+  const sent = await Promise.all(sockets.map((s, i) => sendPaced(s, ops.slice(i * per, (i + 1) * per))));
+  for (const s of sockets) s.close();
+  assert.deepEqual(sent.flatMap((x) => x.refused), [], "the filler lands");
+}
+
+describe("a stocked dungeon on the server (DSTOCK)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+  });
+  after(() => t.close());
+
+  test("DSTOCK: one Undo setup takes the stocked dungeon back with every creature, and Redo setup brings them back hidden", async () => {
+    const tb = await table(t, "Stocked undo");
+    const m = made(STOCKED);
+    const creatures = m.ops.filter(isCreature).length;
+    assert.ok(creatures > 0, "the fixture is stocked");
+    assert.deepEqual(await send(tb.dmSocket, m.ops), []);
+    assert.equal((await setupHistory(tb.dmSocket)).depth, 1, "one Setup step, its creatures in it");
+    const monsters = (state: RoomState) => Object.values(state.tokens).filter((x) => x.sceneId === m.sceneId && x.kind === "monster");
+    assert.equal(monsters(t.manager.get(tb.roomId)!.committed.state).length, creatures);
+    assert.ok(monsters(t.manager.get(tb.roomId)!.committed.state).every((x) => x.visibility === "dm"));
+    assert.equal((await tb.dmSocket.step("undo", "setup")).rejects, undefined);
+    const undone = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(undone.scenes[m.sceneId], undefined);
+    assert.equal(count(undone.tokens, m.sceneId), 0, "every creature goes with the dungeon");
+    assert.equal((await tb.dmSocket.step("redo", "setup")).rejects, undefined);
+    const redone = monsters(t.manager.get(tb.roomId)!.committed.state);
+    assert.equal(redone.length, creatures, "Redo setup brings every creature back");
+    assert.ok(redone.every((x) => x.visibility === "dm"), "still hidden");
+    tb.dmSocket.close();
+  });
+
+  test("DSTOCK: a stocked Make on a new floor, its scene's group near 500 tokens over two floors, lands whole within what the group has left", async () => {
+    const tb = await table(t, "Stocked floor near the cap");
+    const base = made(MEDIUM);
+    assert.deepEqual(await send(tb.dmSocket, base.ops), []);
+    const upstairs = uuidv7();
+    assert.equal((await tb.dmSocket.apply({ t: "scene.create", scene: { id: upstairs, name: "Upstairs", bounds: { w: 20, h: 20 } }, floor: { beside: base.sceneId, side: "above" } } as Op)).rejects, undefined);
+    const m = made(STOCKED);
+    const creatures = m.ops.filter(isCreature).length;
+    const stones = m.ops.filter((op) => op.t === "token.create" && !isCreature(op)).length;
+    // Exactly the room the stocking counts (stockCapacity): the group's tokens left are the creatures and the stones.
+    const fill = LIMITS.tokensPerScene - creatures - stones;
+    const half = Math.floor(fill / 2);
+    await fillGroup(t, tb, [...filler(base.sceneId, half), ...filler(upstairs, fill - half)]);
+    const create = m.ops[0]!;
+    assert.ok(create.t === "scene.create");
+    // As the dialog makes a floor (client/features/scenes/floorSource.ts floorCreateOf): the scene's id, name and size, its own look in `own`.
+    const { id, name, bounds, background, grid, autoWalls } = create.scene;
+    const onFloor = [{ t: "scene.create", scene: { id, name, bounds }, floor: { beside: base.sceneId, side: "below", own: { bounds, background, grid, autoWalls: autoWalls ?? "all" } } } as Op, ...m.ops.slice(1)];
+    const sent = await sendPaced(tb.dmSocket, onFloor);
+    assert.deepEqual(sent.refused, [], "nothing is refused");
+    const live = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(Object.values(live.tokens).filter((x) => x.sceneId === m.sceneId && x.kind === "monster").length, creatures, "every creature landed on the new floor");
+    const group = new Set([base.sceneId, upstairs, m.sceneId]);
+    assert.equal(Object.values(live.tokens).filter((x) => group.has(x.sceneId)).length, LIMITS.tokensPerScene, "the group is full, and not past it");
+    // Not vacuous: the group had room for these creatures and no more.
+    const more = filler(m.sceneId, 1);
+    assert.equal((await sendPaced(tb.dmSocket, more)).refused.length, 1, "one more token is past the cap");
     tb.dmSocket.close();
   });
 });
