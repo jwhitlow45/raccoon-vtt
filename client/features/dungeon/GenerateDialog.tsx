@@ -564,6 +564,7 @@ export function GenerateDialog(props: {
           value: stockOf(choices),
           onChange: setStock,
           held,
+          edited: editedParty !== null,
           groups,
           party: <PartyEditor party={editedParty} roomParty={roomParty} onChange={editParty} />,
           below: (

@@ -624,6 +624,7 @@ export default function WingPane(props: {
                     value: stockChoices,
                     onChange: (next) => restock(next, groups, false),
                     held: stockHeld,
+                    edited: editedParty !== null,
                     groups,
                     party: <PartyEditor party={editedParty} roomParty={roomParty} onChange={editParty} />,
                     below: (

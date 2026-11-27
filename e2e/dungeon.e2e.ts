@@ -1300,6 +1300,12 @@ describe("dungeon generator", { concurrency: false }, () => {
     await dialog.getByText("Give the party a level to stock rooms: set one on a character's card, or edit the party below.", { exact: true }).waitFor();
     await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
     assert.equal(await monsters.isDisabled(), false, "a party with a level gives Monsters back");
+    // STOCK-O-01: at None the edited party keeps its rows, focus on its first stepper, and closing it gives focus back to Edit the party.
+    const focused = () => dm.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "");
+    await waitFor("focus on the party's first stepper", async () => ((await focused()).startsWith("Characters") ? true : null));
+    await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
+    await waitFor("focus back on Edit the party", async () => ((await focused()) === "Edit the party" ? true : null));
+    await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
     await mark(dialog, "Monsters", "Half").click();
     await dialog.getByText(/^Moderate: [\d,]+ XP a room for 1 character at level 1\.$/).waitFor();
     await dialog.getByText("Set from the party: levels 1 to 4.", { exact: true }).waitFor();

@@ -87,7 +87,7 @@ test("a row change patches only what it changed, so a Rooms past the cap stays t
  */
 const { MONSTERS_HELD, MONSTERS_HELP, MONSTERS_THEME, SEED_HELP, SEED_HELP_STOCKED } = await import("./words.ts");
 
-function stocked(stock: { monsters?: number; held?: boolean; band?: { held: boolean; lines: string[] }; theme?: DungeonSettings["theme"]; traps?: number } = {}): string {
+function stocked(stock: { monsters?: number; held?: boolean; edited?: boolean; band?: { held: boolean; lines: string[] }; theme?: DungeonSettings["theme"]; traps?: number } = {}): string {
   return renderToStaticMarkup(
     h(Choices, {
       value: { ...DEFAULT_SETTINGS, theme: stock.theme ?? "dungeon", traps: stock.traps ?? 2 },
@@ -96,7 +96,7 @@ function stocked(stock: { monsters?: number; held?: boolean; band?: { held: bool
       grid: "squares",
       wing: false,
       seed: { text: "9K7Q-H2MX-A9F3-TWQ5", onChange: nothing },
-      stock: { value: { monsters: stock.monsters ?? 50, difficulty: "moderate" }, onChange: nothing, held: stock.held ?? false, groups: [{ count: 4, level: 3 }], party: h("p", null, "PARTY-SLOT"), below: h("p", null, "BELOW-SLOT") },
+      stock: { value: { monsters: stock.monsters ?? 50, difficulty: "moderate" }, onChange: nothing, held: stock.held ?? false, edited: stock.edited ?? false, groups: [{ count: 4, level: 3 }], party: h("p", null, "PARTY-SLOT"), below: h("p", null, "BELOW-SLOT") },
       ...(stock.band ? { band: stock.band } : {}),
     }),
   );
@@ -141,4 +141,11 @@ test("DSTOCK-C: while the band follows the party, Party level is held with where
   const free = stocked({ band: { held: false, lines: ["Set from the party: levels 1 to 4."] } });
   assert.ok(!text(free).includes("Set from the party"));
   assert.doesNotMatch(free.slice(free.indexOf("Party level"), free.indexOf("Secret doors")), /disabled=""/);
+});
+
+test("DSTOCK-C: an edited party keeps its rows at None, so Edit the party never takes its steppers away (STOCK-O-01)", () => {
+  const words = text(stocked({ monsters: 0, edited: true }));
+  assert.ok(words.includes("PARTY-SLOT"), "the edited party stays");
+  assert.ok(!words.includes("Difficulty"));
+  assert.ok(!text(stocked({ monsters: 0 })).includes("PARTY-SLOT"), "the room's party at None shows no rows");
 });

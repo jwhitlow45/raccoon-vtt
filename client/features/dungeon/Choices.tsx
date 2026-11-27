@@ -103,6 +103,8 @@ export type StockRow = {
   value: StockChoices;
   onChange(next: StockChoices): void;
   held: boolean;
+  /** The party is the dialog's own edit, so its rows stay while it is edited, Monsters at None too. */
+  edited: boolean;
   groups: readonly PartyGroup[];
   party: ReactNode;
   below?: ReactNode;
@@ -346,7 +348,8 @@ function StockRows(props: { row: StockRow; theme: DungeonSettings["theme"]; room
           help={difficultyHelp(row.value.difficulty, budgets[row.value.difficulty], row.groups)}
         />
       ) : null}
-      {share > 0 || row.held ? (
+      {/* An edited party stays, so Edit the party at None, where a held Monsters comes back, never pulls the steppers away from focus. */}
+      {share > 0 || row.held || row.edited ? (
         <Named name="Party">
           {() => <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 }}>{row.party}</div>}
         </Named>

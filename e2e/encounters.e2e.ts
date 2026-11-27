@@ -198,6 +198,16 @@ describe("raccoon-vtt: the Encounters panel's lines at every size", { timeout: 6
     assert.deepEqual(lines, [], "the editor with wide fields");
   });
 
+  test("DSTOCK-E. Edit the party moves focus to its first stepper, and Use the room's characters gives it back to Edit the party (STOCK-O-01)", async () => {
+    await dm.setViewportSize({ width: 1440, height: 900 });
+    const panel = await openCrypt(dm);
+    const focused = () => dm.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "");
+    await panel.getByRole("button", { name: "Edit the party", exact: true }).click();
+    await waitFor("focus on the party's first stepper", async () => ((await focused()).startsWith("Characters") ? true : null));
+    await panel.getByRole("button", { name: "Use the room's characters", exact: true }).click();
+    await waitFor("focus back on Edit the party", async () => ((await focused()) === "Edit the party" ? true : null));
+  });
+
   test("enc46-3. no console errors", () => {
     assert.deepEqual(dmConsole.errors, []);
   });

@@ -30,10 +30,14 @@ const LEVEL_OPTIONS = Array.from({ length: MAX_LEVEL - MIN_LEVEL + 1 }, (_, i) =
 export function PartyEditor(props: { party: PartyGroup[] | null; roomParty: ReturnType<typeof partyFromCharacters>; onChange(next: PartyGroup[] | null): void }) {
   const { party, roomParty } = props;
   const rows = useRef<HTMLDivElement>(null);
+  const edit = useRef<HTMLButtonElement>(null);
   const editing = party !== null;
   const opened = useRef(editing);
   useEffect(() => {
-    if (editing && !opened.current) rows.current?.querySelector<HTMLElement>("input, button")?.focus({ preventScroll: true });
+    // Opening moves focus to the first stepper control that takes it (a party of one cannot step down), and closing back to Edit the
+    // party, so the keyboard never drops to the page.
+    if (editing && !opened.current) rows.current?.querySelector<HTMLElement>("input:not(:disabled), button:not(:disabled)")?.focus({ preventScroll: true });
+    if (!editing && opened.current) edit.current?.focus({ preventScroll: true });
     opened.current = editing;
   }, [editing]);
   if (party === null) {
@@ -50,7 +54,7 @@ export function PartyEditor(props: { party: PartyGroup[] | null; roomParty: Retu
           ) : null}
           {size === 0 && roomParty.unleveled.length === 0 ? <Help>This room has no characters yet. Edit the party to budget for one.</Help> : null}
         </div>
-        <Button size="sm" onClick={() => props.onChange(roomParty.groups.length > 0 ? roomParty.groups : [{ count: Math.max(1, roomParty.unleveled.length), level: 1 }])}>
+        <Button ref={edit} size="sm" onClick={() => props.onChange(roomParty.groups.length > 0 ? roomParty.groups : [{ count: Math.max(1, roomParty.unleveled.length), level: 1 }])}>
           Edit the party
         </Button>
       </>
