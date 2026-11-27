@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "./keys.ts";
-import type { MapVideo, RoomState } from "./model.ts";
-import { referencedAssetIds, referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
+import type { MapVideo, ModelRef, RoomState } from "./model.ts";
+import { entityAssetRefs, referencedAssetIds, referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { character, companionBlock, customMonster, imageRef, room, scene, srdImage, token } from "./testutil.ts";
 
 const page = (assetId: string) => ({ assetId, width: 1584, height: 2048 });
+const sheet = (assetId: string): ModelRef => ({ assetId, side: 1.4, anchorY: 0.82, boxes: Array.from({ length: 8 }, () => [20, 10, 80, 95] as [number, number, number, number]) });
 const video = (assetId: string): MapVideo => ({ assetId, widthPx: 1920, heightPx: 1080, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 6_000 });
 
 /** Every place a room names an image, each with its own asset id: the walk must find them all. */
@@ -32,6 +33,12 @@ function everyReference(): RoomState {
   state.handouts.h2 = { id: "h2", rev: 0, assetId: "page1", pages: [page("page1"), page("page2"), page("page1")], title: "Strange letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page("docPage1"), page("docPage2")], createdAt: "2026-10-14T00:00:00.000Z" };
   state.companionBlocks.b1 = companionBlock("b1", "c1", { defaultImage: imageRef("blockImage") });
+  // A 3D model's sheet on each place an image goes, on an upload and on an icon (docs/design/design-v1-token-models.md 4.5).
+  state.tokens.t3 = token("t3", { image: { ...imageRef("modelFace"), model: sheet("tokenModel") }, altImages: [{ icon: "lorc/wolf-head", color: "#336699", model: sheet("altModel") }] });
+  state.characters.c2 = character("c2", { defaultImage: { icon: "lorc/skull", color: "#000000", model: sheet("portraitModel") } });
+  state.monsters.m2 = customMonster("m2", { defaultImage: { ...imageRef("monsterImage"), model: sheet("monsterModel") } });
+  state.srdImages.bandit = srdImage("bandit", "srdImage", { image: { ...imageRef("srdImage"), model: sheet("srdModel") } });
+  state.companionBlocks.b2 = companionBlock("b2", "c1", { defaultImage: { ...imageRef("blockImage"), model: sheet("blockModel") } });
   // Stamps players remember (docs/design/design-v1-map-discovery.md 5.4): the party's and a holder's, whatever the stamp is now.
   const remembered = (id: string, assetId: string) => ({ ...state.stamps.st1!, id, art: { assetId } });
   state.memory = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, stamps: { st1: remembered("st1", "rememberedStamp"), gone: null } } };
@@ -61,7 +68,68 @@ describe("referencedAssetIds (docs/design/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "holderStamp", "map", "mapVideo", "monsterImage", "page1", "page2", "phase", "phaseVideo", "portrait", "rememberedStamp", "soundFile", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), [
+      "altImage",
+      "altModel",
+      "blockImage",
+      "blockModel",
+      "docPage1",
+      "docPage2",
+      "handout",
+      "holderStamp",
+      "map",
+      "mapVideo",
+      "modelFace",
+      "monsterImage",
+      "monsterModel",
+      "page1",
+      "page2",
+      "phase",
+      "phaseVideo",
+      "portrait",
+      "portraitModel",
+      "rememberedStamp",
+      "soundFile",
+      "srdImage",
+      "srdModel",
+      "stampImage",
+      "thumb",
+      "tokenImage",
+      "tokenModel",
+    ]);
+  });
+
+  test("a 3D model's sheet is a model row wherever an image carries it, so cleanup keeps it and a restore checks its kind (docs/design/design-v1-token-models.md 4.5)", () => {
+    const state = everyReference();
+    const refsOf = (key: Parameters<typeof entityAssetRefs>[0], value: unknown) => entityAssetRefs(key, value);
+    assert.deepEqual(refsOf(keys.token("t3"), state.tokens.t3), [
+      { assetId: "modelFace", kind: "token" },
+      { assetId: "tokenModel", kind: "model" },
+      { assetId: "altModel", kind: "model" },
+    ]);
+    assert.deepEqual(refsOf(keys.character("c2"), state.characters.c2), [{ assetId: "portraitModel", kind: "model" }], "an icon's model, with no picture row");
+    assert.deepEqual(refsOf(keys.monster("m2"), state.monsters.m2), [
+      { assetId: "monsterImage", kind: "token" },
+      { assetId: "monsterModel", kind: "model" },
+    ]);
+    assert.deepEqual(refsOf(keys.srdImage("bandit"), state.srdImages.bandit), [
+      { assetId: "srdImage", kind: "token" },
+      { assetId: "srdModel", kind: "model" },
+    ]);
+    assert.deepEqual(refsOf(keys.companionBlock("b2"), state.companionBlocks.b2), [
+      { assetId: "blockImage", kind: "token" },
+      { assetId: "blockModel", kind: "model" },
+    ]);
+    // Removing the model leaves the picture in use and frees the sheet, and an undo of the removal adds the sheet alone.
+    const before = state.tokens.t3!;
+    const removed = { ...state, tokens: { ...state.tokens, t3: { ...before, image: imageRef("modelFace"), altImages: [] } } };
+    assert.equal(referencedAssetIds(removed).has("tokenModel"), false);
+    assert.equal(referencedAssetIds(removed).has("modelFace"), true);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.token("t3"), value: before }], removed), [
+      { assetId: "tokenModel", kind: "model" },
+      { assetId: "altModel", kind: "model" },
+    ]);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.token("t3"), value: before }], state), []);
   });
 
   test("a sound's file is a sound row, so cleanup keeps it while the library names it and a restore checks its kind (docs/design/design-v1-music.md 6.6)", () => {

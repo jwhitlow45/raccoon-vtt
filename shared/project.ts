@@ -65,7 +65,7 @@ import {
   type WallFeature,
 } from "./model.ts";
 import { handoutPages } from "./handouts.ts";
-import { imageAssetId } from "./imageRef.ts";
+import { imageAssetIds } from "./imageRef.ts";
 import { inLiveLog, lineAudience, liveStart, neverRead } from "./logRings.ts";
 import { clipsByHeldWalls, companionByCopy, revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
@@ -5712,9 +5712,10 @@ function sameSightTile(a: SightTile, b: SightTile): boolean {
  */
 export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectOpts): Set<string> {
   const ids = new Set<string>();
-  const addImage = (image: Parameters<typeof imageAssetId>[0]) => {
-    const id = imageAssetId(image);
-    if (id !== undefined) ids.add(id);
+  // An image's upload and its model's sheet together, so a sheet is the viewer's exactly while an image they hold names it
+  // (docs/design/design-v1-token-models.md 4.5): every place below that passes an image passes its model with it.
+  const addImage = (image: Parameters<typeof imageAssetIds>[0]) => {
+    for (const id of imageAssetIds(image)) ids.add(id);
   };
   const projected = projectState(state, viewer, opts);
   // A player gets only the floors they hold, each carrying only the showing phase's video, on its map

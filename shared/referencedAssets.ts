@@ -1,6 +1,6 @@
 import { keys, parseKey, readEntity, type EntityKey } from "./keys.ts";
 import type { ImageRef, RoomState } from "./model.ts";
-import { imageAssetId } from "./imageRef.ts";
+import { imageAssetId, imageModelId } from "./imageRef.ts";
 import type { AssetKind } from "./permissions.ts";
 import type { RestoreEntry } from "./protocol.ts";
 
@@ -9,9 +9,11 @@ import type { RestoreEntry } from "./protocol.ts";
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
  * phases and their videos, thumbnails, token images and other images, character
  * portraits, monsters', SRD monsters' and companion blocks' default
- * images, stamps from the library, the stamps players remember
- * (docs/design/design-v1-map-discovery.md 5.4), and every page of a handout and
- * of a document in the DM's library. Shipped icons name no row.
+ * images, the 3D model sheet any of those images carries
+ * (docs/design/design-v1-token-models.md 4.5), stamps from the library, the
+ * stamps players remember (docs/design/design-v1-map-discovery.md 5.4), and
+ * every page of a handout and of a document in the DM's library. A shipped
+ * icon names no row, though a model on it names its sheet.
  *
  * Cleanup asks it which images a room still uses, and the permissions ask
  * it which images an undo would put back. Both must know every reference,
@@ -26,9 +28,13 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
   const parsed = parseKey(key);
   if (!parsed) return [];
   const out: AssetRef[] = [];
+  // An image's upload is a `token` row and its model's sheet a `model` row, on an icon as on an upload, so cleanup keeps
+  // a sheet while a picture names it and a restore checks the sheet's kind.
   const image = (ref: ImageRef | null | undefined) => {
     const assetId = imageAssetId(ref);
     if (assetId !== undefined) out.push({ assetId, kind: "token" });
+    const modelId = imageModelId(ref);
+    if (modelId !== undefined) out.push({ assetId: modelId, kind: "model" });
   };
   // Every page of a handout or a document, each image once (docs/design/design-v1-pdf-handouts.md 3.5).
   const pages = (list: unknown, ...seen: unknown[]) => {

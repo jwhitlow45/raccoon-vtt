@@ -1,5 +1,5 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, parseKey, wallMidpoint } from "./keys.ts";
-import { imageAssetId } from "./imageRef.ts";
+import { imageAssetId, imageModelId } from "./imageRef.ts";
 import { ownLines } from "./logRings.ts";
 import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollRequest, RollTarget, RoomSettings, RoomState, Scene, ShownEnds, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
@@ -62,7 +62,7 @@ import { lengthAs } from "./sound.ts";
  * exists. Visibility is decided by the projection itself, never by a second
  * copy of its rules.
  */
-export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound";
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound" | "model";
 
 /**
  * The `invalid` refusals of an op that sets a map's video
@@ -1531,11 +1531,16 @@ function forPlayer(op: Op, c: Check): Decision {
 /**
  * Whether the actor may wear an image: an upload must be one they may use,
  * of kind `token`. A shipped icon names no asset, so its key's shape, which
- * the protocol checked, is all it needs (docs/design/design-v1-dm-tools.md 3.12).
+ * the protocol checked, is all its picture needs (docs/design/design-v1-dm-tools.md 3.12).
+ * A model on either must be a sheet they may use, of kind `model`, so a
+ * picture never names a sheet nor a model a picture
+ * (docs/design/design-v1-token-models.md 4.2).
  */
 function imageUsable(c: Check, image: ImageRef | null | undefined): boolean {
   const assetId = imageAssetId(image);
-  return assetId === undefined || c.asset(assetId, "token");
+  if (assetId !== undefined && !c.asset(assetId, "token")) return false;
+  const modelId = imageModelId(image);
+  return modelId === undefined || c.asset(modelId, "model");
 }
 
 /** Whether every image a token op names, the one it wears and its alternates, is one the actor may use. */
