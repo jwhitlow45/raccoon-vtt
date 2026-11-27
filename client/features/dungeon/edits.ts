@@ -17,7 +17,18 @@ export type DoorPin = "closed" | "locked" | "secret";
  * for none, `propsDraw` which of the room's own prop streams Other props
  * drew last, and `lit` its light.
  */
-export type RoomEdit = { ground?: number; doors?: Record<string, DoorPin>; trap?: string | null; dressing?: Dressing; propsDraw?: number; lit?: boolean };
+export type RoomEdit = {
+  ground?: number;
+  doors?: Record<string, DoorPin>;
+  trap?: string | null;
+  dressing?: Dressing;
+  propsDraw?: number;
+  lit?: boolean;
+  /** Whether the room holds a fight, whatever the Monsters share gives it (docs/design/design-v1-dungeon-stock.md 1). */
+  monsters?: boolean;
+  /** Which of the room's own fight streams Other monsters drew last. */
+  monstersDraw?: number;
+};
 
 /**
  * Edits and the layout they were made on (4.2, D-261110-231): the room
@@ -43,7 +54,22 @@ export type DoorFacts = { key: string; side: "n" | "e" | "s" | "w"; to: number |
  * the wing's ghost and the panel find a room's box and pin by `at` and
  * name it by `room` (DG3 review round 1).
  */
-export type RoomFacts = { n: number; room: number; at: number; ground: number; doors: DoorFacts[]; traps: string[]; trap: string | null; dressing: Dressing; lit: boolean; reports: string[] };
+export type RoomFacts = {
+  n: number;
+  room: number;
+  at: number;
+  ground: number;
+  doors: DoorFacts[];
+  traps: string[];
+  trap: string | null;
+  dressing: Dressing;
+  lit: boolean;
+  reports: string[];
+  /** Whether the Monsters share picked the room (docs/design/design-v1-dungeon-stock.md 4, stocking step 2). */
+  share: boolean;
+  /** The room's fight: whether it holds one, each kind's name and count, and their XP. Null at None. */
+  monsters: { on: boolean; lines: [string, number][]; xp: number } | null;
+};
 
 /**
  * A doorway's key in a room's door pins: its link's index, or "stub" for
@@ -77,6 +103,7 @@ export const REPORTS = {
   secretOnStairs: "A door at the top of stairs is never secret, so it is closed.",
   secretBreaksReach: "That door cannot be secret here: every room must still be reached without it.",
   roomGone: "This room is gone in this dungeon.",
+  noMonsterSpot: "No spot for monsters here, so it has none.",
   noRoom: (what: "trap" | "secret door" | "stamp" | "light") => `No room for another ${what} in this dungeon, so that change was not made.`,
 } as const;
 

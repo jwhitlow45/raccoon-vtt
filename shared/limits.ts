@@ -2282,6 +2282,18 @@ function sceneCounts(state: RoomState, sceneId: string): SceneCounts {
   return counts;
 }
 
+/**
+ * Tokens the scene's group of floors has room for: 500 less every token on
+ * the scene and its floors. It counts seat-held tokens on purpose, though
+ * the cap itself leaves them out (`restOf`), so a generated dungeon may
+ * stock fewer creatures than the server would take, and is never refused
+ * (docs/design/design-v1-dungeon-stock.md 4). A scene not in the room has
+ * the whole cap.
+ */
+export function sceneTokensLeft(state: RoomState, sceneId: string): number {
+  return Math.max(0, LIMITS.tokensPerScene - sceneCounts(state, sceneId).tokens);
+}
+
 /** The counts no seat holds: the DM's part, which the room caps read. */
 function restOf(counts: SceneCounts, held: SeatHeld): SceneCounts {
   return { tokens: counts.tokens - held.tokens.size, templates: counts.templates - held.templates.size, drawings: counts.drawings - held.drawings.size, points: counts.points - held.pointValues };

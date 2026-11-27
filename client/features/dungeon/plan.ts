@@ -78,7 +78,23 @@ export type KeyDoor = { side: "n" | "e" | "s" | "w"; to: number | "edge" | "join
  * names, an index into the SRD's trinket table (shared/srd/trinkets.ts
  * `TRINKETS`), and what else stands in it.
  */
-export type KeyRoom = { n: number; room: number; doors: KeyDoor[]; light?: string; traps: string[]; trinket: number; secret?: true; dais?: true; pit?: true; cistern?: true };
+export type KeyRoom = {
+  n: number;
+  room: number;
+  doors: KeyDoor[];
+  light?: string;
+  traps: string[];
+  trinket: number;
+  secret?: true;
+  dais?: true;
+  pit?: true;
+  cistern?: true;
+  /** The room's fight as stocked (docs/design/design-v1-dungeon-stock.md 1): each kind's name and count, their XP and the budget it was drawn against. Absent at None. */
+  monsters?: { lines: [string, number][]; xp: number; budget: number };
+};
+
+/** A stocked creature: its SRD block, the board index of its room, and its token's corner as placed, in scene cells. */
+export type PlanMonster = { srdId: string; room: number; x: number; y: number };
 
 /**
  * A trap in the corridors as the key reads it (LP33-B-KEY-1): its name, and
@@ -130,6 +146,8 @@ export type DungeonPlan = {
   rough?: string[];
   /** A wing's join as planned, which its asks carry for the server's check. */
   join?: JoinExpect;
+  /** The stocked creatures (docs/design/design-v1-dungeon-stock.md 4), biggest first in each room, rooms in board order. Absent at None, so every plan made before stays as it was. */
+  monsters?: PlanMonster[];
 };
 
 /**
@@ -238,6 +256,14 @@ export type Planned = {
   overBudget: FitFailure | null;
   /** A wing's outcome: why it cannot be planned, or null, and what the scene had room for (3.4). Null for a new scene. */
   wing: { problem: WingProblem | null; allowance: Allowance } | null;
+  /**
+   * Whether a creature may stand on lattice cell `k` of kept room `i` (board
+   * index), read from the room's final contents after the edits reconcile
+   * (docs/design/design-v1-dungeon-stock.md 4, stocking step 7): its own
+   * floor, off every doorway's inside cells, the dais's clear ground, every
+   * stair, overlay, trap square, light, stamp and prop, and its key pin.
+   */
+  standable(i: number, k: number): boolean;
 };
 
 export function generate(settings: DungeonSettings, seed: Seed, context: PlanContext, budget: number = SEARCH_BUDGET): DungeonPlan {
@@ -1001,6 +1027,8 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
         dressing: edits?.[i]?.dressing ?? s.dressing,
         lit: lit.some((l) => l.room === i),
         reports: reports.get(i) ?? [],
+        share: false,
+        monsters: null,
       };
     })
     .sort((a, b) => a.n - b.n);
@@ -1097,6 +1125,13 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
         : {}),
     ...(wing ? { join: wing.expect } : {}),
   };
+  // What a creature may stand on, from the final contents (stocking step 7). A statue's stamp counts as a prop's would, though its trap's squares hold it already.
+  const taken = new Set<number>([...doorways.flatMap((d) => d.inside), ...clear, ...ups.keys(), ...overlay.keys(), ...picked.squares.flat()]);
+  for (const l of lit) for (const k of l.stamp && hexStamps ? [l.square, ...hexStamps.touched(l.stamp)] : [l.square]) taken.add(k);
+  for (const f of props) for (const k of f.squares) taken.add(k);
+  for (const st of picked.statues) for (const k of hexStamps ? hexStamps.touched(st) : stampCells(st, W, H)) taken.add(k);
+  const standable = (i: number, k: number) => k >= 0 && k < W * H && kept.includes(i) && board.roomAt[k] === i + 1 && (hex ? space[k] === i : inRoom(k)) && k !== pins.get(i) && !taken.has(k);
+
   // A square join that was a wall becomes a closed door, Cave or not, since the room it joins keeps its doors. A door keeps its state (3.2).
   if (wing && wing.expect.grid === "squares" && !wing.facts.door) plan.doors = [...plan.doors, ...wing.expect.edges.map((e) => ({ edge: e.key, state: "closed" as const }))];
   return {
@@ -1125,7 +1160,18 @@ export function planDungeon(input: DungeonSettings, seed: Seed, context: PlanCon
     reports,
     overBudget: null,
     wing: wing ? { problem: wingProblem ?? (kept.length < MIN_ROOMS ? "noRooms" : null), allowance } : null,
+    standable,
   };
+}
+
+/** The square cells a stamp's box covers, by its middle, size and turn, on a W by H board. */
+function stampCells(st: PlanStamp, W: number, H: number): number[] {
+  const [w, h] = st.rotation % 180 === 0 ? [st.w, st.h] : [st.h, st.w];
+  const out: number[] = [];
+  for (let y = Math.floor(st.y - h / 2 + 1e-9); y < Math.ceil(st.y + h / 2 - 1e-9); y++) {
+    for (let x = Math.floor(st.x - w / 2 + 1e-9); x < Math.ceil(st.x + w / 2 - 1e-9); x++) if (x >= 0 && y >= 0 && x < W && y < H) out.push(y * W + x);
+  }
+  return out;
 }
 
 /** Whether one rank comes before another, compared element by element. */

@@ -20,6 +20,7 @@ import { planFitted, type DungeonPlan, type Fitted, type Planned, type WingBase 
 import type { Seed } from "./seed.ts";
 import { clampSettings, isHexGrid, MIN_ROOMS, type DungeonSettings, type GridKind, type PlanContext } from "./settings.ts";
 import { wingSetup } from "./wing.ts";
+import type { StockRequest } from "./worker.ts";
 
 /*
  * The scratch room (docs/design/design-v1-dungeon-generator.md 5.5): the
@@ -155,7 +156,7 @@ export function previewScene(scene: SceneInput, plan: Pick<DungeonPlan, "w" | "h
  * hexes a doorway's leaves (`leaves`, the plan's walls by doorway) are one
  * door in their doorway's one state (phase 3, 2.2).
  */
-export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps" | "lights" | "walls">, leaves?: readonly (readonly number[])[]): Summary {
+export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | "traps" | "lights" | "walls" | "monsters">, leaves?: readonly (readonly number[])[]): Summary {
   const byKey = new Map(plan.doors.map((d) => [d.edge, d.state]));
   const seen = new Set<string>();
   let doors = 0;
@@ -184,7 +185,18 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
     if (f === "locked") locked++;
     if (f === "secret") secretDoors++;
   }
-  return { rooms: plan.rooms.length, asked: plan.asked, doors, locked, traps: plan.traps.length, secretDoors, secretRooms: plan.rooms.filter((r) => r.secret).length, lights: plan.lights.length };
+  const monsters = plan.monsters;
+  return {
+    rooms: plan.rooms.length,
+    asked: plan.asked,
+    doors,
+    locked,
+    traps: plan.traps.length,
+    secretDoors,
+    secretRooms: plan.rooms.filter((r) => r.secret).length,
+    lights: plan.lights.length,
+    ...(monsters ? { monsters: monsters.length, stockedRooms: new Set(monsters.map((m) => m.room)).size } : {}),
+  };
 }
 
 /** What a preview reads of a plan's working, and the layout an edit on it freezes where the planner says (`planFitted`). */
@@ -228,6 +240,7 @@ export function previewOf(
   key: KeyInput | null,
   make: (settings: DungeonSettings, seed: Seed, context: PlanContext, edits: DungeonEdits | null) => Made | DungeonPlan = (s, sd, c, e) => planFitted(s, sd, c, e ? { edits: e } : {}),
   edits: DungeonEdits | null = null,
+  _stock: StockRequest | null = null,
 ): Preview {
   let planned: Made;
   try {
@@ -343,7 +356,7 @@ export function wingClearOf(planned: Planned, base: WingBase, settings: DungeonS
  * panel's facts, and what its asks carry. A wing that cannot be planned
  * is the "fit" error with the planner's problem.
  */
-export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null): Preview {
+export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null, _stock: StockRequest | null = null): Preview {
   let planned: Fitted;
   try {
     planned = planFitted(settings, seed, context, { wing: base, ...(edits ? { edits } : {}) });

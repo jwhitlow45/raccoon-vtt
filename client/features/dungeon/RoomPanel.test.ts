@@ -29,6 +29,8 @@ const ROOM: RoomFacts = {
   dressing: "some",
   lit: false,
   reports: [],
+  share: false,
+  monsters: null,
 };
 
 function draw(facts: RoomFacts | null, edit?: RoomEdit, more: { cave?: boolean; flat?: boolean; extra?: string[]; wing?: boolean } = {}): string {

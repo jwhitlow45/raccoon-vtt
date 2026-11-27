@@ -1,4 +1,5 @@
 import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
+import { DIFFICULTIES, type Difficulty } from "#shared/srd/xp-budget.ts";
 
 /*
  * The dungeon generator's choices and caps (docs/design/design-v1-dungeon-generator.md
@@ -294,4 +295,31 @@ export function clampContext(c: Partial<Record<keyof PlanContext, unknown>> | un
   const feetPerCell = typeof ft === "number" && Number.isFinite(ft) ? clamp(Math.round(ft), 1, 100) : DEFAULT_CONTEXT.feetPerCell;
   const grid = oneOf(c?.grid, GRIDS, "squares");
   return isHexGrid(grid) ? { feetPerCell, grid } : { feetPerCell };
+}
+
+/**
+ * The Monsters choices (docs/design/design-v1-dungeon-stock.md 4,
+ * D-261127-061): the share of the rooms other than the entrance that hold
+ * a fight, in percent, and the fight's difficulty. They sit beside the
+ * settings, not in them, so at None every setting, plan, keyed op and
+ * golden fixture stays as it was, and an edit's frozen layout never holds
+ * them.
+ */
+export type StockChoices = { monsters: number; difficulty: Difficulty };
+export const DEFAULT_STOCK: Readonly<StockChoices> = { monsters: 0, difficulty: "moderate" };
+export const MONSTERS_MAX = 100;
+export const MONSTERS_STEP = 5;
+/** The Monsters slider's named marks, in percent of the rooms other than the entrance. */
+export const MONSTER_PRESETS = { None: 0, Few: 25, Half: 50, All: 100 } as const;
+/** Creatures one dungeon or wing stocks at most, so Make's ops stay within MAX_OPS (D-261127-059, 060). */
+export const MAX_MONSTERS = 40;
+/** Creatures one room's fight holds at most. */
+export const MAX_ROOM_MONSTERS = 6;
+
+/** Stock choices from anything shaped like them, such as choices a device remembered: each read or replaced by its default. */
+export function clampStock(c: Partial<Record<keyof StockChoices, unknown>> | undefined): StockChoices {
+  return {
+    monsters: onSlider(c?.monsters, MONSTERS_MAX, MONSTERS_STEP, {}, DEFAULT_STOCK.monsters),
+    difficulty: oneOf(c?.difficulty, DIFFICULTIES, DEFAULT_STOCK.difficulty),
+  };
 }

@@ -5,7 +5,9 @@ import type { KeyInput } from "./keyPage.ts";
 import type { WingBase } from "./plan.ts";
 import { previewOf, wingPreviewOf } from "./scratch.ts";
 import type { Seed } from "./seed.ts";
-import type { DungeonSettings, PlanContext } from "./settings.ts";
+import type { PartyGroup } from "#shared/model.ts";
+import type { DungeonSettings, PlanContext, StockChoices } from "./settings.ts";
+import type { StockMonster } from "./stockPools.ts";
 
 /*
  * The dungeon worker (docs/design/design-v1-dungeon-generator.md 5.5 and 8,
@@ -16,15 +18,22 @@ import type { DungeonSettings, PlanContext } from "./settings.ts";
  */
 
 /**
+ * What a preview stocks (docs/design/design-v1-dungeon-stock.md 4): the
+ * choices, the party, the theme's pool and the tokens the scene's group has
+ * room for. Null at None, without a leveled party, or before the SRD list.
+ */
+export type StockRequest = { choices: StockChoices; party: PartyGroup[]; pool: StockMonster[]; tokensLeft: number };
+
+/**
  * What the page asks: a new scene's preview, a wing's base (phase 3, 3.3),
  * which every later wing is planned on until another is posted, and a
  * wing's preview on it. Edits ride each preview (4.2) and never leave the
  * device.
  */
 export type ToWorker =
-  | { t: "preview"; id: number; settings: DungeonSettings; seed: Seed; scene: SceneInput; context: PlanContext; key: KeyInput | null; edits: DungeonEdits | null }
+  | { t: "preview"; id: number; settings: DungeonSettings; seed: Seed; scene: SceneInput; context: PlanContext; key: KeyInput | null; edits: DungeonEdits | null; stock: StockRequest | null }
   | { t: "base"; base: WingBase }
-  | { t: "wing"; id: number; settings: DungeonSettings; seed: Seed; context: PlanContext; key: KeyInput | null; edits: DungeonEdits | null };
+  | { t: "wing"; id: number; settings: DungeonSettings; seed: Seed; context: PlanContext; key: KeyInput | null; edits: DungeonEdits | null; stock: StockRequest | null };
 export type FromWorker = { t: "preview"; id: number; preview: Preview };
 
 const scope = self as unknown as {
@@ -42,8 +51,8 @@ scope.addEventListener("message", (e) => {
   }
   if (m.t === "wing") {
     // No base posted: the page answers its own wing with nothing to plan on as a bug, which it never sends.
-    scope.postMessage({ t: "preview", id: m.id, preview: base ? wingPreviewOf(m.settings, m.seed, base, m.context, m.key, m.edits) : { ok: false, error: "bug" } });
+    scope.postMessage({ t: "preview", id: m.id, preview: base ? wingPreviewOf(m.settings, m.seed, base, m.context, m.key, m.edits, m.stock) : { ok: false, error: "bug" } });
     return;
   }
-  scope.postMessage({ t: "preview", id: m.id, preview: previewOf(m.settings, m.seed, m.scene, m.context, m.key, undefined, m.edits) });
+  scope.postMessage({ t: "preview", id: m.id, preview: previewOf(m.settings, m.seed, m.scene, m.context, m.key, undefined, m.edits, m.stock) });
 });
