@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { uuidv7 } from "#shared/ids.ts";
 import type { Character } from "#shared/model.ts";
 import { modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
-import { ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, openSideTab, OpSocket, pagePoint, pickTool, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -16,10 +16,14 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * lived, on a phone held upright and on a computer (ft-1), every part's
  * probes in the toolbar, the top bar, the side panel's tabs and This device
  * gone once hidden and back from the search (ft-2), keys and an active
- * tool (ft-3), no op as the switches and presets change (ft-4), the
- * player's Short Rest and D&D Beyond re-sync sending the same ops with the
- * slot parts hidden as shown (ft-4f, ft-4h), the Classes sheet closing once
- * both slot parts hide (ftd-1), Reset all
+ * tool (ft-3), no op as the switches and presets change (ft-4), and the op
+ * twin: each of its steps played with every part shown and again with run
+ * H's parts hidden, sending the same ops and putting the same prompts
+ * before each person (ft-4a to ft-4h, the room set in ft-4s), with the
+ * Classes sheet closing once both slot parts hide (ftd-1). Then the
+ * prompts that still reach a person: a player's trap with every part
+ * hidden (ft-5), the DM's trap, hint, borrowed Area tool and fall (ft-6),
+ * Bless ending on the clock with Date and time hidden (ft-7), Reset all
  * and a second window (ft-8), "view as a player" showing every part
  * (ft-9) and the search's Show results (ft-10). The surfaces gated inside
  * their own files (the creature homes, scene settings, the DM panel, the
@@ -45,12 +49,13 @@ let dmContext: BrowserContext;
 let playerContext: BrowserContext;
 let dm: Page;
 let player: Page;
+let playerCdp: CDPSession;
 const dmSocket = new SocketWatch("dm");
 const playerSocket = new SocketWatch("player");
 const dmConsole = new ConsoleWatch("dm");
 const playerConsole = new ConsoleWatch("player");
 
-const run = { roomId: "", roomName: `E2E features ${new Date().toISOString().slice(0, 19)}`, password: "", thorn: uuidv7() };
+const run = { roomId: "", roomName: `E2E features ${new Date().toISOString().slice(0, 19)}`, password: "", thorn: uuidv7(), scene: "", thornToken: uuidv7(), priest: uuidv7(), goblin: uuidv7(), fireball: uuidv7(), guardians: uuidv7() };
 /** The DM's own socket for the slot steps' setup, which is no device's choice. */
 let ops: OpSocket | null = null;
 
@@ -166,17 +171,20 @@ async function ownerShot(page: Page, name: string): Promise<void> {
 
 /**
  * An op frame as the twin compares it (docs/design/design-v1-features.md 14,
- * ft-4): the op alone, its frame number and tags left out and every id
- * written as <id>, so two runs of one script read the same.
+ * ft-4): the op alone, its frame number, tags and claims left out, every id
+ * written as <id> and every log line's id as <line>, so two runs of one
+ * script read the same. What stands under `mask`'s keys comes from the
+ * server's dice, a number or a save's result, so it is <n>.
  */
-function opShape(frame: string): unknown {
-  const strip = (v: unknown): unknown => {
-    if (typeof v === "string") return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? "<id>" : v;
-    if (Array.isArray(v)) return v.map(strip);
-    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => k !== "tag").map(([k, x]) => [k, strip(x)]));
+function opShape(frame: string, mask: readonly string[] = []): unknown {
+  const strip = (v: unknown, key: string): unknown => {
+    if ((typeof v === "number" || typeof v === "string") && mask.includes(key)) return "<n>";
+    if (typeof v === "string") return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? "<id>" : /^\d+:\d+$/.test(v) ? "<line>" : v;
+    if (Array.isArray(v)) return v.map((x) => strip(x, key));
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => k !== "tag" && k !== "claim").map(([k, x]) => [k, strip(x, k)]));
     return v;
   };
-  return strip((JSON.parse(frame) as { op: unknown }).op);
+  return strip((JSON.parse(frame) as { op: unknown }).op, "");
 }
 
 /** Run H's choices for the player (D-261127-398): every part hidden but Areas and D&D Beyond. */
@@ -235,7 +243,7 @@ async function shortRest(): Promise<unknown[]> {
     const frames = opsSince(playerSocket, from);
     return frames.some((f) => f.includes('"t":"actor.rest"')) ? frames : null;
   });
-  return sent.map(opShape);
+  return sent.map((f) => opShape(f));
 }
 
 /** Thorn as D&D Beyond would send him after a level, Fighter 4, in the service's JSON shape with only the paths the reader reads (shared/ddb/read.ts). */
@@ -279,13 +287,177 @@ async function resync(): Promise<unknown[]> {
   const done = player.getByRole("dialog", { name: "Thorn is re-synced" });
   await done.waitFor();
   await waitFor("Fighter 4 on the DM's device", () => (thorn()?.classes?.[0]?.level === 4 ? true : null));
-  const sent = opsSince(playerSocket, from).map(opShape);
+  const sent = opsSince(playerSocket, from).map((f) => opShape(f));
   await done.getByRole("button", { name: "Undo the re-sync", exact: true }).tap();
   const undone = player.getByRole("dialog", { name: "Re-sync undone" });
   await undone.getByRole("button", { name: "Done", exact: true }).tap();
   await undone.waitFor({ state: "detached" });
   await waitFor("Fighter 3 again", () => (thorn()?.classes?.[0]?.level === 3 ? true : null));
   return sent;
+}
+
+type Hide = Partial<Record<ModuleId, boolean>>;
+
+/** Every part of a role hidden. */
+function allHidden(role: "dm" | "player"): Hide {
+  return Object.fromEntries(modulesFor(role).map((m) => [m.id, false]));
+}
+
+/** Run H's DM device: every part hidden (design 14). */
+const DM_H = allHidden("dm");
+
+/** One run of a twin step: the ops each device sent, and the prompts its script read from each person's screen. */
+type Take = { dm: unknown[]; player: unknown[]; prompts: string[] };
+
+/**
+ * One step of the op twin (docs/design/design-v1-features.md 14, ft-4): its
+ * script once with every part shown on both devices (run E), then once with
+ * `hidden` on each (run H). Each device must send the same ops, and each
+ * person must get the same prompts. A script leaves the room as it found it,
+ * so the second run starts where the first did.
+ */
+async function twin(hidden: { dm?: Hide; player?: Hide }, script: () => Promise<string[]>, mask: readonly string[] = []): Promise<Take> {
+  const once = async (): Promise<Take> => {
+    const d = dmSocket.sent.length;
+    const p = playerSocket.sent.length;
+    const prompts = await script();
+    return { dm: opsSince(dmSocket, d).map((f) => opShape(f, mask)), player: opsSince(playerSocket, p).map((f) => opShape(f, mask)), prompts };
+  };
+  const shown = await once();
+  await setChoices(dm, { dm: hidden.dm ?? {} });
+  await setChoices(player, { player: hidden.player ?? {} });
+  try {
+    const run = await once();
+    assert.deepEqual(run, shown, `run H differs from run E:\nE ${JSON.stringify(shown)}\nH ${JSON.stringify(run)}`);
+  } finally {
+    await setChoices(dm, null);
+    await setChoices(player, null);
+  }
+  return shown;
+}
+
+const HOUR = 3600;
+/** Day 1, 6:00 AM, so an hour's span ends at 7:00 AM. */
+const DAWN = 6 * HOUR;
+const BOUNDS = { w: 16, h: 12 };
+/** Thorn's own square, west of every trap's. */
+const THORN_AT = { x: 2, y: 4 };
+
+/** Thorn's block with the Fireball the twin's cast area is his (step g). */
+const THORN_STATS = {
+  abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 12, cha: 8 },
+  saves: ["str", "con"],
+  skills: {},
+  spellAbility: "int",
+  adjust: {},
+  defenses: {},
+  rolls: [{ id: "fb", name: "Fireball", kind: "spell", ability: "spell", level: 3, save: { ability: "dex", onPass: "half" }, dice: [{ formula: "8d6", type: "fire", upcast: "1d6" }] }],
+};
+
+/** A monster hardy enough that no step's damage drops it. The SRD block in `extra` gives it saves the group save rolls. */
+function monster(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { hp: { cur: 100, max: 100, temp: 0 }, life: "alive", ac: 13, speeds: { walk: 30 }, initBonus: 2, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "", ...extra };
+}
+
+/** A trap's rig, armed on a step in, its effects from `extra`. */
+function rig(extra: Record<string, unknown>): Record<string, unknown> {
+  return { on: ["enter"], who: "any", floor: false, resets: "never", stops: true, foundOnSpring: false, hits: "trigger", message: "The floor gives way!", actions: [], find: [], notice: false, ...extra };
+}
+
+/** A trap on the 2 x 2 squares east of Thorn, on the players' scene. */
+async function armTrap(name: string, effects: Record<string, unknown>): Promise<string> {
+  const id = uuidv7();
+  await ops!.send({ t: "trap.create", trap: { id, sceneId: run.scene, name, found: false, zone: { cells: [{ x: 6, y: 4, w: 2, h: 2 }] }, rig: rig(effects) } });
+  await waitFor(`${name} on the DM's device`, () => dmSocket.state?.traps?.[id] ?? null);
+  return id;
+}
+
+function thornToken() {
+  return dmSocket.state?.tokens[run.thornToken];
+}
+
+/** Pat drags Thorn east, across the squares the traps take unless he stops short, as a finger would. */
+async function walkThorn(toX = 10): Promise<void> {
+  await closeSheets(player);
+  const from = await pagePoint(player, BOUNDS, { x: THORN_AT.x + 0.5, y: THORN_AT.y + 0.5 });
+  const to = await pagePoint(player, BOUNDS, { x: toX + 0.5, y: THORN_AT.y + 0.5 });
+  await touchSwipe(playerCdp, from, to, { steps: 16, everyMs: 20 });
+}
+
+/** Thorn back on his square, his conditions gone and his HP whole, the trap gone. */
+async function thornBack(trapId: string | null): Promise<void> {
+  if (trapId) await ops!.send({ t: "trap.delete", trapId });
+  for (const e of thorn()?.actor.effects ?? []) await ops!.send({ t: "actor.effect.remove", target: { characterId: run.thorn }, effectId: e.id });
+  await ops!.send({ t: "actor.hp", target: { characterId: run.thorn }, change: { kind: "set", cur: 30 } });
+  await ops!.send({ t: "token.update", tokenId: run.thornToken, patch: { x: THORN_AT.x, y: THORN_AT.y, elevation: 0 } });
+  await waitFor("Thorn back on his square", () => {
+    const t = thornToken();
+    return t?.x === THORN_AT.x && t.y === THORN_AT.y && thorn()?.actor.effects.length === 0 ? true : null;
+  });
+}
+
+/** A toast's words, once it shows. */
+async function toastWords(page: Page, words: string | RegExp): Promise<string> {
+  const toast = page.locator("[data-toast]").filter({ hasText: words }).first();
+  await toast.waitFor();
+  return (await toast.innerText()).replace(/\s+/g, " ").trim();
+}
+
+/** Every toast holding `words` dismissed by a press on its words, so the twin's next run reads its own. */
+async function dismissToasts(page: Page, words: string | RegExp): Promise<void> {
+  const toasts = page.locator("[data-toast]").filter({ hasText: words });
+  for (let i = 0; i < 6 && (await toasts.count()) > 0; i++) {
+    await toasts
+      .first()
+      .locator("xpath=descendant-or-self::button[1]")
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+  }
+  await waitFor(`no toast saying ${String(words)}`, async () => ((await toasts.count()) === 0 ? true : null));
+}
+
+/** A panel of the phone's Panels list, as a sheet. */
+async function phoneSheet(name: string): Promise<Locator> {
+  const sheet = player.locator(`dialog[data-rvtt-sheet][aria-label="${name}"]`);
+  if (await sheet.isVisible()) return sheet;
+  await closeSheets(player);
+  await player.locator('button[title="Panels"]').click();
+  await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/** The DM's side panel, on a tab. */
+async function dmPanel(title: string): Promise<Locator> {
+  await openSideTab(dm, title);
+  return dm.getByRole("tabpanel", { name: sideTabName(title) });
+}
+
+/** Thorn's page in the DM's Characters panel, its Combat group unfolded. */
+async function dmThornsPage(): Promise<Locator> {
+  const panel = await dmPanel("Characters");
+  const heading = panel.locator("[data-creature-heading]").filter({ hasText: "Thorn" });
+  const opener = panel.locator(`[data-opener="character:${run.thorn}"]`);
+  await heading.or(opener).first().waitFor();
+  if ((await heading.count()) === 0) await opener.click();
+  await heading.waitFor();
+  const fold = panel.getByRole("button", { name: "Combat", exact: true });
+  if ((await fold.count()) > 0 && (await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  return panel;
+}
+
+/** A trap's card on the DM's desk, opened. */
+async function trapCard(name: string): Promise<Locator> {
+  const card = dm.getByRole("group", { name: `${name} went off` });
+  await card.waitFor();
+  const toggle = card.getByRole("button", { name: `${name} went off`, exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+  return card;
+}
+
+/** The group save's page, the Areas panel or Dice: where its Apply stands, and its Done once applied. */
+function groupSavePage(): Locator {
+  return dm.getByRole("tabpanel").filter({ has: dm.getByRole("button", { name: /^Apply: / }).or(dm.getByRole("button", { name: "Done", exact: true })) });
 }
 
 /** The DM's panels a part takes, by their side panel names. */
@@ -298,7 +470,10 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     dmContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     playerContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     dm = await dmContext.newPage();
+    // Every Dice fold open, so the Perception roll of step b shows on the phone.
+    await diceFoldsOpen(playerContext);
     player = await playerContext.newPage();
+    playerCdp = await playerContext.newCDPSession(player);
     dmConsole.attach(dm);
     playerConsole.attach(player);
     await dmSocket.attach(dmContext, dm);
@@ -653,6 +828,336 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
       await player.unroute("**/api/rooms/*/ddb-import");
       await setChoices(player, null);
       await closeSheets(player);
+    }
+  });
+
+  test("ft-4s. the twin's room: Thorn's token west of the traps' squares with Fireball on his block, a goblin priest beside him and a goblin far off", async () => {
+    run.scene = dmSocket.state!.meta.playerSceneId!;
+    await ops!.send({ t: "scene.update", sceneId: run.scene, patch: { bounds: BOUNDS, fogEnabled: false } });
+    await ops!.send({ t: "character.update", characterId: run.thorn, patch: { stats: THORN_STATS } });
+    const shown = { size: "medium", visibility: "all" } as const;
+    await ops!.send({ t: "token.create", token: { id: run.thornToken, sceneId: run.scene, kind: "pc", name: "Thorn", actor: { ref: run.thorn }, disposition: "ally", ...THORN_AT, ...shown } });
+    await ops!.send({ t: "token.create", token: { id: run.priest, sceneId: run.scene, kind: "monster", name: "Goblin Priest", actor: { inline: monster() }, disposition: "hostile", x: 3, y: 7, ...shown } });
+    await ops!.send({ t: "token.create", token: { id: run.goblin, sceneId: run.scene, kind: "monster", name: "Goblin", actor: { inline: monster({ srdId: "goblin-warrior" }) }, disposition: "hostile", x: 12, y: 9, ...shown } });
+    await waitFor("the three on Pat's phone", () => (playerSocket.state?.tokens[run.goblin] && playerSocket.state.tokens[run.thornToken] ? true : null));
+    await closeSheets(player);
+    await player.locator(".konvajs-content").first().waitFor();
+  });
+
+  test("ft-4a. the DM's party Long Rest with the clock running offers Move the clock on 8 hours, ticked, and sends the same ops with Date and time and the Characters parts hidden (D-261127-110)", async () => {
+    const shown = await twin({ dm: DM_H }, async () => {
+      await ops!.send({ t: "clock.start", id: uuidv7(), at: DAWN, shown: true, calendar: { kind: "days" } });
+      await waitFor("the clock at dawn", () => (dmSocket.state?.clock?.t === DAWN ? true : null));
+      const panel = await dmPanel("Characters");
+      const back = dm.getByRole("button", { name: "Back to Characters" });
+      if (await back.isVisible()) await back.click();
+      await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+      const box = panel.getByRole("checkbox", { name: "Move the clock on 8 hours", exact: true });
+      await box.waitFor();
+      const ticked = await box.isChecked();
+      await panel.getByRole("button", { name: "Finish the Long Rest", exact: true }).click();
+      await waitFor("the clock 8 hours on", () => (dmSocket.state?.clock?.t === DAWN + 8 * HOUR ? true : null));
+      await waitFor("Thorn's rest", () => (thorn()?.longRest?.at === DAWN + 8 * HOUR ? true : null));
+      await ops!.send({ t: "clock.stop" });
+      await waitFor("the clock stopped", () => (dmSocket.state?.clock ? null : true));
+      return [`Move the clock on 8 hours ${ticked ? "ticked" : "not ticked"}`];
+    });
+    assert.deepEqual(
+      shown.dm.map((o) => (o as { t: string }).t),
+      ["clock.advance", "actor.rest"],
+    );
+    assert.deepEqual(shown.prompts, ["Move the clock on 8 hours ticked"]);
+  });
+
+  test("ft-4b. Pat's Perception check in heavy rain names the rain and rolls with Disadvantage, Weather hidden on his phone or not", async () => {
+    await ops!.send({ t: "scene.update", sceneId: run.scene, patch: { weather: { kind: "rain", heavy: true, wind: "strong" } } });
+    try {
+      const shown = await twin({ player: RUN_H.player }, async () => {
+        const dice = await phoneSheet("Dice");
+        const perception = dice.getByRole("region", { name: "Rolls for Thorn" }).getByRole("button", { name: /^Perception/ });
+        const label = await waitFor("Perception names heavy rain", async () => {
+          const words = (await perception.getAttribute("aria-label")) ?? "";
+          return /Dis: Heavy rain/.test(words) ? words : null;
+        });
+        const last = playerSocket.state?.log.at(-1)?.id;
+        await perception.tap();
+        await waitFor("the roll's line", () => {
+          const line = playerSocket.state?.log.at(-1);
+          return line && line.id !== last && line.data?.type === "dice" ? true : null;
+        });
+        await closeSheets(player);
+        return [label];
+      });
+      assert.match(JSON.stringify(shown.player), /"mode":"dis"/, "the roll went with Disadvantage");
+    } finally {
+      await ops!.send({ t: "scene.update", sceneId: run.scene, patch: { weather: null } });
+    }
+  });
+
+  test("ft-4c. the DM's New fight with Roll monsters' Initiative rolls for both goblins, the same ops with Encounters and Dice animation hidden", async () => {
+    const shown = await twin(
+      { dm: DM_H },
+      async () => {
+        const tracker = await dmPanel("Initiative");
+        const roll = tracker.getByRole("switch", { name: /^Roll monsters' Initiative/ });
+        if ((await roll.getAttribute("aria-checked")) !== "true") await roll.click();
+        await tracker.getByRole("button", { name: /^Everyone here \(\d+\)$/ }).click();
+        await waitFor("both goblins' Initiative", () => {
+          const goblins = (dmSocket.state?.encounter?.entries ?? []).filter((e) => e.tokenId === run.priest || e.tokenId === run.goblin);
+          return goblins.length === 2 && goblins.every((e) => typeof e.value === "number") ? true : null;
+        });
+        await ops!.send({ t: "encounter.end" });
+        await waitFor("no fight", () => (dmSocket.state?.encounter ? null : true));
+        return [];
+      },
+      ["value"],
+    );
+    assert.deepEqual(
+      shown.dm.map((o) => (o as { t: string }).t),
+      ["encounter.start", "dice.roll", "encounter.setValues"],
+    );
+  });
+
+  test("ft-4d. the DM's Start into Spirit Guardians tells the DM and Pat that Thorn started his turn in it, Areas hidden on both devices or not", async () => {
+    await ops!.send({ t: "template.create", template: { id: run.guardians, sceneId: run.scene, shape: "emanation", size: 15, origin: { x: 3.5, y: 7.5, z: 0 }, yaw: 0, attachedTo: run.priest, casterId: run.priest, includeOrigin: false, color: "#ff8800", spell: "Spirit Guardians", ownerId: dmSocket.you!.memberId, visibility: "all", triggers: ["enter", "turnStart", "turnEnd"], oncePerTurn: true } });
+    const words = "Thorn started its turn in Spirit Guardians.";
+    try {
+      const shown = await twin({ dm: DM_H, player: allHidden("player") }, async () => {
+        await ops!.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.thornToken, value: 15 }, { id: uuidv7(), tokenId: run.priest, value: 10 }] });
+        await waitFor("the fight", () => dmSocket.state?.encounter ?? null);
+        await dmPanel("Initiative");
+        await dm.locator("[data-round-header]").getByRole("button", { name: /^(Start|Next)$/ }).click();
+        const prompts = [await toastWords(dm, words), await toastWords(player, words)];
+        await ops!.send({ t: "encounter.end" });
+        await waitFor("no fight", () => (dmSocket.state?.encounter ? null : true));
+        await dismissToasts(dm, words);
+        await dismissToasts(player, words);
+        await closeSheets(player);
+        return prompts;
+      });
+      assert.equal(shown.dm.length, 1, `one op, the turn: ${JSON.stringify(shown.dm)}`);
+    } finally {
+      await ops!.send({ t: "template.delete", templateId: run.guardians });
+    }
+  });
+
+  test("ft-4e. Pat's move across the armed trap stops Thorn on it with its toast, and the DM's card Apply lays him Prone, the same with Pat's tools and the DM's Traps hidden", async () => {
+    const shown = await twin({ dm: DM_H, player: RUN_H.player }, async () => {
+      const trapId = await armTrap("Tripwire", { conditions: ["prone"] });
+      await walkThorn();
+      await waitFor("Thorn stopped on the trap", () => (thornToken()?.x === 6 && thornToken()?.y === THORN_AT.y ? true : null));
+      const said = await toastWords(player, "Thorn: The floor gives way!");
+      const told = await toastWords(dm, "Tripwire went off: Thorn.");
+      const card = await trapCard("Tripwire");
+      const by = (await card.getByText("Thorn set it off.").innerText()).trim();
+      await card.getByRole("button", { name: "Apply", exact: true }).click();
+      const page = groupSavePage();
+      await page.getByRole("button", { name: /^Apply: / }).click();
+      await waitFor("Thorn Prone", () => (thorn()?.actor.effects.some((e) => e.key === "prone") ? true : null));
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await waitFor("the springing settled", () => (dmSocket.state?.traps?.[trapId]?.rig?.due === undefined ? true : null));
+      await dismissToasts(player, "Thorn: The floor gives way!");
+      await dismissToasts(dm, "Tripwire went off");
+      await thornBack(trapId);
+      return [said, told, by];
+    });
+    assert.ok(shown.player.some((o) => (o as { t: string }).t === "token.move"), JSON.stringify(shown.player));
+  });
+
+  test("ft-4g. Pat's Ask for saves from his Fireball, and the DM's group save from its card whose Apply hurts the goblin, send the same ops with Areas hidden on the DM's device, where the save opens in Dice (D-261127-305)", async () => {
+    await ops!.send({ t: "template.create", template: { id: run.fireball, sceneId: run.scene, shape: "sphere", size: 20, origin: { x: 13, y: 10, z: 0 }, yaw: 0, includeOrigin: true, color: "#30a46c", ownerId: playerSocket.you!.memberId, visibility: "all", casterId: run.thornToken, spell: "Fireball" } });
+    const opened: string[] = [];
+    try {
+      const shown = await twin(
+        { dm: DM_H, player: RUN_H.player },
+        async () => {
+          const areas = await phoneSheet("Areas");
+          await areas.getByRole("button", { name: "Ask the DM for saves against Fireball" }).tap();
+          const block = player.getByRole("group", { name: "Ask for saves: Fireball" });
+          await block.waitFor();
+          const prompts = [(await block.getAttribute("aria-label")) ?? ""];
+          await block.getByRole("button", { name: "Roll 8d6 Fire and ask" }).tap();
+          const card = dm.getByRole("group", { name: "Thorn asks for saves: Fireball" });
+          await card.waitFor();
+          prompts.push((await card.getAttribute("aria-label")) ?? "");
+          const open = card.getByRole("button", { name: "Open the group save for Thorn's Fireball" });
+          if (!(await open.isVisible())) await card.locator("button[aria-expanded]").first().click();
+          await open.click();
+          const rollSaves = dm.getByRole("button", { name: /^Roll \d+ saves?/ });
+          await rollSaves.waitFor();
+          opened.push((await dm.getByRole("tabpanel", { name: sideTabName("Dice") }).filter({ has: rollSaves }).count()) > 0 ? "Dice" : "Areas");
+          await rollSaves.click();
+          const page = groupSavePage();
+          await page.getByRole("button", { name: /^Apply: / }).click();
+          const hp = () => {
+            const a = dmSocket.state?.tokens[run.goblin]?.actor;
+            return a && "inline" in a ? a.inline.hp?.cur : undefined;
+          };
+          await waitFor("the goblin hurt", () => ((hp() ?? 100) < 100 ? true : null));
+          await page.getByRole("button", { name: "Done", exact: true }).click();
+          await closeSheets(player);
+          await ops!.send({ t: "actor.hp", target: { tokenId: run.goblin }, change: { kind: "set", cur: 100 } });
+          await waitFor("the goblin whole", () => (hp() === 100 ? true : null));
+          return prompts;
+        },
+        ["amount", "result"],
+      );
+      assert.ok(shown.player.some((o) => (o as { t: string }).t === "cast.ask"), JSON.stringify(shown.player));
+      assert.deepEqual(opened, ["Areas", "Dice"], "the save opens in Areas, and in Dice while Areas hides");
+    } finally {
+      await ops!.send({ t: "template.delete", templateId: run.fireball });
+    }
+  });
+
+  test("ft-5. with every part hidden on Pat's phone, a trap that goes off on Thorn still gives him its toast, the stopped move, the Log line and a save request named Trap", async () => {
+    await setChoices(player, { player: allHidden("player") });
+    let trapId: string | null = null;
+    try {
+      trapId = await armTrap("Pit", { save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }] });
+      const pit = trapId;
+      await walkThorn();
+      await waitFor("Thorn stopped on the pit", () => (thornToken()?.x === 6 && thornToken()?.y === THORN_AT.y ? true : null));
+      await toastWords(player, "Thorn: The floor gives way!");
+      const log = await phoneSheet("Log");
+      await log.getByText(/The floor gives way!/).first().waitFor();
+      await closeSheets(player);
+      const card = await trapCard("Pit");
+      await card.getByRole("button", { name: "Save and damage", exact: true }).click();
+      await dm.getByRole("button", { name: "Ask 1 player and roll damage", exact: true }).click();
+      const ask = player.getByRole("dialog", { name: "The DM asks for a roll" }).or(player.locator('[aria-label="The DM asks for a roll"]')).first();
+      await ask.getByText(/^The DM asks for a Dexterity saving throw.*: Trap\.$/).waitFor();
+      await shots.take(player, "ft-5-trap-request-hidden-here");
+      const total = ask.getByLabel("Total Thorn rolled");
+      await total.fill("5");
+      await total.press("Enter");
+      await waitFor("Pat's answer on the DM's device", () => (Object.values(dmSocket.state?.rolls ?? {}).some((r) => r.targets.some((t) => t.total === 5)) ? true : null));
+      const outcome = dm.getByRole("group", { name: "Outcome" });
+      if ((await outcome.count()) === 0) await dm.getByRole("button", { name: "Edit", exact: true }).click();
+      await dm.getByLabel("Damage", { exact: true }).press("Enter");
+      const page = groupSavePage();
+      await page.getByRole("button", { name: /^Apply: / }).click();
+      await waitFor("Thorn hurt", () => ((thorn()?.actor.hp.cur ?? 30) < 30 ? true : null));
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await waitFor("the springing settled", () => (dmSocket.state?.traps?.[pit]?.rig?.due === undefined ? true : null));
+    } finally {
+      await setChoices(player, null);
+      await dismissToasts(player, "Thorn: The floor gives way!");
+      await dismissToasts(dm, "Pit went off");
+      await thornBack(trapId);
+    }
+  });
+
+  test("ft-6. with every part hidden on the DM's device, a trap still brings its toast and its card with Save and damage and Dismiss, the Passive Perception hint its Mark found, and a fall its toast and card. With Areas alone hidden, Place the area lends the Area tool to the trap's draft and hands back the Trap tool (D-261127-303)", async () => {
+    await setChoices(dm, { dm: DM_H });
+    let trapId: string | null = null;
+    try {
+      // A walk from the DM's other device springs it.
+      trapId = await armTrap("Spikes", { save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }] });
+      const spikes = trapId;
+      await ops!.send({ t: "token.move", tokenId: run.thornToken, x: 10, y: THORN_AT.y });
+      await waitFor("Thorn stopped on the spikes", () => (thornToken()?.x === 6 ? true : null));
+      await dm.locator("[data-toast]").filter({ hasText: "Spikes went off: Thorn." }).first().getByRole("button", { name: "Save and damage", exact: true }).waitFor();
+      const card = await trapCard("Spikes");
+      await card.getByRole("button", { name: "Save and damage", exact: true }).waitFor();
+      await shots.take(dm, "ft-6-trap-card-hidden-here");
+      await card.getByRole("button", { name: "Dismiss Spikes went off", exact: true }).click();
+      await waitFor("the springing settled", () => (dmSocket.state?.traps?.[spikes]?.rig?.due === undefined ? true : null));
+      await dismissToasts(dm, "Spikes went off");
+      await thornBack(trapId);
+      trapId = null;
+
+      // Pat ends Thorn's walk 5 ft from a trap nobody found, his Passive Perception against its DC 10.
+      const stone = uuidv7();
+      await ops!.send({ t: "trap.create", trap: { id: stone, sceneId: run.scene, name: "Loose stone", found: false, zone: { cells: [{ x: 8, y: 4, w: 1, h: 1 }] }, rig: rig({ conditions: ["prone"], notice: true, find: [{ ability: "wis", skill: "perception", dc: 10 }] }) } });
+      trapId = stone;
+      await waitFor("the stone on the DM's device", () => dmSocket.state?.traps?.[stone] ?? null);
+      await walkThorn(6);
+      await waitFor("Thorn 5 ft from the stone", () => (thornToken()?.x === 6 ? true : null));
+      const hint = dm.locator("[data-toast]").filter({ hasText: /^Thorn's Passive Perception \(11\) would notice Loose stone \(DC 10\)\./ }).first();
+      await hint.getByRole("button", { name: "Mark found", exact: true }).click();
+      await waitFor("the stone found", () => (dmSocket.state?.traps?.[stone]?.found === true ? true : null));
+      await thornBack(stone);
+      trapId = null;
+
+      // Areas alone hidden: Place the area borrows the Area tool for the trap's draft, and Save hands the Trap tool back.
+      await setChoices(dm, { dm: { areas: false } });
+      const dart = uuidv7();
+      await ops!.send({ t: "trap.create", trap: { id: dart, sceneId: run.scene, name: "Dart wall", found: false, zone: { cells: [{ x: 4, y: 10, w: 1, h: 1 }] }, rig: rig({ save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }] }) } });
+      trapId = dart;
+      await waitFor("the dart wall on the DM's device", () => dmSocket.state?.traps?.[dart] ?? null);
+      await closeSheets(dm);
+      await pickTool(dm, "Trap");
+      await tapCell(dm, BOUNDS, { x: 4, y: 10 });
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      await pane.waitFor();
+      const targets = pane.getByRole("button", { name: "Targets", exact: true });
+      if ((await targets.getAttribute("aria-expanded")) !== "true") await targets.click();
+      await pane.getByRole("radiogroup", { name: "Targets" }).getByRole("radio", { name: "Everyone in an area" }).click();
+      await pane.getByRole("button", { name: "Place the area", exact: true }).click();
+      const bar = dm.getByRole("toolbar", { name: "Area options" });
+      await bar.waitFor();
+      await tapCell(dm, BOUNDS, { x: 9, y: 10 });
+      await bar.getByRole("button", { name: "Save to trap", exact: true }).click();
+      await waitFor("the trap hits an area", () => {
+        const hits = dmSocket.state?.traps?.[dart]?.rig?.hits;
+        return typeof hits === "object" && "area" in hits ? true : null;
+      });
+      await pane.waitFor();
+      await waitFor("the Trap tool back", async () => ((await toolbar(dm).locator('[data-tool="trap"]').getAttribute("data-active")) === "true" ? true : null));
+      assert.equal(await toolbar(dm).locator('[data-tool="area"]').count(), 0, "the Area tool still hidden");
+      await pane.getByRole("button", { name: "Done", exact: true }).click();
+      await pane.waitFor({ state: "detached" });
+      await pickTool(dm, "Select");
+      await ops!.send({ t: "trap.delete", trapId: dart });
+      trapId = null;
+
+      // A fall through an opening with Floors hidden.
+      await setChoices(dm, { dm: DM_H });
+      const upper = uuidv7();
+      const rat = uuidv7();
+      const hole = uuidv7();
+      await ops!.send({ t: "scene.create", scene: { id: upper, name: "Tower", bounds: BOUNDS }, floor: { beside: run.scene, side: "above", besideName: "Ground floor" } });
+      await ops!.send({ t: "scene.update", sceneId: upper, patch: { floor: { name: "Upper floor", height: 10 }, fogEnabled: false } });
+      await ops!.send({ t: "token.create", token: { id: rat, sceneId: upper, kind: "monster", name: "Rat", actor: { inline: monster() }, disposition: "hostile", x: 13, y: 2, size: "medium", visibility: "all" } });
+      await ops!.send({ t: "floorLink.put", link: { id: hole, pairId: uuidv7(), sceneId: upper, to: run.scene, rect: { x: 13, y: 2, w: 2, h: 2 }, kind: "opening" } });
+      await waitFor("the rat below", () => (dmSocket.state?.tokens[rat]?.sceneId === run.scene ? true : null));
+      await toastWords(dm, "Rat fell 10 ft to Ground floor.");
+      const fall = dm.getByRole("region", { name: "Fall: Rat" });
+      await fall.waitFor();
+      const fold = fall.getByRole("button", { expanded: false });
+      if ((await fold.count()) > 0) await fold.first().click();
+      await fall.getByRole("button", { name: "Apply Rat's fall" }).waitFor();
+      await shots.take(dm, "ft-6-fall-card-hidden-here");
+      await fall.getByRole("button", { name: "Dismiss Rat's fall" }).click();
+      await fall.waitFor({ state: "detached" });
+      await dismissToasts(dm, "Rat fell 10 ft");
+      await ops!.send({ t: "floorLink.delete", linkId: hole });
+      await ops!.send({ t: "token.delete", tokenId: rat });
+      await ops!.send({ t: "scene.delete", sceneId: upper });
+    } finally {
+      await setChoices(dm, null);
+      if (trapId) await thornBack(trapId);
+      await closeSheets(dm);
+    }
+  });
+
+  test("ft-7. with Date and time hidden on the DM's device, Bless on the clock keeps its Lasts words, and a step from the DM's other device ends it with the notice and the Log line", async () => {
+    await setChoices(dm, { dm: { time: false } });
+    try {
+      await ops!.send({ t: "clock.start", id: uuidv7(), at: DAWN, shown: true, calendar: { kind: "days" } });
+      await ops!.send({ t: "actor.effect.add", target: { characterId: run.thorn }, effect: { id: uuidv7(), key: "blessed", duration: { mode: "span", seconds: HOUR } } });
+      await waitFor("Thorn blessed on the clock", () => thorn()?.actor.effects.find((e) => e.key === "blessed" && e.ends) ?? null);
+      const panel = await dmThornsPage();
+      await panel.getByText("Lasts 1 hour, to 7:00 AM (1 hour left)", { exact: true }).waitFor();
+      await shots.take(dm, "ft-7-lasts-hidden-here");
+      await ops!.send({ t: "clock.advance", by: HOUR });
+      await waitFor("Blessed run out", () => (thorn()?.actor.effects.length === 0 ? true : null));
+      await dm.getByText("Blessed ended on Thorn.", { exact: true }).first().waitFor();
+      const log = await dmPanel("Log");
+      await log.getByText("Blessed ends on Thorn.", { exact: true }).first().waitFor();
+    } finally {
+      await ops!.send({ t: "clock.stop" });
+      await setChoices(dm, null);
     }
   });
 
