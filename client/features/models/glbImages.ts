@@ -4,8 +4,14 @@
  * keeps or leaves out each image by these sizes before any decode runs, so
  * a texture whose header claims 20,000 px a side costs nothing. The format
  * comes from the bytes, never from the file's `mimeType`. Every read is
- * bounds-checked, and a header that cannot be read gives null.
+ * bounds-checked, and a header that cannot be read gives null. So does a
+ * walk that stops before it is done, on a budget or a broken box: a size
+ * read partway could be a decoy smaller than the image, and the decode,
+ * believing it, would not draw the image down.
  */
+
+/** How many JPEG segments or AVIF boxes a walk reads before it gives up: a real header is a few dozen. */
+export const HEADER_STEPS = 1_000;
 
 export type ImageHeader = { mime: "image/png" | "image/jpeg" | "image/webp" | "image/avif"; width: number; height: number };
 
@@ -28,10 +34,10 @@ function png(b: Uint8Array): ImageHeader | null {
   return sized("image/png", u32be(b, 16), u32be(b, 20));
 }
 
-/** JPEG: the first start-of-frame marker's size, walking the segments by their lengths. */
+/** JPEG: the first start-of-frame marker's size, walking at most `HEADER_STEPS` segments by their lengths. */
 function jpeg(b: Uint8Array): ImageHeader | null {
   let i = 2;
-  while (i + 4 <= b.length) {
+  for (let steps = 0; i + 4 <= b.length && steps < HEADER_STEPS; steps++) {
     if (b[i] !== 0xff) return null;
     let marker = b[i + 1]!;
     // Fill bytes: any number of 0xFF before a marker.
@@ -68,8 +74,10 @@ function webp(b: Uint8Array): ImageHeader | null {
 
 /**
  * AVIF: the largest `ispe` (image spatial extent) in `meta`'s `iprp`'s
- * `ipco`. A file may hold several, for a grid's tiles, an alpha plane or a
- * thumbnail, and the largest bounds what a decode makes.
+ * `ipco`, and only there. A file may hold several, for a grid's tiles, an
+ * alpha plane or a thumbnail, and the largest bounds what a decode makes.
+ * The walk must reach the end of every box it enters: one that stops early
+ * gives null, since the real extent may come after the ones it read.
  */
 function avif(b: Uint8Array): ImageHeader | null {
   if (!ascii(b, 4, "ftyp")) return null;
@@ -79,31 +87,36 @@ function avif(b: Uint8Array): ImageHeader | null {
   if (!brand) return null;
   let best: ImageHeader | null = null;
   let boxes = 0;
-  /** The boxes from `from` to `to`, descending into the containers on the way to `ispe`. */
-  const walk = (from: number, to: number, depth: number) => {
-    for (let i = from; i + 8 <= to && boxes < 1_000; ) {
-      boxes++;
+  /** The boxes from `from` to `to` inside `parent`, descending on the way to `ispe`. False when it stopped before `to`. */
+  const walk = (from: number, to: number, parent: string): boolean => {
+    let i = from;
+    while (i + 8 <= to) {
+      if (++boxes > HEADER_STEPS) return false;
       let size = u32be(b, i);
       let head = 8;
       if (size === 1) {
-        if (i + 16 > to || u32be(b, i + 8) !== 0) return;
+        if (i + 16 > to || u32be(b, i + 8) !== 0) return false;
         size = u32be(b, i + 12);
         head = 16;
       } else if (size === 0) size = to - i;
-      if (size < head || i + size > to) return;
+      if (size < head || i + size > to) return false;
       const type = String.fromCharCode(b[i + 4]!, b[i + 5]!, b[i + 6]!, b[i + 7]!);
-      if (depth < 4 && type === "meta") walk(i + head + 4, i + size, depth + 1);
-      else if (depth < 4 && (type === "iprp" || type === "ipco")) walk(i + head, i + size, depth + 1);
-      else if (type === "ispe" && size >= head + 12) {
+      if (type === "meta" && parent === "") {
+        if (!walk(i + head + 4, i + size, "meta")) return false;
+      } else if ((type === "iprp" && parent === "meta") || (type === "ipco" && parent === "iprp")) {
+        if (!walk(i + head, i + size, type)) return false;
+      } else if (type === "ispe" && parent === "ipco") {
+        if (size < head + 12) return false;
         const width = u32be(b, i + head + 4);
         const height = u32be(b, i + head + 8);
         if (width > 0 && height > 0 && (!best || width * height > best.width * best.height)) best = { mime: "image/avif", width, height };
       }
       i += size;
     }
+    // Trailing bytes too few for a box header: the file ends inside a box.
+    return i === to;
   };
-  walk(0, b.length, 0);
-  return best;
+  return walk(0, b.length, "") ? best : null;
 }
 
 export function imageHeader(bytes: Uint8Array): ImageHeader | null {
