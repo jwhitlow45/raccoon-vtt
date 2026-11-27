@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { checkThree, closure, staticImports, type Chunk } from "./three-chunk.ts";
+import { checkThree, closure, dynamicImports, modelWorkerBundle, staticImports, type Chunk } from "./three-chunk.ts";
 
 /** The post-build check of the dice chunk (docs/design/design-v1-roll-animation.md 6), on made-up builds. */
 
@@ -63,5 +63,37 @@ describe("the dice chunk's post-build check", () => {
       assert.match(checkThree(build([...imported, chunk("math.js", [THREE])])).problems.join("\n"), /math\.js loads with/, name);
       assert.match(checkThree(build([...base.filter((c) => c.file !== file), chunk("stage.js", [THREE])])).problems.join("\n"), new RegExp(`no ${name} chunk found`), name);
     }
+  });
+
+  test("passes three in the model worker's bundle too, entry or a chunk it imports, and reports the bundle", () => {
+    const stage = chunk("stage.js", ["../../client/features/dice/throw/stage.ts", THREE]);
+    const inEntry = checkThree(build([...base, stage, chunk("worker-a.js", ["../../client/features/models/worker.ts", "../../client/features/models/render.ts", THREE_CORE])]));
+    assert.deepEqual(inEntry.problems, []);
+    assert.equal(inEntry.stage, "stage.js");
+    assert.deepEqual([...inEntry.worker], ["worker-a.js"]);
+    const split = [stage, chunk("worker-b.js", ["../../client/features/models/worker.ts"], 'import{r}from"./render.js";const t=()=>import("./later.js");'), chunk("render.js", [THREE]), chunk("later.js", [])];
+    const inChunk = checkThree(build([...base, ...split]));
+    assert.deepEqual(inChunk.problems, []);
+    assert.deepEqual([...inChunk.worker].sort(), ["later.js", "render.js", "worker-b.js"]);
+  });
+
+  test("fails three in another worker, as a second chunk, and passes a build with no model worker", () => {
+    const stage = chunk("stage.js", ["../../client/features/dice/throw/stage.ts", THREE]);
+    const other = chunk("worker-c.js", ["../../client/features/uvtt/worker.ts", THREE]);
+    assert.match(checkThree(build([...base, stage, other])).problems.join("\n"), /in 2 chunks outside the model worker/);
+    assert.deepEqual(checkThree(build([...base, stage])).worker.size, 0);
+  });
+
+  test("still fails three in the page beside a model worker that holds it too", () => {
+    const worker = chunk("worker-a.js", ["../../client/features/models/worker.ts", THREE]);
+    const inPanel = base.map((c) => (c.file === "DicePanel.js" ? { ...c, sources: [...c.sources, THREE] } : c));
+    assert.match(checkThree(build([...inPanel, worker])).problems.join("\n"), /loads with the Dice panel/);
+    assert.match(checkThree(build([...base, worker])).problems.join("\n"), /in 0 chunks outside the model worker/);
+  });
+
+  test("reads import() apart from static imports, and the model worker's bundle through both", () => {
+    assert.deepEqual(dynamicImports('const a=()=>import("./x.js");import"./y.js";const b=import(`./z.js`)'), ["x.js", "z.js"]);
+    const chunks = build([chunk("w.js", ["../../client/features/models/worker.ts"], 'import"./a.js";'), chunk("a.js", [], 'const l=()=>import("./b.js")'), chunk("b.js", []), chunk("c.js", [])]).chunks;
+    assert.deepEqual([...modelWorkerBundle(chunks)].sort(), ["a.js", "b.js", "w.js"]);
   });
 });

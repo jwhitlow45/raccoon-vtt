@@ -8,11 +8,17 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
  * three.js hardly tree-shakes, so one stray import would put all of it in
  * a chunk every member loads. The source scan
  * (client/features/dice/throw/lazyThree.test.ts) holds the imports, and
- * this reads what the build made of them: exactly one chunk holds three's
- * renderer, and it is none of the entry, Room, room and Dice panel chunks,
- * nor the Token and Characters panels', whose stat blocks throw dice too
- * (docs/design/design-v1-token-roll-header.md 4.4), nor any chunk they import. It prints that chunk's size and the room's
- * first load, so a change to either shows in CI's log.
+ * this reads what the build made of them: exactly one page chunk holds
+ * three's renderer, and it is none of the entry, Room, room and Dice panel
+ * chunks, nor the Token and Characters panels', whose stat blocks throw dice
+ * too (docs/design/design-v1-token-roll-header.md 4.4), nor any chunk they
+ * import. The model worker (docs/design/design-v1-token-models.md 5,
+ * D-261127-377) is the one other place three may be: Vite bundles a worker
+ * apart from the page, so its bundle is its own entry chunk and the chunks
+ * that entry imports, and three there never reaches the page. Any other
+ * worker holding three counts as a page chunk, so it breaks the rule. It
+ * prints the chunks' sizes and the room's first load, so a change to any
+ * shows in CI's log.
  *
  * `node scripts/three-chunk.ts [dist]` exits 1 when the rule breaks.
  */
@@ -23,6 +29,13 @@ export type Chunk = { file: string; code: string; sources: string[]; imports: st
 export function staticImports(code: string): string[] {
   const out = new Set<string>();
   for (const m of code.matchAll(/(?:^|[;\n}])\s*(?:import|export)\s*(?:[\w$*{}\s,]+\s*from\s*)?["']\.\/([^"']+\.js)["']/g)) out.add(m[1]!);
+  return [...out];
+}
+
+/** The chunks a chunk imports by `import()`. */
+export function dynamicImports(code: string): string[] {
+  const out = new Set<string>();
+  for (const m of code.matchAll(/\bimport\(\s*["'`]\.\/([^"'`]+\.js)["'`]\s*\)/g)) out.add(m[1]!);
   return [...out];
 }
 
@@ -55,6 +68,21 @@ export function closure(chunks: ReadonlyMap<string, Chunk>, from: readonly strin
 }
 
 const THREE = /(^|\/)node_modules\/(\.pnpm\/[^/]+\/node_modules\/)?three\/build\/three\.(module|core)\.js$/;
+const MODEL_WORKER = /client\/features\/models\/worker\.ts$/;
+
+/** The model worker's bundle: the chunk whose sources hold its entry, and every chunk that one imports, statically or by `import()`. */
+export function modelWorkerBundle(chunks: ReadonlyMap<string, Chunk>): Set<string> {
+  const seen = new Set<string>();
+  const stack = [...chunks.values()].filter((c) => c.sources.some((s) => MODEL_WORKER.test(s))).map((c) => c.file);
+  while (stack.length > 0) {
+    const file = stack.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const chunk = chunks.get(file);
+    if (chunk) for (const next of [...chunk.imports, ...dynamicImports(chunk.code)]) if (chunks.has(next)) stack.push(next);
+  }
+  return seen;
+}
 const NAMED = {
   Room: /client\/pages\/Room\.tsx$/,
   room: /client\/canvas\/Stage\.tsx$/,
@@ -63,13 +91,14 @@ const NAMED = {
   "Characters panel": /client\/features\/tokens\/CharactersPanel\.tsx$/,
 } as const;
 
-export type Check = { problems: string[]; stage: string | null; firstLoad: Set<string> };
+export type Check = { problems: string[]; stage: string | null; worker: Set<string>; firstLoad: Set<string> };
 
 export function checkThree(build: { entry: string; chunks: ReadonlyMap<string, Chunk> }): Check {
   const { chunks, entry } = build;
   const problems: string[] = [];
-  const holding = [...chunks.values()].filter((c) => c.sources.some((s) => THREE.test(s))).map((c) => c.file);
-  if (holding.length !== 1) problems.push(`three's renderer is in ${holding.length} chunks, not one: ${holding.join(", ") || "none"}`);
+  const worker = modelWorkerBundle(chunks);
+  const holding = [...chunks.values()].filter((c) => c.sources.some((s) => THREE.test(s)) && !worker.has(c.file)).map((c) => c.file);
+  if (holding.length !== 1) problems.push(`three's renderer is in ${holding.length} chunks outside the model worker, not one: ${holding.join(", ") || "none"}`);
   const named: [string, string][] = [["entry", entry]];
   for (const [name, re] of Object.entries(NAMED)) {
     const chunk = [...chunks.values()].find((c) => c.sources.some((s) => re.test(s)));
@@ -80,9 +109,9 @@ export function checkThree(build: { entry: string; chunks: ReadonlyMap<string, C
     chunks,
     named.map(([, file]) => file),
   );
-  for (const file of holding) if (loaded.has(file)) problems.push(`three's chunk ${file} loads with the ${named.find(([, f]) => f === file)?.[0] ?? "entry, Room, room, Dice panel, Token panel or Characters panel"} chunks`);
+  for (const file of [...holding, ...worker]) if (loaded.has(file)) problems.push(`three's chunk ${file} loads with the ${named.find(([, f]) => f === file)?.[0] ?? "entry, Room, room, Dice panel, Token panel or Characters panel"} chunks`);
   const firstLoad = closure(chunks, [entry, ...named.filter(([n]) => n === "Room" || n === "room").map(([, f]) => f)]);
-  return { problems, stage: holding.length === 1 ? holding[0]! : null, firstLoad };
+  return { problems, stage: holding.length === 1 ? holding[0]! : null, worker, firstLoad };
 }
 
 function kb(bytes: number): string {
@@ -96,6 +125,10 @@ if (import.meta.main) {
   if (result.stage) {
     const code = Buffer.from(build.chunks.get(result.stage)!.code);
     console.log(`three's chunk: ${result.stage}, ${kb(code.length)} minified, ${kb(gzipSync(code, { level: 9 }).length)} gzip, ${kb(brotliCompressSync(code).length)} brotli`);
+  }
+  if (result.worker.size > 0) {
+    const code = Buffer.concat([...result.worker].map((file) => Buffer.from(build.chunks.get(file)!.code)));
+    console.log(`The model worker: ${result.worker.size} chunks, ${kb(code.length)} minified, ${kb(gzipSync(code, { level: 9 }).length)} gzip`);
   }
   const first = [...result.firstLoad].reduce((n, file) => n + gzipSync(Buffer.from(build.chunks.get(file)!.code), { level: 9 }).length, 0);
   console.log(`The room's first load: ${result.firstLoad.size} chunks, ${kb(first)} gzip`);
