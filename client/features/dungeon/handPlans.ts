@@ -126,7 +126,8 @@ const PROPS = [
  * and three props (160 stamps, 40 lights), two Rolling Stones stand in
  * corridors, 20 traps of every kind lie about, and every room is in the
  * key with its pin: the scene, 31 ground ops, 2 stamp ops, a light op, 2
- * stones, 20 traps, the key page and 40 pins make exactly 100 (MAX_OPS).
+ * stones, 20 traps, the key page and 40 pins make exactly 100
+ * (MAX_PLAN_OPS), the most a dungeon sends besides its creatures.
  */
 export function hundredPlan(): DungeonPlan {
   const rooms: PlanRoom[] = [];

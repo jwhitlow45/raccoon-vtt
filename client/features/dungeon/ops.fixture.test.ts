@@ -23,13 +23,15 @@ import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HE
  * writes them, placeholder ids and all, so server/rooms/dungeon.itest.ts
  * lands real dungeons without importing a client module, then two hand
  * plans of phase 2's: twoRooms dressed, with a stone and the key, and the
- * 100-op plan (section 6) with its plan and counts, which
- * e2e/dungeonsend.e2e.ts hands the dialog in place of the worker's answer.
+ * 100-op plan (section 6) with its plan and counts. Last come a stocked
+ * dungeon for the privacy twin and the 140-op hand plan, its 40 creatures
+ * included, which e2e/dungeonsend.e2e.ts hands the dialog in place of the
+ * worker's answer (docs/design/design-v1-dungeon-stock.md 5).
  * `placeholders` lists every id but the scene's that Make gives a fresh
  * one, so a test that sends a dungeon twice in one room replaces each.
  * `UPDATE_FIXTURES=1`
  * writes it, and every other run fails when today's ops differ from it, so
- * a generator change that moves either dungeon updates the fixture in the
+ * a generator change that moves any dungeon updates the fixture in the
  * same commit.
  */
 
@@ -71,7 +73,6 @@ const CASES: { name: string; seed: string; settings: DungeonSettings; key: boole
   { name: "secrets-wide", seed: `${versionChar()}0DT-7M1E-V8N2-FW9P`, settings: { ...DEFAULT_SETTINGS, wide: true, secrets: SECRETS_MAX }, key: false },
 ];
 
-/** Every id Make gives a fresh one but the scene's, in the order it does. */
 /**
  * The stocked dungeon (docs/design/design-v1-dungeon-stock.md 3 and 9): a
  * Narrow Medium dungeon with the key, Half its rooms stocked at Moderate
@@ -83,6 +84,7 @@ const STOCKED = { name: "stocked", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, s
 const SRD = await loadMonsters();
 const STOCK: StockRequest = { choices: { monsters: 50, difficulty: "moderate" }, party: [{ count: 4, level: 3 }], pool: stockPool(SRD, "dungeon", { srdImages: {} }), tokensLeft: 500 };
 
+/** Every id Make gives a fresh one but the scene's, in the order it does. */
 function placeholders(ops: ClientOp[]): string[] {
   let n = 0;
   return [...withIds(ops, () => `x${++n}`).ids.keys()].filter((id) => id !== SCENE_PLACEHOLDER);

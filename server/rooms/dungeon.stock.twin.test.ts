@@ -23,10 +23,9 @@ import { scopeActor, scopeObserver, type ScopeClient } from "./undoScopeTesting.
  * count every device reads counts each op, hidden or not, a residual every
  * DM-only op shares (a hidden trap, a DM pin), so B takes as many ops to
  * keep the counts alike, and its stand-ins stand where no player looks.
- * Both take the
- * same steps at the same clock times, and after each the frames P1 and the
- * display got are compared whole and scanned raw for a creature's id, SRD id
- * or name.
+ * Both take the same steps at the same clock times, and after each the
+ * frames P1 and the display got are compared whole and scanned raw for a
+ * creature's id, SRD id or name.
  *
  * Cases: the players on another scene while it lands (1), moved there on
  * Explore with the party in the entrance (2), a PC walking into a stocked

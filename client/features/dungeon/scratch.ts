@@ -135,11 +135,13 @@ function overCap(ops: readonly ClientOp[]): string | null {
  * (phase 2, section 6): the ground, the stamps, the lights and the stones,
  * then the traps written from the chunks those left, so a pit's floor
  * reads the ground the DM's room will hold and a trap follows the stone it
- * shows, then the key's page and its pins, which follow the page they
- * link. The key needs the choices for its Made with line, and its lengths
- * read in the key's feet per square, the room's, which the plan was made
- * at. Anything refused here, or past MAX_OPS, is a generator bug, which the
- * preview shows as its error with Make off.
+ * shows, then a stocked plan's creatures on that ground, then the key's
+ * page and its pins, which follow the page they link. The key needs the
+ * choices for its Made with line, and with `stock` the Monsters choices
+ * and party for its fights, and its lengths read in the key's feet per
+ * square, the room's, which the plan was made at. Anything refused here,
+ * past MAX_OPS, or past MAX_PLAN_OPS besides the creatures (`overCap`), is
+ * a generator bug, which the preview shows as its error with Make off.
  */
 export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null, stock: StockLanding | null = null): Landed {
   const build = [...buildOps(plan, scene), ...dressOps(plan, scene.id)];
