@@ -40,12 +40,17 @@ const CLASSES_BOX = "[data-uses-classes]";
  * Add and its sheet, and the section's foot names the hidden parts the
  * character holds with their Show (docs/design/design-v1-features.md 6, the
  * uses home). On the character's own page a viewer who may add class
- * resources holds them already (D-261127-423).
+ * resources holds them already (D-261127-423). The Classes line, the level
+ * line and the Classes sheet count for both slot parts, so they hide only
+ * while Spell slots and Hit Point Dice both hide (docs/design/design-v1-slots.md 4).
  */
 export function UsesSection(props: { target: ActorTarget; name: string; character?: Character; search?: { classes: string; slots: string } }) {
   const { character } = props;
   const presence = useUsesPresence(props.target);
   const resourcesShown = useModule("classResources");
+  const slotsShown = useModule("spellSlots");
+  const diceShown = useModule("hitDice");
+  const classesShown = slotsShown || diceShown;
   const [sheet, setSheet] = useState<SheetMode | null>(null);
   const [classesOpen, setClassesOpen] = useState(false);
   const classesOpener = useRef<HTMLElement | null>(null);
@@ -73,6 +78,10 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   useEffect(() => {
     if (!resourcesShown) setSheet(null);
   }, [resourcesShown]);
+  // The Classes sheet closes the same way once both slot parts hide.
+  useEffect(() => {
+    if (!classesShown) setClassesOpen(false);
+  }, [classesShown]);
   if (!character && presence === "no") return null;
   const open = (mode: SheetMode, from: HTMLElement | null) => {
     opener.current = from;
@@ -87,7 +96,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   const resources = character?.resources ?? [];
   const full = resources.length >= LIMITS.resourcesPerCharacter;
   const classes = character?.classes;
-  const mismatch = character ? levelMismatch(character) : null;
+  const mismatch = character && classesShown ? levelMismatch(character) : null;
   const page = "characterId" in props.target;
   return (
     <Section title="Uses">
@@ -107,7 +116,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
       {/* Gated in place, not wrapped in <Module>: the section's spacing reads the boxes under its label, and a display: contents wrapper has none. */}
       {character && resourcesShown && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
       {/* Both edit controls at the foot (docs/design/design-v1-slots.md 3.1): the classes just above Add a class resource. */}
-      {character ? (
+      {character && classesShown ? (
         classes && classes.length > 0 ? (
           <div data-uses-classes="" data-search={props.search?.classes} style={{ display: "flex", alignItems: "center", columnGap: theme.space(2), minHeight: theme.touch }}>
             <p style={{ flex: "1 1 auto", minWidth: 0, margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>{classesLine(classes)}</p>
@@ -134,7 +143,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
         </>
       ) : null}
       {sheet && character ? <ResourceSheet character={character} mode={sheet} opener={opener} onClose={() => setSheet(null)} /> : null}
-      {classesOpen && character ? <ClassesSheet character={character} opener={classesOpener} onClose={() => setClassesOpen(false)} /> : null}
+      {classesOpen && character && classesShown ? <ClassesSheet character={character} opener={classesOpener} onClose={() => setClassesOpen(false)} /> : null}
       {character ? <HiddenHere home="uses" holder={page ? { ...character, mayAdd: true } : character} /> : null}
     </Section>
   );

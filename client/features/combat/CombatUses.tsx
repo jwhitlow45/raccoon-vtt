@@ -95,7 +95,10 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
   const storedResources = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
   // Hidden class resources count for nothing, so a list of only them draws nothing (D-261127-394).
   const resourceCount = useModule("classResources") ? storedResources : 0;
-  const slotRows = useRoomView((s) => (characterId !== undefined ? slotCount(s.view?.characters[characterId]?.classes) : 0));
+  const storedSlots = useRoomView((s) => (characterId !== undefined ? slotCount(s.view?.characters[characterId]?.classes) : 0));
+  // Hidden spell slots draw no rows and count for nothing, as class resources do (docs/design/design-v1-features.md 3).
+  const slotsShown = useModule("spellSlots");
+  const slotRows = slotsShown ? storedSlots : 0;
   const record = currentRecord(encounter, actor);
   const turnWait = useTurnWait();
   const turn = turnKey(encounter);
@@ -134,7 +137,7 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
       {/* Named as the uses list where it is the only one (docs/design/design-v1-token-sections.md 7), and apart from it beside a block's uses. */}
       {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} label={rows.length > 0 || slotRows > 0 ? `${props.name}'s class resources` : `${props.name}'s uses`} edit={props.edit} /> : null}
       {/* After the class resources, wherever they show (docs/design/design-v1-slots.md 3.2): folded on the turn card and an upright phone's drawer. */}
-      {characterId !== undefined ? <SlotRows characterId={characterId} form={form === "card" ? "folded" : props.folded ? "drawer" : "full"} label={slotsListLabel(props.name)} search={props.slotsSearch} /> : null}
+      {characterId !== undefined && slotsShown ? <SlotRows characterId={characterId} form={form === "card" ? "folded" : props.folded ? "drawer" : "full"} label={slotsListLabel(props.name)} search={props.slotsSearch} /> : null}
       {shown ? (
         <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: shown.refused ? theme.color.dangerText : theme.color.textMuted }}>
           {shown.text}

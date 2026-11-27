@@ -158,7 +158,10 @@ export const MODULES: readonly ModuleDef[] = [
     roles: BOTH(["uses"], NEITHER),
     display: "no",
     names: ["slots", "pact magic", "spell slot"],
-    claims: [],
+    claims: [
+      { kind: "anchor", id: "character.slots" },
+      { kind: "search", id: "field:spell-slots" },
+    ],
     holds: classesHeld,
   },
   {
@@ -169,7 +172,10 @@ export const MODULES: readonly ModuleDef[] = [
     roles: BOTH(["rest"], NEITHER),
     display: "no",
     names: ["hit dice", "hd"],
-    claims: [],
+    claims: [
+      { kind: "anchor", id: "character.hit-dice" },
+      { kind: "search", id: "field:hit-dice" },
+    ],
     holds: classesHeld,
   },
   {

@@ -97,6 +97,13 @@ function counted(n: number, one: string, many: string): string {
 /** No part hidden: what a caller passes that draws no device's choices, such as a test. */
 const NONE_HIDDEN: ReadonlySet<ModuleId> = new Set();
 
+/** What is spent, as the parts shown on this device count it: none of a hidden part's (docs/design/design-v1-features.md 3). */
+function shownCounts(spent: Spent | undefined, hidden: ReadonlySet<ModuleId>): { slots: number; pact: number; dice: number } {
+  const counts = spentCounts(spent);
+  const slots = !hidden.has("spellSlots");
+  return { slots: slots ? counts.slots : 0, pact: slots ? counts.pact : 0, dice: hidden.has("hitDice") ? 0 : counts.dice };
+}
+
 /**
  * What a rest also restores of what is spent (7.2), as the rules of
  * shared/rules/rest.ts give it: "A Short Rest also restores one Rage and
@@ -105,12 +112,13 @@ const NONE_HIDDEN: ReadonlySet<ModuleId> = new Set();
  * "A Long Rest also restores Rage, 3 spell slots and 2 Hit Point Dice.",
  * "A Short Rest also restores 2 Pact Magic slots and one Rage." Null when
  * it restores none, so a creature with nothing spent reads nothing new.
- * Class resources hidden on this device (`hidden`) are left out, as their
- * rows are (docs/design/design-v1-features.md 3).
+ * A part hidden on this device (`hidden`) leaves its words out, as its rows
+ * are: Class resources their names, Spell slots the slots and Pact Magic
+ * slots, Hit Point Dice the dice (docs/design/design-v1-features.md 3).
  */
 export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long", spent?: Spent, hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): string | null {
   const used = hidden.has("classResources") ? [] : (resources ?? []).filter((r) => r.used > 0);
-  const counts = spentCounts(spent);
+  const counts = shownCounts(spent, hidden);
   const pact = counts.pact > 0 ? [counted(counts.pact, "Pact Magic slot", "Pact Magic slots")] : [];
   if (kind === "long") {
     const words = [
@@ -131,14 +139,14 @@ export function restBackText(resources: readonly ClassResource[] | undefined, ki
  * past a phone's sheet, naming each kind any of them has spent: "It also
  * restores every class resource, spell slot and Hit Point Die."
  * (docs/design/design-v1-slots.md 3.4). Null when none of them has one
- * spent, as a chosen rest reads nothing new then. Class resources hidden on
- * this device (`hidden`) are left out of it.
+ * spent, as a chosen rest reads nothing new then. A part hidden on this
+ * device (`hidden`) leaves its kind out of it.
  */
 export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[]; spent?: Spent }[], hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): string | null {
   const kinds = [
     !hidden.has("classResources") && characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "class resource" : null,
-    characters.some((c) => spentCounts(c.spent).slots + spentCounts(c.spent).pact > 0) ? "spell slot" : null,
-    characters.some((c) => spentCounts(c.spent).dice > 0) ? "Hit Point Die" : null,
+    characters.some((c) => shownCounts(c.spent, hidden).slots + shownCounts(c.spent, hidden).pact > 0) ? "spell slot" : null,
+    characters.some((c) => shownCounts(c.spent, hidden).dice > 0) ? "Hit Point Die" : null,
   ].filter((k): k is string => k !== null);
   return kinds.length > 0 ? `It also restores every ${joinWords(kinds)}.` : null;
 }

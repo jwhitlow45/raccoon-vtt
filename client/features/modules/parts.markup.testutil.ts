@@ -12,6 +12,7 @@ import { RoomScope, RoomScopeProvider } from "../../state/scope.ts";
 import { EMPTY_EPHEMERAL, INITIAL_LOCAL, type LocalUi, type RoomView } from "../../state/types.ts";
 import { RoomProvider, useRoomView } from "../../state/view.ts";
 import { BUILD_MODES, builderSlot, type BuildMode } from "../builder/store.ts";
+import { offerKey } from "../dice/cast/cast.ts";
 import { optionSlot } from "../dice/optionState.ts";
 import { newPage } from "../dice/groupSave/chain.ts";
 import { groupSaveSlot } from "../dice/groupSave/store.ts";
@@ -43,6 +44,8 @@ const { default: MembersPanel } = await import("../../panels/MembersPanel.tsx");
 const { TurnCard } = await import("../combat/TurnCard.tsx");
 const { useCombatAlerts } = await import("../combat/alerts.ts");
 const { CharacterPage } = await import("../tokens/CharacterCard.tsx");
+const { RestSection } = await import("../tokens/RestSection.tsx");
+const { ClassesSheet } = await import("../slots/ClassesSheet.tsx");
 const { default: CharactersPanel } = await import("../tokens/CharactersPanel.tsx");
 const { MakeCompanion } = await import("../tokens/CompanionsSection.tsx");
 const { ResyncDialog } = await import("../pcstats/Resync.tsx");
@@ -298,7 +301,7 @@ export function draw(fixture: Fixture, role: Role): string {
 }
 
 /** The first element in a component's returned tree that `test` picks, through element children alone. */
-function findIn(node: ReactNode, test: (props: Record<string, unknown>) => boolean): Record<string, unknown> | null {
+export function findIn(node: ReactNode, test: (props: Record<string, unknown>) => boolean): Record<string, unknown> | null {
   if (Array.isArray(node)) {
     for (const child of node) {
       const found = findIn(child, test);
@@ -326,7 +329,7 @@ function words(node: unknown): string {
  * (a render phase update). That is the one way a drawing reaches a state
  * the component keeps itself, such as New scene's picked kind.
  */
-function pressed<P>(component: (props: P) => ReactNode, props: P, press: (tree: ReactNode, scope: RoomScope) => void, opts: { effects?: boolean } = {}): () => ReactElement {
+export function pressed<P>(component: (props: P) => ReactNode, props: P, press: (tree: ReactNode, scope: RoomScope) => void, opts: { effects?: boolean } = {}): () => ReactElement {
   return () => {
     let done = false;
     function Pressed() {
@@ -406,17 +409,24 @@ const bree = () => tableRoom().characters.bree!;
 const BREE_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT }, mayAdd: true };
 const BREE_TOKEN_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT } };
 
-/** The cast table of the save spell tests (docs/design/design-v1-player-save-spell.md 8), Thorn holding Fireball, which has an area to place. */
+/** The cast table of the save spell tests (docs/design/design-v1-player-save-spell.md 8), Thorn holding Fireball, which has an area to place, and the Wizard levels that cast it. */
 function castRoom(): RoomState {
   const state = castTable();
   state.characters["thorn-c"] = character("thorn-c", {
     name: "Thorn",
     ownerIds: ["p1"],
     level: 5,
+    classes: [{ id: "wizard", level: 5 }],
     stats: { ...STATS, spellAbility: "int", rolls: [{ id: "fb", name: "Fireball", kind: "spell", ability: "spell", level: 3, save: { ability: "dex", onPass: "half" }, dice: [{ formula: "8d6", type: "fire", upcast: "1d6" }] }] },
   });
   return state;
 }
+
+/** A sent ask's slot offers (docs/design/design-v1-slots.md 3.2): Fireball's under its row, and Spirit Guardians', which no row names, in the fallback line. */
+const SLOT_OFFERS = [
+  { key: "c:thorn-c", spell: "Fireball", characterId: "thorn-c", level: 3 },
+  { key: "c:thorn-c", spell: "Spirit Guardians", characterId: "thorn-c", level: 3 },
+];
 
 /** Turns the server's sound switch on, as GET /api/config would, so Scene sound and the Sound panel draw their controls. */
 export async function soundOn(): Promise<void> {
@@ -485,7 +495,7 @@ const BUILDER_MODES: readonly BuildMode[] = BUILD_MODES.map((m) => m.value).filt
 
 // ------------------------------------------------------------ the fixtures
 
-/** Every drawn surface of surfaces.ts in the states that show its controls (design section 14's table). DSLOTS's classes, slots, Classes sheet and slot offer are FT-D's to add. */
+/** Every drawn surface of surfaces.ts in the states that show its controls (design section 14's table). */
 export const FIXTURES: readonly Fixture[] = [
   { surface: "DM panel", name: "open, Table display unfolded", roles: ["dm"], homes: [{ home: "dmPanel" }], draw: () => createElement(DmPanel as never, PANEL as never) },
 
@@ -566,7 +576,7 @@ export const FIXTURES: readonly Fixture[] = [
     surface: "Characters",
     name: "Bree's page",
     roles: ["dm", "player"],
-    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
+    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
     draw: () => createElement(CharacterPage, { character: bree(), close: noop, onAddCompanion: noop, onBlocks: noop, onDelete: () => null }),
   },
   { surface: "Characters", name: "the Characters panel's list", roles: ["dm"], draw: () => createElement(CharactersPanel as never, PANEL as never) },
@@ -574,12 +584,22 @@ export const FIXTURES: readonly Fixture[] = [
     surface: "Characters",
     name: "the Characters panel at a player's own page",
     roles: ["player"],
-    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
+    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
     draw: () => createElement(CharactersPanel as never, PANEL as never),
+  },
+  {
+    surface: "Characters",
+    name: "Bree's Rest with the Short Rest card open",
+    roles: ["dm", "player"],
+    homes: [{ home: "rest", holder: BREE_HOLDS }],
+    draw: pressed(RestSection, { actor: { hp: { cur: 10, max: 24, temp: 0 }, life: "alive" }, target: { characterId: "bree" as CharacterId }, resources: [RAGE, HANDS], character: bree(), search: { short: "character.rest.short", long: "character.rest.long", hitDice: "character.hit-dice" } }, (tree) => {
+      const rest = findIn(tree, (p) => p.label === "Rest" && typeof p.onChange === "function");
+      (rest?.onChange as ((kind: string) => void) | undefined)?.("short");
+    }),
   },
   { surface: "Characters", name: "Re-sync from D&D Beyond, getting it", roles: ["dm", "player"], draw: () => createElement(ResyncDialog, { characterId: "bree", onClose: noop }) },
 
-  { surface: "Token panel", name: "Bree's token", roles: ["dm", "player"], homes: [{ home: "uses", holder: BREE_TOKEN_HOLDS }], local: { selectedId: "tbree", selectedIds: ["tbree"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "tbree" } as never) },
+  { surface: "Token panel", name: "Bree's token", roles: ["dm", "player"], homes: [{ home: "uses", holder: BREE_TOKEN_HOLDS }, { home: "rest", holder: BREE_TOKEN_HOLDS }], local: { selectedId: "tbree", selectedIds: ["tbree"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "tbree" } as never) },
   { surface: "Token panel", name: "the owl, Bree's companion", roles: ["dm", "player"], homes: [{ home: "companions" }], local: { selectedId: "owl", selectedIds: ["owl"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "owl" } as never) },
   { surface: "Token panel", name: "Bree's companion stat blocks", roles: ["dm", "player"], draw: () => createElement(CharacterBlocksPage, { character: { id: "bree", name: "Bree" }, onBack: noop }) },
   {
@@ -600,6 +620,7 @@ export const FIXTURES: readonly Fixture[] = [
   },
 
   { surface: "Action bar Uses", name: "Bree's Uses drawer", roles: ["dm", "player"], draw: () => createElement(UsesDrawer, { target: { tokenId: "tbree" }, name: "Bree", onClose: noop }) },
+  { surface: "Action bar Uses", name: "Bree's Uses drawer folded, as the strip's on a phone held upright", roles: ["dm", "player"], draw: () => createElement(UsesDrawer, { target: { tokenId: "tbree" }, name: "Bree", onClose: noop, folded: true }) },
   {
     surface: "Action bar Uses",
     name: "Bree's token bar",
@@ -610,6 +631,7 @@ export const FIXTURES: readonly Fixture[] = [
 
   { surface: "Dialogs and sheets", name: "ResourceSheet, Add", roles: ["dm", "player"], draw: () => createElement(ResourceSheet, { character: bree(), mode: { kind: "add" }, opener: { current: null }, onClose: noop }) },
   { surface: "Dialogs and sheets", name: "ResourceSheet, Edit", roles: ["dm", "player"], draw: () => createElement(ResourceSheet, { character: bree(), mode: { kind: "edit", id: "rage" }, opener: { current: null }, onClose: noop }) },
+  { surface: "Dialogs and sheets", name: "the Classes sheet", roles: ["dm", "player"], draw: () => createElement(ClassesSheet, { character: bree(), opener: { current: null }, onClose: noop }) },
   { surface: "Dialogs and sheets", name: "the stat block editor at Fill from", roles: ["dm", "player"], draw: () => createElement(PcStatsEditor, { characterId: "bree", onClose: noop }) },
   {
     surface: "Dialogs and sheets",
@@ -626,6 +648,14 @@ export const FIXTURES: readonly Fixture[] = [
     roles: ["player"],
     room: castRoom,
     seed: (s) => s.get(optionSlot).setState({ picked: "c:thorn-c", cast: { key: "c:thorn-c", creature: { characterId: "thorn-c" as CharacterId }, spell: "Fireball", roll: "fb" } as never }),
+    draw: () => createElement(PlayerOptions, { view: castRoom() as never, selected: [] }),
+  },
+  {
+    surface: "Dice",
+    name: "slot offers under Fireball's row and in the fallback line",
+    roles: ["player"],
+    room: castRoom,
+    seed: (s) => s.get(optionSlot).setState({ picked: "c:thorn-c", offers: Object.fromEntries(SLOT_OFFERS.map((o) => [offerKey(o.key, o.spell), o])) }),
     draw: () => createElement(PlayerOptions, { view: castRoom() as never, selected: [] }),
   },
   { surface: "Dice", name: "an area's group save in Dice", roles: ["dm"], seed: areaSave, draw: () => createElement(DicePanel as never, PANEL as never) },

@@ -138,8 +138,8 @@ describe("the parts gate's source scans", () => {
     }
   });
 
-  /** Homes whose Hidden on this device line the lanes still to land place: FT-D (rest). */
-  const HOMES_PENDING = ["rest"];
+  /** Homes whose Hidden on this device line the lanes still to land place. None: FT-D placed the last, rest. */
+  const HOMES_PENDING: readonly string[] = [];
   /** Homes whose ways back are a menu's own items, read from useHiddenHere, where a menu holds items and not a line of buttons (design section 6, D-261127-482). */
   const MENU_HOMES = ["tools", "menu"];
 

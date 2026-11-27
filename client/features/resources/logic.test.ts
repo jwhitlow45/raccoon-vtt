@@ -124,6 +124,25 @@ describe("what a rest restores (7.2)", () => {
     assert.equal(partyRestBackText([{ resources: [{ ...rage, used: 1 }] }], hidden), null);
     assert.equal(restBackText([rage, focus], "short", undefined, new Set()), "A Short Rest also restores one Rage and all Focus Points.", "shown, as before");
   });
+
+  test("spell slots and Hit Point Dice hidden on this device leave their words out, each apart (docs/design/design-v1-features.md 3)", () => {
+    const spent = { slots: [2, 1, 0, 0, 0, 0, 0, 0, 0], pact: 2, dice: { d10: 2 } };
+    const slots = new Set(["spellSlots"] as const);
+    const dice = new Set(["hitDice"] as const);
+    const both = new Set(["spellSlots", "hitDice"] as const);
+    assert.equal(restBackText([rage], "long", spent), "A Long Rest also restores Rage, 3 spell slots, 2 Pact Magic slots and 2 Hit Point Dice.");
+    assert.equal(restBackText([rage], "long", spent, slots), "A Long Rest also restores Rage and 2 Hit Point Dice.");
+    assert.equal(restBackText([rage], "long", spent, dice), "A Long Rest also restores Rage, 3 spell slots and 2 Pact Magic slots.");
+    assert.equal(restBackText([], "long", spent, both), null);
+    assert.equal(restBackText([rage], "short", spent, slots), "A Short Rest also restores one Rage.", "Pact Magic is Spell slots'");
+    assert.equal(restBackText([], "short", spent, dice), "A Short Rest also restores 2 Pact Magic slots.");
+    const party = [{ resources: [rage] }, { spent }];
+    assert.equal(partyRestBackText(party), "It also restores every class resource, spell slot and Hit Point Die.");
+    assert.equal(partyRestBackText(party, slots), "It also restores every class resource and Hit Point Die.");
+    assert.equal(partyRestBackText(party, dice), "It also restores every class resource and spell slot.");
+    assert.equal(partyRestBackText([{ spent }], both), null);
+    assert.equal(partyRestBackText([{ spent: { pact: 1 } }], dice), "It also restores every spell slot.", "a spent Pact Magic slot alone is a spell slot");
+  });
 });
 
 describe("adding from a class (7.1)", () => {

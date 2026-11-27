@@ -10,6 +10,7 @@ import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { partMark } from "../modules/gate.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
@@ -39,13 +40,17 @@ import {
 } from "./logic.ts";
 
 /**
- * The muted count line under the rest choice (docs/design/design-v1-slots.md 3.3): "Hit Point Dice: 3 of 5 d10". Nothing without classes.
- * The room search's Hit Point Dice lands here, so the line takes focus from script, as the HP vitals do, and never joins the Tab order.
+ * The muted count line under the rest choice (docs/design/design-v1-slots.md 3.3):
+ * "Hit Point Dice: 3 of 5 d10". Nothing without classes. Hit Point Dice
+ * hidden on this device is gated where it mounts (tokens/RestSection.tsx),
+ * and the line carries the part's mark (docs/design/design-v1-features.md 8).
+ * The room search's Hit Point Dice lands here, so the line takes focus from
+ * script, as the HP vitals do, and never joins the Tab order.
  */
 export function HitDiceCount(props: { character: Pick<Character, "classes" | "spent">; search?: string }) {
   const line = hitDiceLine(dieRows(props.character));
   return line ? (
-    <div data-search={props.search} tabIndex={props.search ? -1 : undefined} style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>
+    <div data-search={props.search} tabIndex={props.search ? -1 : undefined} {...partMark("hitDice")} style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>
       {line}
     </div>
   ) : null;

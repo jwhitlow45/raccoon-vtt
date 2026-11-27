@@ -8,6 +8,7 @@ import { theme } from "../../lib/theme.ts";
 import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { partMark } from "../modules/gate.ts";
 import { reasonText } from "../resources/logic.ts";
 import { CountRowHead, RowButton } from "../resources/ResourceRows.tsx";
 import {
@@ -48,7 +49,9 @@ export type SlotForm = "full" | "folded" | "drawer";
  * resources wherever those show (D-261127-078), with one status line under
  * them that says why a tap was refused. Nothing for a character without
  * slots, or for a viewer whose copy holds no classes: they reach only the
- * DM and the character's players.
+ * DM and the character's players. Spell slots hidden on this device are
+ * gated where the rows mount (combat/CombatUses.tsx), and the root carries
+ * the part's mark (docs/design/design-v1-features.md 8).
  */
 export function SlotRows(props: { characterId: CharacterId; form: SlotForm; label: string; search?: string }) {
   const character = useRoomView((s) => s.view?.characters[props.characterId]);
@@ -57,7 +60,7 @@ export function SlotRows(props: { characterId: CharacterId; form: SlotForm; labe
   const { levels, pact } = slotLevels(character);
   const folded = props.form !== "full";
   return (
-    <div data-slot-rows={props.form} data-search={props.search} style={{ display: "grid", gap: theme.space(1) }}>
+    <div data-slot-rows={props.form} data-search={props.search} {...partMark("spellSlots")} style={{ display: "grid", gap: theme.space(1) }}>
       <ul aria-label={props.label} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {folded ? (
           levels.length > 0 ? <FoldedRow characterId={character.id} levels={levels} back={props.form === "drawer"} onStatus={setStatus} /> : null

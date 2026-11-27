@@ -8,6 +8,8 @@ import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { restNote } from "../clock/words.ts";
+import { hiddenModules } from "../modules/gate.ts";
+import { HiddenHere, useFeaturesHere } from "../modules/Gate.tsx";
 import { restBackText } from "../resources/logic.ts";
 import { HitDiceCount, HitDiceRows } from "../slots/HitDiceRows.tsx";
 import { dieRows } from "../slots/logic.ts";
@@ -43,6 +45,12 @@ const KINDS: { value: Kind; label: string }[] = [
  * once, in place of the typed HP. Cancel after a roll keeps what the dice
  * did, and Finish restores what the rest restores, with no heal.
  *
+ * Hit Point Dice hidden on this device take the count line and the dice
+ * words, Spell slots the slot words, and the section's foot names them
+ * with their Show (docs/design/design-v1-features.md 3 and 6, the rest
+ * home). The Short Rest card's dice rows and Constitution field stay, so a
+ * rest still spends the dice it rolls (D-261127-300).
+ *
  * A rest of one creature never moves the room's clock, since two players
  * resting would move it twice. With a clock running, the DM's Long Rest
  * says when the character last finished one and the earliest next start
@@ -66,9 +74,13 @@ export function RestSection(props: {
   useUnsavedInput(canRest && kind !== null);
   const fighting = useRoomView((s) => !!s.view?.encounter);
   const character = props.character;
-  const back = kind ? restBackText(props.resources, kind, character?.spent) : null;
+  const here = useFeaturesHere();
+  // With no role known the choices are Everything, which hides nothing.
+  const hidden = hiddenModules(here.role ?? "dm", here.choices);
+  const diceShown = !hidden.has("hitDice");
+  const back = kind ? restBackText(props.resources, kind, character?.spent, hidden) : null;
   const dice = character ? dieRows(character).length > 0 : false;
-  const slots = hasSlots(character?.classes);
+  const slots = hasSlots(character?.classes) && !hidden.has("spellSlots");
   const tracked = (props.resources?.length ?? 0) > 0;
   const note = useRoomView((s) => {
     const clock = s.view?.clock;
@@ -93,7 +105,7 @@ export function RestSection(props: {
       {!canRest ? <Note>A rest needs at least 1 Hit Point.</Note> : null}
       {/* A tap on the chosen rest keeps it, as with any radio. Cancel below puts the choice away. */}
       <Segmented<Kind> label="Rest" value={kind} options={props.search ? KINDS.map((k) => ({ ...k, search: props.search?.[k.value] })) : KINDS} disabled={!canRest} onChange={setKind} grow />
-      {character && dice ? <HitDiceCount character={character} search={props.search?.hitDice} /> : null}
+      {character && dice && diceShown ? <HitDiceCount character={character} search={props.search?.hitDice} /> : null}
       {/* Only once a rest is chosen, so it adds nothing to every creature's panel during a fight (docs/design/design-v1-token-panel.md 3.8). */}
       {canRest && fighting && kind ? <Note>A fight is running, and rolling Initiative stops a rest. End the fight first, or rest anyway.</Note> : null}
       {canRest && kind === "short" && character && dice ? (
@@ -115,7 +127,7 @@ export function RestSection(props: {
         <>
           <Note>
             {dice
-              ? `All HP back, every spent Hit Point Die back, ${slots ? "every spell slot back, " : ""}Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset.`
+              ? `All HP back, ${diceShown ? "every spent Hit Point Die back, " : ""}${slots ? "every spell slot back, " : ""}Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset.`
               : `All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and ${tracked ? "other " : ""}features are on your sheet.`}
           </Note>
           {back ? <Note tone="info">{back}</Note> : null}
@@ -130,6 +142,8 @@ export function RestSection(props: {
           <SmallButton onClick={() => setKind(null)}>Cancel</SmallButton>
         </div>
       ) : null}
+      {/* On the character's own page a viewer who may add classes holds the slot parts already (D-261127-423). */}
+      {character ? <HiddenHere home="rest" holder={"characterId" in props.target ? { ...character, mayAdd: true } : character} /> : null}
     </Section>
   );
 }

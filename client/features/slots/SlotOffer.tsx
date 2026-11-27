@@ -10,6 +10,8 @@ import { offerGone } from "../dice/cast/cast.ts";
 import { useOption, useOptionStore, type SlotOffer as Offer } from "../dice/optionState.ts";
 import { sameSpell } from "../dice/options.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { reasonText } from "../resources/logic.ts";
 import { offerLine, offerPools } from "./logic.ts";
 
@@ -25,13 +27,19 @@ export function characterIdOfCreature(view: Pick<RoomState, "tokens">, creature:
  * 3.2), under the spell's row (`spell`), or with `others`, every offer whose
  * spell no row of the creature names (`rows`), as the fallback line under
  * its options. A cast ask never spends a slot itself.
+ *
+ * Spell slots hidden on this device take the offers at both mounts, gated
+ * here in the offers' own root rather than at each mount (D-261127-421).
+ * An offer set meanwhile stays in the store, so it shows again with the
+ * part until a Use, Dismiss, another ask or leaving the room ends it.
  */
 export function SlotOffers(props: { creatureKey: string; spell?: string; others?: readonly string[] }) {
   const offers = useOption((s) => s.offers);
+  const shown = useModule("spellSlots");
   const mine = Object.values(offers).filter((o) => o.key === props.creatureKey && (props.spell !== undefined ? sameSpell(o.spell, props.spell) : !(props.others ?? []).some((name) => sameSpell(o.spell, name))));
-  if (mine.length === 0) return null;
+  if (!shown || mine.length === 0) return null;
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
+    <div {...partMark("spellSlots")} style={{ display: "grid", gap: theme.space(2) }}>
       {mine.map((o) => (
         <OfferLine key={`${o.key}|${o.spell}`} offer={o} />
       ))}

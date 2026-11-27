@@ -41,8 +41,14 @@ const CHARACTERS: Placement = { kind: "drawn", surface: "Characters", covers: ["
 const TOKEN_PANEL: Placement = { kind: "drawn", surface: "Token panel", covers: ["companions", "classResources"] };
 /** The drawer and the strip's folded form. */
 const ACTION_BAR_USES: Placement = { kind: "drawn", surface: "Action bar Uses", covers: ["classResources", "spellSlots"] };
-/** ResourceSheet, the Classes sheet, the stat block editor (Fill from), the paste dialog with an image (Stamp row). */
-const DIALOGS: Placement = { kind: "drawn", surface: "Dialogs and sheets", covers: ["classResources", "spellSlots", "hitDice", "ddb", "builder"] };
+/**
+ * ResourceSheet, the Classes sheet, the stat block editor (Fill from), the
+ * paste dialog with an image (Stamp row). The Classes sheet counts for both
+ * slot parts and hides only while both do (docs/design/design-v1-slots.md 4),
+ * so no one part marks it and it covers neither. parts.markup.test.ts draws
+ * that gate on its own.
+ */
+const DIALOGS: Placement = { kind: "drawn", surface: "Dialogs and sheets", covers: ["classResources", "ddb", "builder"] };
 /** A cast block, a slot offer in the options store with RollOptions.tsx's fallback line, an area group save, which GroupSave.tsx draws. */
 const DICE: Placement = { kind: "drawn", surface: "Dice", covers: ["areas", "spellSlots"] };
 /** A page in the editor. The panel's page view holds Pin to the map. */
@@ -132,7 +138,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/tokens/CharacterCard.tsx", sites: 32, ...CHARACTERS },
   { file: "client/features/tokens/CharactersPanel.tsx", sites: 28, ...CHARACTERS },
   { file: "client/features/tokens/CompanionsSection.tsx", sites: 30, ...CHARACTERS },
-  { file: "client/features/tokens/RestSection.tsx", sites: 6, ...CHARACTERS },
+  { file: "client/features/tokens/RestSection.tsx", sites: 7, ...CHARACTERS },
   { file: "client/features/slots/HitDiceRows.tsx", sites: 9, ...CHARACTERS },
   // Token panel
   { file: "client/features/combat/UsesSection.tsx", sites: 12, ...TOKEN_PANEL },

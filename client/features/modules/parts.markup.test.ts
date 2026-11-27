@@ -57,7 +57,7 @@ Object.assign(globalThis, {
   MessageChannel: undefined,
 });
 
-const { FIXTURES, disposeDrawn, draw, ownPart, readDrawing, soundOn, tableRoom } = await import("./parts.markup.testutil.ts");
+const { FIXTURES, disposeDrawn, draw, findIn, ownPart, pressed, readDrawing, soundOn, tableRoom } = await import("./parts.markup.testutil.ts");
 type Drawing = import("./parts.markup.testutil.ts").Drawing;
 type Fixture = import("./parts.markup.testutil.ts").Fixture;
 type InnerOwner = import("./parts.markup.testutil.ts").InnerOwner;
@@ -72,9 +72,6 @@ const { featureChoices, resetAllFeatures, setModuleShown } = await import("./sto
 const GOLDEN = new URL("./controls.golden.json", import.meta.url);
 const UPDATE = process.env.UPDATE_GOLDEN === "1";
 const REGENERATE = "UPDATE_GOLDEN=1 node --test client/features/modules/parts.markup.test.ts";
-
-/** DSLOTS's parts, whose surfaces FT-D draws once its classes land (design section 15, D-261127-397). */
-const FTD_PARTS: ReadonlySet<ModuleId> = new Set(["spellSlots", "hitDice"]);
 
 /**
  * Options a part takes from inside a shared control whose gate cannot mark
@@ -334,7 +331,7 @@ describe("each drawn surface's parts (design section 14, checks 1 to 4)", () => 
     for (const surface of drawnSurfaces) {
       const parts = new Set(DRAWN.filter((d) => d.fixture.surface === surface && d.everything).flatMap((d) => [...d.everything!.parts]));
       for (const part of coversOf(surface)) {
-        if (FTD_PARTS.has(part) || parts.has(part) || showsAt(surface, part)) continue;
+        if (parts.has(part) || showsAt(surface, part)) continue;
         if (pendingHere(surface, part)) failPending(surface, part);
         else missing.push(`${surface} covers ${part}, and no drawing of it holds data-part="${part}"`);
       }
@@ -432,6 +429,117 @@ describe("a uses list of class resources alone", () => {
       setModuleShown("classResources", "dm", false);
       assert.doesNotMatch(draw(list, "dm"), /data-combat-uses/);
       assert.equal(draw(presence, "dm"), "<output>no</output>", "no Uses button opens on them");
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+});
+
+/*
+ * The slot parts' gates the checks above cannot see. Each check hides one
+ * part at a time, and the Classes line, the level line and the Classes
+ * sheet count for both, so they leave only once both hide
+ * (docs/design/design-v1-slots.md 4). A Uses list of spell slots alone
+ * draws nothing while they hide, and the rest's words leave out each
+ * hidden part's while the Short Rest card keeps its dice rows
+ * (docs/design/design-v1-features.md 3, D-261127-300).
+ */
+describe("spell slots and Hit Point Dice", async () => {
+  const { createElement } = await import("react");
+  const { UsesSection } = await import("../combat/UsesSection.tsx");
+  const { CreatureUses, useUsesPresence } = await import("../combat/CombatUses.tsx");
+  const { RestSection } = await import("../tokens/RestSection.tsx");
+  type Character = import("#shared/model.ts").Character;
+  /** Bree at level 10, one past her classes' 9, so Uses also holds the level line. */
+  const breeAt10 = (): Character => ({ ...tableRoom().characters.bree!, level: 10 });
+  const hiding = (...parts: ModuleId[]) => {
+    resetAllFeatures();
+    for (const part of parts) setModuleShown(part, "player", false);
+  };
+  const fixture = (name: string, body: Fixture["draw"], more: Partial<Fixture> = {}): Fixture => ({ surface: "the slot parts", name, roles: ["player"], draw: body, ...more });
+
+  test("the Classes line, the level line and the Classes sheet stay while one part shows, and leave once both hide", () => {
+    const uses = fixture("Bree's Uses, the Classes sheet open", pressed(UsesSection, { target: { characterId: "bree" }, name: "Bree", character: breeAt10() }, (tree) => {
+      const edit = findIn(tree, (p) => p.children === "Edit classes" && typeof p.onOpen === "function");
+      (edit?.onOpen as ((from: null) => void) | undefined)?.(null);
+    }));
+    const reads = () => {
+      const html = draw(uses, "player");
+      return { line: html.includes("data-uses-classes"), level: html.includes("Your classes add up to level 9, and your level is 10."), sheet: html.includes("data-class-row=") };
+    };
+    try {
+      for (const parts of [[], ["spellSlots"], ["hitDice"]] as const) {
+        hiding(...parts);
+        assert.deepEqual(reads(), { line: true, level: true, sheet: true }, parts.join(" ") || "every part shown");
+      }
+      hiding("spellSlots", "hitDice");
+      assert.deepEqual(reads(), { line: false, level: false, sheet: false });
+      // Open while they show, then both hide: the next draw holds no sheet.
+      hiding();
+      const late = fixture("Bree's Uses, both parts hidden with the Classes sheet open", pressed(UsesSection, { target: { characterId: "bree" }, name: "Bree", character: breeAt10() }, (tree) => {
+        const edit = findIn(tree, (p) => p.children === "Edit classes" && typeof p.onOpen === "function");
+        (edit?.onOpen as ((from: null) => void) | undefined)?.(null);
+        setModuleShown("spellSlots", "player", false);
+        setModuleShown("hitDice", "player", false);
+      }));
+      assert.doesNotMatch(draw(late, "player"), /data-class-row=/);
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+
+  test("a Uses list of spell slots alone draws nothing while they hide, and her token has no uses", () => {
+    const alone = () => {
+      const state = tableRoom();
+      const bree = state.characters.bree!;
+      state.characters.bree = { ...bree, resources: [], actor: { ...bree.actor, uses: {} } };
+      return state;
+    };
+    const list = fixture("Bree's slots alone", () => createElement(CreatureUses, { target: { characterId: "bree" }, name: "Bree" }), { room: alone });
+    function Presence() {
+      return createElement("output", null, useUsesPresence({ tokenId: "tbree" }));
+    }
+    const presence = fixture("Bree's token's uses presence, her slots alone", () => createElement(Presence), { room: alone });
+    try {
+      hiding();
+      assert.match(draw(list, "player"), /data-slot-rows="full"/, "shown, her slots make the list");
+      assert.equal(draw(presence, "player"), "<output>yes</output>");
+      hiding("spellSlots");
+      assert.doesNotMatch(draw(list, "player"), /data-combat-uses/);
+      assert.equal(draw(presence, "player"), "<output>no</output>", "no Uses button opens on them");
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+
+  test("the rest's words leave out each hidden part's, and the Short Rest card keeps its dice rows", () => {
+    const spent: Character = { ...tableRoom().characters.bree!, spent: { slots: [1, 0, 0, 0, 0, 0, 0, 0, 0], dice: { d12: 1 } } };
+    const rest = (kind: "short" | "long") =>
+      fixture(`Bree's ${kind} rest`, pressed(RestSection, { actor: { hp: { cur: 10, max: 24, temp: 0 }, life: "alive" }, target: { characterId: "bree" }, character: spent }, (tree) => {
+        const choice = findIn(tree, (p) => p.label === "Rest" && typeof p.onChange === "function");
+        (choice?.onChange as ((k: string) => void) | undefined)?.(kind);
+      }));
+    const long = () => draw(rest("long"), "player").replace(/<[^>]+>/g, " ");
+    const short = () => draw(rest("short"), "player");
+    try {
+      hiding();
+      assert.match(long(), /All HP back, every spent Hit Point Die back, every spell slot back, Temporary HP gone/);
+      assert.match(long(), /A Long Rest also restores 1 spell slot and 1 Hit Point Die\./);
+      assert.match(draw(rest("long"), "player"), /<div[^>]*data-part="hitDice"[^>]*>Hit Point Dice: 5 of 6 d12, 3 of 3 d6</, "the count line, marked as the part's");
+      hiding("hitDice");
+      assert.match(long(), /All HP back, every spell slot back, Temporary HP gone/);
+      assert.match(long(), /A Long Rest also restores 1 spell slot\./);
+      assert.doesNotMatch(long(), /Hit Point Dice: /);
+      assert.match(short(), /Roll a d12 Hit Point Die/, "the card's dice rows stay (D-261127-300)");
+      hiding("spellSlots");
+      assert.match(long(), /All HP back, every spent Hit Point Die back, Temporary HP gone/);
+      assert.match(long(), /A Long Rest also restores 1 Hit Point Die\./);
+      hiding("spellSlots", "hitDice");
+      assert.match(long(), /All HP back, Temporary HP gone, one less Exhaustion level/);
+      assert.doesNotMatch(long(), /A Long Rest also restores/);
     } finally {
       resetAllFeatures();
       disposeDrawn();

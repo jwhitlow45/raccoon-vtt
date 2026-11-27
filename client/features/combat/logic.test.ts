@@ -327,6 +327,19 @@ describe("the list", () => {
     assert.equal(usesPresence({ actor: {}, resources: [{}], uses: [breath], loading: false, record: null, hidden }), "yes", "its other uses still open it");
   });
 
+  test("spell slots hidden on this device count for nothing, so a caster with only slots opens no Uses and gets no turn card (docs/design/design-v1-features.md 3)", () => {
+    const hidden = new Set(["spellSlots"] as const);
+    const rage = [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" as const }];
+    assert.equal(usesCount([], undefined, 2), 2, "shown, the slot group and Pact count one each");
+    assert.equal(usesCount([], undefined, 2, hidden), 0);
+    assert.equal(usesCount(rowsOf("card"), rage, 2, hidden), 4, "the block's uses and the class resources still count");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, slots: 1, uses: [], loading: false, record: null }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, slots: 1, uses: [], loading: false, record: null, hidden }), "no", "no Uses opens on slots alone");
+    assert.equal(usesPresence({ actor: {}, resources: [{}], slots: 1, uses: [], loading: false, record: null, hidden }), "yes", "its class resources still open it");
+    const both = new Set(["spellSlots", "classResources"] as const);
+    assert.equal(usesPresence({ actor: {}, resources: [{}], slots: 1, uses: [], loading: false, record: null, hidden: both }), "no");
+  });
+
   test("the DM's chips: three at most, X/Day as left over the most", () => {
     assert.deepEqual(markChips(undefined), { chips: [], more: 0 });
     const marks: Record<string, UseMark> = {

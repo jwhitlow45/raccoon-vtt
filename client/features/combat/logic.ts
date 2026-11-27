@@ -474,13 +474,13 @@ function legendaryOff(action: LegendaryUse, at: { ownTurn: boolean; left: number
  * on or read a count from, each class resource, and a character's spell
  * slots as 1 and its Pact Magic as 1 (`slots`, slots/logic.ts slotCount,
  * docs/design/design-v1-slots.md 3.2), so a caster with nothing else still
- * gets its turn card. Class resources hidden on this device count none, so
- * they never admit a turn card or open a Uses of nothing
+ * gets its turn card. Class resources and spell slots hidden on this device
+ * count none, so they never admit a turn card or open a Uses of nothing
  * (docs/design/design-v1-features.md 3, D-261127-394).
  */
 export function usesCount(rows: readonly UseRow[], resources: readonly ClassResource[] | undefined, slots = 0, hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): number {
-  const counted = hidden.has("classResources") ? 0 : (resources?.length ?? 0);
-  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + counted + slots;
+  const counted = (hidden.has("classResources") ? 0 : (resources?.length ?? 0)) + (hidden.has("spellSlots") ? 0 : slots);
+  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + counted;
 }
 
 // ------------------------------------------------------------ the rows' words
@@ -664,8 +664,9 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
  * is its skipped death save shows Uses while its turn lasts. Before its
  * block is read, spent uses show at once, with the list's loading line
  * where their rows will stand, and a creature with nothing yet is held
- * while its block loads. Class resources hidden on this device (`hidden`)
- * count for nothing here (docs/design/design-v1-features.md 3, D-261127-394).
+ * while its block loads. Class resources and spell slots hidden on this
+ * device (`hidden`) count for nothing here (docs/design/design-v1-features.md 3,
+ * D-261127-394).
  */
 export function usesPresence(input: {
   actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined;
@@ -677,7 +678,8 @@ export function usesPresence(input: {
   record: TurnRecord | null;
   hidden?: ReadonlySet<ModuleId>;
 }): "yes" | "loading" | "no" {
-  if ((!input.hidden?.has("classResources") && (input.resources?.length ?? 0) > 0) || (input.slots ?? 0) > 0) return "yes";
+  if (!input.hidden?.has("classResources") && (input.resources?.length ?? 0) > 0) return "yes";
+  if (!input.hidden?.has("spellSlots") && (input.slots ?? 0) > 0) return "yes";
   if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: input.record }).length > 0) return "yes";
   if (input.uses !== null) return "no";
   if (Object.keys(input.actor?.uses ?? {}).length > 0) return "yes";

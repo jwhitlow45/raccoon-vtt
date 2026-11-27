@@ -76,6 +76,9 @@ describe("the ownership golden", () => {
     assert.equal(own.shortcut["tool:ruler"], "ruler");
     assert.equal(own.anchor["scenes.floors.add-above"], "floors when oneFloor");
     assert.equal(own.search["field:companions"], "companions");
+    assert.equal(own.search["field:spell-slots"], "spellSlots");
+    assert.equal(own.search["field:hit-dice"], "hitDice");
+    assert.equal(own.search["field:classes"], "core", "the Classes line hides only with both slot parts, in tokens/search.ts");
     assert.equal(own.search["playlist:*"], "sound");
     assert.equal(own.builderMode.wing, "dungeon");
     assert.equal(own.topBar.clock, "time");
