@@ -66,6 +66,12 @@ describe("a library tile's name and status (docs/design/design-v1-pdf-handouts.m
     assert.deepEqual(imageTile({ ...row("token"), inUse: true }, { dm: false }), { label: "Token image", status: null });
   });
 
+  test("a 3D model's sheet is named 3D model, in use or not, as the DM's 3D models section lists it (docs/design/design-v1-token-models.md 4.3)", () => {
+    const sheet = { id: "m", kind: "model" as const, width: 2048, height: 1024, variants: ["full" as const, "mobile" as const, "thumb" as const] };
+    assert.deepEqual(imageTile({ ...sheet, inUse: false }, { dm: true }), { label: "3D model, not in use", status: "Not in use" });
+    assert.deepEqual(imageTile({ ...sheet, inUse: true }, { dm: true }), { label: "3D model", status: "In use" });
+  });
+
   test("a document's name gives its page count, and showing now while it shows", () => {
     const pages = Array.from({ length: 12 }, (_, i) => ({ assetId: `p${i}`, width: 1584, height: 2048 }));
     assert.deepEqual(docTile({ title: "Strange letter", pages }, false), { label: "Strange letter, handout, 12 pages", tag: "12 pages", status: null });

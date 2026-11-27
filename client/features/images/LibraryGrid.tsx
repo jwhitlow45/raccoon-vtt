@@ -11,6 +11,7 @@ import { LoadFailed } from "../../components/LoadFailed.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section, SectionLabel } from "../../components/Panel.tsx";
 import { TAG_TONES } from "../../components/tones.ts";
+import { MODEL_LIMITS } from "#shared/limits.ts";
 import type { AssetKind, AssetRow, AssetVariant } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -203,6 +204,8 @@ function LibraryStatus(props: { library: LibraryState; failed?: string }) {
 const SECTIONS: { kind: AssetKind; heading: string }[] = [
   { kind: "map", heading: "Maps" },
   { kind: "token", heading: "Token images" },
+  // A 3D model's sheet of 8 views (docs/design/design-v1-token-models.md 4.3), listed so the DM can free its storage (D-261127-190).
+  { kind: "model", heading: "3D models" },
 ];
 
 /** A video lists among the maps (docs/design/design-v1-animated-maps.md 4.6). */
@@ -263,6 +266,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
       // A video has no thumbnail of its own (D-261102-456): a film strip with its length in the corner.
       tag: video ? videoLength(video.durationMs) : null,
       ...(video ? { film: true } : null),
+      ...(row?.kind === "model" ? { model: true } : null),
       ...imageTile(row, { uploading: isUploading, dm: true }),
       view: (close) => ({
         ...(video ? videoView(video, stillOfVideo(scenes, id), assets) : imageView(id, row, shown, assets)),
@@ -408,7 +412,7 @@ type TileView = { title: string; pages: ViewerPage[]; details?: ReactNode; actio
  * `status`, the DM's, in the bottom right. `view` is asked only for the
  * tile open, with a way to close it once its Delete has run.
  */
-type Tile = { key: string; thumbId: string; label: string; tag: string | null; status: string | null; film?: true; view(close: () => void): TileView };
+type Tile = { key: string; thumbId: string; label: string; tag: string | null; status: string | null; film?: true; model?: true; view(close: () => void): TileView };
 
 /** `starter` puts a section in the starter picks' fold, after the room's own (docs/design/design-v1-starter-art.md 5). */
 type LibrarySection = { id: string; heading?: string; label: string; tiles: readonly Tile[]; after?: ReactNode; keep?: boolean; starter?: boolean };
@@ -501,7 +505,7 @@ function TileLibrary(props: { sections: readonly LibrarySection[]; before?: Reac
                 }}
                 style={tileStyle}
               >
-                {tile.film ? <FilmStrip /> : <Thumb id={tile.thumbId} />}
+                {tile.film ? <FilmStrip /> : <Thumb id={tile.thumbId} front={tile.model} />}
               </button>
               <TileMarks tag={tile.tag} status={tile.status} />
             </li>
@@ -637,7 +641,7 @@ function Mark(props: { end?: boolean; children: ReactNode }) {
 
 /** What the image is: its tile's name, and its viewer's title unless a handout shows it under one. */
 function kindName(row: AssetRow | undefined): string {
-  return row?.kind === "map" ? "Map" : row?.kind === "video" ? VIDEO_KIND : row?.kind === "handout" ? "Handout" : "Token image";
+  return row?.kind === "map" ? "Map" : row?.kind === "video" ? VIDEO_KIND : row?.kind === "handout" ? "Handout" : row?.kind === "model" ? "3D model" : "Token image";
 }
 
 const VIDEO_KIND = "Animated map";
@@ -812,13 +816,27 @@ function Tiles(props: { label: string; children: ReactNode }) {
 }
 
 /** An image's small copy, or a plain tile that says so when it will not load (offline, say), never a broken image. */
-function Thumb(props: { id: string; disabled?: boolean }) {
+/** `front` shows a 3D model's sheet by its front view, the first of its 8 frames, 4 across and 2 down: the square at its top left. */
+function Thumb(props: { id: string; disabled?: boolean; front?: boolean }) {
   const assets = useAssets();
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
       <span style={{ display: "grid", placeItems: "center", width: "100%", height: "100%", color: props.disabled ? theme.color.textDisabled : theme.color.textMuted, fontSize: theme.font.tiny, textAlign: "center" }}>
         No preview
+      </span>
+    );
+  }
+  if (props.front) {
+    return (
+      <span style={{ display: "block", position: "relative", width: "100%", height: "100%", overflow: "hidden", background: theme.color.stage }}>
+        <img
+          src={assets.url(props.id, "thumb")}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+          style={{ position: "absolute", left: 0, top: 0, width: `${MODEL_LIMITS.sheetColumns * 100}%`, height: `${MODEL_LIMITS.sheetRows * 100}%`, maxWidth: "none", display: "block" }}
+        />
       </span>
     );
   }
