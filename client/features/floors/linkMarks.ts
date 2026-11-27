@@ -9,7 +9,7 @@ import type { PillSpec } from "../../canvas/boardView.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import type { IsoGround } from "../../canvas/relief/context.ts";
 import type { Box } from "../../lib/boardText.ts";
-import { hexOutline } from "../../lib/scene.ts";
+import { drawnAt, footprint, hexFootprintOutline, hexOutline } from "../../lib/scene.ts";
 import { isometric, toView } from "../../lib/view.ts";
 import { pillGeometry, pillPlace, pillReach } from "../measure/pillPlace.ts";
 import { turnMoverId } from "../attach/turns.ts";
@@ -100,19 +100,29 @@ export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLin
   return Object.values(view.tokens)
     .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)
     .map((t) => {
-      const r = footprintRect(g, t);
-      return `${r.x},${r.y},${r.w},${r.h}`;
+      if (!isHex(g)) {
+        const r = footprintRect(g, t);
+        return `${r.x},${r.y},${r.w},${r.h}`;
+      }
+      // On hexes the standee draws at the stored spot, which a map turned from squares to hexes leaves off the hexes the
+      // creature stands on (LP54-ISO-1), so both count: the drawn box, then the outline of its hexes.
+      const at = drawnAt(g, t);
+      const fp = footprint(t);
+      return [at.x, at.y, fp.w, fp.h, ...hexFootprintOutline(g, t)].join(",");
     })
     .sort()
     .join(" ");
 }
 
-/** The squares back from tokenSpots. */
-export function spotsOf(key: string): FloorLink["rect"][] {
+/** Where a creature stands for an end's pills: the box it draws in, and on hexes the outline of its hexes, in cells. */
+export type TokenSpot = FloorLink["rect"] & { loop?: readonly number[] };
+
+/** The spots back from tokenSpots. */
+export function spotsOf(key: string): TokenSpot[] {
   if (key === "") return [];
   return key.split(" ").map((part) => {
-    const [x, y, w, h] = part.split(",").map(Number);
-    return { x: x!, y: y!, w: w!, h: h! };
+    const [x, y, w, h, ...loop] = part.split(",").map(Number);
+    return { x: x!, y: y!, w: w!, h: h!, ...(loop.length > 0 ? { loop } : {}) };
   });
 }
 
@@ -293,13 +303,14 @@ export function boxCoversOutline(box: Box, corners: readonly { x: number; y: num
 }
 
 /**
- * What a creature covers on the screen: its squares, and in Isometric the
- * standee rising from their middle as tall as they are deep (canvas/relief/standee.ts
+ * What a creature covers on the screen: its squares, or on hexes the box it
+ * draws in and its hexes, and in Isometric the standee rising from the
+ * box's middle as tall as it is deep (canvas/relief/standee.ts
  * standeeShape's frame), so a chip over a corner behind it keeps off its
  * upper body and its badges too (LP48FIXA-R1).
  */
-export function tokenBox(r: FloorLink["rect"], iso: DrawSpace): Box {
-  const ground = outlineBox(cornersOf({ ...r, loop: null }), iso);
+export function tokenBox(r: TokenSpot, iso: DrawSpace): Box {
+  const ground = outlineBox([...cornersOf({ ...r, loop: null }), ...(r.loop ? cornersOf({ ...r, loop: [...r.loop] }) : [])], iso);
   if (!iso) return ground;
   const foot = viewPointOf(iso, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
   return { x0: Math.min(ground.x0, foot.x - r.w / 2), y0: Math.min(ground.y0, foot.y - r.h), x1: Math.max(ground.x1, foot.x + r.w / 2), y1: ground.y1 };
@@ -353,7 +364,7 @@ export function placeEnds(
   scale: number,
   iso: DrawSpace,
   stands: (p: PillSpec) => boolean,
-  tokens: readonly FloorLink["rect"][] = [],
+  tokens: readonly TokenSpot[] = [],
   options: { view?: Box | null; prune?: boolean; traps?: readonly Outline[]; badges?: readonly Box[]; clear?: boolean } = {},
 ): Map<string, PlacedPills> {
   const { view = null, prune = true, traps = [], badges = [], clear = false } = options;

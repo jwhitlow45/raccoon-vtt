@@ -4,6 +4,10 @@ import { ATTIC, GROUND, UPPER, onThornsTurn, run, thornToken, tower, withOpening
 import type { FloorLink, RoomState } from "#shared/model.ts";
 import { viewPointOf } from "../../canvas/isoPlace.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { placedOnHex } from "#shared/rules/footprint.ts";
+import { standeeFooting } from "../../canvas/relief/stand.ts";
+import { standeeShape } from "../../canvas/relief/standee.ts";
+import { hexFootprintOutline } from "../../lib/scene.ts";
 import type { PillSpec } from "../../canvas/boardView.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { theme } from "../../lib/theme.ts";
@@ -700,4 +704,31 @@ describe("in Isometric the pills of stairs keep off creatures on a floor with no
     assert.equal(meets(spotsOf(tokenSpots(state, GROUND))), true, "read as Top-down reads, the name meets the creature");
     assert.equal(meets(spotsOf(tokenSpots(state, GROUND, true))), false, "read for Isometric, it keeps off it");
   });
+
+  for (const gridShape of ["hexRows", "hexColumns"] as const) {
+    test(`on ${gridShape} a creature's box holds its standee where it draws and its hexes, on its hex or where a squares map left it, at every turn (LP54-ISO-1)`, () => {
+      const g = { shape: "hex", orient: gridShape === "hexRows" ? "rows" : "columns" } as const;
+      const misses: string[] = [];
+      for (const size of ["small", "medium", "large", "huge"] as const) {
+        for (const snapped of [true, false]) {
+          const loose = { size, x: 3, y: 2 };
+          const at = snapped ? placedOnHex(g, loose, { col: 3, row: 2 }) : loose;
+          const base = withStairs(tower({ tokens: { thorn: thornToken({ size, x: at.x, y: at.y }) } }), { rect: { x: 6, y: 6, w: 1, h: 1 } });
+          const state = { ...base, scenes: { ...base.scenes, [GROUND]: { ...base.scenes[GROUND]!, gridShape } } };
+          const thorn = state.tokens.thorn!;
+          const [spot] = spotsOf(tokenSpots(state, GROUND, true));
+          for (const turn of [0, 1, 2, 3] as const) {
+            const iso = { turn, ground: () => 0 };
+            const shape = standeeShape(turn, standeeFooting(g, thorn).box, 0, 0, 40, 900);
+            const hexes = outlineBox(cornersOf({ x: 0, y: 0, w: 0, h: 0, loop: hexFootprintOutline(g, thorn) }), iso);
+            const drawn = { x0: Math.min(shape.frame.x0, shape.ring.x0, hexes.x0), y0: Math.min(shape.frame.y0, hexes.y0), x1: Math.max(shape.frame.x1, shape.ring.x1, hexes.x1), y1: Math.max(shape.ring.y1, hexes.y1) };
+            const box = tokenBox(spot!, iso);
+            const e = 1e-9;
+            if (drawn.x0 < box.x0 - e || drawn.y0 < box.y0 - e || drawn.x1 > box.x1 + e || drawn.y1 > box.y1 + e) misses.push(`${size} ${snapped ? "on its hex" : "off its hex"}, turn ${turn}`);
+          }
+        }
+      }
+      assert.deepEqual(misses, []);
+    });
+  }
 });
