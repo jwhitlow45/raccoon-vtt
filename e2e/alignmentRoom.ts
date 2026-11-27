@@ -2967,6 +2967,25 @@ async function slotScreens(sweep: Sweep, page: Page): Promise<void> {
   await d6.getByText(/^Rolled \d+ [+-] \d+: \d+ HP back/).first().waitFor();
   await sweep.measure(page, "slots-short-rest-rolled", rest);
   await rest.getByRole("button", { name: "Cancel", exact: true }).click();
+  // ftd: both slot parts hidden on this device, Uses and Rest each end with their Hidden on this device line (docs/design/design-v1-features.md 6).
+  const setSlotParts = (shown: boolean) =>
+    page.evaluate((value) => {
+      const w = globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void }; dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string | null }) => unknown };
+      if (value === null) w.localStorage.removeItem("rvtt.features");
+      else w.localStorage.setItem("rvtt.features", value);
+      w.dispatchEvent(new w.StorageEvent("storage", { key: "rvtt.features", newValue: value }));
+    }, shown ? null : JSON.stringify({ v: 1, dm: {}, player: { spellSlots: false, hitDice: false } }));
+  await setSlotParts(false);
+  try {
+    const usesLine = section.getByRole("group", { name: "Hidden on this device" });
+    if (await shows(usesLine)) await sweep.measure(page, "slots-hidden-uses", section);
+    else await sweep.missing(page, "slots-hidden-uses", "Uses held no Hidden on this device line with the slot parts hidden");
+    const restLine = rest.getByRole("group", { name: "Hidden on this device" });
+    if (await shows(restLine)) await sweep.measure(page, "slots-hidden-rest", rest);
+    else await sweep.missing(page, "slots-hidden-rest", "Rest held no Hidden on this device line with Hit Point Dice hidden");
+  } finally {
+    await setSlotParts(true);
+  }
   await closeSheets(page);
 }
 
