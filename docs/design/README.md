@@ -75,6 +75,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   player's area of effect placed from their own character.
 - [design-v1-dungeon-generator.md](design-v1-dungeon-generator.md): making a
   whole dungeon from a few choices and a seed, as a Builder scene.
+- [design-v1-dungeon-stock.md](design-v1-dungeon-stock.md): stocking a
+  generated dungeon's rooms with hidden SRD monsters for the party.
 
 ## Tokens and characters
 
