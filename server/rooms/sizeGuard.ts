@@ -2248,6 +2248,11 @@ const REVERT_MOST = 2 * (fieldBytes("before") + VITALS_MOST + 1) + fieldBytes("a
 const USES_MOST = 4096;
 /** A life's widest as JSON. */
 const LIFE_MOST = Math.max(...Object.keys({ alive: 0, dying: 0, stable: 0, dead: 0 } satisfies Record<LifeState, 0>).map((life) => serializedBytes(life)));
+/**
+ * A character's spent counts (Character `spent`) at their widest by the caps
+ * alone: nine slot levels at 4, Pact Magic at 4 and every die size at 20.
+ */
+const SPENT_MOST = serializedBytes({ slots: Array<number>(9).fill(4), pact: 4, dice: { d12: 20, d10: 20, d8: 20, d6: 20 } });
 /** The damage types a creature took (Actor `hurt`) at their widest: every type once. */
 const HURT_MOST = serializedBytes([...DAMAGE_TYPES]);
 /** The Unconscious that 0 HP puts on (shared/rules/hp.ts withUnconscious). */
@@ -2366,6 +2371,10 @@ export const OWN_WRITTEN: Readonly<Record<CopiedKind, readonly OwnField[]>> = {
     fixed("", "rev", DIGITS.rev),
     // A Long Rest's stamp by the room's clock, whoever rests the character.
     fixed("", "longRest", serializedBytes({ at: 0, clock: "" }) - 1 + DIGITS.tick + ID_MOST - 2),
+    // What a rest gives back and the use stamp it moves, whoever rests the character: a player lent only its token rests
+    // it, and uses its token's abilities, past what their copy holds (docs/design/design-v1-slots.md 7, D-261127-369).
+    fixed("", "spent", SPENT_MOST),
+    fixed("", "useRev", DIGITS.rev),
     shownOr("actor", "hp", HP_MOST),
     copyOnly("actor", "hpLabel"),
     copyOnly("actor", "hpBar"),

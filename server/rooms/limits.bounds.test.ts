@@ -329,5 +329,8 @@ describe("the room the DM's adds leave the players at the far lines", () => {
     }
     assert.deepEqual([...most.keys()].sort(), ["area", "character", "creature", "unseenArea"]);
     withinWidths(most, "the least things");
+    // A character lent by its token counts its spent counts and use stamp at their widest, whoever rests it
+    // (docs/design/design-v1-slots.md 7, D-261127-369), and still fits its width with room to spare.
+    assert.ok(EXACT_WIDTH.character - most.get("character")! >= 100, `a character takes ${most.get("character")} of ${EXACT_WIDTH.character} bytes`);
   });
 });

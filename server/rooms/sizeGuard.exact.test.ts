@@ -252,6 +252,20 @@ describe("LP44-PRIV-1: a player's own op writes nothing into their stepped part"
     });
   }
 
+  test("a rest by a player lent only the token of a character with slots spent and no class resources moves P1's stepped part by nothing (D-261127-369)", () => {
+    for (const kind of ["short", "long"] as const) {
+      const state = table();
+      state.characters.c2 = character("c2", { ownerIds: [], rev: 9, name: "Bree", classes: [{ id: "wizard", level: 17 }, { id: "warlock", level: 3 }], spent: { slots: [4, 3, 3, 3, 2, 1, 1, 1, 1], pact: 2, dice: { d6: 17, d8: 3 } }, useRev: 99_999, actor: actor({ dmNotes: "" }) });
+      state.tokens.bree = token("bree", { kind: "pc", rev: 9, actor: { ref: "c2" }, ownerIds: ["p1"], x: 5, y: 2 });
+      const op: Op = { t: "actor.rest", target: { tokenId: "bree" }, kind };
+      assert.ok(canApply(op, P1, state, DEPS).ok, "a lent player rests the character");
+      const result = applyOp(state, op, P1, env(1_000_000));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      assert.equal(result.state.characters.c2!.useRev, 100_000);
+      assert.deepEqual(strays(state, result.state, [], true), [], kind);
+    }
+  });
+
   test("a dice line of P1's with a roll for a creature of theirs players do not see beside one they do: P1's stepped parts stay as they were, line after line", () => {
     let state = table();
     state.tokens.pet = { ...state.tokens.pet!, visibility: "dm" };

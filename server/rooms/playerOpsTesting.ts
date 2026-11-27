@@ -67,6 +67,11 @@ export const PLAYER_OPS: Partial<Record<OpType, { op: (state: RoomState) => Op; 
     room: (s) => (s.characters.c1 = { ...s.characters.c1!, actor: { ...s.characters.c1!.actor, hp: { cur: 0, max: 20, temp: 0 }, life: "dying" } }),
     op: (s) => rolled(s, { t: "actor.deathRoll", tag: "t1", target: { characterId: "c1" } } as DiceOp),
   },
+  // A Short Rest's Hit Point Die for their own Wizard 3 (docs/design/design-v1-slots.md 6).
+  "actor.hitDieRoll": {
+    room: (s) => (s.characters.c1 = { ...s.characters.c1!, classes: [{ id: "wizard", level: 3 }], actor: { ...s.characters.c1!.actor, hp: { cur: 5, max: 20, temp: 0 } } }),
+    op: (s) => rolled(s, { t: "actor.hitDieRoll", tag: "t1", target: { characterId: "c1" }, die: 6, con: 2 } as DiceOp),
+  },
   "dice.roll": { op: (s) => rolled(s, { t: "dice.roll", tag: "t1", to: "all", rolls: [{ formula: "1d20", label: "Bite", creature: { tokenId: "pet" } }] } as DiceOp) },
   "token.moveMany": { op: () => ({ t: "token.moveMany", moves: [{ tokenId: "pet", x: 13, y: 12 }, { tokenId: "lent", x: 14, y: 12 }] }) as Op },
   "token.update": { op: () => ({ t: "token.update", tokenId: "lent", patch: { notes: "A borrowed wolf" } }) as Op },
