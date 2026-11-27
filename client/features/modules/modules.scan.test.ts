@@ -63,17 +63,9 @@ describe("the parts gate's source scans", () => {
     assert.deepEqual(outside.filter((f) => valueImportsOfStore(f.text)).map((f) => f.file), []);
   });
 
-  /**
-   * Files still reading the old Roll animation setting, each cleared by the lane that owns it: FT-B (device/) and FT-C (dice/throw/, DiceSetPicker).
-   * device/settings.ts keeps the setting's reads for FT-C's three files until they read Dice animation, and the lane that lands after both takes them out.
-   */
-  const ROLL_ANIMATION_PENDING = [
-    "client/features/device/settings.ts",
-  ];
-
   test("the old Roll animation setting is read only by the store's migration", () => {
     const reads = outside.filter((f) => /\b(useRollAnimation|subscribeRollAnimation|setRollAnimation)\b|\brollAnimation\(|rvtt\.rollAnimation/.test(f.text)).map((f) => f.file);
-    assert.deepEqual(reads.sort(), [...ROLL_ANIMATION_PENDING].sort(), "a file reads Roll animation, or a listed one no longer does: read Dice animation through the gate, and take the file off the list");
+    assert.deepEqual(reads, [], "a file reads Roll animation: read Dice animation through the gate");
   });
 
   /** Each part's tool and panel ids, and the folders that are the part's own. */
