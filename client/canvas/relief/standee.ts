@@ -143,19 +143,24 @@ export function standeeShape(
   const ring = ellipseBox(turn, box.w, box.h, at);
   const shadow = base > ground ? ellipseBox(turn, box.w, box.h, g) : null;
   const k = 1 / Math.max(scale, 1e-9);
-  // A picture's art lies inside its frame and its frame's foot above its ring's bottom, so only a model's boxes widen these.
-  const bounds = {
-    x0: Math.min(frame.x0, ring.x0, drawnBox.x0) - DECOR_REACH_PX.side * k,
-    x1: Math.max(frame.x1, ring.x1, drawnBox.x1) + DECOR_REACH_PX.side * k,
-    y0: Math.min(frame.y0, drawnBox.y0) - DECOR_REACH_PX.top * k,
-    y1: Math.max(ring.y1, shadow?.y1 ?? -Infinity, frame.y1, drawnBox.y1) + DECOR_REACH_PX.bottom * k,
-  };
   const reach = TICK_REACH + RING_REACH_PX * k;
   const paints = {
     x0: Math.min(drawnBox.x0, ring.x0 - reach, shadow?.x0 ?? Infinity),
     x1: Math.max(drawnBox.x1, ring.x1 + reach, shadow?.x1 ?? -Infinity),
     y0: Math.min(drawnBox.y0, ring.y0 - reach),
     y1: Math.max(drawnBox.y1, ring.y1 + reach, shadow?.y1 ?? -Infinity),
+  };
+  /*
+   * The decor's reach round the frame it lays out on and the ring under it,
+   * with everything the standee paints: a flat or low model's decor frame
+   * starts at its drawn top, below its ring's top, and at a close zoom the
+   * outlines and facing tick reach past the decor's reach of a few pixels.
+   */
+  const bounds = {
+    x0: Math.min(Math.min(frame.x0, ring.x0, drawnBox.x0) - DECOR_REACH_PX.side * k, paints.x0),
+    x1: Math.max(Math.max(frame.x1, ring.x1, drawnBox.x1) + DECOR_REACH_PX.side * k, paints.x1),
+    y0: Math.min(Math.min(frame.y0, drawnBox.y0) - DECOR_REACH_PX.top * k, paints.y0),
+    y1: Math.max(Math.max(ring.y1, shadow?.y1 ?? -Infinity, frame.y1, drawnBox.y1) + DECOR_REACH_PX.bottom * k, paints.y1),
   };
   return { ground: g, base: at, art, drawnBox, frame, ring, shadow, bounds, paints, capped, drawnBase: drawn };
 }

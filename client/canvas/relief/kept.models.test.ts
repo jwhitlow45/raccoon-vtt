@@ -81,4 +81,21 @@ describe("models on the kept picture", () => {
       assert.deepEqual(r.canvas.diff(r.whole()), [], `pan ${step}`);
     }
   });
+
+  test("a flat model's ring top, above its drawn box and its decor's frame, repaints in the strip that brings it on screen (review MODELC-O-1)", () => {
+    // A long, low figure on a Gargantuan footprint, at a close zoom: its drawn box is a thin band at the base, under its ring's top.
+    const flat: ModelRef = { assetId: "m-flat", side: 1.05, anchorY: 0.55, boxes: Array.from({ length: 8 }, () => [2, 48, 98, 58] as [number, number, number, number]) };
+    const r = new KeptRig({ grid: sceneGrid({}), w: 12, h: 12, ground: new Map() }, { width: 300, height: 240, ratio: 2, camera: { x: 75, y: -330.26, scale: 100 }, margin: 0 });
+    r.standees.push({ id: "worm", x: 4, y: 4, size: 4, look: 0, image: { icon: "lorc/wolf-head", color: "#556b2f", model: flat } });
+    r.sheets = decoded("m-flat");
+    r.commit();
+    r.frame();
+    // The ring's top lies just above the canvas: a pan down brings it into the top strip, its drawn box still off it.
+    for (const dy of [5, 4, 6, -7, 3]) {
+      const fit = r.pan(0, dy);
+      if (fit !== "inside") r.commit();
+      r.frame();
+      assert.deepEqual(r.canvas.diff(r.whole()), [], `after a pan by ${dy}`);
+    }
+  });
 });
