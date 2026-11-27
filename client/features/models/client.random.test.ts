@@ -15,7 +15,7 @@ import { MODEL_WORDS, type FromModelWorker, type ToModelWorker } from "./mesh.ts
  * - SETTLED: every request ends, once, in its sheet, a refusal's words or an AbortError.
  * - OWN: a sheet is the one drawn for that request's file and options.
  * - HELD: a request sent without its file goes to a worker that read that file.
- * - ONE: a worker never has two requests at once, and an ended worker is never sent one.
+ * - ONE: a worker never has two requests at once, reads at most one file, and an ended worker is never sent one.
  * - QUIET: no stage note after a request ends, and no watchdog left once all have ended.
  * - PROGRESS: a request still open is the one the live worker runs, or the one newest behind it.
  */
@@ -43,6 +43,7 @@ class FakeWorker {
     if (this.terminated) this.faults.push("ONE: a message to an ended worker");
     if (this.open) this.faults.push("ONE: a second request while one runs");
     if (!message.file && !this.held) this.faults.push("HELD: options sent to a worker holding no file");
+    if (message.file && this.inbox.some((m) => m.file)) this.faults.push("ONE: a second file sent to one worker, whose last model would sit under the read");
     this.inbox.push(message);
     this.open = message;
   }
@@ -284,13 +285,40 @@ describe("the model worker's page side", () => {
     assert.equal(errorOf(calls[0]!)?.message, MODEL_WORDS.crashed);
   });
 
-  test("a refused read leaves the worker holding no file, so the next request sends it again", async () => {
+  test("a refused read leaves no file held, so the next request reads it again in a new worker", async () => {
     const calls: Call[] = [];
     call(files[0]!, 1, false, calls);
     live()!.answer("refused", 0);
     await flush();
     call(files[0]!, 2, false, calls);
-    assert.equal(live()!.inbox[1]!.file, files[0]);
+    assert.ok(FakeWorker.all[0]!.terminated);
+    assert.equal(live()!.inbox[0]!.file, files[0]);
+  });
+
+  test("another file after a finished draw ends the idle worker before anything is read", async () => {
+    const calls: Call[] = [];
+    call(files[0]!, 1, false, calls);
+    live()!.answer("drawn", 0);
+    await flush();
+    const first = live()!;
+    call(files[1]!, 2, false, calls);
+    assert.ok(first.terminated, "the worker holding the last model ends");
+    assert.equal(FakeWorker.all.length, 2);
+    assert.equal(live()!.inbox[0]!.file, files[1]);
+  });
+
+  test("another file after a refused one ends that worker too", async () => {
+    const calls: Call[] = [];
+    call(files[0]!, 1, false, calls);
+    live()!.answer("drawn", 0);
+    await flush();
+    call(files[0]!, 2, false, calls);
+    live()!.answer("refused", 0);
+    await flush();
+    call(files[1]!, 3, false, calls);
+    assert.ok(FakeWorker.all[0]!.terminated);
+    assert.equal(live()!.inbox.length, 1);
+    assert.equal(live()!.inbox[0]!.file, files[1]);
   });
 
   test("a signal already aborted ends the request before it starts", async () => {

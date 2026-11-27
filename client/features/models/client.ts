@@ -14,9 +14,10 @@ export type { DrawnSheet, ModelColor, ModelDevice, ModelOptions, ModelStage } fr
  * it read, so a change of Color, Size or which way is up draws again
  * without reading again. A second request for the same file while one
  * draws waits, and only the newest waits: an older waiting one is
- * cancelled. A request for another file ends the worker at once, as does a
- * request's signal, the 20 s watchdog and `endModelWorker()`. Every
- * request ends in its sheet, a refusal's sentence, or an AbortError.
+ * cancelled. A request for another file ends the worker at once, busy or
+ * idle, so each worker reads one file and no read sits on the last model.
+ * A request's signal, the 20 s watchdog and `endModelWorker()` end it too.
+ * Every request ends in its sheet, a refusal's sentence, or an AbortError.
  */
 
 export type DrawOptions = ModelOptions & {
@@ -94,7 +95,12 @@ function spawn(): Worker {
       const { t: _t, id: _id, ...sheet } = message;
       settle(request, { sheet });
     } else {
-      if (request.sentFile) held = null;
+      if (request.sentFile) {
+        // A read that failed may have left a model loaded in the drawer: the next read starts in a worker of its own.
+        made.terminate();
+        worker = null;
+        held = null;
+      }
       settle(request, { err: new Error(message.message) });
     }
     startWaiting();
@@ -152,7 +158,7 @@ export function drawModel(file: File, options: DrawOptions): Promise<DrawnSheet>
       request.timer = null;
     };
     signal?.addEventListener("abort", onAbort);
-    if (running && running.file !== file) end(aborted(), true);
+    if (worker && held !== file) end(aborted(), true);
     if (waiting) {
       const older = waiting;
       waiting = null;
