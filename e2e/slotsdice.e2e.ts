@@ -404,12 +404,18 @@ describe("raccoon-vtt: spell slots and Hit Point Dice", { timeout: 900_000 }, ()
     assert.equal(await con.inputValue(), "1", "this device kept the modifier");
     // A modifier out of range holds Roll and says the range on its own line, the field keeping its place in the row.
     await con.fill("11");
-    await rest.getByText("Type a Constitution modifier from -5 to 10.", { exact: true }).waitFor();
+    // The words show once on their line, and Roll names them as its reason in a hidden span of its own.
+    const conError = rest.getByText("Type a Constitution modifier from -5 to 10.", { exact: true }).filter({ visible: true });
+    await conError.waitFor();
     assert.equal(await rest.getByRole("button", { name: /^Roll a d6 Hit Point Die/ }).getAttribute("aria-disabled"), "true", "Roll is held");
     await measure(kim, rest, "the Short Rest card with its Constitution error at 390 x 844");
     const field = await con.boundingBox();
     const card = await rest.boundingBox();
     assert.ok(field && card && field.x + field.width <= card.x + card.width + 1, `the field leaves the card: ${JSON.stringify({ field, card })}`);
+    // Its own line under the row: below the field, starting where the row's label starts.
+    const words = await conError.boundingBox();
+    const label = await rest.getByText("Constitution modifier", { exact: true }).boundingBox();
+    assert.ok(words && label && field && words.y >= field.y + field.height - 1 && Math.abs(words.x - label.x) <= 1, `the error is not its own line under the row: ${JSON.stringify({ words, label, field })}`);
     await con.fill("1");
     await rest.getByRole("button", { name: "Cancel", exact: true }).tap();
     await rest.getByRole("radio", { name: "Long Rest" }).check();
