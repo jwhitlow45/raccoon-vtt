@@ -392,6 +392,8 @@ describe("websocket: reconnects and watermarks", () => {
     await s.snapshot("c1");
     // The refusal is staged but the batch never commits: the room dies first.
     const staged = handled(roomId, 1);
+    // Sent just short of a batch boundary of the real clock, the closest the batch's close can come to the unload.
+    await beforeBoundary();
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
     // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
@@ -419,6 +421,8 @@ describe("websocket: reconnects and watermarks", () => {
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
     const staged = handled(roomId, 1);
+    // Sent just short of a batch boundary of the real clock, the closest the batch's close can come to the unload.
+    await beforeBoundary();
     s.send({ t: "op", n: 1, op: { t: "nonsense" } });
     await staged;
     // handled() resolves before any timer can close the open batch, and the unload drops the batch before one can.
