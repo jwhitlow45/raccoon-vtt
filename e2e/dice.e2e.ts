@@ -1481,6 +1481,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       assert.equal(await player.locator("[data-dice-stage]").count(), 0, `${key} ${value}: no canvas`);
       assert.equal(playerConsole.errors.length + playerConsole.warnings.length, messages, `${key} ${value}: no console message`);
       await player.evaluate((k) => localStorage.removeItem(k), key);
+      // The switch's old "off" also hid Dice animation in the parts store as the room loaded (features/modules/store.ts migratedChoices), so that goes too.
+      await player.evaluate(() => localStorage.removeItem("rvtt.features"));
     }
     await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -2890,6 +2892,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
         await rollsAtOnce(player, playerConsole, `${key} ${value}`);
       } finally {
         await player.evaluate((k) => localStorage.removeItem(k), key);
+        // As ra-3's: the old "off" hid Dice animation in the parts store too.
+        await player.evaluate(() => localStorage.removeItem("rvtt.features"));
       }
     }
     await reopenRoom(player);
