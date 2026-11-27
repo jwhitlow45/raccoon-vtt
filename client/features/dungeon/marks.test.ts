@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { latticeFor } from "./lattice.ts";
-import { drawMarks, lightMarks, numberMarks, pickRoom, roomBox, roomBoxes } from "./marks.ts";
+import { drawMarks, lightMarks, MONSTER_RING, monsterMarks, numberMarks, pickRoom, RING_OUTLINE, roomBox, roomBoxes } from "./marks.ts";
 import { twoRooms } from "./handPlans.ts";
 import { planFitted, type DungeonPlan } from "./plan.ts";
 import { scratchRoom } from "./scratch.ts";
 import { clampSettings, DEFAULT_SETTINGS } from "./settings.ts";
+import { token } from "#shared/testutil.ts";
+import { contrast } from "../../lib/accent.ts";
+import { boardTheme } from "../../lib/theme.ts";
 
 /*
  * The DM marks (phase 2, 4.2): a ring on each light, and with DM key on a
@@ -126,10 +129,6 @@ test("DG3: after routing drops rooms, each room's box, number, ring and edit are
 });
 
 /* DSTOCK (docs/design/design-v1-dungeon-stock.md 1 and 6): a ring round each stocked creature's footprint, in the hostile red over the dark halo. */
-const { contrast } = await import("../../lib/accent.ts");
-const { boardTheme } = await import("../../lib/theme.ts");
-const { MONSTER_RING, monsterMarks, RING_OUTLINE } = await import("./marks.ts");
-const { token } = await import("#shared/testutil.ts");
 
 test("DSTOCK-M: each creature the plan stocked is ringed inside its footprint, and a token it did not stock is not", () => {
   const plan = { ...twoRooms(), monsters: [{ srdId: "goblin-warrior", room: 0, x: 3, y: 4 }, { srdId: "ogre", room: 1, x: 10, y: 6 }] };

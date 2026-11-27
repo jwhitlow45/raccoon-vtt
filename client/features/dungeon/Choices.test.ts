@@ -2,7 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS, MAX_HEX_ROOMS, type DungeonSettings, type GridKind } from "./settings.ts";
-import { HEIGHTS_HELP, HEX_THEME_NOTE, KEY_FULL, SECRETS_CAVE, WIDE_HELP, WIDE_HELP_HEX, WING_FLAT } from "./words.ts";
+import { HEIGHTS_HELP, HEX_THEME_NOTE, KEY_FULL, MONSTERS_HELD, MONSTERS_HELP, MONSTERS_THEME, SECRETS_CAVE, SEED_HELP, SEED_HELP_STOCKED, WIDE_HELP, WIDE_HELP_HEX, WING_FLAT } from "./words.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -85,7 +85,6 @@ test("a row change patches only what it changed, so a Rooms past the cap stays t
  * Dressing and before DM key, held at None without a leveled party, and the
  * Party level row held while it follows the party.
  */
-const { MONSTERS_HELD, MONSTERS_HELP, MONSTERS_THEME, SEED_HELP, SEED_HELP_STOCKED } = await import("./words.ts");
 
 function stocked(stock: { monsters?: number; held?: boolean; edited?: boolean; band?: { held: boolean; lines: string[] }; theme?: DungeonSettings["theme"]; traps?: number } = {}): string {
   return renderToStaticMarkup(

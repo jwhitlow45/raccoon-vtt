@@ -2,7 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { REPORTS, SECRET_OFF, type RoomEdit, type RoomFacts } from "./edits.ts";
-import { doorName, EDIT_OVER_WALLS, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportRow, ROOM_GONE, WING_FLAT } from "./words.ts";
+import { doorName, EDIT_OVER_WALLS, ENTRANCE_FLAT, fightLine, HEIGHT_HELP, NO_TRAP_FITS, OTHER_MONSTERS, reportRow, ROOM_GONE, WING_FLAT } from "./words.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -135,7 +135,6 @@ test("each report stands under its row and is spoken once in the status region",
  * shows only while Monsters is above None, reads On as the room's claim
  * does, lists its fight, and Other monsters draws the room's next one.
  */
-const { fightLine, OTHER_MONSTERS } = await import("./words.ts");
 
 function stockedDraw(facts: RoomFacts, edit: RoomEdit | undefined, onEdit: (next: RoomEdit | null) => void = nothing): string {
   return renderToStaticMarkup(h(RoomPanel, { facts, edit, onEdit, onStep: nothing, onDone: nothing, cave: false, stocking: true, limit: h("p", null, "LIMIT-SLOT") }));

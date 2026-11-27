@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { keyTitle } from "./keyPage.ts";
-import { doorName, editedLine, entranceSide, fitLine, floorKeyName, floorOutcomeText, floorTitle, fogLine, MAKE_FLOOR, makingLine, MAKING_FLOOR, NO_FOG_WARNING, outcomeText, previewName, roomsHint, roomTitle, selectedName, sizeLine, statusLine } from "./words.ts";
+import { bandLines, difficultyHelp, doorName, editedLine, entranceSide, fightLine, fitLine, floorKeyName, floorOutcomeText, floorTitle, fogLine, fogLine as fogLine2, lightLine, litWords, MAKE_FLOOR, MAKING_FLOOR, makingLine, monstersWords, NO_FOG_SECRET_WARNING, NO_FOG_WARNING, outcomeText, overLimitLine, previewName, previewName as previewName2, reportRow as rowOf, roomsHint, roomTitle, secretsWords, selectedName, sizeLine, startScene, statusLine, statusLine as statusLine2 } from "./words.ts";
+import { REPORTS } from "./edits.ts";
 
 test("DG-C: the size line in the room's feet per square", () => {
   assert.equal(sizeLine(30, 30, 5), "30 × 30 squares (150 by 150 ft)");
@@ -69,16 +70,6 @@ test("DG-C: Make's progress and every outcome in its sentence", () => {
  * secret-room fog warning, the two rows' words, the light line and the
  * scene Make sends.
  */
-const {
-  fogLine: fogLine2,
-  lightLine,
-  litWords,
-  NO_FOG_SECRET_WARNING,
-  previewName: previewName2,
-  secretsWords,
-  startScene,
-  statusLine: statusLine2,
-} = await import("./words.ts");
 
 const counts = { rooms: 12, asked: 12, doors: 18, locked: 3, traps: 4, secretDoors: 2, secretRooms: 1, lights: 3 };
 
@@ -188,8 +179,6 @@ test("DG3: the room panel's words, the edits line and the preview's name with a 
 });
 
 /* DSTOCK (docs/design/design-v1-dungeon-stock.md 1): the Monsters rows' words, the foot's count and the room panel's list. */
-const { bandLines, difficultyHelp, fightLine, monstersWords, overLimitLine, reportRow: rowOf } = await import("./words.ts");
-const { REPORTS } = await import("./edits.ts");
 
 test("DSTOCK-T: the foot counts the creatures and the rooms that hold them, and says nothing of them at None", () => {
   const counts = { rooms: 12, asked: 12, doors: 18, locked: 3, traps: 4, secretDoors: 2, secretRooms: 1, lights: 3 };

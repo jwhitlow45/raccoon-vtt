@@ -5,6 +5,7 @@ import type { DungeonEdits } from "../dungeon/edits.ts";
 import { squareWingBase } from "../dungeon/handPlans.ts";
 import { wingPreviewOf } from "../dungeon/scratch.ts";
 import { DEFAULT_SETTINGS } from "../dungeon/settings.ts";
+import { readFileSync } from "node:fs";
 
 const { forgetQuestion, problemWords, wingPlanner } = await import("./WingPane.tsx");
 
@@ -109,7 +110,6 @@ test("DSTOCK-W: the planner sends the stock with the plan and hands back the sto
   assert.deepEqual(asked[1], null, "no stock is null, as the worker takes it");
 });
 
-const { readFileSync } = await import("node:fs");
 const pane = readFileSync(new URL("./WingPane.tsx", import.meta.url), "utf8");
 
 test("DSTOCK-W: the pane's stock starts at None each time it opens, and Bring them back restores the band, stock and party", () => {

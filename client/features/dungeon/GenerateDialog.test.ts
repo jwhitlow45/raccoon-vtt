@@ -1,6 +1,9 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { editsStep, startEdits } from "./flow.ts";
+import { DEFAULT_CHOICES, restocked, rowChanged } from "./remembered.ts";
 
 const { previewSide } = await import("./GenerateDialog.tsx");
 
@@ -41,7 +44,6 @@ test("a body narrower than the gap gives 0", () => {
  * DGFIX-FU-1: the error lines are pinned above the foot, not at the top of
  * the choices that scroll away.
  */
-const { readFileSync } = await import("node:fs");
 const source = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
 
 test("DG-R2-02: the preview box is rendered once, in a wrapper whose style changes with the width", () => {
@@ -141,8 +143,6 @@ test("FL3S: Make asks the add's refusals on the latest view before any op, and m
  * off with its words, and the creature limit is checked on every render
  * and again at Make on the live room.
  */
-const { editsStep, startEdits } = await import("./flow.ts");
-const { restocked, rowChanged, DEFAULT_CHOICES } = await import("./remembered.ts");
 type Choices = import("./remembered.ts").Choices;
 type PartyGroup = import("#shared/model.ts").PartyGroup;
 
