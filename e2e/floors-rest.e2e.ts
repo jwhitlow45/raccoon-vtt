@@ -29,6 +29,10 @@ import { undoSetup } from "./helpers/undoScope.ts";
  *   upload, a damaged file and a failed upload stop with nothing sent, and
  *   Make the scene makes one scene of three floors with every wall, which
  *   one Undo setup takes back.
+ * - DUVTT-F1: Export as VTT file's Every floor makes one zip of a
+ *   Universal VTT file a floor, named Tower - 01 - Ground floor and on,
+ *   whose three files New scene's picker takes back as Tower and its
+ *   floors by name (docs/design/design-v1-uvtt-export.md 7).
  * - FL4R-4: the export with Every floor, New fight with its floors and the
  *   several-files dialog, within 1 px at 1440 x 900, 390 x 844 and
  *   320 x 568, at 100% and 130%.
@@ -115,6 +119,17 @@ async function exportSection(page: Page): Promise<Locator> {
   await open.or(floors).first().waitFor();
   if ((await open.count()) > 0) await open.click();
   await floors.waitFor();
+  return section;
+}
+
+/** The scene settings' Export section with Export as VTT file's options open. */
+async function vttSection(page: Page): Promise<Locator> {
+  const scenes = await panel(page, "Scenes");
+  const section = scenes.locator("section").filter({ has: page.getByRole("heading", { name: "Export", exact: true }) }).last();
+  const open = section.getByRole("button", { name: "Export as VTT file", exact: true });
+  await open.waitFor();
+  await open.click();
+  await section.getByRole("radiogroup", { name: "Floors", exact: true }).waitFor();
   return section;
 }
 
@@ -450,6 +465,55 @@ describe("raccoon-vtt several floors, phase 4: export every floor, a fight on ev
     await undoSetup(dm);
     await waitFor("Crypt gone", () => (floorsNamed("Crypt").length === 0 ? true : null));
     assert.equal(Object.keys(state().scenes).length, scenesBefore);
+  });
+
+  test("DUVTT-F1. Export as VTT file's Every floor: a zip of three files named for Tower and each floor, which New scene's picker takes back as Tower and its floors", async () => {
+    const section = await vttSection(dm);
+    await section.getByRole("radiogroup", { name: "Floors", exact: true }).getByRole("radio", { name: "Every floor", exact: true }).check();
+    await section.getByText("One .zip file with a Universal VTT file of each of Tower's 3 floors.", { exact: true }).waitFor();
+    await section.getByRole("radiogroup", { name: "Version", exact: true }).getByRole("radio", { name: "DM view", exact: true }).check();
+    await shots.take(dm, "duvtt-f1-every-floor");
+    const made = await makeAndSave(dm, section);
+    assert.equal(made.name, "Tower (DM).zip");
+    const names = ["Tower - 01 - Ground floor.dd2vtt", "Tower - 02 - Upper floor.dd2vtt", "Tower - 03 - Attic.dd2vtt"];
+    assert.deepEqual(made.entries.map((e) => e.name), names);
+    assert.deepEqual(made.steps, ["Making Ground floor (1 of 3)…", "Making Upper floor (2 of 3)…", "Making Attic (3 of 3)…"]);
+    await section.getByText(/^Made Tower \(DM\)\.zip: 3 floors at 70 px per square, /).waitFor();
+    await shots.take(dm, "duvtt-f1-made");
+    const files = made.entries.map((e) => {
+      const json = JSON.parse(e.data.toString("utf8")) as { resolution: { map_size: { x: number; y: number } }; line_of_sight: unknown[] };
+      assert.deepEqual(json.resolution.map_size, { x: 30, y: 20 }, e.name);
+      assert.ok(json.line_of_sight.length > 0, `${e.name} has its walls`);
+      const file = path.join(work, e.name);
+      writeFileSync(file, e.data);
+      return file;
+    });
+
+    // The player view's holds the two floors players reached, numbered without a gap.
+    await section.getByRole("radiogroup", { name: "Version", exact: true }).getByRole("radio", { name: "Player view", exact: true }).check();
+    await waitFor("a made file no longer matches a new version", async () => ((await section.getByRole("link", { name: "Download", exact: true }).count()) === 0 ? true : null));
+    const players = await makeAndSave(dm, section);
+    assert.equal(players.name, "Tower.zip");
+    assert.deepEqual(players.entries.map((e) => e.name), ["Tower - 01 - Ground floor.dd2vtt", "Tower - 02 - Attic.dd2vtt"]);
+    await section.getByRole("button", { name: "Close", exact: true }).click();
+
+    const scenesBefore = Object.keys(state().scenes).length;
+    await pickFiles(dm, files);
+    const dialog = dm.getByRole("dialog", { name: "New scene from 3 files", exact: true });
+    await dialog.waitFor();
+    assert.equal(await dialog.getByRole("textbox", { name: "Scene name", exact: true }).inputValue(), "Tower", "the scene part as written");
+    const floorName = (file: string) => dialog.getByRole("group", { name: file, exact: true }).getByRole("textbox", { name: "Floor name", exact: true });
+    assert.deepEqual(await Promise.all(names.map((n) => floorName(n).inputValue())), ["Ground floor", "Upper floor", "Attic"]);
+    await shots.take(dm, "duvtt-f1-import-dialog");
+    await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
+    await dialog.waitFor({ state: "detached", timeout: 120_000 });
+    const back = await waitFor("Tower's three floors from the files", () => {
+      const fromFiles = floorsNamed("Tower").filter((f) => f.gridFromFile === true);
+      return fromFiles.length === 3 ? fromFiles : null;
+    }, 30_000);
+    assert.deepEqual(back.map((f) => f.floor?.name), ["Ground floor", "Upper floor", "Attic"]);
+    await undoSetup(dm);
+    await waitFor("the imported Tower gone", () => (Object.keys(state().scenes).length === scenesBefore ? true : null));
   });
 
   test("FL4R-4. Export with Every floor, New fight with its floors and the several-files dialog, within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {

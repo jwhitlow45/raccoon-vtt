@@ -2,7 +2,7 @@ import { pointerText } from "./helpers/pointerText.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -10,6 +10,7 @@ import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { namedId, ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
+import { uvttFile } from "../client/features/uvtt/synthetic.ts";
 
 /**
  * A DM at a computer with a keyboard, after the design pass's live play:
@@ -33,6 +34,10 @@ import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
  *   button that opened it. The token bar's Details focuses the token's
  *   panel's tab, and a click on the panel's blank space leaves Space free
  *   to pan the map.
+ * - Export as VTT file (docs/design/design-v1-uvtt-export.md): DUVTT-2 a
+ *   Builder scene's player view file writes a secret door not yet found
+ *   as a wall and holds no light, and DUVTT-1 a map image scene's DM view
+ *   file downloads and imports back with the same walls, doors and lights.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -158,11 +163,49 @@ async function writeUvtt(file: string): Promise<void> {
   writeFileSync(file, JSON.stringify(content));
 }
 
+/** Scene settings' Export section in the Scenes panel, with Export as VTT file's options open. */
+async function vttExport(): Promise<Locator> {
+  await openSideTab(dm, "Scenes");
+  const panel = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
+  const section = panel.locator("section").filter({ has: dm.getByRole("heading", { name: "Export", exact: true }) }).last();
+  await section.getByRole("button", { name: "Export as VTT file", exact: true }).click();
+  await section.getByRole("radiogroup", { name: "Version", exact: true }).waitFor();
+  return section;
+}
+
+/** Makes the file with the options on screen and saves it: its name, path and JSON. */
+async function makeVtt(section: Locator): Promise<{ name: string; file: string; json: Record<string, unknown> }> {
+  await section.getByRole("button", { name: "Make the file", exact: true }).click();
+  const link = section.getByRole("link", { name: "Download", exact: true });
+  await link.waitFor({ timeout: 60_000 });
+  const [download] = await Promise.all([dm.waitForEvent("download"), link.click()]);
+  const file = path.join(work, download.suggestedFilename());
+  await download.saveAs(file);
+  return { name: download.suggestedFilename(), file, json: JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> };
+}
+
+/** A PNG's size from a file's base64 image. */
+function imageSize(json: Record<string, unknown>): { w: number; h: number } {
+  const png = Buffer.from(json.image as string, "base64");
+  assert.equal(png.subarray(1, 4).toString("latin1"), "PNG", "the image is a PNG");
+  return { w: png.readUInt32BE(16), h: png.readUInt32BE(20) };
+}
+
+/** The import dialog's counts line for a file picked in New scene. */
+async function importCounts(file: string): Promise<{ dialog: Locator; counts: string }> {
+  await openSideTab(dm, "Scenes");
+  await dm.getByRole("tabpanel").getByLabel("From a Universal VTT file", { exact: true }).setInputFiles(file);
+  const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+  const line = dialog.getByText(/^\d+ walls? \(/);
+  await line.waitFor({ timeout: 30_000 });
+  return { dialog, counts: ((await line.textContent()) ?? "").trim() };
+}
+
 describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
-    dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
     dm = await dmContext.newPage();
     dmConsole.attach(dm);
     await dmSocket.attach(dmContext, dm);
@@ -754,6 +797,92 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
       assert.equal(await one.getByRole("button", { name: /^All \d+ / }).count(), 0, `${name}'s bar offers All of a kind`);
       await dm.keyboard.press("Escape");
     }
+  });
+
+  test("DUVTT-2. a Builder scene's player view file writes a secret door not yet found as a wall and holds no light", async () => {
+    const sceneId = run.sceneId;
+    const scene = dmSocket.state!.scenes[sceneId]!;
+    const fog = scene.fogEnabled;
+    await ops.send({ t: "scene.update", sceneId, patch: { fogEnabled: false } });
+    await ops.send({ t: "build.rect", sceneId, terrain: "stone", x: 2, y: 2, w: 6, h: 4 });
+    await ops.send({ t: "build.edge", sceneId, edges: [{ key: "4,2,n", feature: { kind: "door", state: "closed", secret: true, discovered: false } }] });
+    const lamp = uuidv7();
+    await ops.send({ t: "build.lights", sceneId, put: [{ id: lamp, x: 4.5, y: 3.5, bright: 15, dim: 30, on: true, walls: true }] });
+    await waitFor("the room, its secret door and its lamp", () => (dmSocket.state?.lights[lamp] && Object.values(dmSocket.state.buildChunks).some((c) => c?.sceneId === sceneId && c.edges["4,2,n"]) ? true : null));
+    try {
+      const section = await vttExport();
+      assert.equal(await section.getByRole("radio", { name: "Player view", exact: true }).isChecked(), true, "Player view first");
+      await section.getByText("What players can see: walls they have seen, secret doors not yet found as walls, and no lights, since only you have those.", { exact: true }).waitFor();
+      await section.getByText(/^The file keeps the map, walls, doors, windows and lights\./).waitFor();
+      await shots.take(dm, "duvtt-2-options");
+      const made = await makeVtt(section);
+      assert.equal(made.name, `${scene.name}.dd2vtt`);
+      assert.deepEqual(made.json.lights, [], "a player view file holds no light");
+      const portals = made.json.portals as { bounds: { x: number; y: number }[] }[];
+      assert.ok(!portals.some((p) => p.bounds.some((b) => b.y === 2 && b.x >= 4 && b.x <= 5)), "no portal at the secret door");
+      const walls = made.json.line_of_sight as { x: number; y: number }[][];
+      assert.ok(walls.some(([a, b]) => a!.y === 2 && b!.y === 2 && Math.min(a!.x, b!.x) <= 4 && Math.max(a!.x, b!.x) >= 5), "the secret door is a wall in the run along the room's top");
+      assert.deepEqual(imageSize(made.json), { w: scene.bounds.w * 70, h: scene.bounds.h * 70 });
+      await section.getByText(/^Made .+\.dd2vtt: \d+ × \d+ px at 70 px per square, /).waitFor();
+      await section.getByText("1 secret door written as a wall, as players see them.", { exact: true }).waitFor();
+      await shots.take(dm, "duvtt-2-made");
+
+      // The DM view writes it as a plain door, and the lamp.
+      await section.getByRole("radio", { name: "DM view", exact: true }).check();
+      await section.getByText("Every wall, door and light that is on. Secret doors become plain doors, and the map is drawn as players see it. Keep it to yourself.", { exact: true }).waitFor();
+      const dmFile = await makeVtt(section);
+      assert.equal(dmFile.name, `${scene.name} (DM).dd2vtt`);
+      assert.equal((dmFile.json.lights as unknown[]).length, 1);
+      assert.ok((dmFile.json.portals as { bounds: { x: number; y: number }[]; closed: boolean }[]).some((p) => p.closed && p.bounds.every((b) => b.y === 2)), "the secret door as a closed door");
+      await section.getByText("1 secret door written as a plain door.", { exact: true }).waitFor();
+      await shots.take(dm, "duvtt-2-dm-made");
+      await section.getByRole("button", { name: "Close", exact: true }).click();
+      await waitFor("Export as VTT file focused again", async () => (await focused(dm)).name === "Export as VTT file");
+    } finally {
+      await ops.send({ t: "build.lights", sceneId, remove: [lamp] });
+      await ops.send({ t: "scene.update", sceneId, patch: { fogEnabled: fog } });
+    }
+  });
+
+  test("DUVTT-1. a map image scene's DM view file downloads and imports back with the summary's counts", async () => {
+    const p = (x: number, y: number) => ({ x, y });
+    const image = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 120, g: 110, b: 100 } } }).png().toBuffer();
+    const source = path.join(work, "Desk_vault.dd2vtt");
+    writeFileSync(
+      source,
+      JSON.stringify(
+        uvttFile({
+          size: p(12, 8),
+          ppg: 50,
+          image: image.toString("base64"),
+          walls: [[p(1, 1), p(11, 1), p(11, 7), p(1, 7), p(1, 1)], [p(6, 1), p(6, 3.5)], [p(3.25, 4.25), p(5.5, 5.75)]],
+          portals: [{ a: p(3, 7), b: p(4, 7) }, { a: p(8, 1), b: p(9, 1), closed: false }],
+          lights: [{ at: p(3.5, 2.5), range: 6, color: "ffffcc88" }],
+        }),
+      ),
+    );
+    const first = await importCounts(source);
+    const sceneIds = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await first.dialog.getByRole("button", { name: "Create scene" }).click();
+    await first.dialog.waitFor({ state: "detached", timeout: 60_000 });
+    const scene = await waitFor("the imported scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && !sceneIds.has(s.id)), 30_000);
+    await waitFor("the DM on the imported scene", () => (dmSocket.you?.sceneId === scene.id ? true : null), 30_000);
+    assert.ok(scene.map, "a map image scene");
+
+    const section = await vttExport();
+    await section.getByRole("radio", { name: "DM view", exact: true }).check();
+    const made = await makeVtt(section);
+    assert.equal(made.name, "Desk vault (DM).dd2vtt");
+    assert.deepEqual(imageSize(made.json), { w: scene.bounds.w * 70, h: scene.bounds.h * 70 });
+    await shots.take(dm, "duvtt-1-made");
+    assert.equal(await section.getByText(/^Some walls change/).count(), 0, "no note that walls change");
+    await section.getByRole("button", { name: "Close", exact: true }).click();
+
+    const back = await importCounts(made.file);
+    assert.equal(back.counts, first.counts, "the file imports back with the same walls, doors, windows and lights");
+    assert.equal(await back.dialog.getByLabel("Scene name").inputValue(), "Desk vault (DM)");
+    await dm.keyboard.press("Escape");
+    await back.dialog.waitFor({ state: "detached" });
   });
 
   test("9. no page errors along the way", () => {

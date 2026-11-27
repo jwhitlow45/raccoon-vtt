@@ -283,6 +283,9 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "fl4-hp-panel": { phones: 4, wide: 2 },
   "fl4-hp-character": { phones: 4, wide: 2 },
   "fl4-hp-group": { phones: 6, wide: 6 },
+  // Scene settings' Export with Export as VTT file, at the sweep's export sizes (VTT_EXPORT_AT).
+  "export-buttons": { phones: 4, wide: 2 },
+  "vtt-export": { phones: 4, wide: 2 },
   // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
   "setup-menu": { phones: 6, wide: 3 },
   "tools-menu": { phones: 0, wide: 1 },
@@ -1308,6 +1311,31 @@ const VISION_SECTION_AT = new Set([...PHONE_ROOTS, "1440x900"]);
  * sight to Pat show too: Pat's page is closed by then, and the fold back
  * to whole party empties the list.
  */
+/** The sizes where the sweep measures Scene settings' Export with Export as VTT file open (docs/design/design-v1-uvtt-export.md 9). */
+const VTT_EXPORT_AT = new Set(["390x844", "320x568", "1440x900"]);
+
+/** Scene settings' Export: its two buttons, which wrap at 320 px, then Export as VTT file's options open. */
+async function vttExportScreens(sweep: Sweep, page: Page): Promise<void> {
+  await escapeAll(page);
+  const panel = await openPanelOf(page, "Scenes");
+  const section = panel.locator("section").filter({ has: page.getByRole("heading", { name: "Export", exact: true }) }).last();
+  const open = section.getByRole("button", { name: "Export as VTT file", exact: true });
+  if (!(await shows(open))) {
+    await sweep.missing(page, "vtt-export", "Scene settings showed no Export as VTT file");
+    await escapeAll(page);
+    return;
+  }
+  await open.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "export-buttons", section);
+  await open.click();
+  await section.getByRole("radiogroup", { name: "Version", exact: true }).waitFor();
+  await section.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "vtt-export", section);
+  await shots.take(page, `alignment-${sweep.at}-vtt-export`);
+  await section.getByRole("button", { name: "Close", exact: true }).click();
+  await escapeAll(page);
+}
+
 async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const sceneId = run.sceneId;
   // Fog stays off, as the room has it: turning vision on would turn it on too, and fog would hide from Pat what the next size's screens show him.
@@ -6022,6 +6050,7 @@ export function sizeTests(names: readonly string[]): void {
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
           await visionScreens(sweep, page, size);
+          if (VTT_EXPORT_AT.has(size.name)) await vttExportScreens(sweep, page);
           await dungeonScreens(sweep, page, size, scale);
           if (ANIMMAP_AT.has(size.name)) await animatedMapScreens(sweep, page);
           if (SOUND_AT.has(size.name)) await soundScreens(sweep, page, size, scale);

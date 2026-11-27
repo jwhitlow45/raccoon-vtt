@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "#shared/ids.ts";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { FOG_SUBCELLS, type AreaTemplate, type Token } from "../shared/model.ts";
+import { wallChunk } from "../shared/keys.ts";
 import { creaturesInArea } from "../shared/rules/aoe.ts";
 import { footprintSubcells, occupiedHexes, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
 import { isSubcellFogged } from "../shared/rules/fog.ts";
@@ -45,6 +46,11 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * measured, the whole of the largest open hex scene drafted in messages that
  * each fit a socket frame, and a room sent in several ops counted and taken
  * back as one edit, on hexes and squares.
+ *
+ * DUVTT-H1 exports the hex battle mat as a Universal VTT file
+ * (docs/design/design-v1-uvtt-export.md 6): pixels per hex, the line that
+ * hexes leave as squares, and its walls written at their exact ends as
+ * lines off the grid. DUVTT-5: Pat, a player, has no export to reach.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -589,7 +595,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
-    dmContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    dmContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
     patContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     benContext = await browser.newContext();
     for (const c of [dmContext, patContext]) await c.addInitScript(HOOK_FLAG);
@@ -785,6 +791,48 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.equal(await section.getByText(/square/).count(), 0, "no square in the export's words");
     await shots.take(dm, "hex-dm-export");
     await section.getByRole("button", { name: "Close", exact: true }).click();
+  });
+
+  test("DUVTT-H1. Export as VTT file on hexes: pixels per hex, the hexes' line, and its walls at their exact ends, none on the grid", async () => {
+    const sides = hexCorners(G, { col: 6, row: 8 }).map((k) => cornerAt(G, k));
+    const lat = (v: number) => Math.round(v * 64) / 64;
+    const id = randomUUID().replace(/-/g, "").slice(0, 12);
+    const wall = { id, a: [lat(sides[0]!.x), lat(sides[0]!.y)] as [number, number], b: [lat(sides[1]!.x), lat(sides[1]!.y)] as [number, number], f: { kind: "wall" as const } };
+    await ops.send({ t: "build.walls", sceneId: run.sceneId, put: [wall] });
+    await waitFor("the hex side's wall", () => (Object.values(dmSocket.state?.buildChunks ?? {}).some((c) => c?.sceneId === run.sceneId && c.walls?.some((w) => w.id === id)) ? true : null));
+    const panel = await openScenes(dm);
+    const section = exportSection(panel, dm);
+    await section.getByRole("button", { name: "Export as VTT file", exact: true }).click();
+    await section.getByRole("radiogroup", { name: "Pixels per hex" }).waitFor();
+    await section.getByText("Other VTTs read the file's grid as squares, so hexes leave as squares and their walls as lines off the grid.", { exact: true }).waitFor();
+    assert.equal(await section.getByText(/square/).count(), 1, "square only in the hexes' line");
+    await section.getByRole("radio", { name: "DM view", exact: true }).check();
+    await shots.take(dm, "duvtt-h1-hex-export");
+    await section.getByRole("button", { name: "Make the file", exact: true }).click();
+    const link = section.getByRole("link", { name: "Download", exact: true });
+    await link.waitFor({ timeout: 60_000 });
+    const [download] = await Promise.all([dm.waitForEvent("download"), link.click()]);
+    const file = path.join(work, download.suggestedFilename());
+    await download.saveAs(file);
+    const json = JSON.parse(readFileSync(file, "utf8")) as { line_of_sight: { x: number; y: number }[][]; resolution: { map_size: { x: number; y: number } } };
+    assert.deepEqual(json.resolution.map_size, { x: BOUNDS.w, y: BOUNDS.h }, "the scene's cells as squares");
+    assert.ok(
+      json.line_of_sight.some(([a, b]) => a!.x === wall.a[0] && a!.y === wall.a[1] && b!.x === wall.b[0] && b!.y === wall.b[1]),
+      "the hex side's wall at its exact ends",
+    );
+    const onGrid = json.line_of_sight.filter(([a, b]) => [a!.x, a!.y, b!.x, b!.y].every(Number.isInteger) && (a!.x === b!.x) !== (a!.y === b!.y));
+    assert.deepEqual(onGrid, [], "no square grid walls on a hex scene");
+    await section.getByRole("button", { name: "Close", exact: true }).click();
+    await ops.send({ t: "build.walls", sceneId: run.sceneId, remove: [{ ...wallChunk(wall), id }] });
+  });
+
+  test("DUVTT-5. Pat, a player, has no Scenes panel and no Export as VTT file", async () => {
+    assert.equal(await pat.getByRole("button", { name: "Export as VTT file" }).count(), 0);
+    const picker = pat.getByRole("list", { name: "Panels" });
+    if (!(await picker.isVisible())) await pat.locator('button[title="Panels"]').click();
+    await picker.waitFor();
+    assert.equal(await picker.getByRole("button", { name: /^Scenes/ }).count(), 0, "no Scenes panel for a player");
+    await pat.keyboard.press("Escape");
   });
 
   test("HX-8. under fog a goblin reaches neither of Pat's boards, a revealed sub-cell of its hex sends it lying flat, its whole hex stands it, and a Tiny imp revealed past its drawn box lies flat for Pat and stands bright for the DM", async () => {
