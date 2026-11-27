@@ -1,4 +1,4 @@
-import type { AbilityKey, Actor, ClassResource, PcRoll, PcStats } from "../model.ts";
+import type { AbilityKey, Actor, ClassLevel, ClassResource, PcRoll, PcStats } from "../model.ts";
 import { MAX_PC_ROLLS, pcFillSchema, pcStatsForImport } from "../protocol.ts";
 import type { ClassId } from "./classResources.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
@@ -45,6 +45,14 @@ export type PcFill = {
   read?: { weapon: boolean; spell: boolean; other: boolean; resource?: boolean };
   /** The class resources a D&D Beyond fill read, at most 12. Absent: not read, as for pasted text or no actions. */
   resources?: FillResource[];
+  /**
+   * The classes a D&D Beyond fill read whole (docs/design/design-v1-slots.md 8),
+   * an empty list for a character with none read. Absent: not read, so they
+   * stay as they are.
+   */
+  classes?: ClassLevel[];
+  /** D&D Beyond's name for each of `classes`, in order, so the review names an Other class. */
+  classNames?: string[];
 };
 
 /**

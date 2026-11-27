@@ -1,9 +1,11 @@
 import { parseFormula, type DiceTerm, type Formula } from "../dice/formula.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type PcDice, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
+import { ABILITY_KEYS, HIT_DIE_SIZES, SKILL_KEYS, type AbilityKey, type Actor, type ClassLevel, type HitDieSize, type PcDice, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "../protocol.ts";
+import { CLASS_IDS, CLASS_NAMES, type ClassId } from "../rules/classResources.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import type { PcFill, PcFillStats } from "../rules/pcFill.ts";
 import { cantripTier, srdOnPass } from "../rules/pcStats.ts";
+import { classesFit, MAX_LEVEL, THIRD_CLASSES } from "../rules/spellSlots.ts";
 import { abilityMod } from "../statBlock.ts";
 import { ddbSheetUrl } from "./link.ts";
 import { actionsWhole, readResources } from "./resources.ts";
@@ -239,7 +241,13 @@ function scoresOf(base: Record<AbilityKey, number>, data: Obj, mods: readonly Mo
   return out;
 }
 
-type ClassRead = { name: string; level: number; spellAbility: AbilityKey | null; features: Set<string> };
+/**
+ * One class as read: `id` the SRD class its name matches, case blind, or
+ * null for one that is not SRD, `die` D&D Beyond's Hit Point Die for it,
+ * and `fromSubclass` a spellcasting ability its subclass gives and its class
+ * does not, as an Eldritch Knight's.
+ */
+type ClassRead = { name: string; level: number; spellAbility: AbilityKey | null; features: Set<string>; id: ClassId | null; die: number | null; fromSubclass: boolean };
 
 function classesOf(data: Obj): ClassRead[] {
   const out: ClassRead[] = [];
@@ -256,11 +264,17 @@ function classesOf(data: Obj): ClassRead[] {
       // A feature counts once the class's level reaches the feature's.
       if (fname && at <= level) features.add(fname.toLowerCase());
     }
+    const own = abilityOf(def.spellCastingAbilityId);
+    const sub = abilityOf(obj(c.subclassDefinition)?.spellCastingAbilityId);
+    const cname = name(def.name, 40);
     out.push({
-      name: name(def.name, 40) ?? "A class",
+      name: cname ?? "A class",
       level: Math.max(0, Math.round(level)),
-      spellAbility: abilityOf(def.spellCastingAbilityId) ?? abilityOf(obj(c.subclassDefinition)?.spellCastingAbilityId),
+      spellAbility: own ?? sub,
       features,
+      id: cname === null ? null : (CLASS_IDS.find((id) => CLASS_NAMES[id].toLowerCase() === cname.trim().toLowerCase()) ?? null),
+      die: num(def.hitDice),
+      fromSubclass: own === null && sub !== null,
     });
   }
   return out;
@@ -558,6 +572,43 @@ function levelOf(classes: readonly ClassRead[], warnings: string[]): number {
   return 20;
 }
 
+/**
+ * The classes as a character holds them (docs/design/design-v1-slots.md 8),
+ * read only when the classes were read whole: an SRD class by its id, a
+ * Fighter or Rogue whose subclass gives its spellcasting marked `third`, a
+ * class that is not SRD as an Other class with D&D Beyond's die, and a class
+ * at level 0 left out. One whose die is not a d6, d8, d10 or d12 is left out
+ * with a warning, though its levels still count toward the level. Past 20 in
+ * all, none are read, so they stay as they are. Spent slots and dice are
+ * never read: the table spends them here, so a fill starts full (D-261127-094).
+ */
+function characterClasses(classes: readonly ClassRead[], warnings: string[]): { classes: ClassLevel[]; names: string[] } | null {
+  const total = classes.reduce((sum, c) => sum + c.level, 0);
+  if (total > MAX_LEVEL) {
+    warnings.push(`The classes' levels add up to ${total}, past 20, so the classes were not read. They stay as they are.`);
+    return null;
+  }
+  const out: ClassLevel[] = [];
+  const names: string[] = [];
+  for (const c of classes) {
+    if (c.level < 1) continue;
+    if (c.id !== null) {
+      out.push(c.fromSubclass && THIRD_CLASSES.has(c.id) ? { id: c.id, level: c.level, third: true } : { id: c.id, level: c.level });
+      names.push(CLASS_NAMES[c.id]);
+      continue;
+    }
+    if (!(HIT_DIE_SIZES as readonly number[]).includes(c.die ?? 0)) {
+      warnings.push(`${c.name}'s Hit Point Die could not be read, so its levels count toward no Hit Point Dice here.`);
+      continue;
+    }
+    out.push({ id: "other", level: c.level, die: c.die as HitDieSize });
+    names.push(c.name);
+    warnings.push(`${c.name} is not an SRD 5.2.1 class, so it counts toward your level and Hit Point Dice here, never spell slots.`);
+  }
+  // D&D Beyond names each class once, so a list past the caps is not a character's and is left out whole.
+  return classesFit(out) ? { classes: out, names } : null;
+}
+
 /** Which sources the JSON holds with the type the reader needs (2.5). An empty list counts as sent. */
 type Sent = {
   modifiers: boolean;
@@ -710,6 +761,7 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const scoreMods = scores ? (Object.fromEntries(ABILITY_KEYS.map((a) => [a, abilityMod(scores[a])])) as Record<AbilityKey, number>) : null;
   // The level is null exactly when the classes were not read, so each output that needs the classes tests it.
   const level = classesWhole ? levelOf(classes, warnings) : null;
+  const held = classesWhole ? characterClasses(classes, warnings) : null;
   const hasFeature = (feature: string) => classes.find((c) => c.features.has(feature.toLowerCase()));
 
   const stats: PcFillStats = { rolls: [] };
@@ -785,6 +837,10 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const fill: PcFill = { source: "ddb", stats, actor, warnings: warnings.slice(0, 40), read: { ...cut.read, resource: resources?.whole ?? false } };
   if (resources) fill.resources = resources.resources;
   if (level !== null) fill.level = level;
+  if (held) {
+    fill.classes = held.classes;
+    fill.classNames = held.names;
+  }
   if (cname) fill.name = cname;
   return fill;
 }

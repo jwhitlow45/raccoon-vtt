@@ -695,3 +695,67 @@ describe("a weapon's range from D&D Beyond (docs/design/design-v1-weather.md 2.1
     assert.equal(range("Warhammer"), undefined);
   });
 });
+
+/** The classes as a character holds them (docs/design/design-v1-slots.md 8). */
+describe("readDdbCharacter: classes", () => {
+  const cls = (name: unknown, level: number, extra: J = {}): J => ({ level, definition: { name, spellCastingAbilityId: null, ...((extra.definition as J) ?? {}) }, subclassDefinition: extra.subclassDefinition ?? null, classFeatures: [] });
+
+  test("each class by its SRD id, case blind, in D&D Beyond's order, with no spent count read", () => {
+    const fill = readDdbCharacter(wren(), ids)!;
+    assert.deepEqual(fill.classes, [{ id: "rogue", level: 7 }, { id: "fighter", level: 3 }]);
+    assert.deepEqual(fill.classNames, ["Rogue", "Fighter"]);
+    const odd = readDdbCharacter(wren({ classes: [cls("wIzArD", 2), cls("  cleric ", 1)], spellSlots: [{ level: 1, used: 2 }], pactMagic: [{ used: 1 }], hitDiceUsed: 3 }), ids)!;
+    assert.deepEqual(odd.classes, [{ id: "wizard", level: 2 }, { id: "cleric", level: 1 }]);
+    assert.ok(checkedFill(odd), "the fill passes its schema");
+    assert.equal(JSON.stringify(odd).includes("used"), false, "nothing spent is read");
+  });
+
+  test("a Fighter or Rogue whose spellcasting comes from its subclass is marked, and no other class", () => {
+    const knight = readDdbCharacter(wren({ classes: [cls("Fighter", 3, { subclassDefinition: { spellCastingAbilityId: 4 } }), cls("Wizard", 2, { subclassDefinition: { spellCastingAbilityId: 4 } })] }), ids)!;
+    assert.deepEqual(knight.classes, [{ id: "fighter", level: 3, third: true }, { id: "wizard", level: 2 }]);
+    const own = readDdbCharacter(wren({ classes: [cls("Rogue", 4, { definition: { spellCastingAbilityId: 4 }, subclassDefinition: { spellCastingAbilityId: 4 } })] }), ids)!;
+    assert.deepEqual(own.classes, [{ id: "rogue", level: 4 }], "a class's own spellcasting is not its subclass's");
+    const trickster = readDdbCharacter(wren({ classes: [cls("Rogue", 2, { subclassDefinition: { spellCastingAbilityId: 4 } })] }), ids)!;
+    assert.deepEqual(trickster.classes, [{ id: "rogue", level: 2, third: true }], "marked below 3 too, where it counts nothing yet");
+  });
+
+  test("an Artificer 3 and Wizard 2: an Other class d8, its warning, level 5", () => {
+    const fill = readDdbCharacter(wren({ classes: [cls("Artificer", 3, { definition: { hitDice: 8 } }), cls("Wizard", 2)] }), ids)!;
+    assert.deepEqual(fill.classes, [{ id: "other", level: 3, die: 8 }, { id: "wizard", level: 2 }]);
+    assert.deepEqual(fill.classNames, ["Artificer", "Wizard"]);
+    assert.equal(fill.level, 5);
+    assert.ok(fill.warnings.includes("Artificer is not an SRD 5.2.1 class, so it counts toward your level and Hit Point Dice here, never spell slots."));
+    assert.ok(checkedFill(fill));
+  });
+
+  test("a class whose die is not a d6, d8, d10 or d12 is left out, its levels still in the level", () => {
+    for (const hitDice of [7, 20, null, "d8", undefined]) {
+      const fill = readDdbCharacter(wren({ classes: [cls("Blood Hunter", 4, { definition: { hitDice } }), cls("Wizard", 2)] }), ids)!;
+      assert.deepEqual(fill.classes, [{ id: "wizard", level: 2 }], String(hitDice));
+      assert.equal(fill.level, 6);
+      assert.ok(fill.warnings.includes("Blood Hunter's Hit Point Die could not be read, so its levels count toward no Hit Point Dice here."));
+    }
+  });
+
+  test("a class at level 0 is dropped", () => {
+    const fill = readDdbCharacter(wren({ classes: [cls("Wizard", 0), cls("Cleric", 3)] }), ids)!;
+    assert.deepEqual(fill.classes, [{ id: "cleric", level: 3 }]);
+    assert.deepEqual(fill.classNames, ["Cleric"]);
+  });
+
+  test("levels past 20 read no classes, with the warning, and the level reads 20 as before", () => {
+    const fill = readDdbCharacter(wren({ classes: [cls("Wizard", 13), cls("Cleric", 10)] }), ids)!;
+    assert.equal(fill.classes, undefined);
+    assert.equal(fill.level, 20);
+    assert.ok(fill.warnings.includes("The classes' levels add up to 23, past 20, so the classes were not read. They stay as they are."));
+  });
+
+  test("classes not sent, or read in part, are left out", () => {
+    assert.equal(readDdbCharacter(wren({ classes: undefined }), ids)!.classes, undefined);
+    assert.equal(readDdbCharacter(wren({ classes: "nope" }), ids)!.classes, undefined);
+    const many = Array.from({ length: 21 }, () => cls("Wizard", 1));
+    assert.equal(readDdbCharacter(wren({ classes: many }), ids)!.classes, undefined);
+    const features = Array.from({ length: 301 }, (_, i) => feature(`F${i}`, 1));
+    assert.equal(readDdbCharacter(wren({ classes: [{ ...cls("Wizard", 2), classFeatures: features }] }), ids)!.classes, undefined);
+  });
+});
