@@ -9,7 +9,7 @@ import { chunkHeights, chunkMarks, groundAt, markIn } from "#shared/rules/height
 import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, hexSubcells, parseHexKey, sameHex, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { seenFogBits } from "#shared/rules/vision.ts";
 import { deriveWalls, floodHexRoom, indexBuild, sceneChunks } from "#shared/rules/walls.ts";
-import type { JoinExpect } from "#shared/rules/wingClear.ts";
+import { eachTokenCell, wingBoard, type JoinExpect } from "#shared/rules/wingClear.ts";
 import type { WingBase } from "../dungeon/plan.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts";
@@ -754,7 +754,7 @@ function wingUp(p: ToolPointer, ctx: ToolContext): void {
 type Based = Pick<RoomState, "buildChunks" | "traps" | "stamps" | "lights" | "labels" | "pins" | "tokens" | "floorLinks">;
 
 /** FNV-1a over a string's UTF-16 units, as eight hex digits: enough to tell a changed scene from the same one, never a secret. */
-function fnv(text: string): string {
+export function fnv(text: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);
@@ -810,4 +810,19 @@ export function wingBaseOf(view: Based, scene: Scene, area: CellRect, join: Wing
     floorLinks: own(view.floorLinks, scene.id),
   };
   return { scene, state, area, join: join.expect, hash: fnv(JSON.stringify(geometry)) };
+}
+
+/**
+ * The board cells the scene's tokens stand on, as the wing planner's
+ * occupied cells read them (shared/rules/wingClear.ts `eachTokenCell`),
+ * sorted, as text. Tokens shape a wing only through those cells, so
+ * tokens that give the same text plan the same wing (D-261127-604).
+ */
+export function tokenCellsOf(base: Pick<WingBase, "scene" | "state">): string {
+  const cells = new Set<number>();
+  eachTokenCell(base.state, wingBoard(base.state, base.scene), (k) => {
+    cells.add(k);
+    return false;
+  });
+  return [...cells].sort((a, b) => a - b).join(",");
 }

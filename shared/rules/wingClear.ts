@@ -555,6 +555,26 @@ export function excusedOf(board: WingBoard, room: ReadonlySet<number>): Set<numb
 }
 
 /**
+ * The cells the scene's tokens stand on, as `eachOccupied` reads them, so
+ * a wing's base can tell whether new tokens move its plan (D-261127-604).
+ * `hit` returning true stops the walk, and then this returns true.
+ */
+export function eachTokenCell(state: Pick<OccupiedState, "tokens">, board: WingBoard, hit: (k: number) => boolean): boolean {
+  const g = board.grid;
+  const at = (x: number, y: number) => {
+    const k = cellAt(board, x, y);
+    return k >= 0 && hit(k);
+  };
+  for (const t of Object.values(state.tokens)) {
+    if (!t || t.sceneId !== board.sceneId) continue;
+    if (g.shape === "hex") {
+      for (const h of occupiedHexes(g, t)) if (at(h.col, h.row)) return true;
+    } else for (const p of occupiedCells(g, t)) if (at(p.x, p.y)) return true;
+  }
+  return false;
+}
+
+/**
  * Every occupied cell (3.4), told to `hit` with whether it is structure
  * (painted ground, drawn edges and free walls by both their cells, height
  * and difficult marks), which the joined room may excuse, or an object
@@ -602,13 +622,7 @@ export function eachOccupied(state: OccupiedState, board: WingBoard, hit: (k: nu
       }
     }
   }
-  const g = board.grid;
-  for (const t of Object.values(state.tokens)) {
-    if (!t || t.sceneId !== sceneId) continue;
-    if (g.shape === "hex") {
-      for (const h of occupiedHexes(g, t)) if (at(h.col, h.row, false)) return;
-    } else for (const p of occupiedCells(g, t)) if (at(p.x, p.y, false)) return;
-  }
+  if (eachTokenCell(state, board, (k) => hit(k, false))) return;
   for (const trap of Object.values(state.traps)) {
     if (!trap || trap.sceneId !== sceneId) continue;
     const z = trap.zone;

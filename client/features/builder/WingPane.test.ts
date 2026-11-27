@@ -204,3 +204,36 @@ test("DSTOCK-W: a token deleted from the 498 lets all three creatures land, the 
   assert.match(pane, /const noRoom = unstocked && overBy === 0;/);
   assert.equal(pane.match(/<LimitLine over=\{overBy\} full=\{noRoom\} \/>/g)?.length, 2, "both Monsters lines, the room panel's too");
 });
+
+test("DSTOCK-W: a token added inside an edited room moves the base's hash, so its edits drop, and the same cells keep it (STOCK-ASTRA-06)", async () => {
+  const { loadMonsters } = await import("#shared/srd/monsters.ts");
+  const { stockPool } = await import("../dungeon/stockPools.ts");
+  const { WING_SETTINGS } = await import("../dungeon/handPlans.ts");
+  const { editsHold } = await import("../dungeon/edits.ts");
+  const { withTokens } = await import("./WingPane.tsx");
+  const { token } = await import("#shared/testutil.ts");
+  const base = squareWingBase();
+  const sceneId = base.scene.id;
+  const settings = { ...WING_SETTINGS, traps: 0 };
+  const stock = { choices: { monsters: 100, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool: stockPool(await loadMonsters(), "dungeon", { srdImages: {} }), tokensLeft: 500 };
+  const rect = (r: { x: number; y: number; w: number; h: number }) => [r.x, r.y, r.w, r.h];
+  const first = wingPreviewOf(settings, SEED, base, { feetPerCell: 5 }, null, null, stock);
+  assert.ok(first.ok);
+  const edited = first.plan.rooms.findIndex((r) => 47 >= r.x && 47 < r.x + r.w && 7 >= r.y && 7 < r.y + r.h);
+  assert.ok(edited >= 0, "a room stands on (47, 7)");
+  assert.deepEqual(rect(first.plan.rooms[edited]!), [43, 5, 9, 4]);
+  const edits: DungeonEdits = { layout: first.layout, rooms: { [edited]: { lit: !first.plan.rooms[edited]!.entrance } } };
+  assert.ok(editsHold(edits, settings, SEED, base.hash), "not vacuous: the edits hold on the base they were made on");
+  // A token in the edited room: the planner avoids its cell, so the room moves, and the edits must not follow it.
+  const added = withTokens(base, { ...base.state.tokens, t1: token("t1", { sceneId, x: 47, y: 7 }) });
+  const moved = wingPreviewOf(settings, SEED, added, { feetPerCell: 5 }, null, null, stock);
+  assert.ok(moved.ok);
+  assert.notDeepEqual(rect(moved.plan.rooms[edited]!), [43, 5, 9, 4], "not vacuous: the token moves the room");
+  assert.notEqual(added.hash, base.hash, "the hash moves");
+  assert.ok(!editsHold(edits, settings, SEED, added.hash), "so the edits drop, as baseChanged drops them in the pane");
+  // A second token on the same cell gives the planner nothing new, so the hash and the edits hold.
+  const stacked = withTokens(added, { ...added.state.tokens, t2: token("t2", { sceneId, x: 47, y: 7 }) });
+  assert.equal(stacked.hash, added.hash);
+  assert.equal(withTokens(stacked, added.state.tokens).hash, added.hash, "and deleting it again changes nothing");
+});
+

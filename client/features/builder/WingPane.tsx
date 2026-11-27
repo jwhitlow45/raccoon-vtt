@@ -44,7 +44,7 @@ import { labelPaneFrame } from "./labelPaneFrame.ts";
 import { NO_WING, useBuilderStore, type WingPicks } from "./store.ts";
 import { ghostOf, ghostRooms, type WingGhost } from "./wingGhost.ts";
 import { wingBox, wingFit, wingPanePlacement, wingPlace } from "./wingPanePlacement.ts";
-import { areaLine, JOIN_WORDS, judgeJoin, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
+import { areaLine, fnv, JOIN_WORDS, judgeJoin, tokenCellsOf, wingBaseOf, wingWarnings, type WingJoin } from "./wingPick.ts";
 import { JOIN_CHANGED, WING_MOVED } from "#shared/rules/wingClear.ts";
 import { pointerWords } from "../../lib/pointerWords.ts";
 
@@ -160,14 +160,20 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
 }
 
 /**
- * The base with the scene's tokens read again, its hash kept so the edits
- * hold. The pane reads them as the scene's room for creatures moves: a
- * base kept from before a token was deleted lands the wing's creatures
- * past the cap the live count says they fit, and the wing stays without
- * them (D-261127-601).
+ * The base with the scene's tokens read again. The pane reads them as the
+ * scene's room for creatures moves: a base kept from before a token was
+ * deleted lands the wing's creatures past the cap the live count says
+ * they fit, and the wing stays without them (D-261127-601). The hash
+ * holds, and with it the edits, only while the tokens stand on the same
+ * cells, since the planner avoids those cells and other cells can move a
+ * room the edits name. Otherwise the hash moves, and the edits drop as on
+ * any changed scene (D-261127-604).
  */
 export function withTokens(base: WingBase, tokens: WingBase["state"]["tokens"]): WingBase {
-  return tokens === base.state.tokens ? base : { ...base, state: { ...base.state, tokens } };
+  if (tokens === base.state.tokens) return base;
+  const next = { ...base, state: { ...base.state, tokens } };
+  const cells = tokenCellsOf(next);
+  return cells === tokenCellsOf(base) ? next : { ...next, hash: fnv(`${base.hash} ${cells}`) };
 }
 
 /** Add the wing's send: every id fresh at Make (dungeon/ops.ts wingIds), then sendWing behind its asks. */
@@ -420,7 +426,7 @@ export default function WingPane(props: {
   }, [roomStore, scene, picks.area, join, reread]);
   // The wing's scene group, sibling floors included, is what the creatures must fit (D-261127-075).
   const tokensLeft = useTokensLeft(share > 0, scene.id);
-  // As that room moves, a token deleted or added, the scene's tokens are read again under the same hash, so the edits hold (D-261127-601).
+  // As that room moves, a token deleted or added, the scene's tokens are read again, the hash kept while they stand on the same cells (D-261127-601, 604).
   const base = useMemo(() => {
     const tokens = roomStore.getState().floorView?.tokens;
     return read && tokens ? withTokens(read, tokens) : read;
