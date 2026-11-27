@@ -23,6 +23,11 @@ import { ModelSession, PICTURE_COLORS_MAX, distinctPictures, pictureColorOffer, 
  *   Picture's color, and a wearer with no picture wears the front view.
  * - ENDED: a close ends the worker, and no draw starts after it.
  * - CLEAR: once every answer is in, nothing reads as reading, drawing or saving.
+ * - BUSY: after each step, reading, drawing or saving only while an answer is on its way.
+ *
+ * Half the runs have a worker and a server that still answer what they were
+ * told to drop, so a late sheet or upload is never taken for one asked for
+ * since, nor sent after a close.
  */
 
 type Deferred<T> = { resolve(value: T): void; reject(err: unknown): void; settled: boolean };
@@ -143,25 +148,33 @@ class Rig {
   readonly session: ModelSession;
   readonly wearers: (ImageRef | undefined)[];
 
-  constructor(wearers: (ImageRef | undefined)[]) {
+  /** A worker and a server that answer what they were told to drop: the sheet or the upload still comes, late, and must be ignored. */
+  readonly late: boolean;
+
+  constructor(wearers: (ImageRef | undefined)[], late = false) {
     this.wearers = wearers;
+    this.late = late;
     const deps: SessionDeps = {
       draw: (file, options) => {
         const { promise, d } = deferred<DrawnSheet>();
         if (this.closed) this.faults.push("ENDED: a draw started after the close");
-        if (options.signal?.aborted) d.reject(abortError());
-        options.signal?.addEventListener("abort", () => d.reject(abortError()));
+        if (!this.late) {
+          if (options.signal?.aborted) d.reject(abortError());
+          options.signal?.addEventListener("abort", () => d.reject(abortError()));
+        }
         this.draws.push({ file, options, d, after: this.closed });
         return promise;
       },
       endWorker: () => {
         this.ends++;
-        for (const draw of this.draws) draw.d.reject(abortError());
+        if (!this.late) for (const draw of this.draws) draw.d.reject(abortError());
       },
       upload: (kind, blob, signal) => {
         const { promise, d } = deferred<string>();
-        if (signal.aborted) d.reject(abortError());
-        signal.addEventListener("abort", () => d.reject(abortError()));
+        if (!this.late) {
+          if (signal.aborted) d.reject(abortError());
+          signal.addEventListener("abort", () => d.reject(abortError()));
+        }
         this.uploads.push({ kind, blob, d, save: this.save });
         return promise;
       },
@@ -247,6 +260,8 @@ async function play(rig: Rig, steps: readonly Step[]): Promise<void> {
       rig.closed = true;
     }
     await flush();
+    // BUSY: reading, drawing or saving only while an answer is on its way.
+    if (s.state.stage !== null || s.state.saving) assert.ok(rig.pendingCount() > 0, `BUSY: ${s.state.saving ? "saving" : s.state.stage} with nothing in flight`);
   }
   // Every answer comes in, a good one, until nothing waits.
   for (let i = 0; i < 50; i++) {
@@ -400,6 +415,26 @@ describe("the 3D model sheet's state", () => {
     assert.deepEqual(saving.commits, []);
   });
 
+  test("Cancel during a redraw goes back to the last drawing and its options, and during a first read back to the start", async () => {
+    const rig = new Rig([icon("#336699")]);
+    rig.session.pick(FILES[0]!);
+    await flush();
+    rig.answerDraw(true, false);
+    await flush();
+    const drawn = rig.session.state.drawn;
+    rig.session.setOptions({ size: 140 });
+    await flush();
+    assert.equal(rig.session.state.stage, "drawing");
+    rig.session.cancelDraw();
+    await flush();
+    assert.deepEqual([rig.session.state.stage, rig.session.state.options.size, rig.session.state.drawn], [null, 100, drawn]);
+    rig.session.pick(FILES[1]!);
+    await flush();
+    rig.session.cancelDraw();
+    await flush();
+    assert.deepEqual([rig.session.state.stage, rig.session.state.file, rig.session.state.drawn], [null, null, null]);
+  });
+
   test("a failed upload clears Saving with its words, and Save then tries again once", async () => {
     const rig = new Rig([icon("#336699")]);
     rig.session.pick(FILES[0]!);
@@ -421,10 +456,10 @@ describe("the 3D model sheet's state", () => {
     assert.equal(rig.commits.length, 1);
   });
 
-  test("holds ONE, QUIET, OWN, ENDED and CLEAR over random sequences of picks, draws, options, cancels, closes, saves and uploads", async () => {
+  test("holds ONE, QUIET, OWN, ENDED, CLEAR and BUSY over random sequences of picks, draws, options, cancels, closes, saves and uploads", async () => {
     await fc.assert(
-      fc.asyncProperty(fc.nat(WEARERS.length - 1), runSteps, async (who, steps) => {
-        const rig = new Rig(WEARERS[who]!);
+      fc.asyncProperty(fc.nat(WEARERS.length - 1), runSteps, fc.boolean(), async (who, steps, late) => {
+        const rig = new Rig(WEARERS[who]!, late);
         await play(rig, steps);
         check(rig);
       }),
