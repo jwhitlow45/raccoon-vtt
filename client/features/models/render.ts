@@ -295,11 +295,14 @@ const OUTLINE_STEPS = (() => {
 /**
  * A dark outline 1.5 px out round the drawing, at 70%, so a grey figure
  * reads on a grey floor, in the image's own RGBA bytes (not premultiplied,
- * as getImageData gives them). It goes only where nothing is drawn: a
- * pixel the drawing touches keeps its color and alpha, so a see-through
- * cloak stays as see-through as its material. Outside, the outline is the
- * drawing's alpha sampled at the eight offsets and joined, as stamping it
- * eight times would make it. The gutter keeps each frame's outline inside it.
+ * as getImageData gives them). It goes where nothing is drawn, and under
+ * a partly drawn pixel at the drawing's edge, one with a clear 4-neighbour,
+ * so an antialiased edge shows no floor between the figure and its ring.
+ * A pixel drawn whole, or inside a see-through surface, keeps its color and
+ * alpha, so a see-through cloak stays as see-through as its material
+ * (D-261127-547). The outline is the drawing's alpha sampled at the eight
+ * offsets and joined, as stamping it eight times would make it. The gutter
+ * keeps each frame's outline inside it.
  */
 export function outline(rgba: Uint8ClampedArray, width: number, height: number): void {
   const n = width * height;
@@ -327,17 +330,18 @@ export function outline(rgba: Uint8ClampedArray, width: number, height: number):
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = y * width + x;
-      if (alpha[p]! > 0) continue;
+      const drawn = alpha[p]!;
+      if (drawn >= 1 || (drawn > 0 && at(x - 1, y) > 0 && at(x + 1, y) > 0 && at(x, y - 1) > 0 && at(x, y + 1) > 0)) continue;
       let near = 0;
       for (let k = Math.max(0, y - R); k <= Math.min(height - 1, y + R) && !near; k++) near = rows[k * width + x]!;
       if (!near) continue;
       let clear = 1;
       for (const [dx, dy] of OUTLINE_STEPS) clear *= 1 - sample(x - dx, y - dy);
-      const a = Math.round(255 * OUTLINE_ALPHA * (1 - clear));
-      if (a === 0) continue;
-      rgba[p * 4] = OUTLINE_RGB[0];
-      rgba[p * 4 + 1] = OUTLINE_RGB[1];
-      rgba[p * 4 + 2] = OUTLINE_RGB[2];
+      // The drawing over the outline: alpha a + o (1 - a), each color weighted the same way.
+      const under = OUTLINE_ALPHA * (1 - clear) * (1 - drawn);
+      const a = Math.round(255 * (drawn + under));
+      if (a === 0 || under === 0) continue;
+      for (let c = 0; c < 3; c++) rgba[p * 4 + c] = (rgba[p * 4 + c]! * drawn + OUTLINE_RGB[c]! * under) / (drawn + under);
       rgba[p * 4 + 3] = a;
     }
   }

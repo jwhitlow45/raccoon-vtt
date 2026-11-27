@@ -94,16 +94,34 @@ describe("the outline", () => {
   }
   const px = (img: Uint8ClampedArray, width: number, x: number, y: number) => [...img.slice((y * width + x) * 4, (y * width + x) * 4 + 4)];
 
-  test("leaves a broad translucent surface's color and alpha as drawn, and darkens only outside it", () => {
+  test("leaves a broad translucent surface's color and alpha as drawn inside its edge, and darkens only its edge and outside it", () => {
     const W = 48;
     const img = square(W, W, 12, 12, 24, [200, 100, 50, 128]);
     const before = img.slice();
     outline(img, W, W);
-    for (let y = 12; y < 36; y++) for (let x = 12; x < 36; x++) assert.deepEqual(px(img, W, x, y), px(before, W, x, y), `inside at ${x}, ${y}`);
+    for (let y = 13; y < 35; y++) for (let x = 13; x < 35; x++) assert.deepEqual(px(img, W, x, y), px(before, W, x, y), `inside at ${x}, ${y}`);
+    const [er, eg, eb, ea] = px(img, W, 12, 20);
+    assert.ok(ea! > 128 && er! < 200 && eg! < 100 && eb! < 50, `the edge pixel over the ring: ${[er, eg, eb, ea]}`);
     const [r, g, b, a] = px(img, W, 11, 20);
     assert.deepEqual([r, g, b], [0, 0, 0]);
     assert.ok(a! > 40 && a! < 0.7 * 255, `a ring at the half-seen surface's edge: ${a}`);
     assert.deepEqual(px(img, W, 8, 20), [0, 0, 0, 0], "nothing 4 px out");
+  });
+
+  test("draws an antialiased edge pixel over the ring, so no floor shows between the figure and its outline", () => {
+    // An opaque square with a column of 16/255 coverage along its left side, as antialiasing leaves.
+    const W = 40;
+    const img = square(W, W, 10, 10, 20, [150, 150, 150, 255]);
+    for (let y = 10; y < 30; y++) img.set([150, 150, 150, 16], (y * W + 9) * 4);
+    outline(img, W, W);
+    // The opaque pixel 1.5 px in puts the full 70% under it: a' = a + 0.7 (1 - a), its gray weighted by a alone.
+    const a = 16 / 255;
+    const under = 0.7 * (1 - a);
+    const [r, g, b, alpha] = px(img, W, 9, 20);
+    assert.equal(alpha, Math.round(255 * (a + under)));
+    for (const c of [r, g, b]) assert.ok(Math.abs(c! - (150 * a) / (a + under)) <= 1, `edge color ${c}`);
+    assert.ok(px(img, W, 8, 20)[3]! > 0, "the ring still runs outside the edge");
+    assert.deepEqual(px(img, W, 15, 15), [150, 150, 150, 255]);
   });
 
   test("rings an opaque figure at 70% just outside it, fading by 2 px out", () => {
