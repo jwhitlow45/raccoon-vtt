@@ -183,14 +183,15 @@ function ClassRowFields(props: { row: ClassRow; rows: readonly ClassRow[]; onCha
   const below = row.level < THIRD_FROM;
   return (
     <div data-class-row={row.key} role="group" aria-label={name} style={{ display: "grid", gap: theme.space(2) }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-        <Select aria-label="Class" value={row.id} onChange={(e) => props.onChange({ id: e.target.value as ClassId | "other", third: false })} style={{ flex: "1 1 140px", minWidth: 0, maxWidth: "100%" }}>
-          {classChoices(props.rows, row).map((id) => (
-            <option key={id} value={id}>
-              {id === "other" ? "Other class" : CLASS_NAMES[id]}
-            </option>
-          ))}
-        </Select>
+      {/* The class on a line of its own, its level and Remove under it, so a phone never leaves Remove alone on a line. */}
+      <Select aria-label="Class" value={row.id} onChange={(e) => props.onChange({ id: e.target.value as ClassId | "other", third: false })} style={{ width: "100%", minWidth: 0, maxWidth: "100%" }}>
+        {classChoices(props.rows, row).map((id) => (
+          <option key={id} value={id}>
+            {id === "other" ? "Other class" : CLASS_NAMES[id]}
+          </option>
+        ))}
+      </Select>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: theme.space(2) }}>
         <Stepper label={`${name} level`} value={row.level} step={1} min={1} max={MAX_LEVEL} onChange={(level) => props.onChange({ level })} />
         <SmallButton icon="delete" label={`Remove ${name}`} onClick={props.onRemove} />
       </div>
