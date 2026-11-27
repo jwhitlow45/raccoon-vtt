@@ -3,7 +3,9 @@ import { describe, test } from "node:test";
 import type { ImportOptions } from "./convert.ts";
 import { GRID_PROBLEM, MAX_POLYLINES, NOT_UVTT } from "./limits.ts";
 import { readUvtt, type UvttMap } from "./schema.ts";
-import { checkFile, planScene } from "./steps.ts";
+import { checkExport, checkFile, planScene } from "./steps.ts";
+import { chunksOf, door, WALL, WINDOW, type BuildInput } from "./exportTestutil.ts";
+import { uvttGeometry } from "./write.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 
 const p = (x: number, y: number) => ({ x, y });
@@ -63,5 +65,53 @@ describe("the grid, before the upload", () => {
       plan: null,
       problem: "This map is 250 squares wide. Scenes can be at most 200.",
     });
+  });
+});
+
+describe("the export's import check", () => {
+  const head = (build: BuildInput, bounds = { w: 20, h: 20 }) => uvttGeometry({ scene: { bounds }, chunks: chunksOf(build), rule: "off", lights: [], feetPerCell: 5, pxPerCell: 70 }, "dm").json;
+
+  test("a grid wall run of three squares imports as three unit edges, with no note", () => {
+    assert.deepEqual(checkExport(head({ edges: { "1,2,n": WALL, "2,2,n": WALL, "3,2,n": WALL } }), 5), { changes: false });
+  });
+
+  test("a free wall, door or window along a grid line between intersections imports as grid edges, with no note", () => {
+    const walls: BuildInput["walls"] = [
+      { a: [1, 6], b: [4, 6], f: WALL },
+      { a: [6, 2], b: [6, 3], f: door() },
+      { a: [8, 4], b: [9, 4], f: WINDOW },
+    ];
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: false });
+  });
+
+  test("a door very close to a wall cuts it on import: the file is still checked, with the note's flag", () => {
+    const walls: BuildInput["walls"] = [
+      { a: [1.5, 1.5], b: [4.5, 1.5], f: WALL },
+      { a: [2.5, 1.59375], b: [3.5, 1.59375], f: door() },
+    ];
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true });
+  });
+
+  test("two doors a 64th apart weld into one on import: within the cover, but a door is lost, so the note's flag", () => {
+    const walls: BuildInput["walls"] = [
+      { a: [2.25, 2.25], b: [3.25, 2.25], f: door() },
+      { a: [2.25, 2.265625], b: [3.25, 2.265625], f: door() },
+    ];
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true });
+  });
+
+  test("20,001 separate grid walls: the schema's count refuses, before any conversion", () => {
+    const edges: Record<string, typeof WALL> = {};
+    let n = 0;
+    for (let y = 0; y <= 200 && n < 20_001; y++) for (let x = 0; x < 200 && n < 20_001; x += 2, n++) edges[`${x},${y},n`] = WALL;
+    assert.deepEqual(checkExport(head({ edges }, { w: 200, h: 200 }), 5), { refused: "This file has 20,001 wall lines. An import takes at most 20,000." });
+  });
+
+  test("900 pillars and 500 free walls: the conversion refuses past a scene's 4,000 free walls", () => {
+    const cells: Record<string, "pillar"> = {};
+    for (let i = 0; i < 900; i++) cells[`${(i % 60) * 2},${Math.floor(i / 60) * 2}`] = "pillar";
+    const walls: BuildInput["walls"] = Array.from({ length: 500 }, (_, i) => ({ a: [130 + (i % 25) * 2 + 0.25, 2 + Math.floor(i / 25) * 2 + 0.25] as [number, number], b: [131 + (i % 25) * 2 + 0.5, 2 + Math.floor(i / 25) * 2 + 0.75] as [number, number], f: WALL }));
+    const check = checkExport(head({ cells, walls }, { w: 200, h: 200 }), 5);
+    assert.deepEqual(check, { refused: "This map has 4,100 walls off the grid even simplified, more than a scene holds (4,000)." });
   });
 });
