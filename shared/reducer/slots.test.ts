@@ -158,6 +158,14 @@ describe("who may spend slots and dice (docs/design/design-v1-slots.md 6)", () =
       }
     }
   });
+  test("a target the sender cannot see is not there", () => {
+    const s = table();
+    s.tokens.t1 = { ...s.tokens.t1!, visibility: "dm", ownerIds: [] };
+    for (const op of ops) {
+      const d = canApply(op, P2, s, deps);
+      assert.deepEqual(d.ok ? null : d.code, "gone", op.t);
+    }
+  });
   test("classes and spent are the owners' fields, spent only with a re-sync's Undo", () => {
     const s = table();
     assert.ok(canApply({ t: "character.update", characterId: "bree", patch: { classes: [{ id: "wizard", level: 6 }] } }, P1, s, deps).ok);
