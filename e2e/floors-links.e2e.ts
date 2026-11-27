@@ -42,6 +42,10 @@ import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/a
  *   ends the drag as a cancel: Thorn stays on the stairs, drawn there back
  *   on Ground, Bree hears the drag cancelled, and neither the key nor the
  *   rest of the gesture sends a move.
+ * - lp54fix-1: the DM drags Thorn on Upper floor, and his second device's
+ *   Undo takes Thorn back down mid-drag: the drag ends as a cancel, the
+ *   DM's board stays on Upper floor, and the rest of the gesture sends no
+ *   move, so Thorn stays on Ground's stairs.
  * - flrl-10: no page logged an error.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus sixty-seven, one file after
@@ -581,6 +585,47 @@ describe("Go up and Go down, and the stairs on the board", { concurrency: false 
       return now && drawn && now.x === drawn.x && now.y === drawn.y ? true : null;
     });
     await shots.take(dm, "lp53fix-1-dm-ground-thorn-back");
+    await deselect(dm);
+  });
+
+  test("lp54fix-1. a second DM device's Undo takes Thorn off Upper floor while the DM drags him there: the drag ends as a cancel and sends no move", async () => {
+    await onGroundStairs();
+    await deselect(dm);
+    await showsFloor(dm, "Ground floor");
+    await ops.send({ t: "token.update", tokenId: run.tThorn, patch: { sceneId: run.upper, ...STAIRS } });
+    await waitFor("Thorn on Upper's stairs in the DM's copy", () => (thornAt(dmSocket)?.sceneId === run.upper ? true : null));
+    await keyOn(dm, "]");
+    await showsFloor(dm, "Upper floor");
+    await waitFor("Thorn drawn on Upper floor", () => thornDrawn(dm));
+    const from = await pagePoint(dm, BOUNDS, { x: STAIRS.x + 0.5, y: STAIRS.y + 0.5 });
+    const mid = await pagePoint(dm, BOUNDS, { x: STAIRS.x - 2.5, y: STAIRS.y + 0.5 });
+    const far = await pagePoint(dm, BOUNDS, { x: START.x + 0.5, y: START.y + 0.5 });
+    await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+    const start = dmSocket.sent.length;
+    await dm.mouse.move(from.x, from.y);
+    await dm.mouse.down();
+    try {
+      await dm.mouse.move(from.x + (mid.x - from.x) * 0.1, from.y, { steps: 3 });
+      await dm.mouse.move(mid.x, mid.y, { steps: 8 });
+      await waitFor("the DM's drag of Thorn under way", () => (dmSocket.sent.slice(start).some((f) => f.includes('"dragMove"') && f.includes(run.tThorn)) ? true : null), 5_000);
+      await ops.step("undo");
+      await waitFor("the Undo takes Thorn back to Ground in the DM's copy", () => (thornAt(dmSocket)?.sceneId === run.ground ? true : null));
+      await sleep(300);
+      const undone = dmSocket.sent.length;
+      await dm.mouse.move(far.x, far.y, { steps: 8 });
+      await shots.take(dm, "lp54fix-1-dm-upper-after-undo-mid-gesture");
+      await dm.mouse.up();
+      await sleep(800);
+      assert.deepEqual(dmSocket.sent.slice(start).filter((f) => /"t":"token\.move(Many)?"/.test(f)), [], "no move sent for the drag");
+      assert.deepEqual(dmSocket.sent.slice(undone).filter((f) => f.includes('"dragMove"')), [], "the rest of the gesture previews nothing");
+    } finally {
+      await dm.mouse.up().catch(() => {});
+    }
+    await showsFloor(dm, "Upper floor", "the DM's board still on Upper floor");
+    const t = thornAt(dmSocket);
+    assert.deepEqual([t?.sceneId, t?.x, t?.y], [run.ground, STAIRS.x, STAIRS.y], "Thorn stays on Ground's stairs");
+    await keyOn(dm, "[");
+    await showsFloor(dm, "Ground floor");
     await deselect(dm);
   });
 
