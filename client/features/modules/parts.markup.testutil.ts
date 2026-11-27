@@ -1,7 +1,7 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createStore } from "zustand/vanilla";
-import type { CharacterId, ClassResource, PcStats, RoomState } from "#shared/model.ts";
+import type { Character, CharacterId, ClassResource, PcStats, RoomState } from "#shared/model.ts";
 import { AT, DM, P1, castTable, character, entry, template, token } from "#shared/testutil.ts";
 import { api } from "../../lib/api.ts";
 import { dmPanelFoldsSlot, scenesFoldsSlot } from "../../lib/folds.ts";
@@ -357,6 +357,11 @@ export const effectsNow: { on: boolean } = ((globalThis as Record<symbol, unknow
 
 const RAGE: ClassResource = { id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "barbarian-rage", level: 5, atLevel: 3 };
 const HANDS: ClassResource = { id: "hands", name: "Lay on Hands", max: 25, used: 0, reset: "long", pool: true, preset: "paladin-lay-on-hands", level: 5, atLevel: 5 };
+/** Barbarian past Rage's preset level, so its level-up asks, and Wizard, so she holds spell slots and Hit Point Dice. */
+const BREE_CLASSES: NonNullable<Character["classes"]> = [
+  { id: "barbarian", level: 6 },
+  { id: "wizard", level: 3 },
+];
 
 const STATS: PcStats = {
   abilities: { str: 16, dex: 14, con: 14, int: 8, wis: 12, cha: 10 },
@@ -369,8 +374,9 @@ const STATS: PcStats = {
 
 /**
  * The table every fixture starts from, the room search's seeded room with
- * Bree made a character that holds every Characters part: two class
- * resources a level behind (the level-up ask), a stat block synced from
+ * Bree made a character that holds every Characters part: classes that
+ * give her spell slots and Hit Point Dice, two class resources a level
+ * behind her Barbarian level (the level-up ask), a stat block synced from
  * D&D Beyond (Re-sync), an owl companion on the map, and a fight on her
  * turn. A clock runs, shown to players, and Bree's Fireball area stands.
  */
@@ -379,7 +385,8 @@ export function tableRoom(): RoomState {
   const bree = state.characters.bree!;
   state.characters.bree = {
     ...bree,
-    level: 5,
+    level: 9,
+    classes: BREE_CLASSES,
     resources: [RAGE, HANDS],
     stats: STATS,
     // A spent use her block no longer lists stands as its own row beside her class resources, so a Uses list draws with them hidden and shows that their own gate holds.
@@ -396,8 +403,8 @@ export function tableRoom(): RoomState {
 /** Bree as the table holds her, for the fixtures that take a character. */
 const bree = () => tableRoom().characters.bree!;
 /** Bree on her own page, where this viewer may add classes and resources (D-261127-423), and on her token, where she holds what she has. */
-const BREE_HOLDS: Holder = { classes: [], resources: [RAGE, HANDS], ddbSync: { at: AT }, mayAdd: true };
-const BREE_TOKEN_HOLDS: Holder = { classes: [], resources: [RAGE, HANDS], ddbSync: { at: AT } };
+const BREE_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT }, mayAdd: true };
+const BREE_TOKEN_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT } };
 
 /** The cast table of the save spell tests (docs/design/design-v1-player-save-spell.md 8), Thorn holding Fireball, which has an area to place. */
 function castRoom(): RoomState {

@@ -101,16 +101,13 @@ const INNER_OWNERS: readonly InnerOwner[] = [
 
 /**
  * Core controls that stand on a fixture only because a part's count admits
- * them, which the part's hiding takes with it by design: Bree's turn card
- * holds her class resources alone, so with them hidden no card comes
- * (design section 3, D-261127-394). Each is that part's on its surface.
+ * them, which the part's hiding takes with it by design (design section 3,
+ * D-261127-394). Each is that part's on its surface. None today: Bree's
+ * turn card holds her class resources and her spell slots, so hiding either
+ * alone leaves the card. A Uses list that one part alone holds is drawn by
+ * the class resources alone test below.
  */
-const ADMITTED: readonly InnerOwner[] = [`button "Collapse Bree's turn"`, `button "Dismiss Bree's turn"`, `button "Show Bree's turn"`].map((key) => ({
-  surface: "Time, Sound, Initiative, Log, Members",
-  key,
-  owner: "classResources",
-  why: "Bree's turn card holds only her class resources",
-}));
+const ADMITTED: readonly InnerOwner[] = [];
 
 /**
  * A part whose gates on a surface another lane places, so checks 1, 2 and 4
@@ -416,7 +413,9 @@ describe("a uses list of class resources alone", () => {
     const { CreatureUses, useUsesPresence } = await import("../combat/CombatUses.tsx");
     const alone = () => {
       const state = tableRoom();
-      const bree = state.characters.bree!;
+      // No classes either, or her spell slots would make the list.
+      const bree = { ...state.characters.bree! };
+      delete bree.classes;
       state.characters.bree = { ...bree, actor: { ...bree.actor, uses: {} } };
       return state;
     };
