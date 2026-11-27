@@ -250,3 +250,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
   from a speaker on the top bar, a master level with a mute in place of
   the Room sound switch, the same controls in This device and Sound, U to
   mute, and a table display's Off to 100%.
+- [design-v1-uvtt-export.md](design-v1-uvtt-export.md): Export as VTT
+  file beside Export as image, a scene or every floor as Universal VTT
+  files with the map, walls, doors, windows and lights, a player view
+  that holds nothing hidden, and this app's own import check as a note.
