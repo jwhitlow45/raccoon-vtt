@@ -1639,7 +1639,8 @@ export function MapStage(props: {
         }
       }
       // Each landing is offset from where its token and its holder stood as the drag began, the pressed token's too, as the
-      // node was moved from there (LP55-DRAG-1). A token that lands nowhere stays where the room holds it now.
+      // node was moved from there (LP55-DRAG-1). A token that lands nowhere, the pressed one or a follower, stays where this
+      // copy holds it now, as putBack reads it.
       const tokenOf = (id: string) => (id === token.id ? parts.pressed : (followers.find((f) => f.token.id === id)?.token ?? tokensByIdRef.current.get(id)));
       /** Where a moving token lands: its own move, or its named holder's offset, or nowhere when that did not move. */
       const landing = (t: ViewToken): { x: number; y: number } | null => {
@@ -1662,7 +1663,7 @@ export function MapStage(props: {
         const m = landed.get(t.id);
         if (m) return m.drawnAt ?? { x: m.x, y: m.y };
         if (at) return drawnSpot(grid, { ...at, ...(t.nudge ? { nudge: t.nudge } : {}) });
-        const stays = t.id === token.id ? token : t;
+        const stays = tokensByIdRef.current.get(t.id) ?? t;
         if (inPlace && inPlace.tokenId === t.id && "drawnAt" in inPlace.patch) return inPlace.patch.drawnAt ?? { x: stays.x, y: stays.y };
         return drawnSpot(grid, stays);
       };
