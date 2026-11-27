@@ -193,7 +193,7 @@ test("a shutdown with sockets open stamps every session's last sight, a slow cli
   playerSocket.ws.terminate();
 });
 
-test("a shutdown during a log backfill batch stops it: the backend is told to stop, its connection and locks are gone, and the close is bounded", async () => {
+test("a shutdown during a log backfill batch stops it: the backend is told to stop, its connection and locks are gone, and the close is bounded", { timeout: 60_000 }, async () => {
   const tag = `rvtt-shutdown-logb-${randomBytes(4).toString("hex")}`;
   const ownPool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 5 });
   let reached!: () => void;
@@ -241,7 +241,7 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
 
   const started = Date.now();
   await closeServer(logApp, () => ownPool.end());
-  // The cancel ends the held batch at once. Without it the stop waits out the rooms' 16 s close, so a bound under that tells them apart on a loaded machine too.
+  // The cancel ends the held batch at once. Without it the batch never ends and the stop never answers, so the test's own timeout fails it, and a stop that merely drags passes only under 12 s.
   assert.ok(Date.now() - started < 12_000, "bounded");
   let left = { backends: 1, locks: 1 };
   for (const deadline = Date.now() + 20_000; left.backends > 0 || left.locks > 0; ) {
@@ -898,8 +898,11 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 insid
     const steps = lines.map((line) => line.msg ?? "").filter((msg) => msg.startsWith("shut"));
     assert.equal(code, 0, `the stop's exit code, after ${took} ms: ${steps.join(", ")}`);
     // Exit 0 already means the deadline timer never fired. What a loaded machine must not hide is a stop that waits a socket out: the sockets step cuts the slow one off after its 2 s grace, so waiting out ws's 30 s close timeout would show here, not in a fixed 5 s for the whole stop.
-    const sockets0 = lines.find((line) => line.msg === "shutdown: sockets closed") as { tookMs?: number } | undefined;
-    assert.ok((sockets0?.tookMs ?? Infinity) < 10_000, `the sockets step took ${sockets0?.tookMs} ms, a slow client is cut off after its grace`);
+    const socketsStep = lines.find((line) => line.msg === "shutdown: sockets closed") as { tookMs?: number } | undefined;
+    assert.ok((socketsStep?.tookMs ?? Infinity) < 10_000, `the sockets step took ${socketsStep?.tookMs} ms, a slow client is cut off after its grace`);
+    // The stop's own last line says how long all of it took, so a slow rooms or pool step shows too.
+    const lastMs = (lines.find((line) => line.msg === "shut down") as { ms?: number } | undefined)?.ms ?? Infinity;
+    assert.ok(lastMs < 15_000, `the stop logged its end ${lastMs} ms in`);
     assert.ok(took < SHUTDOWN_DEADLINE_MS, `the stop took ${took} ms`);
     assert.equal(await seqOf("select seq::int from room_snapshots where room_id = $1"), lastSeq, "the stop saved the room at its last op");
     // The child's log reaches this pipe in the order its writes are flushed, which a loaded machine can swap for two lines.
