@@ -110,7 +110,10 @@ describe("GLB bombs: counts before allocation", () => {
     (wide.json.nodes as Json[])[0]!.children = new Array(1_999_000).fill(1);
     await refused(wide.build(), MODEL_WORDS.tooComplex);
     const roots = cubeGlb();
-    (roots.json.scenes as Json[])[0]!.nodes = new Array(L.glbNodeVisits + 1).fill(0);
+    // The first root names no node, so a walk that stacked the list would read it and refuse the file as no model.
+    const list: number[] = new Array(L.glbNodeVisits + 1).fill(0);
+    list[0] = 99;
+    (roots.json.scenes as Json[])[0]!.nodes = list;
     await refused(roots.build(), MODEL_WORDS.tooComplex);
     // Children that fit the visits left are walked as ever.
     const fits = cubeGlb();
@@ -327,6 +330,26 @@ describe("GLB bombs: skins", () => {
     return g.build();
   }
   const first = (n: number, count: number) => Array.from({ length: count }, (_, i) => n + i);
+
+  /** The cube skinned to one joint outside the scene, at the foot of a chain of `length` nodes. */
+  function chainedJoint(length: number): Uint8Array {
+    const g = new Glb();
+    const n = 36;
+    const position = g.floats(cube, "VEC3");
+    const joints = g.accessor({ bufferView: g.view(new Uint8Array(n * 4)), componentType: 5121, type: "VEC4", count: n });
+    const weights = g.floats(Array.from({ length: n }, () => [1, 0, 0, 0]).flat(), "VEC4");
+    (g.json.meshes as Json[]).push({ primitives: [{ attributes: { POSITION: position, JOINTS_0: joints, WEIGHTS_0: weights } }] });
+    g.json.skins = [{ joints: [length] }];
+    g.node({ mesh: 0, skin: 0 });
+    for (let k = 1; k <= length; k++) g.node(k < length ? { children: [k + 1] } : {}, false);
+    return g.build();
+  }
+
+  test("counts the steps up from a joint outside the scene among the 10,000 visits", async () => {
+    // The skinned node is the walk's one visit, so a chain of 9,999 above its joint fits and one of 10,000 does not.
+    assert.equal(readGlb(chainedJoint(L.glbNodeVisits - 1), "computer").triangles, 12);
+    await refused(chainedJoint(L.glbNodeVisits), MODEL_WORDS.tooComplex);
+  });
 
   test("refuses duplicate joints in words", async () => {
     await refused(skinnedCube([[1, 2, 1]], 2), MODEL_WORDS.duplicateJoints);

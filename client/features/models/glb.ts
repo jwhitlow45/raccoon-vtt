@@ -327,14 +327,15 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
   const walked: number[] = [];
   let visits = 0;
   const stack: { node: number; parent: number }[] = [];
-  // Every node pushed is visited or refused, so the stack is held to the visits left: a list of two million children never builds.
+  // Every node pushed is visited or refused, so holding the visits so far and the stack to the cap at each push caps the visits
+  // too, and a list of two million children never builds.
   if (roots.length > L.glbNodeVisits) refuse(MODEL_WORDS.tooComplex);
   for (let r = roots.length - 1; r >= 0; r--) stack.push({ node: indexOf(roots[r], nodes.length), parent: -1 });
   while (stack.length > 0) {
     const { node: n, parent } = stack.pop()!;
     if (visited[n]) notModel();
     visited[n] = 1;
-    if (++visits > L.glbNodeVisits) refuse(MODEL_WORDS.tooComplex);
+    visits++;
     const node = item(nodes, n);
     refuseExtensionsIn(node);
     const local = localMatrix(node);
