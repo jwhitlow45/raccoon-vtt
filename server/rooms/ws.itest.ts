@@ -279,29 +279,43 @@ describe("websocket: reconnects and watermarks", () => {
   /**
    * Resolves once the room has handled its op `n`, set before the op is sent: the op is queued and taken from the queue,
    * so what it staged waits in the open batch. It resolves in the same turn of the event loop as the room takes the op,
-   * so a test that awaits it goes on before any timer runs, the batch's close among them: a poll, as a sleep, could let a
-   * batch boundary of the real clock pass first. The deadline runs from the call, so an op that never reaches the room
-   * fails the test rather than hanging it.
+   * so a test that awaits it goes on before any timer runs, the batch's close among them: a poll on a timer, as a sleep,
+   * could let a batch boundary of the real clock pass first. A room whose drain has spent its time in the turn takes the
+   * op in an immediate it sets (RoomActor #drain), and one set after it runs in the same check phase, before the next
+   * timers. The deadline runs from the call, so an op that never reaches the room fails the test rather than hanging it.
    */
   async function handled(roomId: string, n: number, ms = 10_000): Promise<void> {
     const actor = t.manager.get(roomId)!;
     const own = actor.op;
     let timer: NodeJS.Timeout | undefined;
+    let over = false;
     const taken = new Promise<void>((resolve, reject) => {
       timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms waiting for op ${n} to be handled`)), ms);
+      const check = (): void => {
+        if (over) return;
+        if (actor.queueLength === 0) resolve();
+        else setImmediate(check);
+      };
       actor.op = async (...args: Parameters<RoomActor["op"]>) => {
         await own.apply(actor, args);
-        if (args[1] !== n) return;
-        // An op the room left queued would be taken in a later turn, after timers that may close its batch.
-        if (actor.queueLength === 0) resolve();
-        else reject(new Error(`the room left op ${n} queued, so its batch could close before the test goes on`));
+        if (args[1] === n) check();
       };
     });
     try {
       await taken;
     } finally {
+      over = true;
       clearTimeout(timer);
       delete (actor as { op?: unknown }).op;
+    }
+  }
+
+  /** Until the real clock is just short of a batch boundary, so an op sent now lands in a batch about to close. */
+  async function beforeBoundary(batchMs = 400): Promise<void> {
+    for (;;) {
+      const into = Date.now() % batchMs;
+      if (into >= batchMs - 4 && into <= batchMs - 2) return;
+      await new Promise((r) => setImmediate(r));
     }
   }
 
@@ -314,6 +328,37 @@ describe("websocket: reconnects and watermarks", () => {
     await assert.rejects(handled(roomId, 1, 300), /timed out after 300 ms waiting for op 1 to be handled/);
     assert.ok(!Object.hasOwn(actor, "op"), "the room's op is its own again");
     s.close();
+  });
+
+  test("the handled probe waits out a drain the room puts off to its next turn, and the unload still drops the refusal it staged", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Put off");
+    const s = await t.connect(roomId, dm);
+    await s.snapshot("c1");
+    const actor = t.manager.get(roomId)!;
+    const roomOp = Object.getPrototypeOf(actor).op as RoomActor["op"];
+    let putOff = false;
+    // The drain reads the clock as if its time in this turn were spent, so it takes the op in an immediate (RoomActor #drain).
+    actor.op = (...args: Parameters<RoomActor["op"]>) => {
+      const real = performance.now;
+      let ahead = 0;
+      performance.now = () => real.call(performance) + (ahead += 100);
+      try {
+        return roomOp.apply(actor, args);
+      } finally {
+        performance.now = real;
+        putOff = actor.queueLength > 0;
+      }
+    };
+    const staged = handled(roomId, 1);
+    await beforeBoundary();
+    s.send({ t: "op", n: 1, op: { t: "nonsense" } });
+    await staged;
+    await t.manager.unload(roomId, 4010, false);
+    assert.ok(putOff, "the room put the op off to its next turn");
+    assert.equal((await s.waitClosed()).code, 4010);
+    const stored = await t.pool.query("select 1 from client_watermarks where room_id = $1", [roomId]);
+    assert.equal(stored.rowCount, 0, "the refusal went with its open batch");
   });
 
   test("a client that reconnects while its op is staged gets its snapshot at the commit, with the op settled, and a resend of it is acked at the next close with no change", async () => {
