@@ -1,5 +1,5 @@
 import { ddbCharacterId } from "../ddb/link.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type ClassResource, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type ClassLevel, type ClassResource, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
 import { expectOf } from "../permissions.ts";
 import { hash128, stableStringify } from "../project.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
@@ -9,6 +9,7 @@ import { DAMAGE_TYPES, type DamageType } from "./damage.ts";
 import type { PcFill } from "./pcFill.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcDerived } from "./pcStats.ts";
 import { planResources, resourceLosses, resourcePart, resourceResult, sameButLevels, type ResourceItem, type ResourcePlan, type SpentItem } from "./resourceSync.ts";
+import { spentWithin } from "./spellSlots.ts";
 
 /**
  * A D&D Beyond sync merged three ways (docs/design/design-v1-resync.md 2): the
@@ -49,8 +50,12 @@ export type FieldKey =
   | "critOn"
   | ActorField;
 
-/** The five fields beside the block that keep their tick (2.2). */
-export type ActorField = "level" | "ac" | "hpMax" | "speeds" | "senses";
+/**
+ * The fields beside the block that keep their tick (2.2): the level, AC, max
+ * HP, speeds and senses, and the classes, which a sync treats as one field,
+ * as it treats the level (docs/design/design-v1-slots.md 8).
+ */
+export type ActorField = "level" | "ac" | "hpMax" | "speeds" | "senses" | "classes";
 
 /** The lines of Also set (3.3), the five ticked fields, the sheet link and the name. */
 export type AlsoKey = ActorField | "sheetUrl" | "name";
@@ -61,7 +66,7 @@ export type AlsoKey = ActorField | "sheetUrl" | "name";
  * null, a spellcasting ability or null, a flag, the critical range's
  * lowest number (20 for none), the level, AC, max HP, speeds or senses.
  */
-export type FieldValue = number | boolean | string | null | Actor["speeds"] | undefined;
+export type FieldValue = number | boolean | string | null | Actor["speeds"] | ClassLevel[] | undefined;
 
 /** Where the merge stands with the record (1.3): no block yet, no record, a record of another number, or the same source. */
 export type SyncSource = "first" | "none" | "relinked" | "same";
@@ -102,6 +107,8 @@ export type FieldItem = {
   theirs: FieldValue;
   /** Changed here and in D&D Beyond, to different values. */
   conflict: boolean;
+  /** D&D Beyond's name for each of the classes in `theirs`, so a line names an Other class. */
+  names?: string[];
 };
 
 export type RollItem = {
@@ -129,6 +136,8 @@ export type AlsoItem = {
   theirs: FieldValue;
   /** Ticked until the player unticks it. The name alone starts unticked. */
   on: boolean;
+  /** D&D Beyond's name for each of the classes in `theirs`, so a line names an Other class. */
+  names?: string[];
 };
 
 /** What a sync works from (2.2): the block and level it merges into, the character beside them, and the read. */
@@ -139,7 +148,7 @@ export type SyncInput = {
   stats: PcStats | undefined;
   level: number | undefined;
   /** The character as the merge sees it. In the editor, a record from an earlier fill before Save has no `at` yet. */
-  character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch; resources?: ClassResource[] };
+  character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch; resources?: ClassResource[]; classes?: ClassLevel[] };
   fill: PcFill;
   /**
    * The record the class resources merge against, when it is not
@@ -202,7 +211,7 @@ export type SyncResult = {
   stats: PcStats;
   level: number | undefined;
   /** The fields beside the block the sync sets, as ticked. */
-  also: { level?: number; name?: string; ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string };
+  also: { level?: number; name?: string; ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string; classes?: ClassLevel[] };
   record: DdbSyncPatch;
   /**
    * The class resources as Apply sends them, whole, each `used` only where
@@ -481,8 +490,19 @@ export function sensesWords(senses: string): string {
   return senses.trim().replace(/\.$/, "");
 }
 
+/**
+ * Two lists of classes as one value: the same classes at the same levels,
+ * in any order, so a list put in another order on the Classes sheet is no
+ * change. None and an empty list are one.
+ */
+export function sameClasses(a: readonly ClassLevel[] | undefined, b: readonly ClassLevel[] | undefined): boolean {
+  const key = (list: readonly ClassLevel[] | undefined) => (list ?? []).map((c) => stableStringify(c)).sort().join(",");
+  return key(a) === key(b);
+}
+
 function sameActorValue(key: ActorField, a: FieldValue, b: FieldValue): boolean {
-  if (key === "speeds" && a && b && typeof a === "object" && typeof b === "object") return same(speedsWithout(a), speedsWithout(b));
+  if (key === "classes") return sameClasses(a as ClassLevel[] | undefined, b as ClassLevel[] | undefined);
+  if (key === "speeds" && a && b && typeof a === "object" && typeof b === "object") return same(speedsWithout(a as Actor["speeds"]), speedsWithout(b as Actor["speeds"]));
   if (key === "senses" && typeof a === "string" && typeof b === "string") return sensesWords(a) === sensesWords(b);
   return same(a, b);
 }
@@ -503,10 +523,12 @@ function actorRead(input: SyncInput, key: ActorField, base: DdbBase | undefined)
       return { now: actor.speeds, theirs: fill.actor.speeds, base: base?.speeds, read: !shaped && fill.actor.speeds !== undefined };
     case "senses":
       return { now: actor.senses, theirs: fill.actor.senses, base: base?.senses, read: fill.actor.senses !== undefined };
+    case "classes":
+      return { now: input.character.classes ?? [], theirs: fill.classes, base: base?.classes, read: fill.classes !== undefined };
   }
 }
 
-const ACTOR_FIELDS: readonly ActorField[] = ["level", "ac", "hpMax", "speeds", "senses"];
+const ACTOR_FIELDS: readonly ActorField[] = ["level", "ac", "hpMax", "speeds", "senses", "classes"];
 
 /** The D&D Beyond number a fill read, from its sheet link. */
 export function fillNumber(fill: PcFill): string | undefined {
@@ -568,10 +590,11 @@ export function planSync(input: SyncInput): SyncPlan {
   for (const key of ACTOR_FIELDS) {
     const f = actorRead(input, key, base);
     if (!f.read || sameActorValue(key, f.now, f.theirs)) continue;
+    const names = key === "classes" && fill.classNames ? { names: fill.classNames } : {};
     // A kept one follows the three ways. Otherwise its line is in Also set, ticked, with a record or without (2.2).
     if (f.base !== undefined && !sameActorValue(key, f.now, f.base)) {
-      items.push({ type: "field", id: `field:${key}`, key, group: "Features", section: "kept", base: f.base, now: f.now, theirs: f.theirs, conflict: !sameActorValue(key, f.theirs, f.base) });
-    } else also.push({ type: "also", id: `also:${key}`, key, now: f.now, theirs: f.theirs, on: true });
+      items.push({ type: "field", id: `field:${key}`, key, group: "Features", section: "kept", base: f.base, now: f.now, theirs: f.theirs, conflict: !sameActorValue(key, f.theirs, f.base), ...names });
+    } else also.push({ type: "also", id: `also:${key}`, key, now: f.now, theirs: f.theirs, on: true, ...names });
   }
   const link = fill.actor.sheetUrl;
   const linkNow = character.actor.sheetUrl;
@@ -1006,7 +1029,8 @@ function setActorField(also: SyncResult["also"], key: ActorField, value: FieldVa
   else if (key === "speeds") {
     const hover = input.character.actor.speeds.hover;
     also.speeds = { ...speedsWithout(value as Actor["speeds"]), ...(hover !== undefined ? { hover } : {}) };
-  } else also.senses = value as string;
+  } else if (key === "classes") also.classes = value as ClassLevel[];
+  else also.senses = value as string;
 }
 
 /** The new base: D&D Beyond's value for every part read, and the old base's for the rest when the source is the same (2.2). */
@@ -1032,6 +1056,7 @@ function nextBase(plan: SyncPlan): DdbBase {
   if (fill.actor.hpMax !== undefined) out.hpMax = fill.actor.hpMax;
   if (!shaped && fill.actor.speeds !== undefined) out.speeds = speedsWithout(fill.actor.speeds);
   if (fill.actor.senses !== undefined) out.senses = fill.actor.senses;
+  if (fill.classes !== undefined) out.classes = fill.classes;
   return out;
 }
 
@@ -1114,7 +1139,7 @@ export function leavesAsIs(plan: SyncPlan, result: SyncResult): boolean {
 }
 
 /** The character a sync starts from, as the dialog holds it. */
-export type SyncCharacter = Pick<Character, "name" | "level" | "actor" | "stats" | "ddbSync" | "resources">;
+export type SyncCharacter = Pick<Character, "name" | "level" | "actor" | "stats" | "ddbSync" | "resources" | "classes" | "spent" | "useRev">;
 
 /**
  * The one `character.update` Apply sends (1.2, 4): every part and field the
@@ -1136,6 +1161,7 @@ export function syncPatch(character: SyncCharacter, result: SyncResult): { patch
   if (result.also.sheetUrl !== undefined && result.also.sheetUrl !== a.sheetUrl) actor.sheetUrl = result.also.sheetUrl;
   if (result.also.hpMax !== undefined && result.also.hpMax !== a.hp.max) actor.hp = hpForMax(a, result.also.hpMax);
   if (Object.keys(actor).length > 0) patch.actor = actor;
+  if (result.also.classes !== undefined && !sameClasses(result.also.classes, character.classes)) patch.classes = result.also.classes;
   const changes = Object.keys(patch).length > 0;
   const sameRec = sameRecord(result.record, character.ddbSync);
   if (result.resources !== undefined) {
@@ -1148,10 +1174,18 @@ export function syncPatch(character: SyncCharacter, result: SyncResult): { patch
   return { patch, expect: expectOf(character, syncExpectParts(patch, character.ddbSync)) };
 }
 
-/** What a sync's op expects: each part it writes, the shape, and the class resources whenever it changes the record's resource part (docs/design/design-v1-ddb-resources.md 5). */
+/**
+ * What a sync's op expects: each part it writes, the shape, the class
+ * resources whenever it changes the record's resource part
+ * (docs/design/design-v1-ddb-resources.md 5), and the classes with their spent
+ * counts and use stamp whenever it writes the classes or the class resources,
+ * so a rest or a use on any device during the review refuses Apply
+ * (docs/design/design-v1-slots.md 6, D-261127-406).
+ */
 function syncExpectParts(patch: CharacterPatch, before: Pick<DdbSyncPatch, "res" | "gone"> | undefined): ExpectPart[] {
   const parts = [...writtenParts(patch), "actor.shape" as const];
   if (patch.resources === undefined && patch.ddbSync !== undefined && resourcePart(patch.ddbSync) !== resourcePart(before)) parts.push("resources");
+  if (patch.resources !== undefined && !parts.includes("classes")) parts.push("classes");
   return parts;
 }
 
@@ -1169,6 +1203,7 @@ export function writtenParts(patch: CharacterPatch): ExpectPart[] {
   if (patch.actor?.hp !== undefined) out.push("actor.hp");
   if (patch.ddbSync !== undefined) out.push("ddbSync");
   if (patch.resources !== undefined) out.push("resources");
+  if (patch.classes !== undefined) out.push("classes");
   return out;
 }
 
@@ -1202,6 +1237,14 @@ export function afterSync(before: SyncCharacter, patch: CharacterPatch, at: stri
   if (patch.resources !== undefined) {
     if (patch.resources.length > 0) out.resources = resourcesAfter(before.resources, patch.resources);
     else delete out.resources;
+  }
+  // The reducer's own rule for the classes (shared/reducer/tokens.ts): the spent counts clamp to them, an empty list removes both.
+  if (patch.classes !== undefined) {
+    if (patch.classes.length > 0) out.classes = patch.classes;
+    else delete out.classes;
+    const spent = spentWithin(patch.spent ?? before.spent, out.classes);
+    if (spent) out.spent = spent;
+    else delete out.spent;
   }
   return out;
 }
@@ -1240,8 +1283,17 @@ export function undoSync(before: SyncCharacter, sent: CharacterPatch, stamped: s
   if (Object.keys(actor).length > 0) patch.actor = actor;
   // The list whole, each count spent as it was (docs/design/design-v1-ddb-resources.md 5).
   if (sent.resources !== undefined) patch.resources = before.resources ?? [];
+  // The classes from before with the exact counts spent then (docs/design/design-v1-slots.md 6, D-261127-264), since Apply's clamp
+  // may have taken some away that the classes alone would not give back.
+  if (sent.classes !== undefined) {
+    patch.classes = before.classes ?? [];
+    patch.spent = before.spent ?? {};
+  }
   patch.ddbSync = before.ddbSync ?? null;
   const parts = [...writtenParts(patch), "actor.shape" as const];
   if (patch.resources === undefined && resourcePart(before.ddbSync) !== resourcePart(after.ddbSync)) parts.push("resources");
+  // Every Undo, a resources-only one too, expects the classes with the counts spent and the use stamp Apply left, so any rest or use since,
+  // on any device, refuses it, even where every count reads the same (D-261127-361, 405).
+  if (!parts.includes("classes")) parts.push("classes");
   return { patch, expect: expectOf(after, parts) };
 }
