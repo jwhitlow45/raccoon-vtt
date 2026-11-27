@@ -259,11 +259,20 @@ export function remapState(file: RoomState, opts: RemapOptions): RoomState {
     return relinked(next, savedLink(was) ?? was);
   };
   // An upload follows its new id where its place takes a token image, and goes when it did not come through. A shipped
-  // icon's key means the same in every room (docs/design/design-v1-dm-tools.md 2.5).
+  // icon's key means the same in every room (docs/design/design-v1-dm-tools.md 2.5). A model on either follows its sheet
+  // to the sheet's new id where it came through as a `model` asset, and goes alone where it did not, so the creature
+  // keeps its picture (docs/design/design-v1-token-models.md 4.6).
   const image = (ref: ImageRef): ImageRef | undefined => {
-    if ("icon" in ref) return ref;
-    const mapped = asset(ref.assetId, "token");
-    return mapped ? { ...ref, assetId: mapped } : undefined;
+    const { model, ...picture } = ref;
+    let out: ImageRef;
+    if ("icon" in picture) out = picture;
+    else {
+      const mapped = asset(picture.assetId, "token");
+      if (!mapped) return undefined;
+      out = { ...picture, assetId: mapped };
+    }
+    const sheet = model && asset(model.assetId, "model");
+    return model && sheet ? { ...out, model: { ...model, assetId: sheet } } : out;
   };
 
   const out: RoomState = {
