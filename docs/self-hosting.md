@@ -679,6 +679,14 @@ newest first.
 
 **Since v0.5.0**
 
+- **Spell slots and Hit Point Dice** ([design](design/design-v1-slots.md)):
+  change format 68, room format 51. Back up the database just before the
+  update, and reload DM pages first, then every other open page, since an
+  old page shows no classes, spell slots or Hit Point Dice. After a clean stop an older build refuses any room this
+  version saved a snapshot of, and after a crash or a forced stop any room
+  with changes at format 68 after its last snapshot, so going back needs the
+  backup taken just before the update for those rooms. A room only opened
+  and left untouched needs nothing.
 - **A creature falls once a step** ([design](design/design-v1-floors.md)):
   change format 67, room format 50 as before. Back up the database just
   before the update. When both tokens of one character fall in one step,

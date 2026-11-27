@@ -1074,7 +1074,7 @@ When the DM adds a sound that is not already a suitable MP3, the browser encodes
 
 ## Rules content (SRD 5.2.1)
 
-Condition text, monster stat blocks, area spells, the encounter XP budgets, and the SRD names in the passphrase word list come from the [System Reference Document 5.2.1](https://www.dndbeyond.com/srd) by Wizards of the Coast LLC, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The material was converted to JSON and edited. The required notice is in [`shared/srd/NOTICE.md`](shared/srd/NOTICE.md).
+Condition text, monster stat blocks, area spells, the encounter XP budgets, the spell slot and Hit Point Dice tables, and the SRD names in the passphrase word list come from the [System Reference Document 5.2.1](https://www.dndbeyond.com/srd) by Wizards of the Coast LLC, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The material was converted to JSON and edited. The required notice is in [`shared/srd/NOTICE.md`](shared/srd/NOTICE.md).
 
 ## Safety tools
 

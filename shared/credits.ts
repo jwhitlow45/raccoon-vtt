@@ -478,7 +478,7 @@ export const CREDITS: CreditGroup[] = [
         source: "https://www.dndbeyond.com/srd",
         license: "CC-BY-4.0",
         changes:
-          "Condition text, monster stat blocks, area spells and names for the passphrase word list, converted to JSON and edited. The full notice is in shared/srd/NOTICE.md.",
+          "Condition text, monster stat blocks, area spells, the spell slot and Hit Point Dice tables and names for the passphrase word list, converted to JSON and edited. The full notice is in shared/srd/NOTICE.md.",
       },
     ],
   },

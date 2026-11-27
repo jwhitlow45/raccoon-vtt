@@ -104,6 +104,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   the party shares its sight and by id where players see for themselves.
 - [design-v1-ddb-resources.md](design-v1-ddb-resources.md): class resources
   imported from D&D Beyond.
+- [design-v1-slots.md](design-v1-slots.md): a character's classes, spell
+  slots and Hit Point Dice, counted from the SRD tables.
 - [design-v1-resync.md](design-v1-resync.md): syncing a character from D&D
   Beyond again, keeping the changes made by hand.
 - [design-v1-known-forms.md](design-v1-known-forms.md): the Wild Shape forms

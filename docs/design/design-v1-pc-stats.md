@@ -393,7 +393,7 @@ One builder, after doc 1's steps 1 to 3 (the grammar, the server's rolls, `bonus
 - A shaped character's Passive Perception stays the druid's, and initiative under Polymorph stays the actor's.
 - Riders are optional parts on an attack, not rolls of their own.
 - Rolls sort by kind, level and name, with no manual order.
-- Portraits, spell slots and a new character made straight from D&D Beyond are later.
+- Portraits and a new character made straight from D&D Beyond are later. Spell slots and Hit Point Dice come from a character's classes (docs/design/design-v1-slots.md).
 
 ## 16. Decided by the project owner (2026-10-17)
 
