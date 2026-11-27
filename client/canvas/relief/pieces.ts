@@ -694,6 +694,9 @@ function endIndex(src: Pick<PieceSource, "ground" | "painted">, near: readonly W
 
 const SLAB_HALF = WALL_THICK / 2;
 
+/** How many wall ends slabOf has read since a test last set it to 0: a tally, so a test can hold its work to a few ends a piece. */
+export const slabWork = { ends: 0 };
+
 /** What slabOf answers for a piece that lies wholly inside the stone of walls it meets, and so draws nothing. */
 const INSIDE = Symbol("inside");
 
@@ -705,9 +708,10 @@ const INSIDE = Symbol("inside");
  *   the two meet with no end face and no line between them. A slab of the
  *   same height standing against this one's side at the joint (a T's stem)
  *   leaves that side's top and foot unstroked where it stands.
- * - A crossing: the wall with the higher top, or the first by id, runs
- *   through, and the other's two arms stop at its sides, as a T's stem does,
- *   so no two slabs stand inside each other.
+ * - A square crossing of walls of one height: the wall whose first piece
+ *   by id comes first runs through, and the other's two arms stop at its
+ *   sides, as a T's stem does, so no two slabs stand inside each other. Any
+ *   other crossing runs both walls through (D-261127-575).
  * - A frame along the line: the slab stops at the post, which covers its end.
  * - A slab along the line of another height: it stops there, its end face showing.
  * - Two slabs through the end across it (a wall ending on another): it
@@ -747,7 +751,8 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | typeof INSIDE | null {
    * piece of this wall that carries on along the line at the same height.
    */
   type End = { shift: number; face: boolean; line: boolean; upright: [boolean, boolean]; abut: [boolean, boolean]; next: EndEntry | null };
-  const endOf = (at: Point, out: Point, self: string): End => {
+  const endOf = (at: Point, out: Point, self: string, look = true): End => {
+    slabWork.ends++;
     const along: EndEntry[] = [];
     const across: EndEntry[] = [];
     for (const q of ends.get(endKey(at)) ?? []) {
@@ -790,11 +795,23 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | typeof INSIDE | null {
         const theirs = through[0].id < through[1].id ? through[0].id : through[1].id;
         if (theirs < mine) return stop(through[0], through[1]);
       }
-      // A next piece shorter than half a thickness can lie wholly inside a slab it stops at: this one then stops there in its place.
-      const d = Math.hypot(next.other.x - at.x, next.other.y - at.y);
-      if (d < SLAB_HALF) {
-        const far = endOf(next.other, out, next.id);
-        if (far.shift < 0 && -far.shift * SLAB_HALF > d + 1e-9) return { ...far, shift: (far.shift * SLAB_HALF + d) / SLAB_HALF, abut: none, next: null };
+      // Pieces shorter than half a thickness can lie wholly inside a slab the wall stops at further on: this one then stops there in their place. No stop reaches back more than half a thickness, so the walk ends once the pieces passed add up to that (ISOWALL-SOL-2, D-261127-578).
+      if (look) {
+        let passed = 0;
+        let piece: EndEntry = next;
+        let at2 = at;
+        for (;;) {
+          passed += Math.hypot(piece.other.x - at2.x, piece.other.y - at2.y);
+          if (passed >= SLAB_HALF) break;
+          const far = endOf(piece.other, out, piece.id, false);
+          if (far.shift < 0) {
+            if (-far.shift * SLAB_HALF > passed + 1e-9) return { ...far, shift: (far.shift * SLAB_HALF + passed) / SLAB_HALF, abut: none, next: null };
+            break;
+          }
+          if (!far.next || far.shift !== 0 || far.face) break;
+          at2 = piece.other;
+          piece = far.next;
+        }
       }
       const abut: [boolean, boolean] = [false, false];
       for (const q of across) if (plain(q)) abut[sideOf(dirOf(q))] = true;

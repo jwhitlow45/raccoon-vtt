@@ -10,7 +10,7 @@ import { groupWalls, ReliefIndex } from "./buckets.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { tintedPatternOf } from "./looks.ts";
-import { boundsOf, cellPieces, facesOf, keyOf, slabCorners, WALL_RISE, WALL_THICK, wallItems, type CellPiece, type PieceSource, type WallItem } from "./pieces.ts";
+import { boundsOf, cellPieces, facesOf, keyOf, slabCorners, slabWork, WALL_RISE, WALL_THICK, wallItems, type CellPiece, type PieceSource, type WallItem } from "./pieces.ts";
 import { wallPieces, type WallPiece } from "./runs.ts";
 
 /*
@@ -732,6 +732,31 @@ describe("wall slabs (5.6)", () => {
         }
       }
     }
+  });
+
+  test("a long run of free walls a sixty-fourth of a cell each reads a few ends a piece, however long the run (ISOWALL-SOL-2)", () => {
+    const perPiece: number[] = [];
+    for (const n of [1000, 3000]) {
+      const chunks: Record<string, BuildChunk> = {};
+      for (let i = 0; i < n; i++) {
+        const x = 1 + i / 64;
+        const cx = Math.floor(x / 16);
+        const chunk = (chunks[`s1:${cx},0`] ??= { sceneId: "s1", cx, cy: 0, rev: 1, cells: {}, edges: {}, walls: [] });
+        chunk.walls!.push({ id: `c${String(i).padStart(11, "0")}`, a: [x, 4], b: [x + 1 / 64, 4], f: { kind: "wall" } });
+      }
+      const scene = { ...SCENE, bounds: { w: 64, h: 16 } };
+      const pieces = wallPieces(sceneWalls(scene, chunks), new FogView(null, "s1", scene.bounds));
+      assert.equal(pieces.length, n);
+      slabWork.ends = 0;
+      const items = wallItems({ ground: () => 0, detail: true }, pieces);
+      perPiece.push(slabWork.ends / n);
+      // The run is one wall: no line across it, and its two free ends square.
+      assert.ok(items.every((w) => w.slab), `${n}: every piece a slab`);
+      assert.ok(items.filter((w) => w.slab!.face[0] || w.slab!.face[1]).length === 2, `${n}: two free ends`);
+    }
+    // Each piece reads its own two ends and those within a thickness of them, each of those looking half a thickness on: at 1/64 cell a piece, about 90 ends. The work grows with the run's length and no faster.
+    assert.ok(perPiece.every((k) => k <= 120), `ends read a piece: ${perPiece.join(", ")}`);
+    assert.ok(Math.abs(perPiece[1]! - perPiece[0]!) < 1, `the same ends a piece at 1,000 and 3,000: ${perPiece.join(", ")}`);
   });
 
   test("a crossing that is not square keeps both walls running through it (D-261127-575)", () => {
