@@ -590,6 +590,25 @@ describe("URL import", () => {
     }
   });
 
+  test("an image of the wrong shape imported as a 3D model's sheet is 422 bad_model_sheet and stores no row, and a sheet's shape is taken (docs/design/design-v1-token-models.md 4.3)", async () => {
+    const t = await importApp();
+    try {
+      const roomId = await room();
+      const player = auth.allow(roomId, "player");
+      // 700 x 350 is 2:1 but no width a sheet may have.
+      t.publicMock.get("https://art.example").intercept({ path: "/knight.png" }).reply(200, tokenPng);
+      const res = await post(t.imp, roomId, player, { url: "https://art.example/knight.png", kind: "model" });
+      assert.deepEqual([res.statusCode, res.json()], [422, { error: "bad_model_sheet" }]);
+      assert.equal((await pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
+      t.publicMock.get("https://art.example").intercept({ path: "/sheet.png" }).reply(200, await solid(1024, 512, "#3a6").png().toBuffer());
+      const taken = await post(t.imp, roomId, player, { url: "https://art.example/sheet.png", kind: "model" });
+      assert.equal(taken.statusCode, 200, taken.body);
+      assert.deepEqual([taken.json().kind, taken.json().width, taken.json().height], ["model", 1024, 512]);
+    } finally {
+      await t.close();
+    }
+  });
+
   test("falls back to a cached serpapi.com thumbnail through the strict egress", async () => {
     const t = await importApp();
     const q = `fallback test ${process.pid} ${Date.now()}`;
