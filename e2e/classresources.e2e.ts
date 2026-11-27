@@ -841,6 +841,21 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     }
   });
 
+  test("sd-b-cr. with classes, Add a class resource starts at the first SRD class among them and its level (docs/design/design-v1-slots.md 3.1)", async () => {
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { classes: [{ id: "other", level: 1, die: 8 }, { id: "paladin", level: 4 }, { id: "barbarian", level: 2 }] } });
+    await waitFor("Thorn's classes in Pat's copy", () => (patSocket.state?.characters[run.thorn]?.classes ? true : null));
+    await setUp(pat, patCdp, PHONE);
+    const page = await thornsPage(pat);
+    await section(page).getByText("Classes: Other class 1 (d8), Paladin 4, Barbarian 2", { exact: true }).waitFor();
+    const add = await openAdd(page);
+    assert.equal(await add.getByRole("combobox", { name: "Class" }).inputValue(), "paladin", "the sheet starts on the first SRD class among the classes");
+    assert.equal(await add.getByRole("combobox", { name: "Paladin level" }).inputValue(), "4", "at its level");
+    await add.getByRole("button", { name: "Cancel", exact: true }).click();
+    await add.waitFor({ state: "detached" });
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { classes: [] } });
+    await waitFor("Thorn's classes gone", () => (dmSocket.state?.characters[run.thorn]?.classes === undefined ? true : null));
+  });
+
   test("cr-c-13. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");

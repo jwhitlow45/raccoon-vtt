@@ -2353,7 +2353,7 @@ async function combatEnd(): Promise<void> {
   await dmContext.setOffline(false);
   if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
   for (const id of [run.ids.redDragon, run.ids.troll]) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
-  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { resources: [], level: null } });
+  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { resources: [], classes: [], level: null } });
   await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 30 } });
   await ops.send({ t: "room.update", settings: { monstersDieAtZero: true } });
 }
@@ -2840,9 +2840,86 @@ async function combatScreens(sweep: Sweep, page: Page, size: Size, scale: number
     await pat.goto("about:blank");
     await openAt(page, size, scale);
     await dmCombatScreens(sweep, page);
+    await page.goto("about:blank");
+    await openAt(pat, size, scale);
+    await slotScreens(sweep, pat);
+    await pat.goto("about:blank");
   } finally {
     await combatEnd();
   }
+}
+
+/** Thorn's classes for the slot screens: two die sizes, a Fighter whose subclass casts, an Other class, and a Wizard, adding up to his level of 7. */
+const THORN_CLASSES = [
+  { id: "fighter", level: 3, third: true },
+  { id: "other", level: 2, die: 10 },
+  { id: "wizard", level: 2 },
+];
+
+/**
+ * Spell slots and Hit Point Dice (docs/design/design-v1-slots.md 3, 13), on
+ * Pat's page in the combat screens' fight, Thorn back on his feet: the
+ * turn card's folded slot row open, the bar's Uses drawer with Restore a
+ * slot…, his page's full slot rows, the Classes sheet with a Fighter and
+ * an Other row and then its lowering line, and the Short Rest card with
+ * two die sizes, a typed field and a landed roll.
+ */
+async function slotScreens(sweep: Sweep, page: Page): Promise<void> {
+  await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 20 } });
+  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 7, classes: THORN_CLASSES } });
+  await waitFor("Thorn's classes", () => (dmSocket.state?.characters[run.ids.thornChar]?.classes ? true : null));
+  if (dmSocket.state?.encounter) await turnTo(run.fight.thorn);
+  let turn = await alertCard(page, "Thorn's turn", { optional: true });
+  if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
+    await turn.getByRole("button", { name: "Show Thorn's turn" }).click();
+    turn = await alertCard(page, "Thorn's turn");
+  }
+  if (turn) {
+    await turn.getByRole("button", { name: "Use a slot…" }).click();
+    await turn.getByRole("group", { name: "Use a slot" }).waitFor();
+    await sweep.measure(page, "slots-turn-open", turn);
+    await turn.getByRole("button", { name: "Dismiss Thorn's turn" }).click();
+  } else await sweep.missing(page, "slots-turn-open", "Thorn's turn showed Pat no turn card");
+  await escapeAll(page);
+  const bar = await barUses(page, "Thorn", { x: 5, y: 5 });
+  if (bar) {
+    const restore = bar.drawer.getByRole("button", { name: "Restore a slot…" });
+    if (await visible(restore)) await restore.click();
+    await sweep.measure(page, "slots-bar-drawer", bar.drawer);
+    await closeBar(bar.bar);
+  } else await sweep.missing(page, "slots-bar-drawer", "a tap on Thorn opened no window");
+
+  const scope = await thornsPage(page);
+  const section = resourcesSection(scope);
+  await section.locator("[data-slot-rows]").first().scrollIntoViewIfNeeded();
+  await sweep.measure(page, "slots-section-page", section);
+  await section.getByRole("button", { name: "Edit classes" }).click();
+  const classes = resourceSheet(page, "Classes");
+  await classes.getByRole("checkbox", { name: "Its subclass casts spells" }).waitFor();
+  await sweep.measure(page, "slots-classes", classes);
+  await classes.getByRole("button", { name: "Remove Wizard" }).click();
+  await classes.getByText(/^Saving lowers Thorn's level from 7 to 5/).waitFor();
+  await sweep.measure(page, "slots-classes-lowering", classes);
+  await classes.getByRole("button", { name: "Cancel", exact: true }).click();
+  await classes.getByRole("button", { name: "Discard changes?" }).click();
+  await classes.waitFor({ state: "detached" });
+
+  await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "damage", amount: 4 } });
+  const rest = scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Rest"]]');
+  await rest.getByRole("radio", { name: "Short Rest" }).check();
+  const d10 = rest.locator('[data-hit-die="10"]');
+  await d10.waitFor();
+  await sweep.measure(page, "slots-short-rest", rest);
+  await d10.getByRole("button", { name: "Type a roll for a d10 Hit Point Die" }).click();
+  await d10.getByRole("textbox", { name: "HP from one d10, your roll plus Constitution" }).waitFor();
+  await sweep.measure(page, "slots-short-rest-typed", rest);
+  await d10.getByRole("button", { name: "Cancel", exact: true }).click();
+  const d6 = rest.locator('[data-hit-die="6"]');
+  await d6.getByRole("button", { name: /^Roll a d6 Hit Point Die/ }).click();
+  await d6.getByText(/^Rolled \d+ [+-] \d+: \d+ HP back/).first().waitFor();
+  await sweep.measure(page, "slots-short-rest-rolled", rest);
+  await rest.getByRole("button", { name: "Cancel", exact: true }).click();
+  await closeSheets(page);
 }
 
 /** Request a roll as the needle trap's Ask to disarm opens it over its pane, closed again by Cancel. */
