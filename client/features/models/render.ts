@@ -95,10 +95,12 @@ export async function decodeTexture(bytes: Uint8Array, mime: string, width: numb
 }
 
 /**
- * Each part's texture: one per kept image and wrap, shared by every group
- * that reads it, over one source per image. three uploads a texture's
- * source once, so 64 groups sharing an image cost one copy on the GPU, not
- * 64. A part without its image or coordinates has none.
+ * Each part's texture: one per kept image and wrap pair, shared by every
+ * group that reads that pair, so 64 groups over one image and wrap make
+ * one GPU texture, not 64. Pairs with another wrap share the image's
+ * decoded source, but three keys its GPU textures by wrap too, so each
+ * pair is a GPU texture of its own. A part without its image or
+ * coordinates has none.
  */
 export function partTextures(parts: readonly ModelPart[], bitmaps: readonly (ImageBitmap | null)[]): (Texture | null)[] {
   const sources = new Map<number, TextureSource<ImageBitmap>>();

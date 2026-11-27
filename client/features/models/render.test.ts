@@ -48,7 +48,7 @@ describe("a model's textures", () => {
     const bitmaps = [{ width: 4, height: 4 }, { width: 8, height: 8 }] as unknown as ImageBitmap[];
     const [a, b, c, d, none, missing] = partTextures([part(0), part(0), part(0, 33071), part(1), part(0, 10497, 10497, false), part(-1)], bitmaps);
     assert.ok(a && a === b, "one texture for one image and wrap");
-    assert.ok(c && c !== a && c.source === a.source, "another wrap, the same upload");
+    assert.ok(c && c !== a && c.source === a.source, "another wrap: a GPU texture of its own over the same decoded source");
     assert.ok(d && d.source !== a.source);
     assert.equal(none, null, "no coordinates, no texture");
     assert.equal(missing, null);
