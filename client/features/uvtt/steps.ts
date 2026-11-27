@@ -1,4 +1,5 @@
 import { placeMap } from "./batch.ts";
+import { canonicalDiffers, canonicalOfFile, canonicalOfPlan } from "./compare.ts";
 import { convertUvtt, frameOf, type ImportOptions, type ImportPlan } from "./convert.ts";
 import type { ImagePlan } from "./image.ts";
 import { GRID_PROBLEM } from "./limits.ts";
@@ -44,4 +45,28 @@ export function planScene(
   const canonical = image.plan.kind === "resize" ? image.plan : image;
   const placed = placeMap(result.plan, { assetId: "", width: canonical.width, height: canonical.height, fileImageWidth: image.width });
   return placed ? { plan: result.plan, problem: null } : { plan: null, problem: GRID_PROBLEM };
+}
+
+/** What this app's import would make of an exported file: a refusal in its own words, or whether any wall would change. */
+export type ExportCheck = { refused: string } | { changes: boolean };
+
+/**
+ * Stands in for an exported file's image, which the check never reads:
+ * readUvtt refuses an empty image before anything else.
+ */
+export const STAND_IN = "iVBORw0KGgo=";
+
+/**
+ * The export's own import check (docs/design/design-v1-uvtt-export.md
+ * section 6, D-261127-251, 292, 295): the file as New scene's import takes
+ * it, with the dialog's defaults, so the schema's counts, the walls far
+ * outside and the 200 squares all run before the conversion. A file the
+ * import would refuse is still made, since other VTTs read it as written.
+ */
+export function checkExport(json: Record<string, unknown>, feetPerCell: number): ExportCheck {
+  const checked = checkFile({ ...json, image: STAND_IN }, "scene");
+  if (!checked.ok) return { refused: checked.error };
+  const converted = convertUvtt(checked.map, { objects: true, portals: "window", feetPerCell });
+  if (!converted.ok) return { refused: converted.error };
+  return { changes: canonicalDiffers(canonicalOfFile(checked.map), canonicalOfPlan(converted.plan)) };
 }
