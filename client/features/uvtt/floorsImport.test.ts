@@ -9,6 +9,7 @@ import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.
 import { convertUvtt, type ImportPlan } from "./convert.ts";
 import { addingText, dialogTitle, exportedParts, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, willBeText, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
 import { readUvtt } from "./schema.ts";
+import { vttZipNames } from "../mapexport/fileName.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 import { withPlayersSee } from "../scenes/create.ts";
 
@@ -258,6 +259,24 @@ describe("files Export as VTT file's Every floor wrote", () => {
     const rows = rowsOf(["Keep - East - 01 - Hall.dd2vtt", "Keep - East - 02 - Tower.dd2vtt"].map(file));
     assert.equal(sceneNameOf(rows), "Keep - East");
     assert.deepEqual(rows.map((r) => r.floor), ["Hall", "Tower"]);
+  });
+
+  test("ordinal-like text in a floor's name: Tower with Ground - 02 - Hall and Upper comes back whole (UVTT-SOL-1)", () => {
+    const { entries } = vttZipNames("Tower", "player", ["Ground - 02 - Hall", "Upper"]);
+    const rows = rowsOf(entries.map(file));
+    assert.equal(sceneNameOf(rows), "Tower");
+    assert.deepEqual(rows.map((r) => r.floor), ["Ground - 02 - Hall", "Upper"]);
+  });
+
+  test("ordinal-like text in the scene's name: Keep - 03 - East keeps it, since its 03 is every file's", () => {
+    const { entries } = vttZipNames("Keep - 03 - East", "dm", ["Hall", "Tower - 07 - Top", "Roof"]);
+    const rows = rowsOf(entries.map(file));
+    assert.equal(sceneNameOf(rows), "Keep - 03 - East");
+    assert.deepEqual(rows.map((r) => r.floor), ["Hall", "Tower - 07 - Top", "Roof"]);
+  });
+
+  test("two files with the same number are not one export's", () => {
+    assert.equal(exportedParts(["Tower - 01 - Ground.dd2vtt", "Tower - 01 - Upper.dd2vtt"].map(file)), null);
   });
 
   test("a mixed pick, or two scene parts, keeps today's rule of names read from files", () => {

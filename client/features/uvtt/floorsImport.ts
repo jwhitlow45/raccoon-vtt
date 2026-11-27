@@ -38,30 +38,51 @@ export function rowsOf(files: readonly File[]): FloorRow[] {
     });
 }
 
-/**
- * `Tower - 01 - Ground floor.dd2vtt`: a file of the zip Export as VTT file
- * makes of every floor (mapexport/fileName.ts vttZipNames).
- */
-const EXPORTED = /^(.+) - (\d{2}) - (.+)\.(?:dd2vtt|uvtt|df2vtt)$/i;
+/** The extensions a Universal VTT file goes by, which an exported file's name ends in. */
+const EXTENSION = /\.(?:dd2vtt|uvtt|df2vtt)$/i;
+/** Each ` - 01 - ` in a name: where a scene part may end and its floor's number stand. */
+const ORDINAL = / - (\d{2}) - /g;
+
+/** Each way a file's name splits as `<scene> - NN - <floor>`, by every ` - NN - ` it holds. */
+function splits(name: string): { scene: string; ordinal: string; floor: string }[] {
+  const base = name.replace(EXTENSION, "");
+  if (base === name) return [];
+  const out: { scene: string; ordinal: string; floor: string }[] = [];
+  for (const m of base.matchAll(ORDINAL)) {
+    const scene = base.slice(0, m.index).trim();
+    const floor = base.slice(m.index + m[0].length).trim();
+    if (scene !== "" && floor !== "") out.push({ scene, ordinal: m[1]!, floor });
+  }
+  return out;
+}
 
 /**
  * The scene's name and each floor's, as written, when every picked file is
- * named the way Every floor's zip names its files, with one scene part
- * (docs/design/design-v1-uvtt-export.md section 7, D-261127-254). Null for
- * any other pick, which keeps the rule of names read from files.
+ * named the way Every floor's zip names its files (mapexport/fileName.ts
+ * vttZipNames): `Tower - 01 - Ground floor.dd2vtt` and on, one scene part
+ * for all of them and a number of its own for each (docs/design/design-v1-uvtt-export.md
+ * section 7, D-261127-254). A scene or floor name may hold ` - 02 - ` itself,
+ * so the scene part is the one prefix that every file's name splits at with
+ * every number different, not the first or the last such split of one
+ * name. Null for any other pick, which keeps the rule of names read from files.
  */
 export function exportedParts(files: readonly File[]): { scene: string; floors: Map<File, string> } | null {
-  let scene: string | null = null;
-  const floors = new Map<File, string>();
-  for (const file of files) {
-    const m = EXPORTED.exec(file.name);
-    if (!m) return null;
-    const part = m[1]!.trim();
-    if (scene !== null && part !== scene) return null;
-    scene = part;
-    floors.set(file, m[3]!.trim());
+  const each = files.map((file) => ({ file, splits: splits(file.name) }));
+  if (each.length === 0 || each.some((e) => e.splits.length === 0)) return null;
+  // Shortest first, so a single file takes the scene part its name starts with. Two or more files leave at most one: a longer shared prefix holds one number every file shares.
+  const candidates = [...new Set(each[0]!.splits.map((s) => s.scene))].sort((a, b) => a.length - b.length);
+  for (const scene of candidates) {
+    const floors = new Map<File, string>();
+    const ordinals = new Set<string>();
+    for (const e of each) {
+      const at = e.splits.find((s) => s.scene === scene);
+      if (!at || ordinals.has(at.ordinal)) break;
+      ordinals.add(at.ordinal);
+      floors.set(e.file, at.floor);
+    }
+    if (floors.size === each.length) return { scene, floors };
   }
-  return scene === null || scene === "" ? null : { scene, floors };
+  return null;
 }
 
 /** What the scene name field takes, the protocol's name limit, as New scene and Scene settings do with 80: more than the start value, which is cut like a floor's name. */
