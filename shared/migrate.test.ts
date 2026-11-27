@@ -12,6 +12,8 @@ import {
   fallsOnce,
   SLOTS_SNAPSHOT_VERSION,
   USE_STAMP_OP_VERSION,
+  MODELS_OP_VERSION,
+  MODELS_SNAPSHOT_VERSION,
   usesStamped,
   edgePinches,
   trapSettlesNamed,
@@ -2340,9 +2342,9 @@ describe("op version 68 and snapshot 51, spell slots and Hit Point Dice", () => 
 
   test("are identity steps at 68 and 51, and the new ops parse", () => {
     assert.equal(USE_STAMP_OP_VERSION, 68);
-    assert.equal(OP_VERSION, USE_STAMP_OP_VERSION);
+    assert.ok(OP_VERSION >= USE_STAMP_OP_VERSION);
     assert.equal(SLOTS_SNAPSHOT_VERSION, 51);
-    assert.equal(SNAPSHOT_VERSION, SLOTS_SNAPSHOT_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= SLOTS_SNAPSHOT_VERSION);
     for (const op of [use, roll, classes]) {
       assert.equal(runMigrations(op, 67, 68, opMigrations), op);
       assert.equal(migrateOp(op, 67), op);
@@ -2360,5 +2362,34 @@ describe("op version 68 and snapshot 51, spell slots and Hit Point Dice", () => 
   test("a build at 67 refuses an op from this one by number, and a build at 50 a v51 snapshot", () => {
     assert.throws(() => runMigrations(use, 68, 67, opMigrations), /cannot migrate from version 68 down to 67/);
     assert.throws(() => runMigrations(room(), 51, 50, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 69 and snapshot 52, 3D models on pictures (docs/design/design-v1-token-models.md 4.2)", () => {
+  const model = { assetId: "sheet", side: 1.4, anchorY: 0.82, boxes: Array.from({ length: 8 }, () => [20, 10, 80, 95]) };
+  const update = { t: "token.update", tokenId: "t1", patch: { image: { assetId: "face", crop: { cx: 0, cy: 0, zoom: 1 }, model } } };
+  const portrait = { t: "character.update", characterId: "bree", patch: { defaultImage: { icon: "lorc/wolf-head", color: "#336699", model } } };
+  const restore = { t: "sys.restore", from: "undo", deps: true, entries: [{ key: "token:t1", value: null }] };
+
+  test("are identity steps at 69 and 52, and an op carrying a model parses", () => {
+    assert.equal(MODELS_OP_VERSION, 69);
+    assert.equal(OP_VERSION, MODELS_OP_VERSION);
+    assert.equal(MODELS_SNAPSHOT_VERSION, 52);
+    assert.equal(SNAPSHOT_VERSION, MODELS_SNAPSHOT_VERSION);
+    for (const op of [update, portrait, restore]) {
+      assert.equal(runMigrations(op, 68, 69, opMigrations), op);
+      assert.equal(migrateOp(op, 68), op);
+      assert.equal(migrateOp(op, 67), op, "and from before spell slots, through both steps");
+      assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+    }
+    const state = room();
+    assert.equal(runMigrations(state, 51, 52, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 51), state);
+    assert.equal(migrateSnapshot(state, 50), state);
+  });
+
+  test("a build at 68 refuses an op from this one by number, and a build at 51 a v52 snapshot", () => {
+    assert.throws(() => runMigrations(update, 69, 68, opMigrations), /cannot migrate from version 69 down to 68/);
+    assert.throws(() => runMigrations(room(), 52, 51, snapshotMigrations), /down/);
   });
 });

@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 51;
-export const OP_VERSION = 68;
+export const SNAPSHOT_VERSION = 52;
+export const OP_VERSION = 69;
 
 export type MigrationStep = {
   from: number;
@@ -316,6 +316,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // so that an older build refuses a v51 snapshot instead of failing on the character, which its strict schema refuses.
   // No first commit forces this snapshot, since only a version 68 op writes the fields.
   { from: 50, to: 51, apply: (state) => state },
+  // 3D models on pictures (docs/design/design-v1-token-models.md 4.2, MODELS_SNAPSHOT_VERSION): an image's `model` is
+  // optional, and absent reads as none, so a v51 room is a v52 room as it is. The number moves so that an older build
+  // refuses a v52 snapshot instead of failing on the image, which its strict schema refuses. No first commit forces this
+  // snapshot, since only a version 69 op writes the field.
+  { from: 51, to: 52, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1590,6 +1595,18 @@ export const opMigrations: MigrationStep[] = [
     to: 68,
     apply: (op) => op,
   },
+  {
+    // 3D models on pictures (MODELS_OP_VERSION, docs/design/design-v1-token-models.md 4.2): an image's `model`, on every op
+    // that carries an image, is new, which an older strict schema refuses, so no stored op changes shape and the step is
+    // the identity. No rule changes with it, so no replay predicate reads this version, and ops stored before replay as
+    // they ran.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup for any room this build wrote a snapshot of, and for any room with changes at this version after its
+    // last snapshot, both of which an older build refuses.
+    from: 68,
+    to: 69,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2841,3 +2858,9 @@ export const SLOTS_SNAPSHOT_VERSION = 51;
 export function usesStamped(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < USE_STAMP_OP_VERSION);
 }
+
+/** The op version of 3D models on pictures (docs/design/design-v1-token-models.md 4.2): an identity step, read by no rule. */
+export const MODELS_OP_VERSION = 69;
+
+/** The room format of 3D models on pictures: an image's `model` is new and optional, so a v51 room is a v52 room as it is. */
+export const MODELS_SNAPSHOT_VERSION = 52;
