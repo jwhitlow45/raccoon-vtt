@@ -227,3 +227,12 @@ test("DSTOCK-S: with rooms dropped in routing, each key entry names its own room
   assert.equal(done.plan.key!.find((k) => k.n === 1)!.monsters, undefined, "the entrance holds no fight");
   keyMatchesFacts(done);
 });
+
+test("DSTOCK-S: the key lists a fight in its own order, the leader before its followers, though the biggest are placed first (STOCK-O-04)", async () => {
+  const { linesOf } = await import("./stock.ts");
+  const boss = POOL.find((m) => m.srdId === "goblin-boss")!;
+  const ogre = POOL.find((m) => m.srdId === "ogre")!;
+  // Placement put the two Large ogres first, and one found no spot.
+  assert.deepEqual(linesOf([{ m: boss, n: 1 }, { m: ogre, n: 3 }], [ogre, ogre, boss]), [["Goblin Boss", 1], ["Ogre", 2]]);
+  assert.deepEqual(linesOf([{ m: boss, n: 1 }, { m: ogre, n: 2 }], [ogre, ogre]), [["Ogre", 2]], "a kind with none placed is left out");
+});

@@ -152,9 +152,14 @@ export function overLimitLine(by: number): string {
   return `Over the creature limit by ${by}. Turn a room's monsters off, or lower Monsters.`;
 }
 
-/** A room's fight as the room panel lists it: "Goblin Boss, Goblin Warrior × 3 · 350 XP". Names keep the SRD's spelling, so no plurals are made. */
+/** "Goblin Boss, Goblin Warrior × 3": each kind by its SRD name, a count past one as sizes write it, so no plural is made. The key and the room panel both write a fight so. */
+export function fightWords(lines: readonly (readonly [string, number])[]): string {
+  return lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ");
+}
+
+/** A room's fight as the room panel lists it: "Goblin Boss, Goblin Warrior × 3 · 350 XP". */
 export function fightLine(lines: readonly (readonly [string, number])[], xp: number): string {
-  return `${lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ")} · ${xpText(xp)}`;
+  return `${fightWords(lines)} · ${xpText(xp)}`;
 }
 
 export const OTHER_MONSTERS = "Other monsters";

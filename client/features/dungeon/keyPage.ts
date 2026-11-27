@@ -9,7 +9,7 @@ import type { DungeonPlan, KeyCorridorTrap, KeyDoor, KeyRoom } from "./plan.ts";
 import { DIFFICULTY_LABEL } from "../encounters/budget.ts";
 import { CHOICE_NAMES, HEIGHT_PRESETS, LIT_PRESETS, MONSTER_PRESETS, SECRET_PRESETS, SIZE_SIDES, TRAP_PRESETS, type DungeonSettings, type StockChoices } from "./settings.ts";
 import { THEME_SPECS } from "./themes.ts";
-import { sizeLine } from "./words.ts";
+import { fightWords, sizeLine } from "./words.ts";
 
 /*
  * The DM key (phase 2, 5.6 and section 6): a DM-only journal page in
@@ -214,11 +214,6 @@ export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number, win
 /** "1,250": a number of XP as the SRD prints it. */
 function xpNumber(xp: number): string {
   return xp.toLocaleString("en-US");
-}
-
-/** "Goblin Boss, Goblin Warrior × 3": each kind by its SRD name, a count past one as sizes write it, so no plural is made. */
-export function fightWords(lines: readonly (readonly [string, number])[]): string {
-  return lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ");
 }
 
 /**

@@ -86,7 +86,11 @@ test("DSTOCK-PROP: every creature stands in its room on free floor at one ground
           perRoom.set(m.room, (perRoom.get(m.room) ?? 0) + 1);
           xp.set(m.room, (xp.get(m.room) ?? 0) + block.xp);
         }
+        const byName = new Map(stock.pool.map((m) => [m.name, m]));
         for (const f of done.facts) {
+          // A fight lists its leader first, and a leader is never weaker than its followers, whatever their size.
+          const [first, second] = f.monsters?.lines ?? [];
+          if (first && second) assert.ok(byName.get(first[0])!.xp >= byName.get(second[0])!.xp, `room ${f.n} lists ${first[0]} before ${second[0]}`);
           const claim = roomClaim(f, edits, done.perRoom);
           assert.ok((perRoom.get(f.room) ?? 0) <= claim, `room ${f.n} within its claim`);
           assert.ok((xp.get(f.room) ?? 0) <= budget, `room ${f.n} within the budget`);
@@ -111,7 +115,7 @@ test("DSTOCK-PROP: every creature stands in its room on free floor at one ground
         }
       },
     ),
-    60,
+    120,
   );
   assert.ok(stocked >= 20 && hexStocked >= 5, `not vacuous: ${stocked} runs stocked, ${hexStocked} on hexes`);
 });

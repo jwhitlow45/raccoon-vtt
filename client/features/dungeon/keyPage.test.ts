@@ -4,10 +4,11 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { TRINKETS } from "#shared/srd/trinkets.ts";
 import { dressedRooms, handKey, handPlan140, HAND_SETTINGS, HAND_STOCK, hundredPlan, twoRooms } from "./handPlans.ts";
-import { corridorLine, fightWords, KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, partyWords, roomLine, type KeyStock } from "./keyPage.ts";
+import { corridorLine, KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, partyWords, roomLine, type KeyStock } from "./keyPage.ts";
 import { PAGE_PLACEHOLDER, SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, KeyRoom } from "./plan.ts";
 import { DEFAULT_SETTINGS, type DungeonSettings } from "./settings.ts";
+import { fightWords } from "./words.ts";
 
 /*
  * The DM key's words and ops (dungeon generator phase 2, 5.6 and section

@@ -67,7 +67,7 @@ export type StockInput = Pick<Planned, "plan" | "board" | "kept" | "entrance" | 
 export type Stocked = { plan: DungeonPlan; facts: RoomFacts[]; capacity: number; perRoom: number; claims: number };
 
 /** One kind in a fight: its block and how many. */
-type Pick1 = { m: StockMonster; n: number };
+export type Pick1 = { m: StockMonster; n: number };
 
 /**
  * A room's fight (stocking step 5): a family drawn by weight, then a
@@ -126,11 +126,16 @@ export function drawFight(rng: Stream, pool: readonly StockMonster[], theme: The
   return band ? [band] : solo();
 }
 
-/** The key's lines for a fight: each kind's name and count, the first kind first. */
-function linesOf(placed: readonly StockMonster[]): [string, number][] {
-  const lines = new Map<string, number>();
-  for (const m of placed) lines.set(m.name, (lines.get(m.name) ?? 0) + 1);
-  return [...lines];
+/**
+ * The key's lines for a fight in the fight's own order, a leader before its
+ * followers, though placement takes the biggest first: each kind's name and
+ * the count of it that found a spot.
+ */
+export function linesOf(fight: readonly Pick1[], placed: readonly StockMonster[]): [string, number][] {
+  return fight.flatMap((p): [string, number][] => {
+    const n = placed.filter((m) => m.srdId === p.m.srdId).length;
+    return n > 0 ? [[p.m.name, n]] : [];
+  });
 }
 
 /**
@@ -239,7 +244,7 @@ export function stockPlan(input: StockInput, seed: Seed, theme: Theme, stock: St
       placed.push(m);
       monsters.push({ srdId: m.srdId, room: i, ...cornerOf(m.size, spot.k) });
     }
-    const lines = linesOf(placed);
+    const lines = linesOf(fight, placed);
     const xp = placed.reduce((sum, m) => sum + m.xp, 0);
     fights.set(i, { on: true, lines, xp });
     if (placed.length === 0) spotless.add(i);
