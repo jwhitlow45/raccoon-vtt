@@ -405,9 +405,19 @@ export function tableRoom(): RoomState {
 
 /** Bree as the table holds her, for the fixtures that take a character. */
 const bree = () => tableRoom().characters.bree!;
+
+/** The table with Bree's stat block linked to her D&D Beyond sheet and never synced, so Re-sync stands for the link alone (D-261127-712). */
+export function linkedRoom(): RoomState {
+  const state = tableRoom();
+  const { ddbSync: _synced, ...linked } = state.characters.bree!;
+  state.characters.bree = linked;
+  return state;
+}
 /** Bree on her own page, where this viewer may add classes and resources (D-261127-423), and on her token, where she holds what she has. */
 const BREE_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT }, mayAdd: true };
 const BREE_TOKEN_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], ddbSync: { at: AT } };
+/** Bree on her own page, linked to D&D Beyond and never synced. */
+const BREE_LINKED_HOLDS: Holder = { classes: BREE_CLASSES, resources: [RAGE, HANDS], actor: { sheetUrl: "https://www.dndbeyond.com/characters/12345678" }, mayAdd: true };
 
 /** The cast table of the save spell tests (docs/design/design-v1-player-save-spell.md 8), Thorn holding Fireball, which has an area to place, and the Wizard levels that cast it. */
 function castRoom(): RoomState {
@@ -578,6 +588,14 @@ export const FIXTURES: readonly Fixture[] = [
     roles: ["dm", "player"],
     homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
     draw: () => createElement(CharacterPage, { character: bree(), close: noop, onAddCompanion: noop, onBlocks: noop, onDelete: () => null }),
+  },
+  {
+    surface: "Characters",
+    name: "Bree's page, her stat block linked to D&D Beyond and never synced",
+    roles: ["dm", "player"],
+    room: linkedRoom,
+    homes: [{ home: "uses", holder: BREE_LINKED_HOLDS }, { home: "rest", holder: BREE_LINKED_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_LINKED_HOLDS }],
+    draw: () => createElement(CharacterPage, { character: linkedRoom().characters.bree!, close: noop, onAddCompanion: noop, onBlocks: noop, onDelete: () => null }),
   },
   { surface: "Characters", name: "the Characters panel's list", roles: ["dm"], draw: () => createElement(CharactersPanel as never, PANEL as never) },
   {

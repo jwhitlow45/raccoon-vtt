@@ -24,6 +24,15 @@ const KINDS: { value: Kind; label: string }[] = [
 ];
 
 /**
+ * A classless creature's Long Rest leaves what it restores beyond HP to its
+ * sheet, naming spell slots only while Spell slots shows (D-261127-711).
+ */
+export function sheetWords(tracked: boolean, slots: boolean): string {
+  const features = tracked ? "other features" : "features";
+  return slots ? `Spell slots and ${features} are on your sheet.` : `${features[0]!.toUpperCase()}${features.slice(1)} are on your sheet.`;
+}
+
+/**
  * Short and long rests (features section 15, shared/rules/rest.ts), for the
  * DM and the creature's owner. For a creature without classes, rolling the
  * Hit Point Dice is the player's, so a short rest asks for the HP they gave
@@ -128,7 +137,7 @@ export function RestSection(props: {
           <Note>
             {dice
               ? `All HP back, ${diceShown ? "every spent Hit Point Die back, " : ""}${slots ? "every spell slot back, " : ""}Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset.`
-              : `All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and ${tracked ? "other " : ""}features are on your sheet.`}
+              : `All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. ${sheetWords(tracked, !hidden.has("spellSlots"))}`}
           </Note>
           {back ? <Note tone="info">{back}</Note> : null}
           {note ? <Note tone="info">{note}</Note> : null}

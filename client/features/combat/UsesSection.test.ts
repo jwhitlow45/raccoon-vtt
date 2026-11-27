@@ -10,7 +10,8 @@ import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { UsesSection, NOTHING_TO_LIST } = await import("./UsesSection.tsx");
+const { UsesSection, NOTHING_TO_LIST, NOTHING_TO_LIST_NO_DDB } = await import("./UsesSection.tsx");
+const { resetAllFeatures, setModuleShown } = await import("../modules/store.ts");
 const { CombatUses } = await import("./CombatUses.tsx");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
@@ -59,6 +60,17 @@ describe("Combat's Uses for a character", () => {
     assert.ok(markup.includes(`>${NOTHING_TO_LIST.replace("&", "&amp;")}<`));
     assert.match(markup, />Add a class resource<\/button>/);
     assert.doesNotMatch(markup, /data-combat-uses/, "no empty list box to take a gap");
+  });
+
+  test("with none and D&D Beyond hidden on this device, the words leave out Re-sync (D-261127-714)", () => {
+    try {
+      setModuleShown("ddb", "player", false);
+      const markup = section({});
+      assert.ok(markup.includes(`>${NOTHING_TO_LIST_NO_DDB}<`), markup);
+      assert.doesNotMatch(markup, /Re-sync/);
+    } finally {
+      resetAllFeatures();
+    }
   });
 
   test("its rows with Restore and Edit on their button line, then Add", () => {

@@ -19,6 +19,8 @@ import { CreatureUses, useUsesPresence } from "./CombatUses.tsx";
 
 /** What Uses says with nothing in it, where class resources are added (the D&D Beyond stack's words). */
 export const NOTHING_TO_LIST = "Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&D Beyond.";
+/** The same words while D&D Beyond hides on this device, which takes Re-sync (D-261127-714). */
+export const NOTHING_TO_LIST_NO_DDB = "Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, or typed.";
 
 /** Add a class resource's box, where focus goes when the sheet's opener went with what it saved. */
 const ADD_BOX = "[data-uses-add]";
@@ -48,6 +50,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   const { character } = props;
   const presence = useUsesPresence(props.target);
   const resourcesShown = useModule("classResources");
+  const ddbShown = useModule("ddb");
   const slotsShown = useModule("spellSlots");
   const diceShown = useModule("hitDice");
   const classesShown = slotsShown || diceShown;
@@ -114,7 +117,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
         : null}
       <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} slotsSearch={props.search?.slots} />
       {/* Gated in place, not wrapped in <Module>: the section's spacing reads the boxes under its label, and a display: contents wrapper has none. */}
-      {character && resourcesShown && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
+      {character && resourcesShown && presence === "no" ? <Help>{ddbShown ? NOTHING_TO_LIST : NOTHING_TO_LIST_NO_DDB}</Help> : null}
       {/* Both edit controls at the foot (docs/design/design-v1-slots.md 3.1): the classes just above Add a class resource. */}
       {character && classesShown ? (
         classes && classes.length > 0 ? (

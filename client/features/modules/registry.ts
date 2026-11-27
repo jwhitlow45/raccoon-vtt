@@ -16,6 +16,8 @@
  * the room, the socket or the protocol, so every registry may read it.
  */
 
+import { ddbCharacterId } from "#shared/ddb/link.ts";
+
 export type ModuleId =
   | "spellSlots"
   | "hitDice"
@@ -99,14 +101,15 @@ export type Claim = { kind: ClaimKind; id: string; when?: ConditionName };
 
 /**
  * What a creature's surface knows of the creature, for a creature home's
- * `holds`. A character passes as it is (its `classes`, `resources` and
- * `ddbSync`), with `mayAdd` where this viewer may add classes or class
+ * `holds`. A character passes as it is (its `classes`, `resources`,
+ * `ddbSync` and sheet link), with `mayAdd` where this viewer may add classes or class
  * resources on that page (D-261127-423).
  */
 export type Holder = {
   classes?: readonly unknown[];
   resources?: readonly unknown[];
   ddbSync?: unknown;
+  actor?: { sheetUrl?: string };
   mayAdd?: boolean;
 };
 
@@ -211,7 +214,8 @@ export const MODULES: readonly ModuleDef[] = [
     display: "no",
     names: ["dnd beyond", "ddb", "re-sync", "import"],
     claims: [],
-    holds: (h) => h.ddbSync !== undefined && h.ddbSync !== null,
+    // As the stat block's Re-sync stands (pcstats/resync.ts resyncNumber): synced, or linked to a D&D Beyond sheet and never synced (D-261127-712).
+    holds: (h) => (h.ddbSync !== undefined && h.ddbSync !== null) || (h.actor?.sheetUrl ? ddbCharacterId(h.actor.sheetUrl) !== null : false),
   },
   {
     id: "ruler",

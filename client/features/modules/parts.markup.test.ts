@@ -545,6 +545,61 @@ describe("spell slots and Hit Point Dice", async () => {
       disposeDrawn();
     }
   });
+
+  test("a classless creature's Long Rest leaves spell slots to its sheet only while Spell slots shows (D-261127-711)", () => {
+    const classless = (): Character => {
+      const bree = { ...tableRoom().characters.bree! };
+      delete bree.classes;
+      return bree;
+    };
+    const long = (resources?: readonly import("#shared/model.ts").ClassResource[]) =>
+      draw(
+        fixture(`a classless Long Rest${resources ? " with class resources" : ""}`, pressed(RestSection, { actor: { hp: { cur: 10, max: 24, temp: 0 }, life: "alive" }, target: { characterId: "bree" }, character: classless(), ...(resources ? { resources } : {}) }, (tree) => {
+          const choice = findIn(tree, (p) => p.label === "Rest" && typeof p.onChange === "function");
+          (choice?.onChange as ((k: string) => void) | undefined)?.("long");
+        })),
+        "player",
+      ).replace(/<[^>]+>/g, " ");
+    const resources = tableRoom().characters.bree!.resources;
+    try {
+      hiding();
+      assert.match(long(), /Legendary Resistance reset\. Spell slots and features are on your sheet\./);
+      assert.match(long(resources), /Spell slots and other features are on your sheet\./);
+      hiding("spellSlots");
+      assert.match(long(), /Legendary Resistance reset\. Features are on your sheet\./);
+      assert.match(long(resources), /Legendary Resistance reset\. Other features are on your sheet\./);
+      assert.doesNotMatch(long(resources), /Spell slots/);
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+});
+
+/*
+ * D&D Beyond's way back on a stat block stands wherever its Re-sync stood:
+ * a character synced, or linked to a D&D Beyond sheet and never synced
+ * (pcstats/resync.ts resyncNumber, D-261127-712).
+ */
+describe("D&D Beyond on a stat block linked and never synced", () => {
+  test("its Re-sync shows, and with D&D Beyond hidden the line names it", () => {
+    const linked = FIXTURES.find((f) => f.name === "Bree's page, her stat block linked to D&D Beyond and never synced")!;
+    try {
+      for (const role of ["dm", "player"] as const) {
+        resetAllFeatures();
+        const shown = draw(linked, role);
+        assert.match(shown, /Re-sync from D&amp;D Beyond/, `${role}: Re-sync for the link alone`);
+        assert.doesNotMatch(shown, /Show D&amp;D Beyond/);
+        setModuleShown("ddb", role, false);
+        const hidden = draw(linked, role);
+        assert.doesNotMatch(hidden, /Re-sync from D&amp;D Beyond/);
+        assert.match(hidden, /data-hidden-here="statBlock"[^]*Show D&amp;D Beyond/, `${role}: the stat block's line names D&D Beyond`);
+      }
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
 });
 
 /*

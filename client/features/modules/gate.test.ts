@@ -80,6 +80,8 @@ describe("the parts gate", () => {
     assert.deepEqual(hiddenAt("companions", "player", choices, {}).map((m) => m.id), ["companions"]);
     assert.deepEqual(hiddenAt("statBlock", "player", choices, {}).map((m) => m.id), []);
     assert.deepEqual(hiddenAt("statBlock", "player", choices, { ddbSync: { at: 1 } }).map((m) => m.id), ["ddb"]);
+    assert.deepEqual(hiddenAt("statBlock", "player", choices, { actor: { sheetUrl: "https://www.dndbeyond.com/characters/12345678" } }).map((m) => m.id), ["ddb"], "linked and never synced, as Re-sync stands");
+    assert.deepEqual(hiddenAt("statBlock", "player", choices, { actor: { sheetUrl: "https://example.com/sheet" } }).map((m) => m.id), [], "a sheet link elsewhere has no Re-sync");
     assert.deepEqual(hiddenAt("panels", "player", choices).map((m) => m.id), ["sound"]);
     assert.deepEqual(hiddenAt("panels", "dm", choices).map((m) => m.id), [], "the player's choices are not the DM's");
   });
