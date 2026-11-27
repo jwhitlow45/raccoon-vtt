@@ -18,6 +18,7 @@ import {
   type ResourceInput,
 } from "#shared/rules/classResources.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
+import type { ModuleId } from "../modules/registry.ts";
 import { pickStart, spentCounts } from "../slots/logic.ts";
 
 /**
@@ -93,6 +94,9 @@ function counted(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** No part hidden: what a caller passes that draws no device's choices, such as a test. */
+const NONE_HIDDEN: ReadonlySet<ModuleId> = new Set();
+
 /**
  * What a rest also restores of what is spent (7.2), as the rules of
  * shared/rules/rest.ts give it: "A Short Rest also restores one Rage and
@@ -101,9 +105,11 @@ function counted(n: number, one: string, many: string): string {
  * "A Long Rest also restores Rage, 3 spell slots and 2 Hit Point Dice.",
  * "A Short Rest also restores 2 Pact Magic slots and one Rage." Null when
  * it restores none, so a creature with nothing spent reads nothing new.
+ * Class resources hidden on this device (`hidden`) are left out, as their
+ * rows are (docs/design/design-v1-features.md 3).
  */
-export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long", spent?: Spent): string | null {
-  const used = (resources ?? []).filter((r) => r.used > 0);
+export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long", spent?: Spent, hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): string | null {
+  const used = hidden.has("classResources") ? [] : (resources ?? []).filter((r) => r.used > 0);
   const counts = spentCounts(spent);
   const pact = counts.pact > 0 ? [counted(counts.pact, "Pact Magic slot", "Pact Magic slots")] : [];
   if (kind === "long") {
@@ -125,11 +131,12 @@ export function restBackText(resources: readonly ClassResource[] | undefined, ki
  * past a phone's sheet, naming each kind any of them has spent: "It also
  * restores every class resource, spell slot and Hit Point Die."
  * (docs/design/design-v1-slots.md 3.4). Null when none of them has one
- * spent, as a chosen rest reads nothing new then.
+ * spent, as a chosen rest reads nothing new then. Class resources hidden on
+ * this device (`hidden`) are left out of it.
  */
-export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[]; spent?: Spent }[]): string | null {
+export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[]; spent?: Spent }[], hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): string | null {
   const kinds = [
-    characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "class resource" : null,
+    !hidden.has("classResources") && characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "class resource" : null,
     characters.some((c) => spentCounts(c.spent).slots + spentCounts(c.spent).pact > 0) ? "spell slot" : null,
     characters.some((c) => spentCounts(c.spent).dice > 0) ? "Hit Point Die" : null,
   ].filter((k): k is string => k !== null);

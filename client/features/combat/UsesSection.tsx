@@ -7,6 +7,9 @@ import type { IconName } from "../../components/Icon.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { handFocusNow } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
+import { partMark } from "../modules/gate.ts";
+import { HiddenHere, Module, useModule } from "../modules/Gate.tsx";
+import type { ModuleId } from "../modules/registry.ts";
 import { updateTitle } from "../resources/logic.ts";
 import { ResourceSheet, type SheetMode } from "../resources/ResourceSheet.tsx";
 import { Section, SmallButton } from "../tokens/ui.tsx";
@@ -32,10 +35,17 @@ const CLASSES_BOX = "[data-uses-classes]";
  * resource gains Edit on its button line, a level that rose past what a
  * class's presets were read at asks once per class to update them, and
  * Add, or the limit's line, comes last.
+ *
+ * Class resources hidden on this device take their rows, the level-up ask,
+ * Add and its sheet, and the section's foot names the hidden parts the
+ * character holds with their Show (docs/design/design-v1-features.md 6, the
+ * uses home). On the character's own page a viewer who may add class
+ * resources holds them already (D-261127-423).
  */
 export function UsesSection(props: { target: ActorTarget; name: string; character?: Character; search?: { classes: string; slots: string } }) {
   const { character } = props;
   const presence = useUsesPresence(props.target);
+  const resourcesShown = useModule("classResources");
   const [sheet, setSheet] = useState<SheetMode | null>(null);
   const [classesOpen, setClassesOpen] = useState(false);
   const classesOpener = useRef<HTMLElement | null>(null);
@@ -59,6 +69,10 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   useEffect(() => {
     if (!classesOpen) handFocusNow(classesBox.current, classesOpener.current, [`${CLASSES_BOX} button`, "button"]);
   }, [classesOpen]);
+  // Hidden, here or from another window, Class resources closes its sheet for good, so showing them again opens none (docs/design/design-v1-features.md 5, Effect).
+  useEffect(() => {
+    if (!resourcesShown) setSheet(null);
+  }, [resourcesShown]);
   if (!character && presence === "no") return null;
   const open = (mode: SheetMode, from: HTMLElement | null) => {
     opener.current = from;
@@ -74,6 +88,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   const full = resources.length >= LIMITS.resourcesPerCharacter;
   const classes = character?.classes;
   const mismatch = character ? levelMismatch(character) : null;
+  const page = "characterId" in props.target;
   return (
     <Section title="Uses">
       {mismatch ? (
@@ -81,15 +96,19 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
           <OpenerButton onOpen={(from) => openClasses(from)}>Edit classes</OpenerButton>
         </LineWith>
       ) : null}
-      {character
+      {character && resourcesShown
         ? levelUps(resources, character.level, classes).map((up) => (
-            <LineWith key={up.classId} text={classes && classes.length > 0 ? `Your ${CLASS_NAMES[up.classId]} level is now ${up.guess}. ${updateTitle(up.classId)}?` : `Your level went up. ${updateTitle(up.classId)}?`}>
+            <LineWith key={up.classId} part="classResources" text={classes && classes.length > 0 ? `Your ${CLASS_NAMES[up.classId]} level is now ${up.guess}. ${updateTitle(up.classId)}?` : `Your level went up. ${updateTitle(up.classId)}?`}>
               <OpenerButton onOpen={(from) => open({ kind: "update", up }, from)}>Update</OpenerButton>
             </LineWith>
           ))
         : null}
       <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} slotsSearch={props.search?.slots} />
-      {character && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
+      {character && presence === "no" ? (
+        <Module id="classResources">
+          <Help>{NOTHING_TO_LIST}</Help>
+        </Module>
+      ) : null}
       {/* Both edit controls at the foot (docs/design/design-v1-slots.md 3.1): the classes just above Add a class resource. */}
       {character ? (
         classes && classes.length > 0 ? (
@@ -104,25 +123,30 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
           </div>
         )
       ) : null}
-      {!character ? null : full ? (
-        <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>
-      ) : (
-        <div data-uses-add="">
-          <OpenerButton icon="plus" onOpen={(from) => open({ kind: "add" }, from)}>
-            Add a class resource
-          </OpenerButton>
-        </div>
-      )}
+      {character ? (
+        <Module id="classResources">
+          {full ? (
+            <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>
+          ) : (
+            <div data-uses-add="">
+              <OpenerButton icon="plus" onOpen={(from) => open({ kind: "add" }, from)}>
+                Add a class resource
+              </OpenerButton>
+            </div>
+          )}
+        </Module>
+      ) : null}
       {sheet && character ? <ResourceSheet character={character} mode={sheet} opener={opener} onClose={() => setSheet(null)} /> : null}
       {classesOpen && character ? <ClassesSheet character={character} opener={classesOpener} onClose={() => setClassesOpen(false)} /> : null}
+      {character ? <HiddenHere home="uses" holder={page ? { ...character, mayAdd: true } : character} /> : null}
     </Section>
   );
 }
 
-/** A line of words with its button beside it, wrapping under them where they do not fit. */
-function LineWith(props: { text: string; children: ReactNode }) {
+/** A line of words with its button beside it, wrapping under them where they do not fit. `part` marks a line a hidden part takes (docs/design/design-v1-features.md 8). */
+function LineWith(props: { text: string; part?: ModuleId; children: ReactNode }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
+    <div {...(props.part ? partMark(props.part) : {})} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
       <p style={{ flex: "1 1 160px", minWidth: 0, margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>{props.text}</p>
       {props.children}
     </div>

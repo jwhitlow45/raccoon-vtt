@@ -55,7 +55,8 @@ describe("the scene's weather rows", () => {
       const html = render(weather);
       assert.doesNotMatch(html, /aria-expanded/);
       assert.doesNotMatch(html, /<section/);
-      assert.match(html, /^<div[^>]*><div data-setting-row=""[^>]*>(?:(?!<\/div>)[\s\S])*?Weather/, "the Weather row first");
+      // The rows that set the look stand in Weather's own wrapper, which hides them with the part (docs/design/design-v1-features.md 3).
+      assert.match(html, /^<div[^>]*><div data-part="weather" style="display:contents"><div data-setting-row=""[^>]*>(?:(?!<\/div>)[\s\S])*?Weather/, "the Weather row first");
       assert.match(html, /<select[^>]*aria-label="Weather"/, "the kind's picker");
       assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\. $/, "the devices line last");
     }

@@ -11,6 +11,7 @@ import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
+import { Module } from "../modules/Gate.tsx";
 import { Select } from "../scenes/controls.tsx";
 import {
   buildWeather,
@@ -59,6 +60,13 @@ export function weatherSummary(weather: Weather | undefined): string {
   return parts.length === 0 ? "Clear" : parts.join(" · ");
 }
 
+/**
+ * The rows under the light. Weather hidden on this device takes the four
+ * that set the look, Weather, Strength, Wind and Direction, and the line on
+ * how devices show it, while Weather rules on rolls and the SRD's lines
+ * stay, since rolls still follow the weather (docs/design/design-v1-features.md 3).
+ * The folded group's line still names a set weather.
+ */
 function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forced: string | null; change(pick: Partial<Picker>): void }) {
   const { picker, weather, forced, change } = props;
   const clear = picker.kind === "clear";
@@ -67,40 +75,42 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
   const rules = weatherRuleLines(weather);
   return (
     <div style={{ display: "grid", minWidth: 0 }}>
-      <SettingRow name="Weather">
-        <Select<WeatherKind> label="Weather" search="scenes.light.weather" value={picker.kind} options={KIND_CHOICES} onChange={(kind) => change({ kind })} />
-      </SettingRow>
-      {clear ? null : (
-        <SettingRow name="Strength" wide>
+      <Module id="weather">
+        <SettingRow name="Weather">
+          <Select<WeatherKind> label="Weather" search="scenes.light.weather" value={picker.kind} options={KIND_CHOICES} onChange={(kind) => change({ kind })} />
+        </SettingRow>
+        {clear ? null : (
+          <SettingRow name="Strength" wide>
+            {(ids) => (
+              <Segmented<"light" | "heavy">
+                labelledBy={ids.nameId}
+                value={picker.heavy ? "heavy" : "light"}
+                options={[
+                  { value: "light", label: light },
+                  { value: "heavy", label: heavy },
+                ]}
+                onChange={(strength) => change({ heavy: strength === "heavy" })}
+              />
+            )}
+          </SettingRow>
+        )}
+        <SettingRow name="Wind" wide help={help ? <span role="status">{help}</span> : undefined}>
           {(ids) => (
-            <Segmented<"light" | "heavy">
+            <Segmented<WindLevel>
               labelledBy={ids.nameId}
-              value={picker.heavy ? "heavy" : "light"}
-              options={[
-                { value: "light", label: light },
-                { value: "heavy", label: heavy },
-              ]}
-              onChange={(strength) => change({ heavy: strength === "heavy" })}
+              {...(ids.helpId ? { describedBy: ids.helpId } : {})}
+              value={picker.wind}
+              options={WIND_CHOICES.map((w) => ({ ...w, disabled: !windOffered(picker, w.value) }))}
+              onChange={(wind) => change({ wind })}
             />
           )}
         </SettingRow>
-      )}
-      <SettingRow name="Wind" wide help={help ? <span role="status">{help}</span> : undefined}>
-        {(ids) => (
-          <Segmented<WindLevel>
-            labelledBy={ids.nameId}
-            {...(ids.helpId ? { describedBy: ids.helpId } : {})}
-            value={picker.wind}
-            options={WIND_CHOICES.map((w) => ({ ...w, disabled: !windOffered(picker, w.value) }))}
-            onChange={(wind) => change({ wind })}
-          />
+        {picker.wind === "calm" ? null : (
+          <SettingRow name="Direction" wide help="Where it blows toward, by the map's edges as Top-down shows them.">
+            <Compass value={picker.toward} onChange={(toward) => change({ toward })} />
+          </SettingRow>
         )}
-      </SettingRow>
-      {picker.wind === "calm" ? null : (
-        <SettingRow name="Direction" wide help="Where it blows toward, by the map's edges as Top-down shows them.">
-          <Compass value={picker.toward} onChange={(toward) => change({ toward })} />
-        </SettingRow>
-      )}
+      </Module>
       {/*
        * What rolls here do is the switch's help, in one sentence, and what
        * the SRD says follows it, a line per weather part at the panel's
@@ -120,7 +130,9 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
       ) : (
         <Help style={{ paddingBottom: theme.space(2) }}>{rules.rolls}</Help>
       )}
-      <Help style={{ paddingBottom: theme.space(2) }}>Players see it at once. Each device can show it still or turn it off in This device.</Help>
+      <Module id="weather">
+        <Help style={{ paddingBottom: theme.space(2) }}>Players see it at once. Each device can show it still or turn it off in This device.</Help>
+      </Module>
     </div>
   );
 }

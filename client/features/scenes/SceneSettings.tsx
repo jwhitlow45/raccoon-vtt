@@ -45,6 +45,7 @@ import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCa
 import { useStartFraming } from "./FrameView.tsx";
 import { sceneGroupSummary, sceneSoundSummary } from "./sceneSummary.ts";
 import { FloorsGroup } from "./FloorsGroup.tsx";
+import { HiddenHere, Module } from "../modules/Gate.tsx";
 import { floorSettingsLine } from "./floorWords.ts";
 import { SceneSoundSettings, useSceneSoundNames } from "./SceneSoundSettings.tsx";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
@@ -124,9 +125,11 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       </Group>
 
       {sound ? (
-        <Group {...group("sound", sceneSoundSummary(soundNames))} search="scenes.sound">
-          <SceneSoundSettings key={scene.id} scene={scene} />
-        </Group>
+        <Module id="sound">
+          <Group {...group("sound", sceneSoundSummary(soundNames))} search="scenes.sound">
+            <SceneSoundSettings key={scene.id} scene={scene} />
+          </Group>
+        </Module>
       ) : null}
 
       <Group
@@ -158,19 +161,21 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
           <SettingRow name="Automatic walls" search="scenes.walls.auto" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
             <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
           </SettingRow>
-          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-            <Button
-              size="sm"
-              search="scenes.walls.builder"
-              onClick={() => {
-                ui.setTool("build");
-                props.close({ placing: true });
-              }}
-            >
-              Open the builder
-            </Button>
-            <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
-          </div>
+          <Module id="builder">
+            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+              <Button
+                size="sm"
+                search="scenes.walls.builder"
+                onClick={() => {
+                  ui.setTool("build");
+                  props.close({ placing: true });
+                }}
+              >
+                Open the builder
+              </Button>
+              <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
+            </div>
+          </Module>
         </Fragment>
       </Group>
 
@@ -198,10 +203,16 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
               ) : null}
             </div>
           </SettingRow>
-          {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
+          {isoOffered ? (
+            <Module id="isometric">
+              <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} />
+            </Module>
+          ) : null}
         </Fragment>
       </Group>
 
+      {/* Above Export, where hidden Floors and Weather come back (docs/design/design-v1-features.md 6, the sceneSettings home). */}
+      <HiddenHere home="sceneSettings" />
       <MapExport key={scene.id} scene={scene} />
     </>
   );

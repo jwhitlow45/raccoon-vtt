@@ -68,10 +68,7 @@ describe("the parts gate's source scans", () => {
    * device/settings.ts keeps the setting's reads for FT-C's three files until they read Dice animation, and the lane that lands after both takes them out.
    */
   const ROLL_ANIMATION_PENDING = [
-    "client/features/device/DiceSetPicker.tsx",
     "client/features/device/settings.ts",
-    "client/features/dice/throw/hooks.ts",
-    "client/features/dice/throw/useThrows.ts",
   ];
 
   test("the old Roll animation setting is read only by the store's migration", () => {
@@ -150,10 +147,10 @@ describe("the parts gate's source scans", () => {
   });
 
   /**
-   * Homes whose Hidden on this device line the lanes still to land place: FT-C and FT-D (the creature homes, sceneSettings, newScene, dmPanel).
+   * Homes whose Hidden on this device line the lanes still to land place: FT-D (rest).
    * tools and menu hold their ways back as menu items, which design section 6 gives them, from useHiddenHere: they have no line to find, and wait on this scan reading those too.
    */
-  const HOMES_PENDING = ["uses", "rest", "companions", "statBlock", "tools", "menu", "sceneSettings", "newScene", "dmPanel"];
+  const HOMES_PENDING = ["rest", "tools", "menu"];
 
   test("every home has its Hidden on this device line", () => {
     const placed = new Set([...outside.flatMap((f) => [...f.text.matchAll(/<HiddenHere\b[^>]*\bhome="([a-zA-Z]+)"/g)].map((m) => m[1]!))]);

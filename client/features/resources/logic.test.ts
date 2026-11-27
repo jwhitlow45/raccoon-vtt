@@ -116,6 +116,14 @@ describe("what a rest restores (7.2)", () => {
     assert.equal(partyRestBackText([{ resources: [hands, { ...rage, used: 0 }] }, {}]), null, "nothing spent reads nothing new");
     assert.equal(partyRestBackText([]), null);
   });
+
+  test("class resources hidden on this device leave the rest words (docs/design/design-v1-features.md 3)", () => {
+    const hidden = new Set(["classResources"] as const);
+    assert.equal(restBackText([rage, focus], "short", undefined, hidden), null);
+    assert.equal(restBackText([rage, focus, hands, surge], "long", undefined, hidden), null);
+    assert.equal(partyRestBackText([{ resources: [{ ...rage, used: 1 }] }], hidden), null);
+    assert.equal(restBackText([rage, focus], "short", undefined, new Set()), "A Short Rest also restores one Rage and all Focus Points.", "shown, as before");
+  });
 });
 
 describe("adding from a class (7.1)", () => {

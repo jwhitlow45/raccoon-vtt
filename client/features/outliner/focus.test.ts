@@ -11,6 +11,8 @@ import { raised, world } from "../movement/testing.ts";
 import type { OutlineRow } from "./rows.ts";
 
 const { focusOutlineRow } = await import("./focus.ts");
+const { resetAllFeatures, setModuleShown } = await import("../modules/store.ts");
+const { trapSlot } = await import("../traps/store.ts");
 
 const viewport = { width: 800, height: 600 };
 const bars = { top: 56, right: 0, bottom: 64, left: 0 };
@@ -64,3 +66,22 @@ test("an outline row on a 20 ft platform, tapped from far out where the platform
   }
 });
 
+test("a trap's row with Traps hidden on this device frames the trap and picks no tool (docs/design/design-v1-features.md 8)", () => {
+  try {
+    for (const hidden of [false, true]) {
+      resetAllFeatures();
+      if (hidden) setModuleShown("traps", "dm", false);
+      const scope = new RoomScope();
+      let framedIt = false;
+      scope.get(fitSlot).show = () => void (framedIt = true);
+      const tools: string[] = [];
+      const ui = { setTool: (id: string) => void tools.push(id), select: () => {}, showActions: () => {} };
+      focusOutlineRow(row("trap", "t1", { x: 1, y: 1, width: 1, height: 1 }), { scope, ui: ui as never, actions: {} as never, sceneId: "s1", tokens: {} });
+      assert.ok(framedIt, "the map frames it either way");
+      assert.deepEqual(tools, hidden ? [] : ["trap"]);
+      assert.equal(scope.get(trapSlot).store.getState().paneId, hidden ? null : "t1", hidden ? "no pane waits for a tool that never opens" : "its pane opens");
+    }
+  } finally {
+    resetAllFeatures();
+  }
+});

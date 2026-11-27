@@ -9,6 +9,8 @@ import { theme } from "../../lib/theme.ts";
 import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { amountOutcome, backLabel, emptyText, fullText, left, reasonText, RESET_WORDS, useLabel } from "./logic.ts";
 
 /**
@@ -26,11 +28,13 @@ export type ResourceRowsForm = "card" | "list";
  * off-turn list adds Restore, and Edit where the Combat section's Uses
  * passes `edit`. Nothing at all for a character with none, or for a
  * viewer whose copy holds none, since they reach only the DM and the
- * character's players.
+ * character's players. Nothing either while Class resources hides on this
+ * device, wherever the rows stand (docs/design/design-v1-features.md 3).
  */
 export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm; label: string; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const resources = useRoomView((s) => s.view?.characters[props.characterId]?.resources);
-  if (!resources || resources.length === 0) return null;
+  const shown = useModule("classResources");
+  if (!shown || !resources || resources.length === 0) return null;
   return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} label={props.label} edit={props.edit} />;
 }
 
@@ -41,7 +45,7 @@ export function ClassResourceRows(props: { characterId: CharacterId; form: Resou
 function ResourceList(props: { characterId: CharacterId; resources: readonly ClassResource[]; back: boolean; label: string; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const [status, setStatus] = useState<string | null>(null);
   return (
-    <div data-resource-list style={{ display: "grid", gap: theme.space(1) }}>
+    <div data-resource-list {...partMark("classResources")} style={{ display: "grid", gap: theme.space(1) }}>
       <ul aria-label={props.label} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {props.resources.map((r) => (
           <ResourceRow key={r.id} characterId={props.characterId} resource={r} back={props.back} edit={props.edit} onStatus={setStatus} />

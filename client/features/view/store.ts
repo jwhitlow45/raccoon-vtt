@@ -162,6 +162,27 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+const topDownOf = new WeakMap<StoredView, StoredView>();
+
+/**
+ * The stored view as the board takes it: Isometric view hidden on this
+ * device draws Top-down at once, whatever the pick or the scene suggests,
+ * and the pick and turns stay stored for when it shows again
+ * (docs/design/design-v1-features.md 3 and 8). The page's view choice
+ * reads its stored view through it, with `isoShown` from the parts gate, as
+ * a table display and a preview show every part. One object per stored
+ * view, so a render that changes nothing hands back the same one. Pure.
+ */
+export function shownStored(stored: StoredView, isoShown: boolean): StoredView {
+  if (isoShown) return stored;
+  let topDown = topDownOf.get(stored);
+  if (!topDown) {
+    topDown = { pick: "topDown", turns: stored.turns };
+    topDownOf.set(stored, topDown);
+  }
+  return topDown;
+}
+
 export function useStoredView(key: string): StoredView {
   return useSyncExternalStore(subscribe, () => readView(key));
 }

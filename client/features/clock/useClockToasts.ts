@@ -5,6 +5,7 @@ import { arrivals } from "../areas/reminders.ts";
 import { useConfirmedSeq } from "../encounter/hooks.ts";
 import type { RoomView } from "../../state/types.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useModule } from "../modules/Gate.tsx";
 
 /** An op this device sent that writes a clock line, by its `n` and the claim id the line will carry, until the server settles it. */
 export type Claim = { n: number; id: string };
@@ -100,12 +101,23 @@ export function ownLineWatcher(): { update(s: Watched, prev: Watched): void; tak
 }
 
 /**
+ * Whether clock lines toast here: neither the Log nor an open Time is on
+ * screen (`onScreen`), and Date and time shows on this device. Hidden, the
+ * Log keeps the line and no toast or chip says it
+ * (docs/design/design-v1-features.md 4). Pure.
+ */
+export function clockToastsShown(onScreen: boolean, timeShown: boolean): boolean {
+  return !onScreen && timeShown;
+}
+
+/**
  * A toast for each clock line that arrives while neither the Log nor an open
  * Time is on screen (docs/design/design-v1-calendar.md 4.7), for players and
- * co-DMs. The Log keeps every line, toast or not. A line this device's own
- * op wrote makes none.
+ * co-DMs, while Date and time shows on this device. The Log keeps every
+ * line, toast or not. A line this device's own op wrote makes none.
  */
 export function useClockToasts(hidden: boolean): void {
+  const toasts = clockToastsShown(hidden, useModule("time"));
   const log = useRoomView((s) => s.view?.log);
   const confirmedSeq = useConfirmedSeq();
   const ui = useRoomUi();
@@ -125,7 +137,7 @@ export function useClockToasts(hidden: boolean): void {
     const { seen: next, fresh } = arrivals(seen.current, log, confirmedSeq);
     seen.current = next;
     const shown = fresh.filter((e) => e.kind === "event" && e.data?.type === "clock" && !own.current?.take(e.id));
-    if (hidden) return;
+    if (!toasts) return;
     for (const entry of shown) if (entry.data?.type === "clock") ui.notify(clockText(entry.data), "info", undefined, undefined, true);
-  }, [log, confirmedSeq, hidden, ui]);
+  }, [log, confirmedSeq, toasts, ui]);
 }

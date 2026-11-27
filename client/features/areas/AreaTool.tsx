@@ -411,9 +411,12 @@ export function pickTemplate(scope: RoomScope, id: string, actions: RoomActions)
 /**
  * For a trap's pane (docs/design/design-v1-traps.md 4.1): aim the area a trap hits
  * with the area tool's shapes and handles. The draft starts as the trap's
- * own area, and the tool's Save puts it back into the trap.
+ * own area, and the tool's Save puts it back into the trap. The tool is
+ * borrowed, so it opens for the trap's draft alone while Areas hides on
+ * this device, until Save or Cancel goes back to the trap, which ends the
+ * borrow (docs/design/design-v1-features.md 8, D-261127-303).
  */
-export function aimTrapArea(scope: RoomScope, ui: { setTool(id: string): void }, trapId: string, draft: AreaDraft): void {
+export function aimTrapArea(scope: RoomScope, ui: { setTool(id: string, opts?: { borrow?: true }): void }, trapId: string, draft: AreaDraft): void {
   scope.get(gestureSlot).pendingTrap = { trapId, draft };
-  ui.setTool("area");
+  ui.setTool("area", { borrow: true });
 }

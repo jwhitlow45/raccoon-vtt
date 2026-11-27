@@ -5,6 +5,7 @@ import { chooseDisplaySound } from "../../display/remember.ts";
 import { usePreview } from "../../dm/previewContext.ts";
 import { soundTimeLink } from "../../../state/socket.ts";
 import { useAssets, useIsDisplay, useRoomStore, useRoomView } from "../../../state/view.ts";
+import { useFeaturesHere, useModule } from "../../modules/Gate.tsx";
 import { mixerSupported, soundUnlock } from "./context.ts";
 import type { EngineInput, SoundEngine } from "./engine.ts";
 import { refreshServerRoomSound, setSoundHere, useRoomSoundOn } from "./store.ts";
@@ -42,6 +43,18 @@ export function soundEnabled(on: boolean, display: boolean, blackout: boolean, d
   return on && !(display && (blackout || dmOnly));
 }
 
+/**
+ * Whether Sound shows on this page (docs/design/design-v1-features.md 8,
+ * D-261127-123): hidden, this device plays none, so it is no longer
+ * eligible and the playing page in the browser hands off to another. Mute
+ * and mix stay stored. A member's page waits for its role, so a DM who hid
+ * Sound never hears a first bar (D-261127-316). A table display ignores
+ * this device's choices (D-261127-126). Pure.
+ */
+export function soundShownHere(display: boolean, role: "dm" | "player" | null, shown: boolean): boolean {
+  return display || (role !== null && shown);
+}
+
 function Host() {
   const store = useRoomStore();
   const display = useIsDisplay();
@@ -54,7 +67,9 @@ function Host() {
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
   const dmOnly = useRoomView((s) => s.view?.meta.settings.soundDmOnly === true);
   const on = useRoomSoundOn();
-  const enabled = soundEnabled(on, display, blackout, dmOnly);
+  const { role } = useFeaturesHere();
+  const shown = useModule("sound");
+  const enabled = soundEnabled(on, display, blackout, dmOnly) && soundShownHere(display, role, shown);
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
 

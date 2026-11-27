@@ -17,6 +17,7 @@ import { ImportDialog } from "../uvtt/ImportDialog.tsx";
 import { EXTENSIONS, fileSizeProblem, thisDevice, type Device } from "../uvtt/limits.ts";
 import { newSceneIntent, newScenePreset } from "./create.ts";
 import { FloorPage } from "./FloorPage.tsx";
+import { Module, useModule } from "../modules/Gate.tsx";
 import { floorAddRefusal } from "./floorSource.ts";
 import { fileHexReason, FLOOR_MAP_HELP, FLOOR_MAP_NAME, FLOOR_MAP_OPTIONS, FLOOR_MARKS, floorRowLabel, floorsSummary, floorsTopFirst, ON_SCREEN, playersAt, type FloorMap } from "./floorWords.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS } from "./settingsFolds.ts";
@@ -40,6 +41,10 @@ type Side = "above" | "below";
  * each aimed at a floor above or below the floor on screen. A file brings
  * square walls, so it is off on a hex scene, where a generated dungeon is
  * wall lines (docs/design: dungeon generator phase 3, section 2).
+ *
+ * Floors hidden on this device takes the group from a scene with one floor
+ * only: a scene with floors still shows them (docs/design/design-v1-features.md 3,
+ * D-261127-112). Dungeon generator hidden takes Map's Dungeon.
  */
 export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onToggle(): void }; ask?: number }) {
   const { scene } = props;
@@ -59,6 +64,7 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   const [generating, setGenerating] = useState<Side | null>(null);
   /** Which add clicked the file input, read when its pick comes back. */
   const picking = useRef<Side>("above");
+  const dungeonShown = useModule("dungeon");
   const fileInput = useRef<HTMLInputElement>(null);
   const aboveButton = useRef<HTMLButtonElement>(null);
   const belowButton = useRef<HTMLButtonElement>(null);
@@ -88,7 +94,8 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   // A file's walls lie on squares (D-261110-075). A generated dungeon is drawn for the scene's own grid.
   const grid = sceneGrid(scene);
   const hex = isHex(grid);
-  const pick: FloorMap = hex && map === "file" ? "blank" : map;
+  const pick: FloorMap = (hex && map === "file") || (!dungeonShown && map === "dungeon") ? "blank" : map;
+  const mapOptions = dungeonShown ? FLOOR_MAP_OPTIONS : FLOOR_MAP_OPTIONS.filter((o) => o.value !== "dungeon");
   const hexReasons = hex ? fileHexReason(mainName) : null;
 
   const add = (side: Side) => {
@@ -124,109 +131,111 @@ export function FloorsGroup(props: { scene: Scene; fold: { open: boolean; onTogg
   };
 
   return (
-    <div {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.group }}>
-      <Group
-        label={SCENE_GROUP_LABELS.floors}
-        icon={SCENE_GROUP_ICONS.floors}
-        {...props.fold}
-        keep
-        wholeSummary
-        summary={floorsSummary(floors, shownId)}
-        search="scenes.floors"
-      >
-        {pageFloor ? (
-          <FloorPage key={pageFloor.id} floor={pageFloor} selectName={page?.selectName === true} onBack={() => setPage(null)} />
-        ) : (
-          <>
-            {floors.length > 1 ? (
-              <FloorRows sceneId={scene.id} shownId={shownId} onOpen={(id) => setPage({ id, selectName: false })} />
-            ) : (
-              <Help>{mainName} has one floor. Add one above or below to build a tower, a cellar or a roof.</Help>
-            )}
-            <SettingRow name={FLOOR_MAP_NAME} search="scenes.floors.map" wide>
-              {(ids) => (
-                <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, width: "100%" }}>
-                  <Segmented<FloorMap>
-                    labelledBy={ids.nameId}
-                    value={pick}
-                    even
-                    wrap
-                    description={FLOOR_MAP_HELP[pick]}
-                    {...(hexReasons ? { describedBy: hexId } : null)}
-                    options={FLOOR_MAP_OPTIONS.map((o) => ({ ...o, disabled: hex && o.value === "file" }))}
-                    onChange={(next) => {
-                      setMap(next);
-                      setTooBig(null);
-                    }}
-                  />
-                  {hexReasons ? <Help id={hexId}>{hexReasons}</Help> : null}
-                </div>
+    <Module id="floors" when={floors.length <= 1}>
+      <div {...{ [FLOOR_ROOT_ATTR]: FLOOR_ROOTS.group }}>
+        <Group
+          label={SCENE_GROUP_LABELS.floors}
+          icon={SCENE_GROUP_ICONS.floors}
+          {...props.fold}
+          keep
+          wholeSummary
+          summary={floorsSummary(floors, shownId)}
+          search="scenes.floors"
+        >
+          {pageFloor ? (
+            <FloorPage key={pageFloor.id} floor={pageFloor} selectName={page?.selectName === true} onBack={() => setPage(null)} />
+          ) : (
+            <>
+              {floors.length > 1 ? (
+                <FloorRows sceneId={scene.id} shownId={shownId} onOpen={(id) => setPage({ id, selectName: false })} />
+              ) : (
+                <Help>{mainName} has one floor. Add one above or below to build a tower, a cellar or a roof.</Help>
               )}
-            </SettingRow>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-              <Button ref={aboveButton} size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={above !== null || adding === "below"} aria-describedby={above !== null ? reasonId : undefined} onClick={() => add("above")}>
-                Add a floor above
-              </Button>
-              <Button ref={belowButton} size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={below !== null || adding === "above"} aria-describedby={below !== null ? reasonId : undefined} onClick={() => add("below")}>
-                Add a floor below
-              </Button>
-            </div>
-            {reasons.length > 0 ? <Help id={reasonId}>{reasons.join(" ")}</Help> : null}
-            {tooBig ? (
-              <div role="alert">
-                <Note>{tooBig}</Note>
+              <SettingRow name={FLOOR_MAP_NAME} search="scenes.floors.map" wide>
+                {(ids) => (
+                  <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, width: "100%" }}>
+                    <Segmented<FloorMap>
+                      labelledBy={ids.nameId}
+                      value={pick}
+                      even
+                      wrap
+                      description={FLOOR_MAP_HELP[pick]}
+                      {...(hexReasons ? { describedBy: hexId } : null)}
+                      options={mapOptions.map((o) => ({ ...o, disabled: hex && o.value === "file" }))}
+                      onChange={(next) => {
+                        setMap(next);
+                        setTooBig(null);
+                      }}
+                    />
+                    {hexReasons ? <Help id={hexId}>{hexReasons}</Help> : null}
+                  </div>
+                )}
+              </SettingRow>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+                <Button ref={aboveButton} size="sm" icon="arrowUp" search="scenes.floors.add-above" busy={adding === "above"} disabled={above !== null || adding === "below"} aria-describedby={above !== null ? reasonId : undefined} onClick={() => add("above")}>
+                  Add a floor above
+                </Button>
+                <Button ref={belowButton} size="sm" icon="arrowDown" search="scenes.floors.add-below" busy={adding === "below"} disabled={below !== null || adding === "above"} aria-describedby={below !== null ? reasonId : undefined} onClick={() => add("below")}>
+                  Add a floor below
+                </Button>
               </div>
-            ) : null}
-            {/* The adds stay buttons whatever the pick, so a file pick clicks this input rather than wrapping them in its label (D-261110-117). */}
-            <input
-              ref={fileInput}
-              type="file"
-              data-floor-file=""
-              tabIndex={-1}
-              aria-hidden
-              accept={thisDevice() === "computer" ? EXTENSIONS.join(",") : undefined}
-              style={VISUALLY_HIDDEN}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                const device = thisDevice();
-                // A phone checks the size before reading a byte: a file too big for its memory could end the tab.
-                const problem = fileSizeProblem(file.size, device);
-                setTooBig(problem);
-                if (!problem) setPicked({ file, device, side: picking.current });
-              }}
-            />
-          </>
-        )}
-      </Group>
-      {/* Outside the list, so a floor's page opened by an add leaves the dialog that made it in place. */}
-      {picked ? (
-        <ImportDialog
-          file={picked.file}
-          device={picked.device}
-          target={{ kind: "floor", beside: scene.id, side: picked.side }}
-          onClose={() => setPicked(null)}
-          onFloor={(id) => setPage({ id, selectName: true })}
-        />
-      ) : null}
-      {generating && roomId ? (
-        <GenerateDialog
-          roomId={roomId}
-          name={mainName}
-          form={scene.bounds}
-          intent={newSceneIntent(newScenePreset(newScenePlayers, "builder"), undefined)}
-          opener={generating === "above" ? aboveButton : belowButton}
-          floor={{ beside: scene.id, side: generating }}
-          grid={isHex(grid) ? (grid.orient === "rows" ? "hexRows" : "hexColumns") : "squares"}
-          onClose={() => setGenerating(null)}
-          onMade={(id) => {
-            setGenerating(null);
-            setPage({ id, selectName: true });
-          }}
-        />
-      ) : null}
-    </div>
+              {reasons.length > 0 ? <Help id={reasonId}>{reasons.join(" ")}</Help> : null}
+              {tooBig ? (
+                <div role="alert">
+                  <Note>{tooBig}</Note>
+                </div>
+              ) : null}
+              {/* The adds stay buttons whatever the pick, so a file pick clicks this input rather than wrapping them in its label (D-261110-117). */}
+              <input
+                ref={fileInput}
+                type="file"
+                data-floor-file=""
+                tabIndex={-1}
+                aria-hidden
+                accept={thisDevice() === "computer" ? EXTENSIONS.join(",") : undefined}
+                style={VISUALLY_HIDDEN}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const device = thisDevice();
+                  // A phone checks the size before reading a byte: a file too big for its memory could end the tab.
+                  const problem = fileSizeProblem(file.size, device);
+                  setTooBig(problem);
+                  if (!problem) setPicked({ file, device, side: picking.current });
+                }}
+              />
+            </>
+          )}
+        </Group>
+        {/* Outside the list, so a floor's page opened by an add leaves the dialog that made it in place. */}
+        {picked ? (
+          <ImportDialog
+            file={picked.file}
+            device={picked.device}
+            target={{ kind: "floor", beside: scene.id, side: picked.side }}
+            onClose={() => setPicked(null)}
+            onFloor={(id) => setPage({ id, selectName: true })}
+          />
+        ) : null}
+        {generating && roomId ? (
+          <GenerateDialog
+            roomId={roomId}
+            name={mainName}
+            form={scene.bounds}
+            intent={newSceneIntent(newScenePreset(newScenePlayers, "builder"), undefined)}
+            opener={generating === "above" ? aboveButton : belowButton}
+            floor={{ beside: scene.id, side: generating }}
+            grid={isHex(grid) ? (grid.orient === "rows" ? "hexRows" : "hexColumns") : "squares"}
+            onClose={() => setGenerating(null)}
+            onMade={(id) => {
+              setGenerating(null);
+              setPage({ id, selectName: true });
+            }}
+          />
+        ) : null}
+      </div>
+    </Module>
   );
 }
 

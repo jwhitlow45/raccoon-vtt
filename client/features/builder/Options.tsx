@@ -27,6 +27,8 @@ import { LightChip } from "../lights/LightOptions.tsx";
 import { HEX_LIMITS } from "../grid/words.ts";
 import { KIND_GROUP, linkHint, KIND_NAMES, toChoice, TO_GROUP } from "../floors/linkWords.ts";
 import { chosenTarget, linkTargets } from "./linkTap.ts";
+import { claimShown } from "../modules/gate.ts";
+import { Module, useFeatureChoicesHere } from "../modules/Gate.tsx";
 
 const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "wall", label: "Wall" },
@@ -133,6 +135,7 @@ export default function BuilderOptions() {
   // Everything but the stroke in progress, so painting does not re-render the row.
   const builderState = useBuilderStore();
   const scope = useRoomScope();
+  const choices = useFeatureChoicesHere();
   const s = useStore(
     builderState,
     useShallow((b) => ({
@@ -230,7 +233,8 @@ export default function BuilderOptions() {
       />
     ),
   });
-  const modes = linking ? BUILD_MODES : BUILD_MODES.filter((m) => m.value !== "link");
+  // Add a wing is the Dungeon generator's, so the list leaves it out while that part hides on this device (docs/design/design-v1-features.md 8, D-261127-395). The builder is the DM's.
+  const modes = (linking ? BUILD_MODES : BUILD_MODES.filter((m) => m.value !== "link")).filter((m) => claimShown("builderMode", m.value, "dm", choices));
   const wingOffLine = wingOff(scene);
   const mode = BUILD_MODES.find((m) => m.value === s.mode);
   const modeName = mode?.spoken ?? mode?.label ?? s.mode;
@@ -257,7 +261,7 @@ export default function BuilderOptions() {
               even
               value={s.mode}
               options={modes.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} />, ...(m.value === "wing" && wingOffLine !== null ? { disabled: true, title: wingOffLine } : null) }))}
-              onChange={(mode) => pickBuildMode(scope, mode)}
+              onChange={(mode) => pickBuildMode(scope, mode, choices)}
             />
           </PickCloses>
         </ValueChip>
@@ -424,15 +428,17 @@ export default function BuilderOptions() {
     );
   }
   if (s.mode === "stamp") slots.push(...stamps.slots);
-  if (s.mode === "wing") {
+  if (s.mode === "wing" && claimShown("builderMode", "wing", "dm", choices)) {
     const ready = wingOffLine === null && s.wing?.sceneId === sceneId && s.wing.area !== null && s.wing.join !== null;
     slots.push({
       id: "wingGenerate",
       priority: 1,
       control: (
-        <OptButton tone="primary" ends disabled={!ready || s.asking || s.wingOpen} onClick={() => set({ wingOpen: true, note: null })}>
-          Generate a wing
-        </OptButton>
+        <Module id="dungeon">
+          <OptButton tone="primary" ends disabled={!ready || s.asking || s.wingOpen} onClick={() => set({ wingOpen: true, note: null })}>
+            Generate a wing
+          </OptButton>
+        </Module>
       ),
     });
   }

@@ -1,3 +1,4 @@
+import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { resolveDiceOp, type DiceOp } from "#shared/dice/resolve.ts";
@@ -7,7 +8,6 @@ import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema, type ClientOp, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, actor, character, env, room, token } from "#shared/testutil.ts";
-import { combatAlerts } from "./alerts.ts";
 import {
   abilityHead,
   abilityOp,
@@ -49,6 +49,9 @@ import {
   type UseRow,
 } from "./logic.ts";
 import { promptId, turnId } from "./state.ts";
+
+// alerts.ts reads the parts gate, a .tsx module, so it loads after the register hooks.
+const { combatAlerts } = await import("./alerts.ts");
 
 /*
  * The combat uses' rules (docs/design/design-v1-combat-controls.md 4 to 6), on
@@ -314,6 +317,14 @@ describe("the list", () => {
     assert.equal(usesCount(rowsOf("card", { record: record({ settled: { regeneration: { state: "skipped" } } }) }), undefined), 3, "a skipped prompt is no use");
     assert.equal(usesCount(usesRows({ form: "list", uses: [regen], actor: {}, ownTurn: false, record: null }), undefined), 0, "nor is Regeneration's line");
     assert.equal(usesCount([], [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" }]), 1);
+  });
+
+  test("class resources hidden on this device count for nothing, the block's uses still counting (docs/design/design-v1-features.md 3, D-261127-394)", () => {
+    const hidden = new Set(["classResources"] as const);
+    assert.equal(usesCount([], [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" }], 0, hidden), 0);
+    assert.equal(usesCount(rowsOf("card"), [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" }], 0, hidden), 3);
+    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: [], loading: false, record: null, hidden }), "no", "no Uses opens on resources alone");
+    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: [breath], loading: false, record: null, hidden }), "yes", "its other uses still open it");
   });
 
   test("the DM's chips: three at most, X/Day as left over the most", () => {

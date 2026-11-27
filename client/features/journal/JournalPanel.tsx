@@ -10,6 +10,8 @@ import { Help } from "../../components/Panel.tsx";
 import { Row } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
@@ -199,6 +201,8 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
   const ui = useRoomUi();
   const scope = useRoomScope();
   const sceneShown = useRoomView((s) => s.sceneId !== null);
+  // Pin to the map picks the Pin tool, so it goes with Map pins hidden on this device (docs/design/design-v1-features.md 3).
+  const pinsShown = useModule("pins");
 
   // A page on screen is read, and stays read as it changes under the reader's eyes. A hidden sheet or side panel keeps it mounted, and what changed meanwhile counts as unread until it shows again.
   useEffect(() => {
@@ -228,9 +232,11 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
           <Button size="sm" icon="edit" iconOnly="fine" title="Edit this page" onClick={props.onEdit}>
             Edit
           </Button>
-          <Button size="sm" disabled={!sceneShown} onClick={pinToMap}>
-            Pin to the map
-          </Button>
+          {pinsShown ? (
+            <Button size="sm" disabled={!sceneShown} {...partMark("pins")} onClick={pinToMap}>
+              Pin to the map
+            </Button>
+          ) : null}
           <ConfirmButton icon="delete" iconOnly label="Delete page" confirm="Delete the page?" onConfirm={remove}>
             Delete
           </ConfirmButton>

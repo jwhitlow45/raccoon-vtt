@@ -4,6 +4,7 @@ import { JoinRequestsSection, useJoinRequestsShown } from "../features/dm/JoinRe
 import { TableDisplaySection } from "../features/dm/TableDisplay.tsx";
 import { ViewControls } from "../features/dm/ViewControls.tsx";
 import { HandoutsSection } from "../features/handouts/HandoutsSection.tsx";
+import { HiddenHere, Module } from "../features/modules/Gate.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { dmPanelFoldsSlot, useFolds } from "../lib/folds.ts";
 import { useRoomView } from "../state/view.ts";
@@ -20,6 +21,10 @@ import { useRoomView } from "../state/view.ts";
  * (docs/design/design-v1-panel-groups.md 6.2): Handouts and Players' screens
  * are used in play and start open, the other three are setup and start
  * folded on a phone. Join requests never folds, since someone is waiting.
+ *
+ * Table display hidden on this device takes its section, and the panel's
+ * foot holds its way back (docs/design/design-v1-features.md 6, the dmPanel
+ * home).
  */
 export default function DmPanel(_props: PanelProps) {
   const role = useRoomView((s) => s.you?.role);
@@ -34,7 +39,10 @@ export default function DmPanel(_props: PanelProps) {
       <HandoutsSection fold={fold("handouts")} divider={requests} />
       <ViewControls screens={fold("screens")} check={fold("check")} />
       <PlayerLinkSection fold={fold("link")} />
-      <TableDisplaySection fold={fold("display")} />
+      <Module id="tableDisplay">
+        <TableDisplaySection fold={fold("display")} />
+      </Module>
+      <HiddenHere home="dmPanel" />
     </div>
   );
 }

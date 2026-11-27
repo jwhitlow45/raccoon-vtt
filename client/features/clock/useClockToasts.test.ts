@@ -1,8 +1,11 @@
+import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { LogEntry } from "#shared/model.ts";
 import type { RoomView } from "../../state/types.ts";
-import { ownClaimOf, ownLineWatcher, settleClaims } from "./useClockToasts.ts";
+
+// The hook reads the parts gate, a .tsx module, so the module loads after the register hooks.
+const { clockToastsShown, ownClaimOf, ownLineWatcher, settleClaims } = await import("./useClockToasts.ts");
 
 const line = (id: string, claim?: string, from?: "undo" | "redo"): LogEntry => ({
   id,
@@ -129,5 +132,16 @@ describe("ownLineWatcher (ASTRA-05)", () => {
     d.answer(n, [line("8:0", "a1")]);
     assert.equal(d.watcher.take("7:0"), false);
     assert.equal(d.watcher.take("8:0"), true);
+  });
+});
+
+describe("clockToastsShown (docs/design/design-v1-features.md 4)", () => {
+  it("toasts while the Log and Time are off screen and Date and time shows", () => {
+    assert.equal(clockToastsShown(false, true), true);
+    assert.equal(clockToastsShown(true, true), false, "the Log or Time on screen says it");
+  });
+
+  it("toasts nothing while Date and time hides on this device, the Log keeping the line", () => {
+    assert.equal(clockToastsShown(false, false), false);
   });
 });

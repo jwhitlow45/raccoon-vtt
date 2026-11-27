@@ -7,6 +7,7 @@ import { pickTemplate } from "../areas/AreaTool.tsx";
 import { lightSlot } from "../builder/lightTap.ts";
 import { builderSlot, labelPaneSlot } from "../builder/store.ts";
 import { stampSlot } from "../builder/stamps/store.ts";
+import { toolShown } from "../modules/gate.ts";
 import { findOnBoard, findTokenCamera } from "../find/findToken.ts";
 import { groundIn } from "../../canvas/boardPick.ts";
 import { lightModeSlot } from "../lights/store.ts";
@@ -21,7 +22,9 @@ import { frameRect, type OutlineRow } from "./rows.ts";
  * can be. A token opens its action bar, a label, a pin or a trap its pane, an area
  * becomes the area tool's pick, and a stamp or a light opens the builder in
  * its mode with it selected. The rest have no selection, so their outline
- * flashes.
+ * flashes. A row whose tool is a part hidden on this device only frames the
+ * thing, with no tool (docs/design/design-v1-features.md 8): the Outliner is
+ * the DM's, so the DM's choices decide.
  *
  * The caller closes a phone's sheet first, so the item is not under it.
  */
@@ -38,8 +41,13 @@ export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: Ro
   );
 }
 
+/** The tool a row's pick takes, where it takes one: the rows of a hidden part only frame the thing. */
+const ROW_TOOL: Partial<Record<OutlineRow["kind"], string>> = { area: "area", stamp: "build", light: "build", pin: "pin", trap: "trap" };
+
 function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {
   const { scope, ui } = env;
+  const tool = ROW_TOOL[row.kind];
+  if (tool !== undefined && !toolShown(tool, "dm")) return;
   switch (row.kind) {
     case "token":
       ui.setTool("select");

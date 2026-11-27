@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Playing } from "#shared/sound.ts";
-import { setRoomSoundChoice, useRoomSoundChoice } from "../../device/settings.ts";
+import { setRoomSoundChoice, useRoomSoundChoice, type RoomSoundChoice } from "../../device/settings.ts";
 import { usePreview } from "../../dm/previewContext.ts";
+import { useModule } from "../../modules/Gate.tsx";
 import { useIsDisplay, useRoomStore, useRoomView } from "../../../state/view.ts";
 import { firedAfter, setRoomSound } from "./store.ts";
 
@@ -96,15 +97,25 @@ export function askStep(ask: AskState, now: { eligible: boolean; passed: boolean
   return { asking, listed: playing ? new Set(playing.effects.map((e) => e.id)) : ask.listed, closed };
 }
 
+/**
+ * Whether this page may ask to play here: a player's own page, not yet
+ * answered, with Sound shown on this device. Hidden, it plays none, so it
+ * never asks (docs/design/design-v1-features.md 4). Pure.
+ */
+export function askEligible(input: { preview: boolean; display: boolean; role: "dm" | "player"; choice: RoomSoundChoice; soundShown: boolean }): boolean {
+  return !input.preview && !input.display && input.role === "player" && input.choice === null && input.soundShown;
+}
+
 export function useSoundAsk(): SoundAsk {
   const preview = usePreview() !== null;
   const display = useIsDisplay();
   const role = useRoomView((s) => s.you?.role ?? "player");
   const roomId = useRoomView((s) => s.roomId);
   const choice = useRoomSoundChoice();
+  const soundShown = useModule("sound");
   const playing = useRoomView((s): Playing | null | undefined => (s.confirmed ? (s.confirmed.playing ?? null) : undefined));
   const store = useRoomStore();
-  const eligible = !preview && !display && role === "player" && choice === null;
+  const eligible = askEligible({ preview, display, role, choice, soundShown });
   // The first look at the room: what played then counts for a late joiner, and an effect fired before it never asks.
   const first = useRef<AskLook | null>(null);
   const between = useRef<Omit<AskState, "asking">>(ASK_START);

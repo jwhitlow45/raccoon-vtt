@@ -23,6 +23,7 @@ import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";
 import { useCharacterRollNumbers } from "./useRollNumbers.ts";
 import { ShapePicker } from "./ShapePicker.tsx";
+import { HiddenHere, Module } from "../modules/Gate.tsx";
 
 /**
  * A player character's "Stat block" section (docs/design/design-v1-pc-stats.md
@@ -38,6 +39,9 @@ import { ShapePicker } from "./ShapePicker.tsx";
  * last synced under them (docs/design/design-v1-resync.md 1.1). A Druid's known
  * forms live in the Take a shape picker, which the button opens in no shape
  * or in Wild Shape (docs/design/design-v1-known-forms.md 5.3, D-261024-29).
+ * D&D Beyond hidden on this device takes Re-sync and the last sync's line,
+ * and its way back stands where Re-sync stood (docs/design/design-v1-features.md 6,
+ * the statBlock home).
  */
 export function PcStatBlock(props: {
   character: Character;
@@ -108,13 +112,20 @@ export function PcStatBlock(props: {
             {character.stats ? <SmallButton onClick={() => openStats(character.id)}>Edit</SmallButton> : add()}
             {/* Re-sync needs a block and a D&D Beyond number to fetch, the sheet link's or the last sync's (docs/design/design-v1-resync.md 1.1). */}
             {character.stats && resyncNumber(character, ddbCharacterId) ? (
-              <SmallButton wrap onClick={() => openSync(character.id)}>
-                Re-sync from D&amp;D Beyond
-              </SmallButton>
+              <Module id="ddb">
+                <SmallButton wrap onClick={() => openSync(character.id)}>
+                  Re-sync from D&amp;D Beyond
+                </SmallButton>
+              </Module>
             ) : null}
+            <HiddenHere home="statBlock" holder={character} />
           </div>
         ) : null}
-        {edits && character.stats && character.ddbSync ? <Help>{lastSyncedLine(character.ddbSync.at)}</Help> : null}
+        {edits && character.stats && character.ddbSync ? (
+          <Module id="ddb">
+            <Help>{lastSyncedLine(character.ddbSync.at)}</Help>
+          </Module>
+        ) : null}
       </Group>
       {picker}
     </>

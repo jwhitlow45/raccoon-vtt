@@ -32,6 +32,8 @@ import { GenerateDialog } from "../dungeon/GenerateDialog.tsx";
 import type { GridKind } from "../dungeon/settings.ts";
 import { GENERATE_LEAD } from "../dungeon/words.ts";
 import { thisDevice } from "../uvtt/limits.ts";
+import { partMark } from "../modules/gate.ts";
+import { HiddenHere, Module, useModule } from "../modules/Gate.tsx";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameCellPx, nameFromFile, newSceneIntent, newScenePreset, newSceneShape, pickNow, withPlayersSee, type MapAsset, type NewSceneIntent, type SceneInput } from "./create.ts";
@@ -124,7 +126,10 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
   const store = useRoomStore();
-  const [kind, setKind] = useState<Kind | null>(null);
+  const [picked, setKind] = useState<Kind | null>(null);
+  // Map builder hidden on this device takes the Builder kind, from another window too, so a form left on it starts over (docs/design/design-v1-features.md 3).
+  const builderShown = useModule("builder");
+  const kind = picked === "builder" && !builderShown ? null : picked;
   const [name, setName] = useState("");
   const [w, setW] = useState(30);
   const [h, setH] = useState(20);
@@ -397,12 +402,14 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
         options={[
           { value: "mat", label: "Battle mat" },
           { value: "map", label: "Map image" },
-          { value: "builder", label: "Builder" },
+          ...(builderShown ? [{ value: "builder" as const, label: "Builder" }] : []),
         ]}
       />
       {kind ? (
+        // A builder scene's form is Map builder's, gone with it (docs/design/design-v1-features.md 3).
         <div
           ref={formRef}
+          {...(kind === "builder" ? partMark("builder") : null)}
           style={{
             position: "relative",
             display: "grid",
@@ -526,12 +533,14 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                 </Button>,
               )}
               {kind === "builder" ? (
-                <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
-                  <Help>{GENERATE_LEAD}</Help>
-                  <Button ref={generateButton} size="sm" onClick={() => setGenerate({ name, w, h, intent: intentNow("builder"), grid: storedShape(shapeFor("builder")) ?? "squares" })}>
-                    Generate a dungeon
-                  </Button>
-                </div>
+                <Module id="dungeon">
+                  <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+                    <Help>{GENERATE_LEAD}</Help>
+                    <Button ref={generateButton} size="sm" onClick={() => setGenerate({ name, w, h, intent: intentNow("builder"), grid: storedShape(shapeFor("builder")) ?? "squares" })}>
+                      Generate a dungeon
+                    </Button>
+                  </div>
+                </Module>
               ) : null}
               {generate ? (
                 <GenerateDialog
@@ -556,6 +565,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
           )}
         </div>
       ) : null}
+      {/* The foot of the form, where a hidden Map builder or Dungeon generator comes back (docs/design/design-v1-features.md 6, the newScene home). */}
+      <HiddenHere home="newScene" />
     </div>
   );
 }

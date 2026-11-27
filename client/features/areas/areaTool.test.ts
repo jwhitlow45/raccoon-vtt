@@ -14,7 +14,7 @@ import { areaContext } from "./coverage.ts";
 import { draftTemplate, handlePoint, newDraft, yawToward } from "./placement.ts";
 import { areaSlot, HANDLE_GAP_PX } from "./store.ts";
 
-const { areaTool } = await import("./AreaTool.tsx");
+const { aimTrapArea, areaTool } = await import("./AreaTool.tsx");
 
 const CAM: Camera = { x: 400, y: 300, scale: 40 };
 /** The platform's top in cells: 20 ft at 5 ft a cell. */
@@ -107,3 +107,10 @@ for (const turn of TURNS) {
     assert.ok(Math.abs(area.store.getState().draft!.yaw - Math.round(want * 10) / 10) < 1e-9, JSON.stringify([area.store.getState().draft!.yaw, want]));
   });
 }
+
+test("a trap's Place the area borrows the Area tool, so it opens for the trap's draft while Areas hides (docs/design/design-v1-features.md 8, D-261127-303)", () => {
+  const asked: { id: string; opts?: { borrow?: true } }[] = [];
+  const draft = newDraft("a1", "sphere", "#ff0000");
+  aimTrapArea(new RoomScope(), { setTool: (id, opts) => void asked.push({ id, ...(opts ? { opts } : {}) }) }, "t1", draft);
+  assert.deepEqual(asked, [{ id: "area", opts: { borrow: true } }]);
+});

@@ -9,6 +9,7 @@ import { Button } from "../../../components/Button.tsx";
 import { displayName } from "../../../lib/scene.ts";
 import { scrollBox, startInScrollBox } from "../../../lib/reveal.ts";
 import { theme } from "../../../lib/theme.ts";
+import { Module } from "../../modules/Gate.tsx";
 import { useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "../../areas/coverage.ts";
@@ -421,12 +422,15 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
           ) : null}
           {/* With no target the targets line says what to do. */}
           {reason !== null && reason !== SELECT_TARGETS && !busy ? <Note>{reason}</Note> : null}
+          {/* The Area tool's own way in, hidden with Areas (docs/design/design-v1-features.md 3). */}
           {preset ? (
-            <div style={BUTTONS}>
-              <Button size="sm" onClick={placeArea}>
-                Place its area
-              </Button>
-            </div>
+            <Module id="areas">
+              <div style={BUTTONS}>
+                <Button size="sm" onClick={placeArea}>
+                  Place its area
+                </Button>
+              </div>
+            </Module>
           ) : null}
         </>
       )}

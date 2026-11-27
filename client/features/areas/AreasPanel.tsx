@@ -12,15 +12,13 @@ import { AreaSaveStart } from "./AreaSaveStart.tsx";
 import { GroupSave } from "../dice/groupSave/GroupSave.tsx";
 import { useGroupSave, useGroupSaveStore } from "../dice/groupSave/store.ts";
 import { pickTemplate } from "./AreaTool.tsx";
-import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
-import { useLiveGround } from "./liveGround.ts";
-import { namesAcross, useAreaThrough } from "./through.ts";
+import { useAreaCatch } from "./caught.ts";
+import { caughtTokens, inAreaEntries, inAreaText } from "./coverage.ts";
+import { namesAcross } from "./through.ts";
 import { areaTitle } from "./labels.ts";
 import { triggerSummary } from "./placement.ts";
-import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
-import { useLiveTokens } from "./useLiveTokens.ts";
+import { canEdit, deleteTemplate, openDamage, useAreaScope, useAreaTool } from "./store.ts";
 import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
-import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { useLabels } from "../../state/labels.ts";
 
 /**
@@ -47,32 +45,21 @@ export default function AreasPanel(props: PanelProps) {
   const scope = useRoomScope();
   const area = useAreaScope();
   const here = usePanelHere();
-  // Kept live while tokens are dragged, here or on another device.
-  const live = useLiveTokens();
+  // Kept live while tokens are dragged, here or on another device, as this viewer reads the area (caught.ts).
+  const caught = useAreaCatch();
   const damageId = useAreaTool((s) => s.damageId);
-  const scene = sceneId ? view?.scenes[sceneId] : undefined;
   const list = useMemo(() => Object.values(templates).filter((t): t is AreaTemplate => !!t && t.sceneId === sceneId), [templates, sceneId]);
   const closeDamage = useCallback(() => area.store.setState({ damageId: null }), [area]);
   const groupStore = useGroupSaveStore();
   const group = useGroupSave((s) => (s.shownIn === "areas" ? s.page : null));
-  // A player's lists read only the walls they could know, as the board draws their areas (coverage.ts heldWalls). The DM's read every wall.
-  const fog = useViewerFog({ scene, role: you?.role ?? "player", fog: scene?.fogEnabled !== false });
-  // And list only creatures whose rays lie on their live ground (coverage.ts raysLive).
-  const ground = useLiveGround(scene, you?.role ?? "player");
-  // And reach across the openings on its floor (through.ts), by the gate every device reads alike.
-  const throughOf = useAreaThrough(you?.role ?? "player");
-  const across = scene ? throughOf(scene.id) : undefined;
+  if (!view || !caught || !you) return null;
+  const { scene, ctx } = caught;
+  const across = caught.through(scene.id);
   // The rows name creatures across an opening too, which the floor's own tokens lack.
-  const named = namesAcross(live.tokens, across);
-  if (!view || !scene || !you) return null;
+  const named = namesAcross(caught.tokens, across);
 
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
   // The rows of an area's group save follow its caught creatures as they move, until the roll.
-  const areaIds = (templateId: string) => {
-    const t = templates[templateId];
-    return t ? caughtTokens(t, ctx, t.sceneId, throughOf(t.sceneId)) : [];
-  };
-  if (you.role === "dm" && group) return <GroupSave parent="Areas" onBack={() => groupStore.setState({ shownIn: null })} areaIds={areaIds} />;
+  if (you.role === "dm" && group) return <GroupSave parent="Areas" onBack={() => groupStore.setState({ shownIn: null })} areaIds={caught.caught} />;
   const damaged = damageId ? templates[damageId] : undefined;
   if (you.role === "dm" && damaged && damaged.sceneId === scene.id) return <AreaSaveStart template={damaged} onDone={closeDamage} />;
   const env = { actions, view, labels, scene, role: you.role, youId: you.memberId, area };

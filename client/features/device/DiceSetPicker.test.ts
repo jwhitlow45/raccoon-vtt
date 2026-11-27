@@ -13,7 +13,7 @@ import { createStore } from "zustand/vanilla";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { DiceSetPicker, tileStyle } = await import("./DiceSetPicker.tsx");
-const { setRollAnimation } = await import("./settings.ts");
+const { resetAllFeatures, setModuleShown } = await import("../modules/store.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { RoomProvider } = await import("../../state/view.ts");
 const { theme } = await import("../../lib/theme.ts");
@@ -31,25 +31,17 @@ function frame(style: ReturnType<typeof tileStyle>): { across: number; down: num
 }
 
 describe("the dice set picker's tiles", () => {
-  test("every tile has the same border and padding, chosen or not, with the switch on or off", () => {
-    for (const on of [true, false]) {
-      assert.deepEqual(frame(tileStyle(true, on)), frame(tileStyle(false, on)), `chosen and not differ with the switch ${on ? "on" : "off"}`);
-      assert.equal(tileStyle(true, on).padding, tileStyle(false, on).padding);
-      assert.equal(px(tileStyle(true, on).border)[0], px(tileStyle(false, on).border)[0], "the same border width");
-    }
+  test("every tile has the same border and padding, chosen or not", () => {
+    assert.deepEqual(frame(tileStyle(true)), frame(tileStyle(false)), "chosen and not differ");
+    assert.equal(tileStyle(true).padding, tileStyle(false).padding);
+    assert.equal(px(tileStyle(true).border)[0], px(tileStyle(false).border)[0], "the same border width");
   });
 
-  test("the chosen tile still reads heavier: an inset second line, in the accent while the switch is on", () => {
+  test("the chosen tile still reads heavier: an inset second line, in the accent", () => {
     assert.equal(theme.line.border + 1, theme.line.strong, "the ring's 1 px completes the strong line");
-    assert.equal(tileStyle(true, true).boxShadow, `inset 0 0 0 1px ${theme.color.accent}`);
-    assert.equal(tileStyle(false, true).boxShadow, undefined);
-    assert.equal(tileStyle(false, true).border, `${theme.line.border}px solid ${theme.color.border}`);
-  });
-
-  test("with the switch off the chosen tile keeps its mark, a dim outline with no tint, as a chosen option that cannot change now does (docs/design/design-v1-look-pass-2.md D37)", () => {
-    assert.equal(tileStyle(true, false).boxShadow, `inset 0 0 0 1px ${theme.color.textDisabled}`);
-    assert.equal(tileStyle(true, false).background, "transparent");
-    assert.equal(tileStyle(false, false).border, `${theme.line.border}px solid ${theme.color.border}`);
+    assert.equal(tileStyle(true).boxShadow, `inset 0 0 0 1px ${theme.color.accent}`);
+    assert.equal(tileStyle(false).boxShadow, undefined);
+    assert.equal(tileStyle(false).border, `${theme.line.border}px solid ${theme.color.border}`);
   });
 
   test("the die's canvas flows in its box, so the alignment check sees it", () => {
@@ -67,16 +59,15 @@ describe("the dice set picker's tiles", () => {
 });
 
 /*
- * The Dice legend stood right on its tiles, and on its help with Roll
- * animation off: a fieldset's gap never reaches a rendered legend, which
- * is no grid item (docs/design/design-v1-spacing-pass.md S2).
+ * The Dice legend stood right on its tiles: a fieldset's gap never reaches
+ * a rendered legend, which is no grid item (docs/design/design-v1-spacing-pass.md S2).
  */
 describe("the dice legend's gaps", () => {
-  /** The picker as a room draws it, with no room loaded: it reads this device's settings alone. */
-  const render = () =>
+  /** The picker as a room draws it, with no room loaded, for `role` where one is given. */
+  const render = (role: "dm" | "player" | null = null) =>
     renderToStaticMarkup(
       createElement(RoomProvider, {
-        store: createStore(() => ({ view: null, roomId: "r1", connection: "open", you: null, local: { selectedIds: [], multi: false } })) as never,
+        store: createStore(() => ({ view: null, roomId: "r1", connection: "open", you: role ? { memberId: "m1", role } : null, local: { selectedIds: [], multi: false } })) as never,
         actions: { dispatch: () => 1 } as never,
         ui: {} as never,
         assets: { url: () => "" } as never,
@@ -86,22 +77,41 @@ describe("the dice legend's gaps", () => {
   /** The style attribute of the first element some markup opens with `open`. */
   const styleOf = (markup: string, open: RegExp) => new RegExp(`${open.source}[^>]*?style="([^"]*)"`).exec(markup)?.[1] ?? null;
 
-  test("the help stands space(1) under the legend and the tiles space(2) under what stands above them, with Roll animation on and off, and the fieldset has no gap", () => {
+  test("the tiles stand space(2) under the legend, and the fieldset has no gap", () => {
+    const markup = render();
+    const fieldset = styleOf(markup, /^<fieldset/);
+    assert.ok(fieldset !== null && !/(^|;)(row-)?gap:/.test(fieldset), `the fieldset sets no gap: ${fieldset}`);
+    assert.match(markup, /^<fieldset[^>]*><legend[^>]*>Dice<\/legend><div style="display:grid;min-width:0">/, "one column under the legend");
+    assert.match(styleOf(markup, /<div data-card-group=""/) ?? "", new RegExp(`margin-top:${theme.space(2)}px`), "the tiles stand space(2) under the legend");
+  });
+});
+
+/*
+ * The picker follows this role's Dice animation (docs/design/design-v1-features.md 3,
+ * D-261127-396): marked as the part's own, and gone while the part hides,
+ * as the Roll animation switch above it turns it off.
+ */
+describe("the dice set picker and Dice animation", () => {
+  const render = (role: "dm" | "player") =>
+    renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: createStore(() => ({ view: null, roomId: "r1", connection: "open", you: { memberId: "m1", role }, local: { selectedIds: [], multi: false } })) as never,
+        actions: { dispatch: () => 1 } as never,
+        ui: {} as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(DiceSetPicker) }),
+      }),
+    );
+
+  test("shown, it draws marked as Dice animation's, and hidden for a role it draws nothing for that role", () => {
     try {
-      for (const on of [true, false]) {
-        setRollAnimation(on);
-        const markup = render();
-        const fieldset = styleOf(markup, /^<fieldset/);
-        assert.ok(fieldset !== null && !/(^|;)(row-)?gap:/.test(fieldset), `the fieldset sets no gap: ${fieldset}`);
-        assert.match(markup, /^<fieldset[^>]*><legend[^>]*>Dice<\/legend><div style="display:grid;min-width:0">/, "one column under the legend");
-        // A whole <p> tag: the d20 preview's <polygon> carries a style too.
-        const help = styleOf(markup, /<p\b/);
-        if (on) assert.equal(help, null, "no help while the switch is on");
-        else assert.match(help ?? "", new RegExp(`margin-top:${theme.space(1)}px`), "the help stands space(1) under the legend");
-        assert.match(styleOf(markup, /<div data-card-group=""/) ?? "", new RegExp(`margin-top:${theme.space(2)}px`), `the tiles stand space(2) under ${on ? "the legend" : "the help"}`);
-      }
+      resetAllFeatures();
+      assert.match(render("dm"), /^<fieldset data-part="diceAnimation"/);
+      setModuleShown("diceAnimation", "dm", false);
+      assert.equal(render("dm"), "");
+      assert.match(render("player"), /^<fieldset data-part="diceAnimation"/, "the DM's choice is not the player's");
     } finally {
-      setRollAnimation(true);
+      resetAllFeatures();
     }
   });
 });

@@ -100,15 +100,15 @@ const DISPLAY: Placement = { kind: "core", reason: "core: the table display igno
 export const SURFACES: readonly SurfaceEntry[] = [
   // DM panel
   { file: "client/features/dm/TableDisplay.tsx", sites: 12, ...DM_PANEL },
-  { file: "client/panels/DmPanel.tsx", sites: 5, ...DM_PANEL },
+  { file: "client/panels/DmPanel.tsx", sites: 6, ...DM_PANEL },
   // Scene settings
   { file: "client/features/scenes/FloorPage.tsx", sites: 11, ...SCENE_SETTINGS },
   { file: "client/features/scenes/FloorsGroup.tsx", sites: 11, ...SCENE_SETTINGS },
-  { file: "client/features/scenes/SceneSettings.tsx", sites: 61, ...SCENE_SETTINGS },
+  { file: "client/features/scenes/SceneSettings.tsx", sites: 62, ...SCENE_SETTINGS },
   { file: "client/features/scenes/SceneSoundSettings.tsx", sites: 1, ...SCENE_SETTINGS },
   { file: "client/features/weather/WeatherSettings.tsx", sites: 11, ...SCENE_SETTINGS },
   // New scene
-  { file: "client/features/scenes/NewScene.tsx", sites: 22, ...NEW_SCENE },
+  { file: "client/features/scenes/NewScene.tsx", sites: 23, ...NEW_SCENE },
   // Builder options
   { file: "client/features/builder/Options.tsx", sites: 29, ...BUILDER_OPTIONS },
   // Time, Sound, Initiative, Log, Members
@@ -127,14 +127,14 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/panels/MembersPanel.tsx", sites: 11, ...ROOM_PANELS },
   { file: "client/panels/TrackerPanel.tsx", sites: 51, ...ROOM_PANELS },
   // Characters
-  { file: "client/features/pcstats/PcStatBlock.tsx", sites: 12, ...CHARACTERS },
+  { file: "client/features/pcstats/PcStatBlock.tsx", sites: 13, ...CHARACTERS },
   { file: "client/features/pcstats/Resync.tsx", sites: 18, ...CHARACTERS },
   { file: "client/features/tokens/CharacterCard.tsx", sites: 32, ...CHARACTERS },
   { file: "client/features/tokens/CharactersPanel.tsx", sites: 28, ...CHARACTERS },
-  { file: "client/features/tokens/CompanionsSection.tsx", sites: 28, ...CHARACTERS },
+  { file: "client/features/tokens/CompanionsSection.tsx", sites: 30, ...CHARACTERS },
   { file: "client/features/tokens/RestSection.tsx", sites: 5, ...CHARACTERS },
   // Token panel
-  { file: "client/features/combat/UsesSection.tsx", sites: 6, ...TOKEN_PANEL },
+  { file: "client/features/combat/UsesSection.tsx", sites: 7, ...TOKEN_PANEL },
   { file: "client/features/tokens/CompanionBlocks.tsx", sites: 18, ...TOKEN_PANEL },
   { file: "client/panels/TokenPanel.tsx", sites: 73, ...TOKEN_PANEL },
   // Action bar Uses
@@ -146,7 +146,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/pcstats/PcStatsEditor.tsx", sites: 97, ...DIALOGS },
   { file: "client/features/resources/ResourceSheet.tsx", sites: 19, ...DIALOGS },
   // Dice
-  { file: "client/features/dice/DicePanel.tsx", sites: 6, ...DICE },
+  { file: "client/features/dice/DicePanel.tsx", sites: 8, ...DICE },
   { file: "client/features/dice/RollOptions.tsx", sites: 62, ...DICE },
   { file: "client/features/dice/cast/CastBlock.tsx", sites: 16, ...DICE },
   { file: "client/features/dice/groupSave/GroupSave.tsx", sites: 64, ...DICE },
@@ -235,11 +235,11 @@ export const SURFACES: readonly SurfaceEntry[] = [
   // ft-2: the Outliner panel
   { file: "client/features/outliner/OutlinerPanel.tsx", sites: 7, ...OUTLINER },
   // Runtime gates that draw no control of their own (check 6, D-261127-422).
-  { file: "client/features/pings/PingController.ts", sites: 0, kind: "runtime", test: "PingController test and ft-3: hold to ping sends no ping while Ping hides (D-261127-392)", covers: ["ping"] },
-  { file: "client/features/sound/engine/SoundHost.tsx", sites: 0, kind: "runtime", test: "SoundHost test: hidden Sound plays nothing here and the playing page yields", covers: ["sound"] },
-  { file: "client/features/sound/engine/useSoundAsk.ts", sites: 0, kind: "runtime", test: "sound/engine/ask.test.ts: hidden Sound never asks to play here", covers: ["sound"] },
+  { file: "client/features/pings/PingController.ts", sites: 0, kind: "runtime", test: "pings/PingController.test.ts and ft-3: hold to ping sends no ping while Ping hides (D-261127-392)", covers: ["ping"] },
+  { file: "client/features/sound/engine/SoundHost.tsx", sites: 0, kind: "runtime", test: "sound/engine/SoundHost.test.ts: hidden Sound plays nothing here and the playing page yields", covers: ["sound"] },
+  { file: "client/features/sound/engine/useSoundAsk.ts", sites: 0, kind: "runtime", test: "sound/engine/SoundHost.test.ts: hidden Sound never asks to play here", covers: ["sound"] },
   { file: "client/features/clock/useClockToasts.ts", sites: 0, kind: "runtime", test: "useClockToasts.test.ts: hidden Date and time shows no clock toast", covers: ["time"] },
-  { file: "client/features/dice/throw/useThrows.ts", sites: 0, kind: "runtime", test: "the throw test and ft-3: a throw in the air ends as Dice animation hides", covers: ["diceAnimation"] },
+  { file: "client/features/dice/throw/useThrows.ts", sites: 0, kind: "runtime", test: "dice/throw/useThrows.test.ts with throw/store.test.ts, and ft-3: a throw in the air ends as Dice animation hides", covers: ["diceAnimation"] },
   { file: "client/features/dice/throw/hooks.ts", sites: 0, kind: "runtime", test: "ft-3: hidden Dice animation loads no dice chunk and throws nothing", covers: ["diceAnimation"] },
   { file: "client/features/view/store.ts", sites: 0, kind: "runtime", test: "view/store.test.ts: hidden Isometric view draws Top-down and keeps the stored view", covers: ["isometric"] },
   { file: "client/features/weather/store.ts", sites: 0, kind: "runtime", test: "weather/store.test.ts: hidden Weather draws Off", covers: ["weather"] },
@@ -631,6 +631,7 @@ export const PRIMITIVES: readonly string[] = [
   "client/features/device/ThisDevice.tsx#ThisDevice",
   "client/features/dice/AbilityMenu.tsx#AbilityMenu",
   "client/features/dice/ApplyTo.tsx#ApplyTo",
+  "client/features/dice/DicePanel.tsx#AreaGroupSave",
   "client/features/dice/DicePanel.tsx#DicePanel",
   "client/features/dice/RecentRolls.tsx#AgainButton",
   "client/features/dice/RecentRolls.tsx#RecentRolls",

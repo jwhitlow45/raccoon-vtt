@@ -16,6 +16,9 @@ import { useReceipts } from "../useReceipt.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
 import { pageFloors } from "../../areas/through.ts";
+import { claimShown } from "../../modules/gate.ts";
+import type { Role } from "../../modules/registry.ts";
+import type { FeatureChoices } from "../../modules/store.ts";
 
 /**
  * Reads the tab's draft back once after a reload (5.10). The DM's alerts
@@ -55,6 +58,19 @@ export function useRestoreGroupSave(): void {
  */
 export function sentAny(page: Pick<Page, "rolls" | "requests" | "damage">): boolean {
   return page.rolls.length > 0 || page.requests.length > 0 || (page.damage !== null && !page.damage.imported);
+}
+
+/**
+ * The panel a group save shows in: an area's in Areas, which holds the
+ * area, and every other in Dice. While Areas hides on this device an area's
+ * shows in Dice too, its rows still the area's caught creatures
+ * (docs/design/design-v1-features.md 4 and 8, D-261127-305). A start reads
+ * this device's choices as it starts, as the room store's setTool and
+ * openPanel do.
+ */
+export function groupSavePanel(source: Source, role: Role | null, choices?: FeatureChoices): "dice" | "areas" {
+  if (source.kind !== "area") return "dice";
+  return role === null || claimShown("panel", "areas", role, choices) ? "areas" : "dice";
 }
 
 /** Whether a page holds anything a start would throw away: rolls or requests sent and not yet applied. */
@@ -133,7 +149,8 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
   const actions = useRoomActions();
   const scope = useRoomScope();
   return useMemo(
-    () => (input: StartInput, opts: { replace?: boolean } = {}) => {
+    () => (asked: StartInput, opts: { replace?: boolean } = {}) => {
+      const input: StartInput = asked.panel === "areas" ? { ...asked, panel: groupSavePanel(asked.source, room.getState().you?.role ?? null) } : asked;
       restoreDraft(store, roomId);
       const old = store.getState().page;
       if (!opts.replace && holdsRolls(old)) return false;

@@ -16,6 +16,7 @@ import { usePreview } from "../dm/previewContext.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
 import { ReactionSection, reactionFor } from "../encounter/ReactionSection.tsx";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
+import { useModule } from "../modules/Gate.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { BlockHeaderHost } from "../dice/BlockHeader.tsx";
 import { useBlockRoller } from "../monsters/AbilityGrid.tsx";
@@ -89,6 +90,8 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
   const reaction = useRoomView((s) => (s.view ? reactionFor(s.view, s.you, self) !== null : false));
   const spent = useRoomView((s) => (s.view ? reactionSpent(s.view, self) : false));
   const placeMine = useRoomView((s) => (s.view ? playersPlace(s.view) : false));
+  // Hidden class resources leave the rest's words, as their rows leave Uses (docs/design/design-v1-features.md 3).
+  const resourcesShown = useModule("classResources");
   const { folds, slot } = usePanelFolds();
   const preview = usePreview() !== null;
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
@@ -147,7 +150,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
       case "reaction":
         return <ReactionSection key={id} self={{ characterId: character.id }} name={character.name} />;
       case "rest":
-        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} character={character} search={{ short: "character.rest.short", long: "character.rest.long", hitDice: "character.hit-dice" }} />;
+        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={resourcesShown ? character.resources : undefined} character={character} search={{ short: "character.rest.short", long: "character.rest.long", hitDice: "character.hit-dice" }} />;
     }
   };
 

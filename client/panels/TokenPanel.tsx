@@ -11,6 +11,7 @@ import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach, type At
 import { attachControls } from "../features/attach/detach.ts";
 import { SteerControl, usePanelLinkTags } from "../features/attach/SteerControl.tsx";
 import { useUsesPresence } from "../features/combat/CombatUses.tsx";
+import { useModule } from "../features/modules/Gate.tsx";
 import { UsesSection } from "../features/combat/UsesSection.tsx";
 import { ReactionSection, reactionFor } from "../features/encounter/ReactionSection.tsx";
 import { Button } from "../components/Button.tsx";
@@ -160,6 +161,8 @@ function TokenDetails(props: PanelProps) {
   const labels = useLabels();
   // Its uses, for the DM on any creature with one and for owners on theirs, as the bar's Uses button reads them.
   const usesPresence = useUsesPresence(access?.full ? self : null);
+  // Hidden class resources leave the rest's words, as their rows leave Uses (docs/design/design-v1-features.md 3).
+  const resourcesShown = useModule("classResources");
   // Each a yes or no, so the panel draws again only when one changes, not on every change to the room.
   const reaction = useRoomView((s) => (self && s.view ? reactionFor(s.view, s.you, self) !== null : false));
   const spent = useRoomView((s) => (self && s.view ? reactionSpent(s.view, self) : false));
@@ -233,7 +236,7 @@ function TokenDetails(props: PanelProps) {
           />
         );
       case "rest":
-        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={character?.resources} character={classResources ? character : undefined} />;
+        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={resourcesShown ? character?.resources : undefined} character={classResources ? character : undefined} />;
       case "sight":
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":

@@ -11,6 +11,7 @@ import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
+import { Module } from "../modules/Gate.tsx";
 import { useRoomActions, useRoomUi } from "../../state/view.ts";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import { ConfirmButton } from "../tokens/ui.tsx";
@@ -150,85 +151,88 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
     setError(null);
   };
 
+  // The part's own sheet, drawn only while Class resources shows here, wherever it is opened from (docs/design/design-v1-features.md 3).
   return (
-    <SheetDialog
-      title={title}
-      onClose={props.onClose}
-      opener={props.opener}
-      width={theme.layout.dialog.md}
-      statusGrow
-      status={
-        error ? (
-          <span role="alert" style={{ color: theme.color.dangerText }}>
-            {error}
-          </span>
-        ) : null
-      }
-      footer={
-        <>
-          <Button onClick={props.onClose} style={{ flex: "1 1 auto" }}>
-            Cancel
-          </Button>
-          <Button variant="primary" type="submit" form={formId} busy={sending} style={{ flex: "1 1 auto" }}>
-            {sending ? "Saving…" : mainLabel}
-          </Button>
-        </>
-      }
-    >
-      <UnsavedInput unsaved={unsaved} />
-      <form
-        id={formId}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-        onKeyDown={(e) => {
-          // Enter saves from a text field alone: on a checkbox or a radio a browser would send the form too.
-          const target = e.target as HTMLElement;
-          if (e.key === "Enter" && target instanceof HTMLInputElement && (target.type === "radio" || target.type === "checkbox")) e.preventDefault();
-        }}
+    <Module id="classResources">
+      <SheetDialog
+        title={title}
+        onClose={props.onClose}
+        opener={props.opener}
+        width={theme.layout.dialog.md}
+        statusGrow
+        status={
+          error ? (
+            <span role="alert" style={{ color: theme.color.dangerText }}>
+              {error}
+            </span>
+          ) : null
+        }
+        footer={
+          <>
+            <Button onClick={props.onClose} style={{ flex: "1 1 auto" }}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form={formId} busy={sending} style={{ flex: "1 1 auto" }}>
+              {sending ? "Saving…" : mainLabel}
+            </Button>
+          </>
+        }
       >
-        <Held held={sending}>
-          <div style={{ display: "grid", gap: theme.space(4) }}>
-            {mode.kind === "add" ? <Segmented<Tab> label="Add from" value={tab} options={TABS} onChange={change(setTab)} grow /> : null}
-            {mode.kind === "edit" ? (
-              editing ? (
-                <OwnFields draft={own} onChange={change(setOwn)} />
+        <UnsavedInput unsaved={unsaved} />
+        <form
+          id={formId}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          onKeyDown={(e) => {
+            // Enter saves from a text field alone: on a checkbox or a radio a browser would send the form too.
+            const target = e.target as HTMLElement;
+            if (e.key === "Enter" && target instanceof HTMLInputElement && (target.type === "radio" || target.type === "checkbox")) e.preventDefault();
+          }}
+        >
+          <Held held={sending}>
+            <div style={{ display: "grid", gap: theme.space(4) }}>
+              {mode.kind === "add" ? <Segmented<Tab> label="Add from" value={tab} options={TABS} onChange={change(setTab)} grow /> : null}
+              {mode.kind === "edit" ? (
+                editing ? (
+                  <OwnFields draft={own} onChange={change(setOwn)} />
+                ) : (
+                  <Help>It was removed meanwhile.</Help>
+                )
+              ) : mode.kind === "add" && tab === "own" ? (
+                <>
+                  <OwnFields draft={own} onChange={change(setOwn)} />
+                  <Help>For Superiority Dice, a species trait, a feat or anything else counted.</Help>
+                </>
               ) : (
-                <Help>It was removed meanwhile.</Help>
-              )
-            ) : mode.kind === "add" && tab === "own" ? (
-              <>
-                <OwnFields draft={own} onChange={change(setOwn)} />
-                <Help>For Superiority Dice, a species trait, a feat or anything else counted.</Help>
-              </>
-            ) : (
-              <ClassFields
-                draft={draft}
-                mode={pickMode}
-                rows={rows}
-                characterLevel={character.level}
-                modText={modText}
-                onModText={change(setModText)}
-                onClass={(classId) => change(setPick)(pickClass(pick, classId, resources, character.level, character.classes))}
-                onLevel={(level) => change(setPick)(pickLevel(pick, level, resources))}
-                onTick={(id, on) => change(setPick)(tick(pick, id, on))}
-                upFrom={mode.kind === "update" ? mode.up.classLevel : undefined}
-              />
-            )}
-            {mode.kind === "edit" && editing ? (
-              <Section label="Remove" divider={false}>
-                <div>
-                  <ConfirmButton confirm="Tap again to remove" wrap onConfirm={() => sendOutcome(removeOutcome(resources, editing.id))}>
-                    {`Remove ${editing.name}`}
-                  </ConfirmButton>
-                </div>
-              </Section>
-            ) : null}
-          </div>
-        </Held>
-      </form>
-    </SheetDialog>
+                <ClassFields
+                  draft={draft}
+                  mode={pickMode}
+                  rows={rows}
+                  characterLevel={character.level}
+                  modText={modText}
+                  onModText={change(setModText)}
+                  onClass={(classId) => change(setPick)(pickClass(pick, classId, resources, character.level, character.classes))}
+                  onLevel={(level) => change(setPick)(pickLevel(pick, level, resources))}
+                  onTick={(id, on) => change(setPick)(tick(pick, id, on))}
+                  upFrom={mode.kind === "update" ? mode.up.classLevel : undefined}
+                />
+              )}
+              {mode.kind === "edit" && editing ? (
+                <Section label="Remove" divider={false}>
+                  <div>
+                    <ConfirmButton confirm="Tap again to remove" wrap onConfirm={() => sendOutcome(removeOutcome(resources, editing.id))}>
+                      {`Remove ${editing.name}`}
+                    </ConfirmButton>
+                  </div>
+                </Section>
+              ) : null}
+            </div>
+          </Held>
+        </form>
+      </SheetDialog>
+    </Module>
   );
 }
 

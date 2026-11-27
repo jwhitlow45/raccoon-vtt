@@ -154,6 +154,10 @@ export class WeatherRoom {
   #frame: number | null = null;
   #version = -1;
   #lookChanged = false;
+  /** This device's own setting, kept while Weather hides so showing it again puts it back. */
+  #setting: ModeInput["setting"] = IDLE.setting;
+  /** Weather shows on this page (WeatherRoom.show). */
+  #partShown = true;
 
   constructor(frames: Frames = BROWSER_FRAMES, now: () => number = () => performance.now(), afterFrame?: AfterFrame, board: BoardWork = BROWSER_BOARD) {
     this.#frames = frames;
@@ -168,7 +172,21 @@ export class WeatherRoom {
 
   /** What decides the mode changed: the setting, the scene, the page, a tool, a panel. */
   input(patch: Partial<ModeInput>): void {
-    this.mode.update(patch, this.#now());
+    if (patch.setting !== undefined) this.#setting = patch.setting;
+    this.mode.update(this.#partShown ? patch : { ...patch, setting: "off" }, this.#now());
+    this.#settle();
+  }
+
+  /**
+   * Whether Weather shows on this page (docs/design/design-v1-features.md 8,
+   * D-261127-122): hidden, it draws Off whatever this device's setting is,
+   * as the setting's own Off does, and shown again it takes the setting
+   * back. Rolls still follow the weather, which is the scene's, not this.
+   */
+  show(shown: boolean): void {
+    if (shown === this.#partShown) return;
+    this.#partShown = shown;
+    this.mode.update({ setting: shown ? this.#setting : "off" }, this.#now());
     this.#settle();
   }
 

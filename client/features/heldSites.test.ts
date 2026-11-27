@@ -235,32 +235,3 @@ function tagLabelOf(markup: string, pattern: RegExp): string {
   assert.ok(label, `a control matching ${pattern}`);
   return label;
 }
-
-describe("the dice set picker, with Roll animation off, is a held group", () => {
-  async function drawPicker(): Promise<string> {
-    const { DiceSetPicker } = await import("./device/DiceSetPicker.tsx");
-    return renderToStaticMarkup(inRoom(createElement(DiceSetPicker)));
-  }
-
-  test("off, the fieldset is held, the legend and the chosen tile draw off, and on they act", async () => {
-    const { setRollAnimation } = await import("./device/settings.ts");
-    try {
-      setRollAnimation(false);
-      const off = await drawPicker();
-      // Held rather than a bare fieldset, so a shared control added to the picker later reads the group too.
-      const { DiceSetPicker } = await import("./device/DiceSetPicker.tsx");
-      assert.equal(heldIn(drawn(DiceSetPicker as never, {} as never, inRoom))?.props.held, true);
-      assert.match(off, /^<fieldset disabled=""/);
-      assert.match(off, new RegExp(`<legend[^>]*color:${tokenPattern(theme.color.textDisabled)}`, "i"));
-      // The radios are native, so the fieldset stops them. The tiles keep their own look inside it (tileStyle).
-      assert.match(off, new RegExp(`<label[^>]*box-shadow:inset 0 0 0 1px ${tokenPattern(theme.color.textDisabled)}`, "i"));
-      setRollAnimation(true);
-      const on = await drawPicker();
-      assert.doesNotMatch(on, /^<fieldset disabled=""/);
-      assert.equal(heldIn(drawn(DiceSetPicker as never, {} as never, inRoom))?.props.held, false);
-      assert.doesNotMatch(on, new RegExp(`<legend[^>]*color:${tokenPattern(theme.color.textDisabled)}`, "i"));
-    } finally {
-      setRollAnimation(true);
-    }
-  });
-});

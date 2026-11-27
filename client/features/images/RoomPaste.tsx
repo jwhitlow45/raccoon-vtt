@@ -8,6 +8,8 @@ import { Help } from "../../components/Panel.tsx";
 import { dmPanelFoldsSlot, scenesFoldsSlot } from "../../lib/folds.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { builderSlot } from "../builder/store.ts";
@@ -127,6 +129,8 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
     setFailed(false);
     return () => URL.revokeObjectURL(made);
   }, [file]);
+  // Stamp opens the builder, so it goes with Map builder hidden on this device (docs/design/design-v1-features.md 3).
+  const builderShown = useModule("builder");
   const rows = roomPasteRows({
     role: "dm",
     sceneCount,
@@ -134,7 +138,7 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
     onScene,
     stampMode: tool === "build" && builderMode === "stamp",
     busy,
-  });
+  }).filter((row) => row.id !== "stamp" || builderShown);
 
   const choose = (id: RoomPasteRowId) => {
     if (id === "token") {
@@ -201,7 +205,7 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
         {/* Card rows, each named by its title and described by its line, as a list of actions in a sheet is (docs/design/design-v1-look-pass-2.md 2.5). */}
         <div role="group" aria-label="Use it for" style={{ display: "grid", gap: theme.space(1) }}>
           {rows.map((row) => (
-            <Row key={row.id} title={row.label} detail={row.help} fullDetail disabled={row.disabled} onClick={() => choose(row.id)} />
+            <Row key={row.id} title={row.label} detail={row.help} fullDetail disabled={row.disabled} onClick={() => choose(row.id)} {...(row.id === "stamp" ? { data: partMark("builder") } : null)} />
           ))}
         </div>
       </div>

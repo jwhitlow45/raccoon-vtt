@@ -7,6 +7,7 @@ import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { marksTime } from "../attach/tags.ts";
 import { entryName, ownsEntry, playerOwnedEntry } from "../encounter/logic.ts";
 import { rechargeRange } from "../encounter/saveCards.ts";
+import type { ModuleId } from "../modules/registry.ts";
 import type { Labels } from "../../lib/labels.ts";
 
 /*
@@ -18,6 +19,9 @@ import type { Labels } from "../../lib/labels.ts";
  */
 
 type View = Pick<RoomState, "tokens" | "characters" | "encounter">;
+
+/** No part hidden: what a caller passes that draws no device's choices, such as a test. */
+const NONE_HIDDEN: ReadonlySet<ModuleId> = new Set();
 type Turn = Pick<Encounter, "activeEntryId" | "round"> | null | undefined;
 
 /** A creature's turn record while its row acts in its round, else null: an older record only ever says that turn is over (2.3). */
@@ -470,10 +474,13 @@ function legendaryOff(action: LegendaryUse, at: { ownTurn: boolean; left: number
  * on or read a count from, each class resource, and a character's spell
  * slots as 1 and its Pact Magic as 1 (`slots`, slots/logic.ts slotCount,
  * docs/design/design-v1-slots.md 3.2), so a caster with nothing else still
- * gets its turn card.
+ * gets its turn card. Class resources hidden on this device count none, so
+ * they never admit a turn card or open a Uses of nothing
+ * (docs/design/design-v1-features.md 3, D-261127-394).
  */
-export function usesCount(rows: readonly UseRow[], resources: readonly ClassResource[] | undefined, slots = 0): number {
-  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + (resources?.length ?? 0) + slots;
+export function usesCount(rows: readonly UseRow[], resources: readonly ClassResource[] | undefined, slots = 0, hidden: ReadonlySet<ModuleId> = NONE_HIDDEN): number {
+  const counted = hidden.has("classResources") ? 0 : (resources?.length ?? 0);
+  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + counted + slots;
 }
 
 // ------------------------------------------------------------ the rows' words
@@ -657,7 +664,8 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
  * is its skipped death save shows Uses while its turn lasts. Before its
  * block is read, spent uses show at once, with the list's loading line
  * where their rows will stand, and a creature with nothing yet is held
- * while its block loads.
+ * while its block loads. Class resources hidden on this device (`hidden`)
+ * count for nothing here (docs/design/design-v1-features.md 3, D-261127-394).
  */
 export function usesPresence(input: {
   actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined;
@@ -667,8 +675,9 @@ export function usesPresence(input: {
   uses: readonly LimitedUse[] | null;
   loading: boolean;
   record: TurnRecord | null;
+  hidden?: ReadonlySet<ModuleId>;
 }): "yes" | "loading" | "no" {
-  if ((input.resources?.length ?? 0) > 0 || (input.slots ?? 0) > 0) return "yes";
+  if ((!input.hidden?.has("classResources") && (input.resources?.length ?? 0) > 0) || (input.slots ?? 0) > 0) return "yes";
   if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: input.record }).length > 0) return "yes";
   if (input.uses !== null) return "no";
   if (Object.keys(input.actor?.uses ?? {}).length > 0) return "yes";

@@ -10,6 +10,7 @@ import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { Choices } from "../dungeon/Choices.tsx";
+import { useModule } from "../modules/Gate.tsx";
 import { PaneFailedFrame, PaneLoadingFrame } from "./PaneFrames.tsx";
 import { builderSlot } from "./store.ts";
 import { wingPlace } from "./wingPanePlacement.ts";
@@ -20,7 +21,9 @@ const WingPane = retryableLazy(() => import("./WingPane.tsx"), { roles: ["dm"] }
  * Where the canvas mounts the wing pane (WingPane.tsx), for the DM, beside
  * the label and stairs panes (LabelPaneHost.tsx). The pane loads only for
  * a DM. It closes on its own once it no longer applies: the tool or mode
- * moved on, or the area or join it opened for is gone, on this scene.
+ * moved on, the area or join it opened for is gone, on this scene, or the
+ * Dungeon generator hides on this device, which takes its ghost and room
+ * edits with it (docs/design/design-v1-features.md 8).
  */
 export function WingPaneHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const { store } = useScoped(builderSlot);
@@ -28,9 +31,10 @@ export function WingPaneHost(props: { scene: Scene; tool: string; chrome: Chrome
   const mode = useStore(store, (b) => b.mode);
   const picks = useStore(store, (b) => b.wing);
   const role = useRoomView((s) => s.you?.role ?? "player");
+  const dungeonShown = useModule("dungeon");
   const area = picks?.sceneId === props.scene.id ? picks.area : null;
   const join = picks?.sceneId === props.scene.id ? picks.join : null;
-  const open = wingOpen && props.tool === "build" && mode === "wing" && role === "dm" && area !== null && join !== null;
+  const open = wingOpen && props.tool === "build" && mode === "wing" && role === "dm" && dungeonShown && area !== null && join !== null;
   const lane = useAlertsLane(props.viewport);
   useEffect(() => {
     if (wingOpen && !open) store.setState({ wingOpen: false, wingGhost: null, wingEdit: false, wingRoom: null });

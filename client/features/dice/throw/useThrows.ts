@@ -4,9 +4,10 @@ import { scopeSlot, useScoped } from "../../../state/scope.ts";
 import { realClock } from "../../../state/timing.ts";
 import { usePreview } from "../../dm/previewContext.ts";
 import { usePanelShown } from "../../panels.ts";
-import { diceSetId, lowPower, rollAnimation, subscribeDiceSet, subscribeLowPower, subscribeRollAnimation } from "../../device/settings.ts";
+import { diceSetId, lowPower, subscribeDiceSet, subscribeLowPower } from "../../device/settings.ts";
+import { useModule } from "../../modules/Gate.tsx";
 import { useReceipts, type ReceiptTracker } from "../useReceipt.ts";
-import { diceLoader, throwHooksSlot, type ThrowHooks } from "./hooks.ts";
+import { diceAnimationHere, diceLoader, throwHooksSlot, type ThrowHooks } from "./hooks.ts";
 import type { DieKind } from "./layout.ts";
 import { ThrowStore, type PaneSize, type ThrowHost, type ThrowSurface, type ThrowView } from "./store.ts";
 
@@ -41,8 +42,8 @@ export const throwsSlot = scopeSlot<Bound>(
   },
 );
 
-/** Binds a Room's store to the page, once, and again after React's development double mount disposed it. */
-function bind(bound: Bound, tracker: ReceiptTracker, preview: boolean, hooks: { current: ThrowHooks | null }): void {
+/** Binds a Room's store to the page, once, and again after React's development double mount disposed it. `on` is this role's Dice animation as it binds. */
+function bind(bound: Bound, tracker: ReceiptTracker, preview: boolean, hooks: { current: ThrowHooks | null }, on: boolean): void {
   const { store } = bound;
   if (store.bound) return;
   hooks.current = { register: (tag, origin) => store.register(tag, origin), origin: () => store.origin() };
@@ -50,9 +51,8 @@ function bind(bound: Bound, tracker: ReceiptTracker, preview: boolean, hooks: { 
     hooks.current = null;
   });
   store.bind({ clock: realClock, idle, tracker, loader: diceLoader, hidden: pageHidden });
-  store.setInputs({ on: rollAnimation(), lowPower: lowPower(), reducedMotion: reducedMotion(), preview, set: diceSetId() });
+  store.setInputs({ on, lowPower: lowPower(), reducedMotion: reducedMotion(), preview, set: diceSetId() });
   bound.stop.push(subscribeLowPower(() => store.setInputs({ lowPower: lowPower() })));
-  bound.stop.push(subscribeRollAnimation(() => store.setInputs({ on: rollAnimation() })));
   bound.stop.push(subscribeDiceSet(() => store.setInputs({ set: diceSetId() })));
   if (typeof document !== "undefined") {
     const onVisibility = () => store.visibility(pageHidden());
@@ -67,13 +67,28 @@ function bind(bound: Bound, tracker: ReceiptTracker, preview: boolean, hooks: { 
   }
 }
 
+/**
+ * A change of this role's Dice animation, here or from another window
+ * (docs/design/design-v1-features.md 8, D-261127-310): hidden, a throw in
+ * the air ends and the renderer goes (throw/store.ts setInputs), and shown
+ * again the next roll throws, with no reload. The loader learns it too, so
+ * a chunk not yet loaded waits. A "view as a player" preview shows every
+ * part and never throws, so it tells the loader nothing.
+ */
+export function followDiceAnimation(store: Pick<ThrowStore, "setInputs">, on: boolean, preview: boolean): void {
+  store.setInputs({ on });
+  if (!preview) diceAnimationHere(on);
+}
+
 /** This Room's throw store. */
 export function useThrows(): ThrowStore {
   const bound = useScoped(throwsSlot);
   const hooks = useScoped(throwHooksSlot);
   const tracker = useReceipts();
   const preview = usePreview() !== null;
-  bind(bound, tracker, preview, hooks);
+  const on = useModule("diceAnimation");
+  bind(bound, tracker, preview, hooks, on);
+  useEffect(() => followDiceAnimation(bound.store, on, preview), [bound, on, preview]);
   return bound.store;
 }
 

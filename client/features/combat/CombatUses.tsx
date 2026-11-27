@@ -16,6 +16,8 @@ import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { hiddenModules } from "../modules/gate.ts";
+import { useFeaturesHere, useModule } from "../modules/Gate.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { ClassResourceRows } from "../resources/ResourceRows.tsx";
 import { slotCount, slotsListLabel } from "../slots/logic.ts";
@@ -90,7 +92,9 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
   const encounter = useRoomView((s) => s.view?.encounter);
   const characterId = useRoomView((s) => (s.view ? characterIdOf(s.view, target) : undefined));
   const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
-  const resourceCount = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
+  const storedResources = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
+  // Hidden class resources count for nothing, so a list of only them draws nothing (D-261127-394).
+  const resourceCount = useModule("classResources") ? storedResources : 0;
   const slotRows = useRoomView((s) => (characterId !== undefined ? slotCount(s.view?.characters[characterId]?.classes) : 0));
   const record = currentRecord(encounter, actor);
   const turnWait = useTurnWait();
@@ -200,8 +204,10 @@ export function useUsesPresence(target: ActorTarget | null): "yes" | "loading" |
     return id !== undefined ? slotCount(s.view?.characters[id]?.classes) : 0;
   });
   const read = useCreatureUses(target);
+  const here = useFeaturesHere();
   if (!target) return "no";
-  return usesPresence({ actor, resources, slots, uses: read.uses, loading: read.loading, record: currentRecord(encounter, actor) });
+  // With no role known the choices are Everything, which hides nothing.
+  return usesPresence({ actor, resources, slots, uses: read.uses, loading: read.loading, record: currentRecord(encounter, actor), hidden: hiddenModules(here.role ?? "dm", here.choices) });
 }
 
 function rowKey(row: UseRow): string {

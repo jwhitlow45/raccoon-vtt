@@ -7,6 +7,9 @@ import { useRoomView } from "../../state/view.ts";
 import { creatureRolls } from "../dice/creature.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { entryName, playerOwnedEntry } from "../encounter/logic.ts";
+import { hiddenModules } from "../modules/gate.ts";
+import { useFeaturesHere } from "../modules/Gate.tsx";
+import type { ModuleId } from "../modules/registry.ts";
 import {
   actorOf,
   answersFor,
@@ -87,6 +90,9 @@ export function useCombatAlerts(): CombatAlerts {
   const view = useRoomView((s) => s.view);
   const you = useRoomView((s) => s.you);
   const local = useDismissed();
+  const here = useFeaturesHere();
+  // With no role known the choices are Everything, which hides nothing.
+  const hidden = hiddenModules(here.role ?? "dm", here.choices);
   const all = useMemo(() => (view ? turnParticipants(view, labels) : []), [view, labels]);
   // The DM also gets a player's character's death save card (4.1), so the DM reads every creature of the turn.
   const shown = useMemo(() => (view && you ? all.filter((p) => answersFor(view, you, p.target) || (you.role === "dm" && p.record?.life === "dying")) : []), [view, you, all]);
@@ -105,6 +111,7 @@ export function useCombatAlerts(): CombatAlerts {
     attacks: attacks.map((named) => (named ? cardAttacks(named).length : null)),
     ...cardLoad(read, rolls),
     dismissed: local.dismissed,
+    hidden,
   });
 }
 
@@ -143,6 +150,8 @@ export function combatAlerts(input: {
   usesLoad?: Load;
   rollsFailed?: boolean;
   dismissed: ReadonlySet<string>;
+  /** The parts hidden on this device, whose uses neither count nor admit a card (docs/design/design-v1-features.md 3). Left out, none. */
+  hidden?: ReadonlySet<ModuleId>;
 }): CombatAlerts {
   const { view, you, dismissed } = input;
   const out: CombatAlerts = { regenerations: [], deathSaves: [], recharges: [], turn: null, revives: healRevivesDead(view.meta.settings) };
@@ -170,7 +179,7 @@ export function combatAlerts(input: {
     const rows = usesRows({ form: "card", uses, actor, ownTurn: true, record: p.record });
     const characterId = characterIdOf(view, p.target);
     const character = characterId !== undefined ? view.characters[characterId] : undefined;
-    const count = usesCount(rows, character?.resources, slotCount(character?.classes));
+    const count = usesCount(rows, character?.resources, slotCount(character?.classes), input.hidden);
     const skipped = rows.some((r) => r.kind === "skipped");
     const attacks = input.attacks?.[i] ?? 0;
     // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands. One whose table failed keeps it with the failure and its reload.

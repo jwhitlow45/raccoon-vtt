@@ -12,6 +12,8 @@ import { Notice } from "../../components/Notice.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { dateHeading } from "../clock/ties.ts";
 import { ConfirmButton } from "../tokens/ui.tsx";
@@ -43,6 +45,8 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
   const ui = useRoomUi();
   const store = useRoomStore();
   const clocked = useRoomView((s) => !!s.view?.clock);
+  // Add the date reads the clock, so it goes with Date and time hidden on this device (docs/design/design-v1-features.md 3).
+  const dateShown = useModule("time");
   const members = useRoomView((s) => s.view?.members ?? EMPTY_MEMBERS);
   const initial = useMemo(() => (props.page ? draftOf(props.page) : emptyDraft()), [props.page]);
   // The draft locks while a save is pending (pendingSave.ts), so nothing typed then is lost when the acknowledgment closes the editor.
@@ -281,12 +285,13 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
               <Button size="sm" icon="plus" disabled={full} onClick={() => setDraft((d) => ({ ...d, blocks: [...d.blocks, { id: newBlockId(), text: "", secret: true }] }))}>
                 Add a secret
               </Button>
-              {clocked ? (
+              {clocked && dateShown ? (
                 // Read when pressed, so the editor does not redraw at every clock change. The date is the clock's at this moment, as the Log would write it.
                 <Button
                   size="sm"
                   icon="plus"
                   disabled={full}
+                  {...partMark("time")}
                   onClick={() => {
                     const view = store.getState().view;
                     if (!view?.clock) return;

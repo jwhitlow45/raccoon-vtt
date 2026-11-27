@@ -14,7 +14,9 @@ import { RollOptions, useOptionsEndOnGroup } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
 import { useDicePanel } from "./useDicePanel.ts";
 import { GroupSave, OpenGroupSave } from "./groupSave/GroupSave.tsx";
-import { useRestoreGroupSave } from "./groupSave/start.ts";
+import { groupSavePanel, useRestoreGroupSave } from "./groupSave/start.ts";
+import { useAreaCatch } from "../areas/caught.ts";
+import { useFeaturesHere } from "../modules/Gate.tsx";
 import { useGroupSave, useGroupSaveStore } from "./groupSave/store.ts";
 import { recentRolls } from "./logic.ts";
 import { kindsIn } from "./throw/layout.ts";
@@ -66,6 +68,18 @@ function revealUnderLine(row: HTMLElement, line: HTMLElement | null): void {
 }
 
 /**
+ * An area's group save shown in Dice, as it is while Areas hides on this
+ * device (docs/design/design-v1-features.md 4 and 8, D-261127-305): its
+ * rows still follow the area's caught creatures until the roll, as in the
+ * Areas panel. Apart from the panel, so only a page that needs the live
+ * tokens draws again as they move.
+ */
+function AreaGroupSave(props: { onBack(): void }) {
+  const caught = useAreaCatch();
+  return <GroupSave parent="Dice" onBack={props.onBack} {...(caught ? { areaIds: caught.caught } : {})} />;
+}
+
+/**
  * The Dice panel (docs/design/design-v1-dice.md 8), for everyone: the newest
  * panel roll stuck at the top, the formula field with its quick dice and
  * one-roll choices, a creature's roll options, then Recent rolls. Every
@@ -86,6 +100,7 @@ export default function DicePanel(props: PanelProps) {
   const groupStore = useGroupSaveStore();
   const group = useGroupSave((s) => s.page);
   const groupShown = useGroupSave((s) => s.shownIn === "dice");
+  const features = useFeaturesHere();
   const { host, props: throwPanel } = useThrowPanel();
   useRestoreGroupSave();
   // The line a tap on the sticky result opened, unfolded in Recent rolls and scrolled into view.
@@ -124,7 +139,7 @@ export default function DicePanel(props: PanelProps) {
       // The page shows its own results, and its rolls never become the panel's last roll, so the sticky line would only take room.
       // A plain box: the sheet or the tab around it already names the panel "Dice", and a second region of that name is heard twice.
       <div {...throwPanel} style={{ display: "grid", gap: theme.space(2) }}>
-        <GroupSave parent="Dice" onBack={() => groupStore.setState({ shownIn: null })} />
+        {group.source.kind === "area" ? <AreaGroupSave onBack={() => groupStore.setState({ shownIn: null })} /> : <GroupSave parent="Dice" onBack={() => groupStore.setState({ shownIn: null })} />}
       </div>
     );
   }
@@ -143,8 +158,8 @@ export default function DicePanel(props: PanelProps) {
             page={group}
             tokens={tokens}
             onOpen={() => {
-              // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design/design-v1-split-panel.md 5.1).
-              const panel = group.source.kind === "area" ? "areas" : "dice";
+              // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design/design-v1-split-panel.md 5.1). While Areas hides here it opens in place.
+              const panel = groupSavePanel(group.source, features.role, features.choices);
               groupStore.setState({ shownIn: panel });
               if (panel === "areas") ui.openPanel("areas", here ? { from: here } : undefined);
             }}

@@ -5,8 +5,10 @@ import { createStore } from "zustand/vanilla";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
 import { actor, character, customMonster, DM, entry, room, token } from "#shared/testutil.ts";
-import { blockLoad, cardAttacks, cardLoad, combatAlerts } from "./alerts.ts";
 import { turnParticipants } from "./logic.ts";
+
+// alerts.ts reads the parts gate, a .tsx module, so it loads after the register hooks.
+const { blockLoad, cardAttacks, cardLoad, combatAlerts } = await import("./alerts.ts");
 
 /*
  * A creature's attacks on its turn card (QOL audit Q1, D-261106-100): the
@@ -49,6 +51,17 @@ function table(): RoomState {
 
 describe("the turn card's gating", () => {
   const dmYou = { role: "dm" as const, memberId: "dm1" };
+  test("class resources hidden on this device admit no card of their own (docs/design/design-v1-features.md 3, D-261127-394)", () => {
+    const view = table();
+    view.characters["c-thorn"] = { ...view.characters["c-thorn"]!, resources: [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" }] };
+    view.encounter = { ...view.encounter!, activeEntryId: "e2" };
+    const participants = turnParticipants(view, new Map());
+    // Thorn's player answers for him, so the card is theirs.
+    const base = { labels: new Map(), view, you: { role: "player" as const, memberId: "p1" }, participants, uses: participants.map(() => []), loading: false, failed: false, dismissed: new Set<string>() };
+    assert.equal(combatAlerts(base).turn?.count, 1, "Thorn's Rage admits his card");
+    assert.equal(combatAlerts({ ...base, hidden: new Set(["classResources"] as const) }).turn, null, "hidden, Rage counts for nothing");
+  });
+
   test("a creature with attacks and no uses gets its card, counting them, and one with neither gets none", () => {
     const view = table();
     const participants = turnParticipants(view, new Map());

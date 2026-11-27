@@ -51,6 +51,8 @@ import { closePcStats, openPcStatsSlot, openResyncSlot } from "./open.ts";
 import { ResyncDialog } from "./Resync.tsx";
 import { recordTooBigText, RESOURCES_STALE } from "./resync.ts";
 import { SyncReview } from "./SyncReview.tsx";
+import { partMark } from "../modules/gate.ts";
+import { useModule } from "../modules/Gate.tsx";
 import { partsText, rollReading } from "./reading.ts";
 
 /** Draws the player character stat block editors and re-sync dialogs open on this page (open.ts), beside the page, as EditorHost does the monsters'. */
@@ -487,17 +489,20 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   );
 }
 
-/** "Fill from" (7.2): the steps that read a block in, one row. */
+/** "Fill from" (7.2): the steps that read a block in, one row. D&D Beyond hidden on this device leaves Paste text alone (docs/design/design-v1-features.md 3). */
 function FillFrom(props: { onPaste(): void; onDdb(): void }) {
+  const ddbShown = useModule("ddb");
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
       <span style={{ fontWeight: theme.weight.strong }}>Fill from</span>
       <Button size="sm" onClick={props.onPaste}>
         Paste text
       </Button>
-      <Button size="sm" onClick={props.onDdb}>
-        D&amp;D Beyond
-      </Button>
+      {ddbShown ? (
+        <Button size="sm" {...partMark("ddb")} onClick={props.onDdb}>
+          D&amp;D Beyond
+        </Button>
+      ) : null}
     </div>
   );
 }

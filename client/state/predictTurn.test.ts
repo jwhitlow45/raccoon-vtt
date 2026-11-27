@@ -1,3 +1,4 @@
+import "../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Viewer } from "#shared/model.ts";
@@ -7,7 +8,6 @@ import { TURN_OPS } from "#shared/reads.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, actor, character, customMonster, env, room, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
-import { combatAlerts } from "../features/combat/alerts.ts";
 import { answersFor, openRecord, turnParticipants } from "../features/combat/logic.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { resolveLine, srdIndex } from "../features/encounters/draft.ts";
@@ -17,6 +17,9 @@ import { fightOps, shownRowOps } from "../features/tokens/groupEdit.ts";
 import { createRoomStore, fightAhead, turnPending, type RoomStore } from "./store.ts";
 import { applyTestHistory, FakeClock, FakeOutbox } from "./testing.ts";
 import type { OpAnswer } from "./types.ts";
+
+// alerts.ts reads the parts gate, a .tsx module, so it loads after the register hooks.
+const { combatAlerts } = await import("../features/combat/alerts.ts");
 
 /*
  * The DM's device shows no turn change before the server answers it

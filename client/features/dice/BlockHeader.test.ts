@@ -7,7 +7,6 @@ import type { DiceRoll, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, room } from "#shared/testutil.ts";
 import { optionSlot } from "./optionState.ts";
-import { throwsSlot } from "./throw/useThrows.ts";
 import { ReceiptTracker, receiptsSlot } from "./useReceipt.ts";
 
 /*
@@ -18,6 +17,8 @@ import { ReceiptTracker, receiptsSlot } from "./useReceipt.ts";
  * the returned roll, and one announcer per roll.
  */
 
+// useThrows.ts reads the parts gate, a .tsx module, so it loads after the register hooks.
+const { throwsSlot } = await import("./throw/useThrows.ts");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");

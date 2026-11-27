@@ -19,7 +19,7 @@ Object.assign(globalThis, {
 });
 
 const store = await import("./store.ts");
-const { displayViewKey, FOLLOW_THE_SCENE, isoReady, MAX_TURNS, parseStoredView, pickView, readView, serializeStoredView, settledView, shownView, turnOf, turnView, viewKey, withPick, withTurn } = store;
+const { displayViewKey, FOLLOW_THE_SCENE, isoReady, MAX_TURNS, parseStoredView, pickView, readView, serializeStoredView, settledView, shownStored, shownView, turnOf, turnView, viewKey, withPick, withTurn } = store;
 
 const ids = (s: { turns: readonly (readonly [string, Turn])[] }) => s.turns.map(([id]) => id);
 
@@ -159,5 +159,16 @@ describe("the view store (docs/design/design-v1-isometric-view.md 7)", () => {
     } finally {
       blocked = false;
     }
+  });
+});
+
+describe("Isometric view hidden on this device (docs/design/design-v1-features.md 3)", () => {
+  test("the board draws Top-down at once, and the stored pick and turns are kept", () => {
+    const iso = withTurn(withPick(FOLLOW_THE_SCENE, "isometric"), "s1", 2 as Turn);
+    const hidden = shownStored(iso, false);
+    assert.equal(shownView({ stored: hidden, sceneId: "s1", suggested: "isometric" }), TOP_DOWN, "neither the pick nor the scene's suggestion tilts it");
+    assert.deepEqual(hidden.turns, iso.turns, "the turns stay for when it shows again");
+    assert.equal(shownStored(iso, true), iso, "shown, the stored view as it is");
+    assert.equal(shownStored(iso, false), hidden, "one object per stored view, so nothing draws again for it");
   });
 });

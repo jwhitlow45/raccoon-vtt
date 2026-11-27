@@ -185,6 +185,23 @@ describe("the weather clock", () => {
   });
 });
 
+describe("Weather hidden on this device (docs/design/design-v1-features.md 8)", () => {
+  test("it draws Off whatever this device's setting is, and shown again takes the setting back", () => {
+    const { room } = setup();
+    room.setLook(RAIN);
+    room.input({ setting: "moving" });
+    assert.equal(room.state.getState().mounted, true);
+    room.show(false);
+    assert.equal(room.state.getState().mounted, false, "no layer while Weather hides");
+    assert.equal(room.state.getState().effective, "off");
+    room.input({ setting: "still" });
+    assert.equal(room.state.getState().effective, "off", "a setting changed meanwhile keeps it off");
+    room.show(true);
+    assert.equal(room.state.getState().effective, "still", "shown again, the setting chosen meanwhile");
+    assert.equal(room.state.getState().mounted, true);
+  });
+});
+
 describe("This device's line on what keeps the weather still", () => {
   test("reduced motion first, then Low power, then a device that could not keep up", () => {
     assert.equal(weatherStillReason({ reducedMotion: true, lowPower: true, level: "still" }), "Reduced motion keeps weather still.");

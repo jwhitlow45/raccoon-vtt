@@ -19,6 +19,8 @@ import { panAnchor, requestPan } from "../encounter/pan.ts";
 import { useSend } from "../encounter/hooks.ts";
 import { ImageField } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
+import { partMark } from "../modules/gate.ts";
+import { HiddenHere, Module, useModule } from "../modules/Gate.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
@@ -98,9 +100,12 @@ function CompanionPortrait(props: { token: Token; size: number }) {
  * player opens the page more often for companions than to edit stats
  * (docs/design/design-v1-combat-flow.md 3.7.5). It lists the companions on the
  * scene this device holds, each a button that shows it on the map with
- * its bar, as a party bar tap does. Folded, it names them.
+ * its bar, as a party bar tap does. Folded, it names them. While Companions
+ * hides on this device its place holds the way back instead
+ * (docs/design/design-v1-features.md 6, the companions home).
  */
 export function CharacterCompanions(props: { search?: string; character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void; group: { open: boolean; onToggle(): void } }) {
+  const shown = useModule("companions");
   const labels = useLabels();
   const tokens = useRoomView((s) => s.view?.tokens);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
@@ -109,6 +114,7 @@ export function CharacterCompanions(props: { search?: string; character: Charact
   const scope = useRoomScope();
   const list = tokens ? companionsOf({ tokens }, props.character.id) : [];
   const kept = characterBlocks({ companionBlocks: blocks ?? {} }, props.character.id).length;
+  if (!shown) return <HiddenHere home="companions" />;
   if (list.length === 0 && !props.canAdd) return null;
   // Each companion's block, before its turn (docs/design/design-v1-companion-stat-blocks.md 6.4). An effect has none to name.
   const blockName = (t: Token): string | null => {
@@ -130,36 +136,38 @@ export function CharacterCompanions(props: { search?: string; character: Charact
     });
   };
   return (
-    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map((t) => displayName(t, labels)).join(", ") : "None yet"}>
-      {list.length > 0 ? (
-        <RowList label={`${props.character.name}'s companions`}>
-          {list.map((t) => (
-            <Row
-              key={t.id}
-              leading={<CompanionPortrait token={t} size={28} />}
-              title={displayName(t, labels)}
-              detail={t.companion ? [blockName(t), turnLabel(props.character.name, t.companion.turn)].filter(Boolean).join(" · ") : undefined}
-              label={`${displayName(t, labels)}. Show it on the map with its actions`}
-              onClick={() => show(t)}
-              trailing={<Icon name="chevronRight" style={{ color: theme.color.textMuted }} />}
-            />
-          ))}
-        </RowList>
-      ) : null}
-      {props.canAdd ? (
-        // Side by side where the width holds both, else one under the other.
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button size="sm" icon="plus" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
-            Add a companion
-          </Button>
-          {props.onBlocks ? (
-            <Button size="sm" onClick={props.onBlocks} data-opener={`blocks:${props.character.id}`}>
-              {`Stat blocks (${kept})`}
+    <Module id="companions">
+      <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map((t) => displayName(t, labels)).join(", ") : "None yet"}>
+        {list.length > 0 ? (
+          <RowList label={`${props.character.name}'s companions`}>
+            {list.map((t) => (
+              <Row
+                key={t.id}
+                leading={<CompanionPortrait token={t} size={28} />}
+                title={displayName(t, labels)}
+                detail={t.companion ? [blockName(t), turnLabel(props.character.name, t.companion.turn)].filter(Boolean).join(" · ") : undefined}
+                label={`${displayName(t, labels)}. Show it on the map with its actions`}
+                onClick={() => show(t)}
+                trailing={<Icon name="chevronRight" style={{ color: theme.color.textMuted }} />}
+              />
+            ))}
+          </RowList>
+        ) : null}
+        {props.canAdd ? (
+          // Side by side where the width holds both, else one under the other.
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+            <Button size="sm" icon="plus" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
+              Add a companion
             </Button>
-          ) : null}
-        </div>
-      ) : null}
-    </Group>
+            {props.onBlocks ? (
+              <Button size="sm" onClick={props.onBlocks} data-opener={`blocks:${props.character.id}`}>
+                {`Stat blocks (${kept})`}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </Group>
+    </Module>
   );
 }
 
@@ -479,6 +487,7 @@ export function CompanionSection(props: {
   group?: { open: boolean; onToggle(): void };
 }) {
   const { token, access } = props;
+  const shown = useModule("companions");
   const companion = token.companion;
   const characters = useRoomView((s) => s.view?.characters);
   const blockId = "inline" in token.actor ? token.actor.inline.blockId : undefined;
@@ -487,6 +496,8 @@ export function CompanionSection(props: {
   const kind = useSend();
   const detach = useSend();
   if (!companion || !access.companion) return null;
+  // Hidden on this device, the group's place holds the way back (docs/design/design-v1-features.md 6, the companions home).
+  if (!shown) return <HiddenHere home="companions" />;
   const owner = characters?.[companion.of];
   const name = owner?.name ?? "its character";
   const what = companionWhat(token.kind);
@@ -500,53 +511,55 @@ export function CompanionSection(props: {
   const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}'s and stays with ${name}.`}</Help> : null;
   return (
     // A group as Owners beside it is, which names its character while folded as Owners names its players.
-    <Group label="Companion" icon="companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
-      {access.dm ? (
-        <>
-          <FieldRow label="Belongs to" fill>
-            <Select<string>
-              label="Belongs to"
-              value={companion.of}
-              disabled={relink.waiting}
-              options={list.map((c) => ({ value: c.id, label: c.name }))}
-              onChange={(of) => send(linkPatch(companion, { of }))}
-            />
-          </FieldRow>
-          {staysLine}
-        </>
-      ) : (
-        <Help>
-          Belongs to {name}. Whoever plays {name} controls it.
-        </Help>
-      )}
-      <FieldRow label="It is" fixed>
-        <Segmented<CompanionWhat>
-          label="What it is"
-          value={what}
-          disabled={kind.waiting}
-          options={WHAT_OPTIONS.map((o) => (o.value === "effect" && companion.turn === "own" ? { ...o, disabled: true } : o))}
-          onChange={(next) => next !== what && kind.send({ t: "token.update", tokenId: token.id, patch: { kind: next === "effect" ? "object" : "npc" } })}
-        />
-      </FieldRow>
-      {companion.turn === "own" ? <Help>Choose one of {name}'s turns first.</Help> : null}
-      <TurnField>
-        <Select<CompanionTurn> label="Turn" value={chosen.value} disabled={relink.waiting} options={choices} onChange={(turn) => send(linkPatch(companion, { turn }))} />
-      </TurnField>
-      <Help>{chosen.help}</Help>
-      {relink.waiting || kind.waiting ? (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), color: theme.color.textMuted, fontSize: theme.font.small }}>
-          <Spinner label="Saving" /> Saving…
-        </span>
-      ) : null}
-      {access.dm ? (
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-          <Button size="sm" busy={detach.waiting} onClick={() => detach.send({ t: "token.update", tokenId: token.id, patch: { companion: null } })}>
-            Stop being a companion
-          </Button>
-          {staysLine}
-        </div>
-      ) : null}
-    </Group>
+    <Module id="companions">
+      <Group label="Companion" icon="companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
+        {access.dm ? (
+          <>
+            <FieldRow label="Belongs to" fill>
+              <Select<string>
+                label="Belongs to"
+                value={companion.of}
+                disabled={relink.waiting}
+                options={list.map((c) => ({ value: c.id, label: c.name }))}
+                onChange={(of) => send(linkPatch(companion, { of }))}
+              />
+            </FieldRow>
+            {staysLine}
+          </>
+        ) : (
+          <Help>
+            Belongs to {name}. Whoever plays {name} controls it.
+          </Help>
+        )}
+        <FieldRow label="It is" fixed>
+          <Segmented<CompanionWhat>
+            label="What it is"
+            value={what}
+            disabled={kind.waiting}
+            options={WHAT_OPTIONS.map((o) => (o.value === "effect" && companion.turn === "own" ? { ...o, disabled: true } : o))}
+            onChange={(next) => next !== what && kind.send({ t: "token.update", tokenId: token.id, patch: { kind: next === "effect" ? "object" : "npc" } })}
+          />
+        </FieldRow>
+        {companion.turn === "own" ? <Help>Choose one of {name}'s turns first.</Help> : null}
+        <TurnField>
+          <Select<CompanionTurn> label="Turn" value={chosen.value} disabled={relink.waiting} options={choices} onChange={(turn) => send(linkPatch(companion, { turn }))} />
+        </TurnField>
+        <Help>{chosen.help}</Help>
+        {relink.waiting || kind.waiting ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), color: theme.color.textMuted, fontSize: theme.font.small }}>
+            <Spinner label="Saving" /> Saving…
+          </span>
+        ) : null}
+        {access.dm ? (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+            <Button size="sm" busy={detach.waiting} onClick={() => detach.send({ t: "token.update", tokenId: token.id, patch: { companion: null } })}>
+              Stop being a companion
+            </Button>
+            {staysLine}
+          </div>
+        ) : null}
+      </Group>
+    </Module>
   );
 }
 
@@ -564,6 +577,7 @@ const NO_CHARACTER = "";
  */
 export function MakeCompanion(props: { token: Token }) {
   const { token } = props;
+  const shown = useModule("companions");
   const characters = useRoomView((s) => s.view?.characters);
   const [open, setOpen] = useState(false);
   const list = Object.values(characters ?? {})
@@ -589,11 +603,12 @@ export function MakeCompanion(props: { token: Token }) {
   // A companion has stats of its own, so a token that reads a character's cannot be one.
   const cannot = token.kind === "pc" || token.companion || "ref" in token.actor;
   // Only its button sends the choices, so a sheet's swipe springs back while the form shows them changed (docs/design/design-v1-sheet-swipe.md 4.5).
-  useUnsavedInput(open && !cannot && list.length > 0 && !make.waiting && (of !== NO_CHARACTER || turn !== "shared"));
-  if (cannot) return null;
+  useUnsavedInput(shown && open && !cannot && list.length > 0 && !make.waiting && (of !== NO_CHARACTER || turn !== "shared"));
+  // Companions hidden on this device takes Make a companion with it (docs/design/design-v1-features.md 3).
+  if (cannot || !shown) return null;
   if (!open) {
     return (
-      <div style={{ display: "flex" }}>
+      <div {...partMark("companions")} style={{ display: "flex" }}>
         <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
           Make a companion
         </Button>
@@ -602,7 +617,7 @@ export function MakeCompanion(props: { token: Token }) {
   }
   if (list.length === 0) {
     return (
-      <div ref={form} tabIndex={-1}>
+      <div ref={form} tabIndex={-1} {...partMark("companions")}>
         <Help>A companion belongs to a character. Make a character first.</Help>
       </div>
     );
@@ -623,7 +638,7 @@ export function MakeCompanion(props: { token: Token }) {
     handFocusOn(form.current?.closest<HTMLElement>(GROUP_BOX), [GROUP_FOLD]);
   };
   return (
-    <div ref={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+    <div ref={form} {...partMark("companions")} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <FieldRow label="Belongs to" fill>
         <Select<string>
           label="Belongs to"
