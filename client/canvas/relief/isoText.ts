@@ -21,8 +21,8 @@ export function tokenLayoutPills(pills: Readonly<Record<string, readonly PillSpe
   return Object.entries(pills).flatMap(([key, list]) => key.startsWith("area:") || key.startsWith("trap:") ? [] : list);
 }
 
-/** Actual frames, rings, marks and placed text, in the same view units as standing names. */
-export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number, place: (t: ViewToken) => { x: number; y: number; ring?: Box }): Box[] {
+/** Actual frames, rings, models' figures, marks and placed text, in the same view units as standing names. */
+export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number, place: (t: ViewToken) => { x: number; y: number; ring?: Box; figure?: Box }): Box[] {
   // Already where the decor lays out, so the nudge, which `place` has read, is left off.
   const placed = tokens.map((t) => {
     const { nudge: _read, ...rest } = t;
@@ -43,7 +43,7 @@ export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<st
     ...placed.flatMap((t) => {
       const fp = footprint(t);
       const ring = t.ring && Math.min(fp.w, fp.h) >= 2 ? { x0: t.ring.x0 - stroke, y0: t.ring.y0 - stroke, x1: t.ring.x1 + stroke, y1: t.ring.y1 + stroke } : t.ring;
-      return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(ring ? [ring] : [])];
+      return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(ring ? [ring] : []), ...(t.figure ? [t.figure] : [])];
     }),
     ...placedTextBoxes(placed, ink, scale).map((b) => ({ x0: b.x0 / scale, y0: b.y0 / scale, x1: b.x1 / scale, y1: b.y1 / scale })),
   ];
@@ -141,10 +141,12 @@ export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, s
  * Where a token's decor lays out: a standee's frame, where its art stands,
  * with the ring under it, or for a creature lying flat a box its size on
  * its footprint's middle at the drawn ground under it (relief/standee.ts,
- * 5.2).
+ * 5.2). A standee standing as its 3D model carries its figure's drawn box
+ * (`figure`), which reaches past the frame as the model is wide, tall or
+ * low, so names keep off the figure (D-261127-701).
  */
-export function decorPlace(view: View, g: Grid, t: ViewToken, standee: { frame: VBox; ring: VBox } | undefined, ground = 0): { x: number; y: number; ring?: VBox } {
-  if (standee) return { x: standee.frame.x0, y: standee.frame.y0, ring: standee.ring };
+export function decorPlace(view: View, g: Grid, t: ViewToken, standee: { frame: VBox; ring: VBox; figure?: VBox } | undefined, ground = 0): { x: number; y: number; ring?: VBox; figure?: VBox } {
+  if (standee) return { x: standee.frame.x0, y: standee.frame.y0, ring: standee.ring, ...(standee.figure ? { figure: standee.figure } : {}) };
   const fp = footprint(t);
   // On the drawn ground under it (`ground`, cells), where the ground stage lays its picture, at its drawn spot (docs/design/design-v1-snap-off.md 6.2).
   const at = drawnAt(g, t);

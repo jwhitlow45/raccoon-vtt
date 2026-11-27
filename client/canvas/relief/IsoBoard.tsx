@@ -682,13 +682,14 @@ function IsoBoardImpl(props: IsoBoardProps) {
    */
   const groundAt = useCallback((x: number, y: number) => heights.atPoint({ x, y }), [heights]);
   // The frames alone, kept while none moves, so a drag's start, which marks its standee kept, lays nothing out again.
-  const framesRef = useRef<ReadonlyMap<string, { frame: VBox; ring: VBox }> | null>(null);
+  const framesRef = useRef<ReadonlyMap<string, { frame: VBox; ring: VBox; figure?: VBox }> | null>(null);
   const frames = useMemo(() => {
-    const next = new Map(standees.map((s) => [s.id, { frame: s.frame, ring: s.ring }]));
+    // A model's figure too, which names keep off (isoText.ts decorPlace). A picture's art lies in its frame.
+    const next = new Map(standees.map((s) => [s.id, { frame: s.frame, ring: s.ring, figure: s.model ? s.art : undefined }]));
     const prev = framesRef.current;
     const same = prev !== null && prev.size === next.size && [...next].every(([id, f]) => {
       const p = prev.get(id);
-      return p !== undefined && sameBox(p.frame, f.frame) && sameBox(p.ring, f.ring);
+      return p !== undefined && sameBox(p.frame, f.frame) && sameBox(p.ring, f.ring) && (p.figure === f.figure || (p.figure !== undefined && f.figure !== undefined && sameBox(p.figure, f.figure)));
     });
     return same ? prev : (framesRef.current = next);
   }, [standees]);

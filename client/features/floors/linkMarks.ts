@@ -17,6 +17,8 @@ import { pathNow } from "../measure/movement.ts";
 import { FLOOR_MARKS } from "../scenes/floorWords.ts";
 import { floorStatus } from "./words.ts";
 import { linkName } from "./linkWords.ts";
+import { modelArtBox, modelDrawnBox } from "../models/frames.ts";
+import { modelWanted, tokenActor } from "../models/shown.ts";
 
 /*
  * What the board draws for each stairs or ladder end on the floor shown
@@ -90,9 +92,11 @@ export function quietLinks(view: Pick<RoomState, "tokens" | "encounter" | "scene
  * Isometric (`iso`) every end's pills, stairs and ladders too. In
  * Top-down it is empty on a floor with no opening end, whose ends keep
  * their own edges, so a move there costs one look at its ends and no walk
- * over the tokens. In Isometric it is empty only on a floor with no end.
+ * over the tokens. In Isometric it is empty only on a floor with no end,
+ * and a creature that may stand as its 3D model carries the model's figure
+ * (modelFigure).
  */
-export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLinks"> | null | undefined, sceneId: string, iso = false): string {
+export function tokenSpots(view: (Pick<RoomState, "tokens" | "scenes" | "floorLinks"> & Partial<Pick<RoomState, "characters">>) | null | undefined, sceneId: string, iso = false): string {
   const scene = view ? ownEntry(view.scenes, sceneId) : undefined;
   if (!view || !scene) return "";
   if (!Object.values(view.floorLinks ?? {}).some((l) => l.sceneId === sceneId && (iso || l.kind === "opening") && linkDir(view, l) !== null)) return "";
@@ -100,29 +104,54 @@ export function tokenSpots(view: Pick<RoomState, "tokens" | "scenes" | "floorLin
   return Object.values(view.tokens)
     .filter((t): t is Token => t !== undefined && t.sceneId === sceneId)
     .map((t) => {
+      const figure = iso ? modelFigure(t, view.characters) : "";
       if (!isHex(g)) {
         const r = footprintRect(g, t);
-        return `${r.x},${r.y},${r.w},${r.h}`;
+        return `${r.x},${r.y},${r.w},${r.h}${figure}`;
       }
       // On hexes the standee draws at the stored spot, which a map turned from squares to hexes leaves off the hexes the
       // creature stands on (LP54-ISO-1), so both count: the drawn box, then the outline of its hexes.
       const at = drawnAt(g, t);
       const fp = footprint(t);
-      return [at.x, at.y, fp.w, fp.h, ...hexFootprintOutline(g, t)].join(",");
+      return [at.x, at.y, fp.w, fp.h, ...hexFootprintOutline(g, t)].join(",") + figure;
     })
     .sort()
     .join(" ");
 }
 
-/** Where a creature stands for an end's pills: the box it draws in, and on hexes the outline of its hexes, in cells. */
-export type TokenSpot = FloorLink["rect"] & { loop?: readonly number[] };
+/**
+ * Where a creature stands for an end's pills: the box it draws in, and on
+ * hexes the outline of its hexes, in cells, and the figure of a 3D model
+ * it may stand as in Isometric.
+ */
+export type TokenSpot = FloorLink["rect"] & { loop?: readonly number[]; model?: SpotModel };
+
+/** A model's frame side and anchor (ModelRef), and the box every frame's drawn part lies in, in hundredths. */
+export type SpotModel = { side: number; anchorY: number; box: readonly [number, number, number, number] };
+
+/**
+ * A creature's 3D model as its spot carries it, or nothing when it stands
+ * as its picture (models/shown.ts modelWanted), after a ";". It keeps the
+ * box all eight frames' drawn parts lie in, so the spot reads no turn and
+ * a pill keeps off the figure at every facing (D-261127-702). The board
+ * stands the model only once its sheet is decoded, so until then a pill
+ * keeps off a figure not drawn yet.
+ */
+function modelFigure(t: Token, characters: RoomState["characters"] | undefined): string {
+  const ref = modelWanted(t, tokenActor(t, characters));
+  if (!ref) return "";
+  const box = ref.boxes.reduce((u, b) => [Math.min(u[0], b[0]), Math.min(u[1], b[1]), Math.max(u[2], b[2]), Math.max(u[3], b[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+  return `;${ref.side},${ref.anchorY},${box.join(",")}`;
+}
 
 /** The spots back from tokenSpots. */
 export function spotsOf(key: string): TokenSpot[] {
   if (key === "") return [];
   return key.split(" ").map((part) => {
-    const [x, y, w, h, ...loop] = part.split(",").map(Number);
-    return { x: x!, y: y!, w: w!, h: h!, ...(loop.length > 0 ? { loop } : {}) };
+    const [rect, figure] = part.split(";");
+    const [x, y, w, h, ...loop] = rect!.split(",").map(Number);
+    const m = figure?.split(",").map(Number);
+    return { x: x!, y: y!, w: w!, h: h!, ...(loop.length > 0 ? { loop } : {}), ...(m ? { model: { side: m[0]!, anchorY: m[1]!, box: [m[2]!, m[3]!, m[4]!, m[5]!] as const } } : {}) };
   });
 }
 
@@ -307,12 +336,18 @@ export function boxCoversOutline(box: Box, corners: readonly { x: number; y: num
  * draws in and its hexes, and in Isometric the standee rising from the
  * box's middle as tall as it is deep (canvas/relief/standee.ts
  * standeeShape's frame), so a chip over a corner behind it keeps off its
- * upper body and its badges too (LP48FIXA-R1).
+ * upper body and its badges too (LP48FIXA-R1). One standing as its 3D model
+ * covers its model's figure there instead, as tall, wide or low as that
+ * draws (canvas/relief/standee.ts drawnBox, D-261127-702).
  */
 export function tokenBox(r: TokenSpot, iso: DrawSpace): Box {
   const ground = outlineBox([...cornersOf({ ...r, loop: null }), ...(r.loop ? cornersOf({ ...r, loop: [...r.loop] }) : [])], iso);
   if (!iso) return ground;
   const foot = viewPointOf(iso, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  if (r.model) {
+    const figure = modelDrawnBox(modelArtBox(r.model, Math.max(r.w, r.h), foot), r.model.box);
+    return { x0: Math.min(ground.x0, figure.x0), y0: Math.min(ground.y0, figure.y0), x1: Math.max(ground.x1, figure.x1), y1: Math.max(ground.y1, figure.y1) };
+  }
   return { x0: Math.min(ground.x0, foot.x - r.w / 2), y0: Math.min(ground.y0, foot.y - r.h), x1: Math.max(ground.x1, foot.x + r.w / 2), y1: ground.y1 };
 }
 

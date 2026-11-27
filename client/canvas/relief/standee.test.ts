@@ -145,7 +145,7 @@ describe("standees", () => {
     // The decor and the label layout both place a standee's decor by its frame (isoText.ts decorPlace).
     assert.match(board, /const at = decorPlace\(view, grid, t, s, s \? 0 : flatGround\(t\)\);/);
     const text = readFileSync(new URL("./isoText.ts", import.meta.url), "utf8");
-    assert.match(text, /if \(standee\) return \{ x: standee\.frame\.x0, y: standee\.frame\.y0, ring: standee\.ring \};/);
+    assert.match(text, /if \(standee\) return \{ x: standee\.frame\.x0, y: standee\.frame\.y0, ring: standee\.ring, \.\.\.\(standee\.figure \? \{ figure: standee\.figure \} : \{\}\) \};/);
     // Its box is the drawn one (stand.ts standeeFooting, docs/design/design-v1-snap-off.md 6.2).
     assert.match(board, /const \{ box, cells \} = standeeFooting\(grid, t\);/);
     assert.match(board, /standeeShape\(turn, box, base, ground, cam\.scale, size\.height, seat, shown\?\.shape \?\? null\)/);
