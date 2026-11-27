@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { PartyGroup } from "#shared/model.ts";
 import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
 import { DIFFICULTIES, type Difficulty } from "#shared/srd/xp-budget.ts";
@@ -331,8 +331,18 @@ function StockRows(props: { row: StockRow; theme: DungeonSettings["theme"]; room
   const share = row.held ? 0 : row.value.monsters;
   const setStock = (patch: Partial<StockChoices>) => row.onChange({ ...row.value, ...patch });
   const budgets = partyBudgets(row.groups);
+  const partyShown = share > 0 || row.held || row.edited;
+  const box = useRef<HTMLDivElement>(null);
+  const partyWas = useRef(partyShown);
+  useEffect(() => {
+    // Use the room's characters at None hides the Party row it was pressed in, so focus that fell to the page moves to Monsters,
+    // the control that brings the row back (D-261127-603).
+    const doc = box.current?.ownerDocument;
+    if (partyWas.current && !partyShown && doc && (doc.activeElement === null || doc.activeElement === doc.body)) box.current?.querySelector<HTMLElement>('input[type="range"]')?.focus({ preventScroll: true });
+    partyWas.current = partyShown;
+  }, [partyShown]);
   return (
-    <div data-choice="monsters" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
+    <div ref={box} data-choice="monsters" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
       <Held held={row.held} style={{ display: "grid", minWidth: 0 }}>
         <PresetSlider
           name="Monsters"
@@ -356,7 +366,7 @@ function StockRows(props: { row: StockRow; theme: DungeonSettings["theme"]; room
         />
       ) : null}
       {/* An edited party stays, so Edit the party at None, where a held Monsters comes back, never pulls the steppers away from focus. */}
-      {share > 0 || row.held || row.edited ? (
+      {partyShown ? (
         <Named name="Party">
           {() => <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 }}>{row.party}</div>}
         </Named>

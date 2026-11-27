@@ -1345,6 +1345,34 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.deepEqual(lines, []);
   });
 
+  /*
+   * STOCK-O-06: with Thorn at a level, Use the room's characters at None
+   * hides the Party row the button was in, so focus moves to Monsters.
+   */
+  test("DSTOCK-2. Use the room's characters at None hides the Party row and gives focus to Monsters", async () => {
+    await ops.send({ t: "character.update", characterId: run.thornChar, patch: { level: 3 } });
+    await waitFor("Thorn at level 3", () => (state(dmSocket)?.characters[run.thornChar]?.level === 3 ? true : null));
+    try {
+      const dialog = await openDialog(dm);
+      await mark(dialog, "Monsters", "Half").click();
+      await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
+      await mark(dialog, "Monsters", "None").click();
+      await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
+      await dialog.getByRole("button", { name: "Edit the party", exact: true }).waitFor({ state: "detached" });
+      const onMonsters = () =>
+        dm.evaluate(() => {
+          type El = { getAttribute(name: string): string | null; closest(selector: string): unknown };
+          const at = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+          return at?.getAttribute("type") === "range" && at.closest('[data-choice="monsters"]') !== null ? true : null;
+        });
+      await waitFor("focus on the Monsters slider", onMonsters);
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.thornChar, patch: { level: null } });
+    }
+  });
+
   test("DG-10. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, []);
     assert.deepEqual(consoles.pat.errors, []);
