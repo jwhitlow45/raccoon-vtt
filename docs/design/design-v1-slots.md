@@ -320,8 +320,8 @@ Each would add its own predicate in migrate.ts, gated at 68, in a lane stacked a
 - **D-261127-367** `patch.spent` needs `classes`, `ddbSync` and `expect.classes` in the same patch. Rejected: `classes` and `expect` alone.
 - **D-261127-368** With classes, a preset whose class is not in them asks for no update. Rejected: falling back to the total level.
 - **D-261127-369** sizeGuard counts `spent` and `useRev` at their widest for a lent player's rest. Rejected: no written field, which a lent rest disproves.
-- **D-261127-400** (amended by 408) Ordinary slots are offered at exactly the casting level, Pact as "cast at level 3". Rejected: Pact only at an equal level, which gives a Warlock's level 1 spell nothing.
-- **D-261127-401** Where Pact Magic is the only pool covering the spell, the casting level starts at the Pact level. Rejected: the spell's own level, which a Warlock must raise by hand every cast.
+- **D-261127-400** (amended by 408) Ordinary slots are offered at exactly the casting level, Pact as "cast at level 3". Rejected: Pact at or below its level after sending (408). Before sending, the Pact-only default of 401 still lets a Warlock's level 1 spell reach the Pact level.
+- **D-261127-401** Where Pact Magic is the only pool covering the spell, judged by the slot maxima the classes give and not the slots left, the casting level starts at the Pact level. Rejected: the spell's own level, which a Warlock must raise by hand every cast.
 - **D-261127-402** `useRev` is named beside `classes` and `spent` in the snapshot, import, projection, twins and scans, a whole number like `rev`. Rejected: a model field the strict import schema refuses.
 - **D-261127-403** An area spell with no row gets its offer in a fallback line under the creature's options. Rejected: no offer for such a spell.
 - **D-261127-404** A rest always moves `useRev`, a use only when it changes something. Rejected: every use op, no-ops too.
@@ -377,17 +377,17 @@ ASTRA-01 and R1-17 (Wild Shape CON): 2, 3.3, 6, D-263. ASTRA-02 (re-sync Undo af
 
 **Lane A (rules and server)**
 
-- Refusals the design names no words for: a slot or die op on a creature with no character reads "Only a character has spell slots and Hit Point Dice."; a character with no Pact Magic "Bree has no Pact Magic slots."; no die of the size "Bree has no d12 Hit Point Dice."; a shape or block whose numbers are not known on the server "The character's Constitution modifier is not known here." Below 1 HP or not alive reuses rest.ts REST_NEEDS_HP ("a rest needs at least 1 Hit Point"), the same check a rest makes.
+- Refusals the design names no words for. A slot or die op on a creature with no character reads "Only a character has spell slots and Hit Point Dice.", a character with no Pact Magic "Bree has no Pact Magic slots.", no die of the size "Bree has no d12 Hit Point Dice.", and a shape or block whose numbers are not known on the server "The character's Constitution modifier is not known here." Below 1 HP or not alive reuses rest.ts REST_NEEDS_HP ("a rest needs at least 1 Hit Point"), the same check a rest makes.
 - Refusal order for a die spend or roll: no classes, no die of that size, below 1 HP or not alive, full HP, none left.
 - `con` absent on a character with no block and no shape counts as +0.
 - The Hit Point Die roll's label is "Hit Point Die (d10)", so the line reads "Kim rolled for Bree, Hit Point Die (d10): 1d10+2 (7) = 9." The dice line is `to: "all"`, and its reach comes from `hitDie` in diceRollReach.
-- A typed die's line comes before its HP line in the op; order is free by D-261127-270.
+- A typed die's line comes before its HP line in the op. The order is free by D-261127-270.
 - Undo labels for give backs of the three new kinds read "giving back ..." (the design's words), while older kinds keep "restoring ...".
-- levelUps takes the classes as a third parameter; with an empty or absent list it keeps the total-level rule.
+- levelUps takes the classes as a third parameter. With an empty or absent list it keeps the total-level rule.
 - SPENT_MOST is 81 bytes, by the caps alone (nine slot levels at 4, Pact at 4, each die at 20). A lent character takes 4801 of EXACT_WIDTH.character's 5120 bytes (4685 before), a margin of 319 bytes.
 - stateSchema refuses an empty `classes` list and `spent` with no classes, since the reducer never stores either.
 - reid.caps.test.ts now loops the versions below version 8 ids, since a room at 50 or 51 gives no ids anew and its load runs no measure.
-- The replay proof is shared/reducer/useStamp.replay.test.ts with a hash-only fixture (14 KB): 120 seeded runs, 3600 ops, written on the base build ztwoqzzx (d30bb30c), byte-equal at 65, 66 and 67; live, 1787 of 3600 ops land otherwise, every one by the stamp.
+- The replay proof is shared/reducer/useStamp.replay.test.ts with a hash-only fixture (14 KB): 120 seeded runs, 3600 ops, written on the base build ztwoqzzx (d30bb30c), byte-equal at 65, 66 and 67. Live, 1787 of 3600 ops land otherwise, every one by the stamp.
 
 **Lane C (D&D Beyond)**
 
@@ -407,12 +407,15 @@ ASTRA-01 and R1-17 (Wild Shape CON): 2, 3.3, 6, D-263. ASTRA-02 (re-sync Undo af
 - The Classes sheet is titled "Classes". Each row puts its class on a line of its own, with the level and Remove under it, so a phone never leaves Remove alone on a line. The level uses the panel's stepper (minus 1, the number, plus 1), since no Size stepper with icons exists.
 - A new row takes the first SRD class no row picked, at level 1. With no rows the sheet says "No classes. Saving with none removes them and every spent slot and die, and keeps the level."
 - Below class level 3, "Its subclass casts spells" shows unticked and unavailable, and Save sends `third` only from 3. The Classes line names an Other class "Other class 3 (d8)".
-- Words the design left open: Restore off reads "Every level 3 spell slot is there.", "Every Pact Magic slot is there." and "Every d10 Hit Point Die is there."; Pact's Restore is named "Restore a Pact Magic slot"; Type a roll… is named "Type a roll for a d10 Hit Point Die"; a typed roll out of range reads "Type the HP from 1 to 100000."; the Constitution field's hint reads "-5 to 10. No stat block to read it from. This device keeps it."
+- Words the design left open. Restore off reads "Every level 3 spell slot is there.", "Every Pact Magic slot is there." and "Every d10 Hit Point Die is there." Pact's Restore is named "Restore a Pact Magic slot", and Type a roll… "Type a roll for a d10 Hit Point Die". A typed roll out of range reads "Type the HP from 1 to 100000.", and the Constitution field's hint "-5 to 10. No stat block to read it from. This device keeps it." A nonempty Constitution field that is no modifier from -5 to 10 holds Roll with "Type a Constitution modifier from -5 to 10." (SLOTS-ASTRA-01), and only an empty one counts as +0.
+- One pending guard serves every die row's Roll, typed Spend and Restore, so no second die goes before the first answer (SLOTS-ASTRA-02).
 - Pact Magic's row on the turn card has Use alone, as the card's class resource rows do. The drawer's and the full rows have Restore too.
 - The bar's drawer folds the slots wherever the bar spans a phone held upright, resting as the strip or expanded (TokenActionBar's frame `rest`).
 - A Hit Point Die roll's result shows once its answer commits, as the death save card's does (useCardRoll). It keeps no hold for the 3D dice. Where the numbers failed to load, Roll is off with "The Constitution modifier did not load." and the shared load-failure line stands under the rows.
 - The slot offer lives in the roll options' store as `offers`, keyed by the creature and the spell's name, case blind, so another ask from that spell replaces it, and an ask with no pool at its level ends it. Its group is named "Hold Person: Cast at level 2.", and Dismiss "Dismiss the slot offer for Hold Person". The fallback line stands at the top of the creature's options for every offer whose spell has no row.
-- The room search finds Classes, Spell slots and Hit Point Dice on a character's page only, not in the token panel.
+- The room search finds Classes, Spell slots and Hit Point Dice on a character's page only, not in the token panel. The DM finds Spell slots and Hit Point Dice on every character's page, as the rests, and Classes stays with the character's players (SLOTS-O-03).
+- A player lent only a character's token gets the Short Rest note without its classes, since he holds no Classes control (SLOTS-O-04).
 - The Long Rest note for a character with classes but no slots leaves out "every spell slot back". The party card names each kind any of the party has spent ("It also restores every class resource and spell slot.").
+- The DM guide's two pictures, spell-slots-turn.webp and short-rest-dice.webp, come from scripts/guide-slots.ts, in a room named "Guide examples", as the guide's other scripted pictures do.
 - RecentRolls.tsx needed no change: a Hit Point Die roll has no Again because `againInput` returns none for it.
 - Alignment: the page's slot rows, the Classes sheet with a Fighter and an Other row and its lowering line, the Short Rest card with two die sizes, its typed field and a landed roll, the turn card's folded row open and the drawer's Restore a slot… are in the sweep (alignmentRoom.ts slotScreens, at the combat screens' sizes). The turn card's folded row closed and the slot offer are measured in slotsdice.e2e.ts at 390 x 844.
