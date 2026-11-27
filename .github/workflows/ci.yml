@@ -59,6 +59,17 @@ env:
   # The Node of the production image (the Dockerfile's NODE_IMAGE). pnpm
   # comes from package.json's packageManager field.
   NODE_VERSION: 24.21.0
+  # The browser every e2e job runs: one Chrome for Testing build, downloaded
+  # from Google's store and checked against these checksums, so a runner
+  # image update cannot change it under a run. To move to a new version,
+  # change CHROME_VERSION and both checksums (the sha256 of
+  # chrome-linux64.zip and of chrome-mac-arm64.zip under
+  # https://storage.googleapis.com/chrome-for-testing-public/<version>/).
+  # .github/workflows/nightly-chrome.yml runs the suite on the image's own
+  # Chrome stable, which is where a new release shows up first.
+  CHROME_VERSION: 158.0.8127.36
+  CHROME_LINUX64_SHA256: dba9cc838e1ce269c33ea68170881127bd15d078fc3ca5891c90802819a4d7c7
+  CHROME_MAC_ARM64_SHA256: b86d3b393def1f87d369b022abff0a51acb015d6fcb79ddfd1c379c9d72fbbe2
 
 # The jobs a pull request from this repository's own ci/ branch would start
 # with, build, typecheck-int and unit, skip on that condition, and the rest
@@ -301,9 +312,17 @@ jobs:
           cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
           fc-cache ~/.local/share/fonts
           test "$(fc-match --format='%{family}' sans-serif)" = Roboto
-      # The harness launches Chrome with channel "chrome", which is the
-      # runner image's Google Chrome stable. The image sets its version.
-      - run: google-chrome --version
+      # The harness launches "Chrome" from E2E_CHROME_PATH when it is set,
+      # which here is the pinned Chrome for Testing (env above), and logs the
+      # version each file ran on.
+      - name: Chrome for Testing
+        run: |
+          zip=chrome-linux64.zip
+          curl -fsS --retry 3 --max-time 120 -o "$RUNNER_TEMP/$zip" "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/$zip"
+          echo "$CHROME_LINUX64_SHA256  $RUNNER_TEMP/$zip" | sha256sum -c --quiet -
+          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/chrome"
+          echo "E2E_CHROME_PATH=$RUNNER_TEMP/chrome/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/chrome/chrome-linux64/chrome" --version
       - name: e2e shard ${{ matrix.shard }}
         id: shard
         run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }} ${{ needs.build.outputs.docs-only == 'true' && '--only guide' || '' }} --deadline "$E2E_DEADLINE"
@@ -370,6 +389,17 @@ jobs:
             --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 --locale=en_US.UTF-8
           "$bin/pg_ctl" --pgdata="$data" --log=test-results/postgres.log --options="-p 5434" --wait start
           "$bin/createdb" --host=localhost --port=5434 --username=raccoon raccoon
+      # The harness launches "Chrome" from E2E_CHROME_PATH, the pinned Chrome
+      # for Testing (env above), and logs the version each file ran on.
+      - name: Chrome for Testing
+        run: |
+          zip=chrome-mac-arm64.zip
+          curl -fsS --retry 3 --max-time 120 -o "$RUNNER_TEMP/$zip" "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/mac-arm64/$zip"
+          echo "$CHROME_MAC_ARM64_SHA256  $RUNNER_TEMP/$zip" | shasum -a 256 -c --quiet -
+          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/chrome"
+          app="$RUNNER_TEMP/chrome/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+          echo "E2E_CHROME_PATH=$app" >> "$GITHUB_ENV"
+          "$app" --version
       - name: e2e on macOS
         id: shard
         run: node scripts/e2e-shard.ts 1 1 --macos-only --deadline "$E2E_DEADLINE"
@@ -445,10 +475,18 @@ jobs:
           cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
           fc-cache ~/.local/share/fonts
           test "$(fc-match --format='%{family}' sans-serif)" = Roboto
-      # Chromium is the runner image's Google Chrome, as in the shards.
+      # Chromium is the shards' pinned Chrome for Testing, set up as in the
+      # e2e job (scripts/ci-workflow.test.ts).
+      - name: Chrome for Testing
+        run: |
+          zip=chrome-linux64.zip
+          curl -fsS --retry 3 --max-time 120 -o "$RUNNER_TEMP/$zip" "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/$zip"
+          echo "$CHROME_LINUX64_SHA256  $RUNNER_TEMP/$zip" | sha256sum -c --quiet -
+          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/chrome"
+          echo "E2E_CHROME_PATH=$RUNNER_TEMP/chrome/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/chrome/chrome-linux64/chrome" --version
       # WebKit is Playwright's own build for the lockfile's playwright-core,
       # with the system packages it needs.
-      - run: google-chrome --version
       - name: WebKit and its system packages
         run: pnpm exec playwright-core install --with-deps webkit
       - name: e2e/local-lan.e2e.ts in Chromium and WebKit
