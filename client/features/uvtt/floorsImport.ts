@@ -23,26 +23,60 @@ const BY_NAME = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
  * The rows for picked files, lowest first, each named for its file, cut to a floor name's 40 characters.
  * Names that collide after the cut are numbered as the reducer numbers them when the floors are made
  * (freeName), so the dialog shows the names the floors get and each move button has its own name.
+ * Files this app's Every floor export wrote name each floor after its number, as written (exportedParts).
  */
 export function rowsOf(files: readonly File[]): FloorRow[] {
   const taken = new Set<string>();
+  const exported = exportedParts(files);
   return files
     .map((file, i) => ({ file, i }))
     .sort((a, b) => BY_NAME.compare(a.file.name, b.file.name) || a.i - b.i)
     .map(({ file, i }) => {
-      const floor = freeName(floorNameOf(fileSceneName(file.name)), taken);
+      const floor = freeName(floorNameOf(exported?.floors.get(file) ?? fileSceneName(file.name)), taken);
       taken.add(floor);
       return { key: `${i}`, file, floor };
     });
 }
 
+/**
+ * `Tower - 01 - Ground floor.dd2vtt`: a file of the zip Export as VTT file
+ * makes of every floor (mapexport/fileName.ts vttZipNames).
+ */
+const EXPORTED = /^(.+) - (\d{2}) - (.+)\.(?:dd2vtt|uvtt|df2vtt)$/i;
+
+/**
+ * The scene's name and each floor's, as written, when every picked file is
+ * named the way Every floor's zip names its files, with one scene part
+ * (docs/design/design-v1-uvtt-export.md section 7, D-261127-254). Null for
+ * any other pick, which keeps the rule of names read from files.
+ */
+export function exportedParts(files: readonly File[]): { scene: string; floors: Map<File, string> } | null {
+  let scene: string | null = null;
+  const floors = new Map<File, string>();
+  for (const file of files) {
+    const m = EXPORTED.exec(file.name);
+    if (!m) return null;
+    const part = m[1]!.trim();
+    if (scene !== null && part !== scene) return null;
+    scene = part;
+    floors.set(file, m[3]!.trim());
+  }
+  return scene === null || scene === "" ? null : { scene, floors };
+}
+
 /** What the scene name field takes, the protocol's name limit, as New scene and Scene settings do with 80: more than the start value, which is cut like a floor's name. */
 export const SCENE_NAME_CHARS = MAX_NAME;
 
-/** The scene's name to start from: the first file's, cut like a floor's name so the two read alike. */
+/**
+ * The scene's name to start from: the first file's, cut like a floor's name so the two read alike, or the
+ * scene part of files Every floor's export named, as written, up to a scene name's length.
+ */
 export function sceneNameOf(rows: readonly FloorRow[]): string {
   const first = rows[0];
-  return first ? floorNameOf(fileSceneName(first.file.name)) : "";
+  if (!first) return "";
+  const exported = exportedParts(rows.map((r) => r.file));
+  if (exported) return Array.from(exported.scene).slice(0, SCENE_NAME_CHARS).join("").trim();
+  return floorNameOf(fileSceneName(first.file.name));
 }
 
 /** The rows after Move up (toward the first, lowest floor) or Move down, or null at the end of the list. */

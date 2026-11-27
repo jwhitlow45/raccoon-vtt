@@ -7,7 +7,7 @@ import { floorsOf } from "#shared/rules/floors.ts";
 import { apply, room } from "#shared/testutil.ts";
 import { importScene, placeMap, severalFilesOps, type FileFloor } from "./batch.ts";
 import { convertUvtt, type ImportPlan } from "./convert.ts";
-import { addingText, dialogTitle, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, willBeText, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
+import { addingText, dialogTitle, exportedParts, fileError, filesRefusal, floorNamesOf, moveRow, readingText, rowName, rowsOf, SCENE_NAME_CHARS, sceneNameOf, scenesFull, willBeText, severalOutcomeText, tooManyFiles, uploadFailed, uploadingText } from "./floorsImport.ts";
 import { readUvtt } from "./schema.ts";
 import { uvttFile, type FileInput } from "./synthetic.ts";
 import { withPlayersSee } from "../scenes/create.ts";
@@ -236,5 +236,35 @@ describe("a new scene from several files: the one Setup group", () => {
       floorsOf(state, "a").map((f) => f.floor?.name),
       ["Ground floor", "Crypt", "Crypt 2"],
     );
+  });
+});
+
+describe("files Export as VTT file's Every floor wrote", () => {
+  test("name the scene for their scene part and each floor for its own, both as written, still sorted by the full name", () => {
+    const files = ["Sun-Keep - 02 - Upper_floor.dd2vtt", "Sun-Keep - 01 - Ground floor.dd2vtt", "Sun-Keep - 10 - Roof.dd2vtt"].map(file);
+    const rows = rowsOf(files);
+    assert.deepEqual(
+      rows.map((r) => [r.file.name, r.floor]),
+      [
+        ["Sun-Keep - 01 - Ground floor.dd2vtt", "Ground floor"],
+        ["Sun-Keep - 02 - Upper_floor.dd2vtt", "Upper_floor"],
+        ["Sun-Keep - 10 - Roof.dd2vtt", "Roof"],
+      ],
+    );
+    assert.equal(sceneNameOf(rows), "Sun-Keep");
+  });
+
+  test("a scene part with its own dashes reads whole", () => {
+    const rows = rowsOf(["Keep - East - 01 - Hall.dd2vtt", "Keep - East - 02 - Tower.dd2vtt"].map(file));
+    assert.equal(sceneNameOf(rows), "Keep - East");
+    assert.deepEqual(rows.map((r) => r.floor), ["Hall", "Tower"]);
+  });
+
+  test("a mixed pick, or two scene parts, keeps today's rule of names read from files", () => {
+    assert.equal(exportedParts(["Tower - 01 - Ground.dd2vtt", "Crypt_Level_2.dd2vtt"].map(file)), null);
+    assert.equal(exportedParts(["Tower - 01 - Ground.dd2vtt", "Keep - 02 - Ground.dd2vtt"].map(file)), null);
+    const rows = rowsOf(["Tower - 01 - Ground.dd2vtt", "Crypt_Level_2.dd2vtt"].map(file));
+    assert.deepEqual(rows.map((r) => r.floor), ["Crypt Level 2", "Tower 01 Ground"]);
+    assert.equal(sceneNameOf(rows), "Crypt Level 2");
   });
 });
