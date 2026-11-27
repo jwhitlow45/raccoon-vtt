@@ -47,8 +47,12 @@ export function planScene(
   return placed ? { plan: result.plan, problem: null } : { plan: null, problem: GRID_PROBLEM };
 }
 
-/** What this app's import would make of an exported file: a refusal in its own words, or whether any wall would change. */
-export type ExportCheck = { refused: string } | { changes: boolean };
+/**
+ * What this app's import would make of an exported file: a refusal in its
+ * own words, or whether any wall would change, and whether a door or
+ * window cut a wall it lies along, the one cause the note names.
+ */
+export type ExportCheck = { refused: string } | { changes: boolean; portalCut: boolean };
 
 /**
  * Stands in for an exported file's image, which the check never reads:
@@ -68,5 +72,6 @@ export function checkExport(json: Record<string, unknown>, feetPerCell: number):
   if (!checked.ok) return { refused: checked.error };
   const converted = convertUvtt(checked.map, { objects: true, portals: "window", feetPerCell });
   if (!converted.ok) return { refused: converted.error };
-  return { changes: canonicalDiffers(canonicalOfFile(checked.map), canonicalOfPlan(converted.plan)) };
+  const changes = canonicalDiffers(canonicalOfFile(checked.map), canonicalOfPlan(converted.plan));
+  return { changes, portalCut: changes && converted.plan.summary.portalCuts > 0 };
 }

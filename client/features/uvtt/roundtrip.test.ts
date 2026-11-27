@@ -34,7 +34,7 @@ for (const [i, theme] of THEMES.entries()) {
     const lights = Object.values(room.lights).filter((l): l is Light => l?.sceneId === scene.id);
     const rule = scene.autoWalls ?? "all";
     const head = uvttGeometry({ scene, chunks, rule, lights, feetPerCell: 5, pxPerCell: 70 }, "dm");
-    assert.deepEqual(checkExport(head.json, 5), { changes: false });
+    assert.deepEqual(checkExport(head.json, 5), { changes: false, portalCut: false });
     assert.ok(head.counts.walls > 0, "a dungeon has walls");
     seen.doors += head.counts.doors;
     seen.lights += head.counts.lights;

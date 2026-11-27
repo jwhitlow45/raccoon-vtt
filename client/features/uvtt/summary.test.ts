@@ -8,7 +8,7 @@ import { planScene } from "./steps.ts";
 import { uvttFile } from "./synthetic.ts";
 import type { ReadInfo } from "./messages.ts";
 
-const NONE: Summary = { gridWalls: 0, freeWalls: 0, doors: 0, windows: 0, lights: 0, lightsLeftOut: 0, lightsFarOutside: 0, lightsMoved: 0, welded: 0, clipped: 0, tolerance: 0.05 };
+const NONE: Summary = { gridWalls: 0, freeWalls: 0, doors: 0, windows: 0, lights: 0, lightsLeftOut: 0, lightsFarOutside: 0, lightsMoved: 0, welded: 0, portalCuts: 0, clipped: 0, tolerance: 0.05 };
 
 describe("the summary sheet", () => {
   test("FU38-B: lights follow the successful retry after object walls refused the first conversion", () => {

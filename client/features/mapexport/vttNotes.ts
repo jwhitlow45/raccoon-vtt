@@ -68,7 +68,9 @@ export function vttNotes(files: readonly FloorFile[], view: ExportView): string[
   }
   for (const f of files) {
     if (f.check && "changes" in f.check && f.check.changes) {
-      notes.push(f.name === undefined ? "Some walls change when this file is imported here (a door sits very close to a wall)." : `Some walls change when ${f.name}'s file is imported here (a door sits very close to a wall).`);
+      // The cause is named only where the check saw a door or window cut a wall. Pins to the grid, welds and short pieces closing up change walls too (D-261127-353).
+      const why = f.check.portalCut ? " (a door sits very close to a wall)" : "";
+      notes.push(f.name === undefined ? `Some walls change when this file is imported here${why}.` : `Some walls change when ${f.name}'s file is imported here${why}.`);
     }
   }
   for (const f of files) {

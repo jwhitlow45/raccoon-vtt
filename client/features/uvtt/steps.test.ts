@@ -72,7 +72,7 @@ describe("the export's import check", () => {
   const head = (build: BuildInput, bounds = { w: 20, h: 20 }) => uvttGeometry({ scene: { bounds }, chunks: chunksOf(build), rule: "off", lights: [], feetPerCell: 5, pxPerCell: 70 }, "dm").json;
 
   test("a grid wall run of three squares imports as three unit edges, with no note", () => {
-    assert.deepEqual(checkExport(head({ edges: { "1,2,n": WALL, "2,2,n": WALL, "3,2,n": WALL } }), 5), { changes: false });
+    assert.deepEqual(checkExport(head({ edges: { "1,2,n": WALL, "2,2,n": WALL, "3,2,n": WALL } }), 5), { changes: false, portalCut: false });
   });
 
   test("a free wall, door or window along a grid line between intersections imports as grid edges, with no note", () => {
@@ -81,7 +81,7 @@ describe("the export's import check", () => {
       { a: [6, 2], b: [6, 3], f: door() },
       { a: [8, 4], b: [9, 4], f: WINDOW },
     ];
-    assert.deepEqual(checkExport(head({ walls }), 5), { changes: false });
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: false, portalCut: false });
   });
 
   test("a door very close to a wall cuts it on import: the file is still checked, with the note's flag", () => {
@@ -89,7 +89,7 @@ describe("the export's import check", () => {
       { a: [1.5, 1.5], b: [4.5, 1.5], f: WALL },
       { a: [2.5, 1.59375], b: [3.5, 1.59375], f: door() },
     ];
-    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true });
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true, portalCut: true });
   });
 
   test("two doors a 64th apart weld into one on import: within the cover, but a door is lost, so the note's flag", () => {
@@ -97,7 +97,13 @@ describe("the export's import check", () => {
       { a: [2.25, 2.25], b: [3.25, 2.25], f: door() },
       { a: [2.25, 2.265625], b: [3.25, 2.265625], f: door() },
     ];
-    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true });
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true, portalCut: false });
+  });
+
+  test("a wall pinned to the grid changes with no door to blame: the flag, without the portal cut (UVTT-O-2)", () => {
+    // Ends within a tenth of the intersections (1, 4) and (4, 4), which the import pins onto them.
+    const walls: BuildInput["walls"] = [{ a: [1 + 3 / 64, 4 + 2 / 64], b: [4 - 3 / 64, 4 + 1 / 64], f: WALL }];
+    assert.deepEqual(checkExport(head({ walls }), 5), { changes: true, portalCut: false });
   });
 
   test("20,001 separate grid walls: the schema's count refuses, before any conversion", () => {

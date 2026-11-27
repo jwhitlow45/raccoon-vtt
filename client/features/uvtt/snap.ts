@@ -55,6 +55,8 @@ export class WallGraph {
   readonly #segmentCells = new Map<number, number[]>();
   /** How many loose ends welding moved or merged. */
   welded = 0;
+  /** How many walls a portal along them cut (step 2). */
+  cut = 0;
 
   /** The vertex at a lattice point, made if there is none. */
   vertex(x: number, y: number): number {
@@ -232,6 +234,7 @@ export class WallGraph {
         const overlap = (Math.min(t1, 1) - Math.max(t0, 0)) * Math.sqrt(len2);
         if (overlap < 0.5) continue;
         w.alive = false;
+        this.cut++;
         if (t0 > 0) this.#connect(w.a, v0, w.kind, false);
         if (t1 < 1) this.#connect(v1, w.b, w.kind, false);
       }

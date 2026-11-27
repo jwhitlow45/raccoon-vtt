@@ -160,7 +160,7 @@ describe("Export every floor's pictures", () => {
 
 describe("Export as VTT file's notes", () => {
   const counts = { secretAsDoors: 0, lightsOff: 0, clipped: 0, short: false, walls: 1, doors: 0, windows: 0, lights: 0 };
-  const one = (over: Partial<FloorFile> = {}): FloorFile => ({ content: { secretDoors: 0, hiddenLabels: 0, hiddenStamps: 0 }, counts, bytes: 1000, check: { changes: false }, mapMissing: false, ...over });
+  const one = (over: Partial<FloorFile> = {}): FloorFile => ({ content: { secretDoors: 0, hiddenLabels: 0, hiddenStamps: 0 }, counts, bytes: 1000, check: { changes: false, portalCut: false }, mapMissing: false, ...over });
 
   test("say nothing for a file with nothing to say", () => {
     assert.deepEqual(vttNotes([one()], "player"), []);
@@ -190,7 +190,9 @@ describe("Export as VTT file's notes", () => {
   });
 
   test("the import check's answers, by the file they are about", () => {
-    assert.deepEqual(vttNotes([one({ check: { changes: true } })], "dm"), ["Some walls change when this file is imported here (a door sits very close to a wall)."]);
+    assert.deepEqual(vttNotes([one({ check: { changes: true, portalCut: true } })], "dm"), ["Some walls change when this file is imported here (a door sits very close to a wall)."]);
+    assert.deepEqual(vttNotes([one({ check: { changes: true, portalCut: false } })], "dm"), ["Some walls change when this file is imported here."], "no door named where none cut a wall");
+    assert.deepEqual(vttNotes([one({ name: "Upper floor", check: { changes: true, portalCut: false } })], "dm"), ["Some walls change when Upper floor's file is imported here."]);
     const refused = "This map has 4,100 walls off the grid even simplified, more than a scene holds (4,000).";
     assert.deepEqual(vttNotes([one({ check: { refused } })], "dm"), [`This app's import would refuse this file: ${refused}`]);
     assert.deepEqual(vttNotes([one({ name: "Ground floor" }), one({ name: "Upper floor", check: { refused } })], "dm"), [`This app's import would refuse Upper floor's file: ${refused}`]);

@@ -71,6 +71,8 @@ export type Summary = {
   lightsMoved: number;
   /** Wall ends joined within a tenth of a square. */
   welded: number;
+  /** Walls a door or window along them cut at its ends (snap.ts cutAtPortals). */
+  portalCuts: number;
   /** Walls, doors and lights cut or dropped where they passed the scene's edge. */
   clipped: number;
   /** The Douglas-Peucker tolerance that brought the free walls under the scene's limit, in squares. */
@@ -124,7 +126,7 @@ function lattice(p: Point): [number, number] {
   return [Math.round(p.x * L), Math.round(p.y * L)];
 }
 
-type Walls = { edges: Map<string, WallFeature>; free: { a: [number, number]; b: [number, number]; f: WallFeature }[]; welded: number; clipped: number };
+type Walls = { edges: Map<string, WallFeature>; free: { a: [number, number]; b: [number, number]; f: WallFeature }[]; welded: number; cut: number; clipped: number };
 
 function buildWalls(map: UvttMap, portals: readonly UvttPortal[], frame: Frame, options: ImportOptions, tolerance: number): Walls {
   const graph = new WallGraph();
@@ -168,7 +170,7 @@ function buildWalls(map: UvttMap, portals: readonly UvttPortal[], frame: Frame, 
     }
     for (const [ax, ay, bx, by] of cutLong(seg.ax, seg.ay, seg.bx, seg.by)) free.push({ a: [ax / L, ay / L], b: [bx / L, by / L], f });
   }
-  return { edges, free, welded: graph.welded, clipped };
+  return { edges, free, welded: graph.welded, cut: graph.cut, clipped };
 }
 
 /** The segments that stop light from a torch: walls and closed doors, not windows or open doors. */
@@ -300,6 +302,7 @@ export function convertUvtt(map: UvttMap, options: ImportOptions, deps: { newWal
         lightsFarOutside: map.lightsFarOutside,
         lightsMoved: placed.moved,
         welded: walls.welded,
+        portalCuts: walls.cut,
         clipped: walls.clipped + placed.outside,
         tolerance,
       },

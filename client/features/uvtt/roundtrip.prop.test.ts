@@ -240,7 +240,7 @@ describe("spaced square builds come back exactly", () => {
       fc.property(built(buildArb()), (raw) => {
         const b = spaced(raw);
         const h = head(b);
-        assert.deepEqual(checkExport(h.json, 5), { changes: false });
+        assert.deepEqual(checkExport(h.json, 5), { changes: false, portalCut: false });
         assert.equal(h.counts.short, false);
         const plan = importBack(h);
         const want = expected(b);

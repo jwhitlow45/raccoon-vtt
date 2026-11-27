@@ -207,7 +207,7 @@ describe("the scene's edge and short pieces", () => {
     assert.equal(lightsOf(head.json).length, 1);
     // Two runs cut at x = 10, the run along x = 12 left out, the door, the light.
     assert.equal(head.counts.clipped, 5);
-    assert.deepEqual(checkExport(head.json, 5), { changes: false }, "the import takes it unchanged");
+    assert.deepEqual(checkExport(head.json, 5), { changes: false, portalCut: false }, "the import takes it unchanged");
   });
 
   test("a free wall 3/64 long is written 7/64 about its midpoint and comes back", () => {
