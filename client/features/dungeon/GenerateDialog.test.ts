@@ -133,3 +133,91 @@ test("FL3S: Make asks the add's refusals on the latest view before any op, and m
   assert.match(make, /keyName: \(stored\) => floorKeyName\(sceneName, stored\)/);
   assert.match(make, /floorOutcomeText\(outcome, named, sceneName, opened\)/);
 });
+
+/*
+ * DSTOCK (docs/design/design-v1-dungeon-stock.md 1 and 4): the Monsters
+ * choices and the party keep the room edits unless the band moves, Bring
+ * them back restores the band, stock and party, the list's load holds Make
+ * off with its words, and the creature limit is checked on every render
+ * and again at Make on the live room.
+ */
+const { editsStep, startEdits } = await import("./flow.ts");
+const { restocked, rowChanged, DEFAULT_CHOICES } = await import("./remembered.ts");
+type Choices = import("./remembered.ts").Choices;
+type PartyGroup = import("#shared/model.ts").PartyGroup;
+
+/** The dialog's stock and party changes as it makes them: `restocked`, then the edits' "change" only when it drops. */
+function dialogModel(choices: Choices, party: PartyGroup[] | null, room: PartyGroup[]) {
+  const layout = { fitted: 12, seed: "S", settings: "{}", base: null };
+  let s = { choices, party, edits: editsStep(startEdits<{ choices: Choices; party: PartyGroup[] | null }>(), { k: "edit", room: 3, edit: { lit: true }, layout }) };
+  const groups = () => s.party ?? room;
+  return {
+    get: () => s,
+    stock(patch: Partial<Choices>) {
+      const c = restocked(s.choices, { ...s.choices, ...patch }, groups(), groups(), false);
+      s = { ...s, choices: c.next, edits: c.drop ? editsStep(s.edits, { k: "change", before: { choices: s.choices, party: s.party } }) : s.edits };
+    },
+    party(next: PartyGroup[] | null) {
+      const c = restocked(s.choices, s.choices, groups(), next ?? room, true);
+      s = { choices: c.next, party: next, edits: c.drop ? editsStep(s.edits, { k: "change", before: { choices: s.choices, party: s.party } }) : s.edits };
+    },
+    levelUp(next: PartyGroup[]) {
+      room = next;
+    },
+    bringBack() {
+      const back = s.edits.dropped!;
+      s = { choices: back.before.choices, party: back.before.party, edits: editsStep(s.edits, { k: "bringBack" }) };
+    },
+  };
+}
+
+test("DSTOCK-G: Monsters, Difficulty and a party edit in the same band keep the edits and redraw", () => {
+  const m = dialogModel({ ...DEFAULT_CHOICES, monsters: 25 }, null, [{ count: 4, level: 3 }]);
+  m.stock({ monsters: 50 });
+  m.stock({ difficulty: "high" });
+  m.party([{ count: 5, level: 2 }]);
+  assert.ok(m.get().edits.edits, "the edits stand");
+  assert.equal(m.get().edits.dropped, null);
+});
+
+test("DSTOCK-G: None to Few with a party in another band follows through the drop, and Bring them back restores band, stock, party and edits", () => {
+  const m = dialogModel({ ...DEFAULT_CHOICES }, [{ count: 4, level: 7 }], []);
+  m.stock({ monsters: 25 });
+  assert.equal(m.get().choices.band, "5-10");
+  assert.equal(m.get().edits.edits, null, "the band moved, so the edits dropped");
+  m.bringBack();
+  assert.deepEqual([m.get().choices.band, m.get().choices.monsters, m.get().party], ["1-4", 0, [{ count: 4, level: 7 }]]);
+  assert.ok(m.get().edits.edits, "the edits hold again");
+});
+
+test("DSTOCK-G: a live level-up across a band keeps the band and the edits, and only the next change moves it", () => {
+  const m = dialogModel({ ...DEFAULT_CHOICES, monsters: 50 }, null, [{ count: 4, level: 4 }]);
+  m.levelUp([{ count: 4, level: 5 }]);
+  m.stock({ difficulty: "low" });
+  assert.deepEqual([m.get().choices.band, m.get().edits.edits !== null], ["1-4", true]);
+  m.stock({ monsters: 0 });
+  m.stock({ monsters: 50 });
+  assert.equal(m.get().choices.band, "5-10");
+});
+
+test("DSTOCK-G: Traps at None follows nothing, and a band pick is kept as the DM's own", () => {
+  const off = rowChanged({ ...DEFAULT_CHOICES, monsters: 50, traps: 2 }, { traps: 0 }, [{ count: 2, level: 12 }]);
+  assert.equal(off.band, "1-4");
+  assert.equal(rowChanged(off, { band: "17-20" }, [{ count: 2, level: 12 }]).ownBand, "17-20");
+});
+
+test("DSTOCK-G: the dialog wires the stock through restocked, keeps the party in Before, and holds Make for the list and the limit", () => {
+  assert.match(source, /type Before = \{ choices: Choices; seedText: string; party: PartyGroup\[\] \| null \}/);
+  assert.match(source, /setChoices\(\(c\) => rowChanged\(c, patch, groups\)\)/);
+  const restock = source.slice(source.indexOf("const restock"), source.indexOf("const setStock"));
+  assert.match(restock, /if \(changed\.drop\) dropEdits\(\);/);
+  assert.match(source, /setEditedParty\(back\.before\.party\)/);
+  assert.match(source, /const stockWaits = share > 0 && \(source\.pool === null \|\| overBy > 0\);/);
+  assert.match(source, /current\.summary\.rooms >= 2 && !stockWaits/);
+  assert.match(source, /share > 0 && source\.list === null && !source\.failed \? \(\s*<Loading text=\{MONSTERS_LOADING\} \/>/);
+  assert.match(source, /\{share > 0 && source\.failed \? <SrdLoadFailed what="The monster list" inline \/> : null\}/);
+  const make = source.slice(source.indexOf("const make = async"), source.indexOf("const floor = props.floor;"));
+  assert.match(make, /const live = tokensLeftNow\(store, groupScene\);\s*if \(share > 0 && live !== null && overLimitBy\(current\.facts, edits\.edits\?\.rooms \?\? null, live, current\.plan\.stones\.length\) > 0\) return;/);
+  assert.match(source, /JSON\.stringify\(\[settings, parsed\.seed, keyInput, edits\.edits, stocked\]\)/);
+  assert.match(source, /keyInput, sent, stock\)\.then\(/);
+});

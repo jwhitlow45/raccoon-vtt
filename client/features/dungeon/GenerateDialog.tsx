@@ -1,5 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { GROUND_FLOOR } from "#shared/reducer/floors.ts";
+import type { PartyGroup } from "#shared/model.ts";
+import { partyFromCharacters } from "../encounters/budget.ts";
+import { PartyEditor } from "../encounters/PartyEditor.tsx";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { Button } from "../../components/Button.tsx";
 import { BODY_PAD, Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
 import { ErrorText } from "../../components/Field.tsx";
@@ -14,7 +18,7 @@ import { builderScene, cleanName, pickNow, type NewSceneIntent, type SceneInput 
 import { floorAddRefusal, floorCreateOf, type FloorTarget } from "../scenes/floorSource.ts";
 import { CHECK_MS } from "../uvtt/rules.ts";
 import { NumberInput } from "../scenes/controls.tsx";
-import { Choice, Choices as ChoiceRows } from "./Choices.tsx";
+import { Choice, Choices as ChoiceRows, LimitLine } from "./Choices.tsx";
 import type { RoomEdit } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
@@ -25,11 +29,32 @@ import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { roomBox } from "./marks.ts";
 import { DungeonPreview, topCornerFits, type Drawn } from "./Preview.tsx";
 import { RoomPanel } from "./RoomPanel.tsx";
-import { keptSize, loadChoices, saveChoices, settingsOf, sideCap, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
+import {
+  bandFollows,
+  followedBand,
+  keptSize,
+  loadChoices,
+  monstersHeld,
+  partyBand,
+  partyLevel,
+  restocked,
+  rowChanged,
+  saveChoices,
+  settingsOf,
+  sideCap,
+  sidesOf,
+  startChoices,
+  stockedShare,
+  stockOf,
+  withSize,
+  type Choices,
+} from "./remembered.ts";
+import { overLimitBy, stockKey, stockRequest, tokensLeftNow, useStockSource, useTokensLeft } from "./stockSource.ts";
 import { formatSeed, newSeed, parseSeed } from "./seed.ts";
-import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
+import { CHOICE_NAMES, isHexGrid, MIN_SIDE, type DungeonSettings, type GridKind, type SizeChoice, type StockChoices } from "./settings.ts";
 import { sendDungeon, warmOpChecks } from "./send.ts";
 import {
+  bandLines,
   BRING_BACK,
   DROP_EDITS,
   EDIT_OVER_WALLS,
@@ -48,6 +73,7 @@ import {
   MAKE_SCENE,
   makingLine,
   MAKING_FLOOR,
+  MONSTERS_LOADING,
   fogLine,
   NOT_MADE,
   outcomeText,
@@ -68,8 +94,8 @@ const FRAME_MARGIN = 4;
 const TWO_COLUMNS_PX = 640;
 
 type Shown = { result: Extract<Preview, { ok: true }>; drawn: Drawn };
-/** What Bring them back restores beside the edits: the choices and the seed as typed. */
-type Before = { choices: Choices; seedText: string };
+/** What Bring them back restores beside the edits: the choices with their band and stock, the seed as typed, and the edited party (D-261127-219). */
+type Before = { choices: Choices; seedText: string; party: PartyGroup[] | null };
 type Sending = { answered: number; total: number };
 
 /**
@@ -125,10 +151,17 @@ export function GenerateDialog(props: {
   const [keptLit, setKeptLit] = useState(false);
   const [looking, setLooking] = useState(false);
   const [lookFailed, setLookFailed] = useState<string | null>(null);
+  // The party the Monsters rows budget for: the room's characters, live, or the dialog's edit, kept until close (D-261127-062).
+  const characters = useRoomView((s) => s.view?.characters);
+  const roomParty = useMemo(() => partyFromCharacters(Object.values(characters ?? {}).flatMap((c) => (c ? [c] : []))), [characters]);
+  const [editedParty, setEditedParty] = useState<PartyGroup[] | null>(null);
+  const groups = editedParty ?? roomParty.groups;
   // A floor opens at its own size and leaves the remembered size as it was when the dialog opened (D-261110-185).
+  // The band follows the party as the dialog opens, before any edit stands (D-261127-219).
   const [start] = useState(() => {
     const saved = loadChoices(props.roomId);
-    const choices = startChoices(saved, props.form, props.floor ? props.form : undefined);
+    const opened = startChoices(saved, props.form, props.floor ? props.form : undefined);
+    const choices = { ...opened, band: followedBand(opened, roomParty.groups) };
     return { choices, kept: props.floor ? keptSize(saved, choices.rooms) : undefined };
   });
   const [choices, setChoices] = useState<Choices>(start.choices);
@@ -171,7 +204,16 @@ export function GenerateDialog(props: {
   // A floor's page is titled again from the stored name once its create is taken (send.ts). The preview's guesses it.
   const keyName = props.floor ? floorKeyName(sceneName, floorName) : sceneName;
   const keyInput: KeyInput | null = choices.key && !keyHeld && myColor ? { name: keyName, color: myColor, feetPerCell } : null;
-  const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput, edits.edits]) : null;
+  // Monsters as stocked: held at None while the party has no level (design 1).
+  const held = monstersHeld(groups);
+  const share = stockedShare(choices, groups);
+  const source = useStockSource(share > 0, choices.theme);
+  // A new scene has the whole cap, and a floor its scene's group, floors beside included (D-261127-075).
+  const groupScene = props.floor?.beside ?? SCENE_PLACEHOLDER;
+  const tokensLeft = useTokensLeft(share > 0, groupScene);
+  const stock = stockRequest(choices, share, groups, source.pool, tokensLeft);
+  const stocked = stockKey(choices, share, groups, tokensLeft, choices.theme, source.list !== null, source.imagesRev);
+  const key = parsed.ok ? JSON.stringify([settings, parsed.seed, keyInput, edits.edits, stocked]) : null;
 
   // The worker loads as the dialog opens, and closing ends it, dropping any late answer (client.ts).
   useEffect(() => {
@@ -209,7 +251,7 @@ export function GenerateDialog(props: {
     const seed = parsed.seed;
     const sent = edits.edits;
     const timer = setTimeout(() => {
-      preview(settings, seed, scene, hex ? { feetPerCell, grid } : { feetPerCell }, keyInput, sent).then(
+      preview(settings, seed, scene, hex ? { feetPerCell, grid } : { feetPerCell }, keyInput, sent, stock).then(
         (result) => {
           if (!mounted.current) return;
           if (!result.ok) {
@@ -269,7 +311,10 @@ export function GenerateDialog(props: {
     const timer = setTimeout(() => warmOpChecks(current.ops), 0);
     return () => clearTimeout(timer);
   }, [current]);
-  const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2;
+  // The creature limit is checked on every render, against the plan on screen and the edits now (D-261127-280).
+  const overBy = share > 0 && current ? overLimitBy(current.facts, edits.edits?.rooms ?? null, tokensLeft, current.plan.stones.length) : 0;
+  const stockWaits = share > 0 && (source.pool === null || overBy > 0);
+  const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2 && !stockWaits;
 
   // While a floor's create waits, Hide, Escape, the backdrop and Back do nothing, so no op of this device lands between the floor and its key.
   const close = () => {
@@ -277,11 +322,40 @@ export function GenerateDialog(props: {
     props.onClose(sceneMayExist.current);
   };
   // A changed choice, a Reroll or a new seed drops the edits, keeping what stood before for Bring them back (4.4).
-  const dropEdits = () => editStep({ k: "change", before: { choices, seedText } });
+  const dropEdits = () => editStep({ k: "change", before: { choices, seedText, party: editedParty } });
   const set = (patch: Partial<Choices>) => {
     dropEdits();
-    setChoices((c) => ({ ...c, ...patch }));
+    setChoices((c) => rowChanged(c, patch, groups));
   };
+  /**
+   * A change of the Monsters choices or the party (D-261127-063, 219): it
+   * keeps the edits, as stocking moves nothing they pin, unless it is a
+   * transition that moves the band, which shapes traps and the edits'
+   * frozen layout, so it goes through `set` with Bring them back.
+   */
+  const restock = (next: Choices, now: readonly PartyGroup[], partyEdit: boolean, was: readonly PartyGroup[] = groups) => {
+    const changed = restocked(choices, next, was, now, partyEdit);
+    if (changed.drop) dropEdits();
+    setChoices(changed.next);
+  };
+  const setStock = (next: StockChoices) => restock({ ...choices, ...next }, groups, false);
+  const editParty = (next: PartyGroup[] | null) => {
+    setEditedParty(next);
+    restock(choices, next ?? roomParty.groups, true);
+  };
+  // Monsters' Held state changing as the room's characters gain or lose their last level is a transition too.
+  const heldWas = useRef(held);
+  const groupsWas = useRef(groups);
+  useEffect(() => {
+    if (heldWas.current !== held) restock(choices, groups, false, groupsWas.current);
+    heldWas.current = held;
+    groupsWas.current = groups;
+    // Only the hold's change is a transition: a level-up in a standing party moves the budget, never the band.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held]);
+  useEffect(() => {
+    groupsWas.current = groups;
+  }, [groups]);
   const setSize = (patch: Partial<Pick<Choices, "size" | "across" | "down">>) => {
     dropEdits();
     setChoices((c) => withSize(c, patch, grid));
@@ -296,11 +370,15 @@ export function GenerateDialog(props: {
     if (!back) return;
     setChoices(back.before.choices);
     setSeedText(back.before.seedText);
+    setEditedParty(back.before.party);
     editStep({ k: "bringBack" });
   };
 
   const make = async () => {
     if (!canMake || !current) return;
+    // The group's tokens are read again, as a sibling floor's may have changed since the render: past the limit nothing is sent, and the line says so.
+    const live = tokensLeftNow(store, groupScene);
+    if (share > 0 && live !== null && overLimitBy(current.facts, edits.edits?.rooms ?? null, live, current.plan.stones.length) > 0) return;
     const floor = props.floor;
     // A floor's add asks its refusals on the latest view first, so a change made since the dialog opened stops it with its reason.
     const view = store.getState().view;
@@ -366,6 +444,8 @@ export function GenerateDialog(props: {
   const counts = counted(flow)?.result.summary;
   const status = failed && !failed.retry ? null : busy ? (
     <Loading delay={0} text={offline ? WAITING : makingLine(sending.answered, sending.total)} />
+  ) : share > 0 && source.list === null && !source.failed ? (
+    <Loading text={MONSTERS_LOADING} />
   ) : counts ? (
     <span aria-live="polite" aria-busy={ready.drawing}>
       {statusLine(counts)}
@@ -477,6 +557,20 @@ export function GenerateDialog(props: {
           </Choice>
         }
         light={<LightLine kept={keptLit} onToggle={() => setKeptLit((k) => !k)} />}
+        stock={{
+          value: stockOf(choices),
+          onChange: setStock,
+          held,
+          groups,
+          party: <PartyEditor party={editedParty} roomParty={roomParty} onChange={editParty} />,
+          below: (
+            <>
+              {share > 0 && source.failed ? <SrdLoadFailed what="The monster list" inline /> : null}
+              <LimitLine over={overBy} />
+            </>
+          ),
+        }}
+        band={{ held: bandFollows(choices, groups), lines: bandLines(choices.band, partyBand(groups), partyLevel(groups)) }}
         seed={{
           text: seedText,
           onChange: setSeed,
@@ -503,6 +597,8 @@ export function GenerateDialog(props: {
         onDone={done}
         cave={choices.theme === "cave"}
         held={locked}
+        stocking={share > 0}
+        limit={share > 0 ? <LimitLine over={overBy} /> : null}
         more={edits.undone[picked] ? [edits.undone[picked]] : []}
       />
     );
