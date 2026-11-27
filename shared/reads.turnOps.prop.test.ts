@@ -100,6 +100,7 @@ const NOT_APPLIED = new Set<Op["t"]>([
   "roll.dice",
   "actor.deathRoll",
   "actor.rechargeRoll",
+  "actor.hitDieRoll",
   "sound.create",
   "sound.update",
   "sound.delete",

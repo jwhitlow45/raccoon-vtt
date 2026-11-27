@@ -192,10 +192,11 @@ test("the mark is the snapshot row's alone: no frame a DM or a player is sent ca
 
 test("a room this build measured and stored below today's version is unchanged by its load's measure", async (t) => {
   const { state, sceneId } = overShare();
-  // Measured as a first load leaves it, then stored at each version below today's that a live room can hold.
+  // Measured as a first load leaves it, then stored at each version below version 8 ids that a live room can hold: a room
+  // stored at or past them gives no ids anew, so its load runs no measure (reidDue).
   const once = await storedActor(t, new StoredRoomDb(state, { version: PLAYER_LIMITS_SNAPSHOT_VERSION - 1, seq: 9 }), { idGate: false });
   const measured = once.actor.committed.state;
-  for (let version = PLAYER_LIMITS_SNAPSHOT_VERSION; version < SNAPSHOT_VERSION; version++) {
+  for (let version = PLAYER_LIMITS_SNAPSHOT_VERSION; version < SEALED_IDS_SNAPSHOT_VERSION; version++) {
     const db = new StoredRoomDb(structuredClone(measured), { version, seq: 9 });
     const ops: number[] = [];
     const step: typeof mapStepOps = (input) => {

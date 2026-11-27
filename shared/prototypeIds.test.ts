@@ -93,6 +93,7 @@ function handMade(state: RoomState): Case[] {
   both({ t: "roll.dice", tag: "tag9", rollId: roll, target: { characterId: c0 } });
   both({ t: "actor.deathRoll", tag: "tag9", target: { characterId: c0 }, record: 1 });
   both({ t: "actor.rechargeRoll", tag: "tag9", target: { tokenId: t0 }, key: "actions:fire-breath", name: "Fire Breath", min: 5 });
+  both({ t: "actor.hitDieRoll", tag: "tag9", target: { characterId: c0 }, die: 8 });
   both({ t: "clock.start", id: "clock1", at: 8 * 3_600, shown: true, calendar: { kind: "months", months: [{ name: "Deepwinter", days: 30 }], week: ["Moonday"], era: "AF" } });
   both({ t: "clock.stop" });
   both({ t: "clock.update", calendar: { kind: "days" }, shown: false, at: 0 });
@@ -143,6 +144,7 @@ function handMade(state: RoomState): Case[] {
     { t: "roll.dice", tag: "tag9", rollId: roll, target: { characterId: c0 } },
     { t: "actor.deathRoll", tag: "tag9", target: { characterId: c0 } },
     { t: "actor.rechargeRoll", tag: "tag9", target: { tokenId: t0 }, key: "actions:fire-breath", name: "Fire Breath", min: 5 },
+    { t: "actor.hitDieRoll", tag: "tag9", target: { characterId: c0 }, die: 8 },
   ];
   for (const a of asked) ops.push({ op: { t: "sys.dice", asked: a, batch, results: [{ formula: "1d20", faces: [7], total: 9 }] }, who: P1 });
   return ops;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { isUuidv7 } from "#shared/ids.ts";
-import { SEALED_IDS_SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { SEALED_IDS_SNAPSHOT_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { character, drawing, member, rng, room, scene, template, token } from "#shared/testutil.ts";
@@ -181,7 +181,7 @@ describe("random rooms through the first load's new ids", () => {
         assert.deepEqual([db.snapshotWrites, db.snapshot.version], [0, SEALED_IDS_SNAPSHOT_VERSION - 1], `seed ${seed}: nothing stored`);
       } else {
         for (const id of unkept) assert.ok(!JSON.stringify(state).includes(id), `seed ${seed}: ${id} renamed`);
-        assert.deepEqual([db.snapshotWrites, db.snapshot.version], [1, SEALED_IDS_SNAPSHOT_VERSION], `seed ${seed}: stored once at today's version`);
+        assert.deepEqual([db.snapshotWrites, db.snapshot.version], [1, SNAPSHOT_VERSION], `seed ${seed}: stored once at today's version`);
         assert.ok([...v7IdsIn(JSON.stringify(state))].every((id) => isUuidv7(id)));
       }
       await h.actor.shutdown({ code: 1012, snapshot: false });
