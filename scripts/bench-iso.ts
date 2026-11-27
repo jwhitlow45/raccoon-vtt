@@ -37,6 +37,11 @@
  *   16 openings of 8 by 8 over a 40 by 40 mapped floor down to a mapped
  *   floor below, each a drop in Isometric: a pan at 40 px, a warm turn,
  *   and the page's live heap after them.
+ * - models: the caps' relief under heavy snow and a strong wind, with 40
+ *   creatures round the camera, each facing its own way, panned at 40 px
+ *   wearing pictures and then wearing 3D models on them
+ *   (docs/design/design-v1-token-models.md 6 and Appendix A): a model must
+ *   cost no more than its picture. The sheet is drawn from primitives here.
  * - dungeon: a 50 by 50 generated dungeon with rooms raised and sunk and
  *   the runs of stairs to them (docs/design/design-v1-iso-depth.md 7), with
  *   a pan, a drag up a run and a turn at 40 and 24 px, and in Low power at
@@ -89,7 +94,7 @@ import path from "node:path";
 import { chromium, type BrowserContext, type CDPSession, type Page } from "playwright-core";
 import sharp from "sharp";
 import WebSocket from "ws";
-import { pickOption, pickTool, ROOT, startServer } from "../e2e/harness.ts";
+import { pickOption, pickTool, ROOT, startServer, waitFor } from "../e2e/harness.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { hexCenter, sceneHexes } from "../shared/rules/hex.ts";
 
@@ -175,7 +180,7 @@ function chunked<T>(list: readonly T[], size: number): T[][] {
 }
 
 /** What each scene holds: the ops that build it, the tokens the rows press, and where the camera stands for each zoom. */
-type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; aura?: string; group?: string[]; horse?: string; rider?: string; below?: string; bounds: { w: number; h: number }; at40: { x: number; y: number } };
+type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; aura?: string; group?: string[]; horse?: string; rider?: string; below?: string; models?: string[]; bounds: { w: number; h: number }; at40: { x: number; y: number } };
 
 function typical(sceneId: string, dmId: string): Built {
   const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds: { w: 40, h: 30 }, fogEnabled: true, autoWalls: "all" } }];
@@ -241,6 +246,16 @@ function caps(sceneId: string): Built {
   for (const t of [...tokens, ...group, horse, rider]) ops.push({ t: "token.create", token: t });
   ops.push({ t: "token.attach", tokenId: rider.id, to: horse.id, kind: "ride", x: 96.5, y: 103.5, elevation: 0 });
   return { ops, walker: tokens[16]!.id as string, group: group.map((t) => t.id as string), horse: horse.id as string, rider: rider.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 101 } };
+}
+
+/** The caps' relief under heavy snow, with 40 creatures round the camera, each facing its own way, wearing no image until the models block sets their pictures. */
+function models(sceneId: string): Built {
+  const relief = caps(sceneId).ops.filter((op) => op.t !== "token.create" && op.t !== "token.attach");
+  const ops: Op[] = [...relief, { t: "scene.update", sceneId, patch: { weather: { kind: "snow", heavy: true, wind: "strong" } } }];
+  const tokens: Op[] = [];
+  for (let i = 0; i < 40; i++) tokens.push(token(sceneId, `Knight ${i + 1}`, 95 + (i % 8) * 1.5, 97 + Math.floor(i / 8) * 1.6, { rotation: (i * 45) % 360, size: i % 10 === 9 ? "large" : "medium" }));
+  for (const t of tokens) ops.push({ t: "token.create", token: t });
+  return { ops, walker: tokens[20]!.id as string, models: tokens.map((t) => t.id as string), bounds: { w: 200, h: 200 }, at40: { x: 100, y: 101 } };
 }
 
 function crowd(sceneId: string): Built {
@@ -1062,6 +1077,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["pits", pits],
       ["dungeon", dungeon.make],
       ["openings", openings],
+      ["models", models],
     ] as const) {
       // A room costs the session two snapshots, the page's and the DM socket's. Past 20 a minute the server holds the next back and closes a session that keeps asking (server/rooms/budgets.ts DEFAULT_SNAPSHOT_BUDGET), so the eleventh room waits out the first's minute.
       const recent = roomTimes.filter((t) => Date.now() - t < SNAPSHOT_WINDOW_MS);
@@ -1208,6 +1224,35 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 
     // Asked for OPEN-ISO alone, the bench ends here, before the other blocks open their rooms (above).
     if (opts.only?.every((o) => o.includes("OPEN-ISO"))) return rows;
+
+    /*
+     * The models rows (docs/design/design-v1-token-models.md 6): the same 40
+     * creatures panned at 40 px under heavy snow, wearing a picture each and
+     * then the same pictures with a 3D model on them, its sheet decoded at
+     * the copy this phone draws. Second of the rows, while its room, built
+     * last, is still loaded.
+     */
+    if (!opts.only || opts.only.some((o) => MODEL_ROWS.some((r) => r.includes(o)))) {
+      const { room, scene } = built.models!;
+      const dm = await dmOf("models");
+      const picture = await uploadImage(context, server.origin, room.roomId, "token", await sharp({ create: { width: 256, height: 256, channels: 3, background: { r: 150, g: 90, b: 60 } } }).png().toBuffer());
+      const sheet = await uploadImage(context, server.origin, room.roomId, "model", await modelSheet());
+      const crop = { cx: 0.5, cy: 0.5, zoom: 1 };
+      const model = { assetId: sheet, side: 1.6, anchorY: 0.8, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) };
+      for (const tokenId of scene.models!) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop } } });
+      await open("models", 40);
+      await page.waitForTimeout(1000);
+      await frames(page, 30);
+      await addPan(MODEL_PICTURES_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      for (const tokenId of scene.models!) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop, model } } });
+      if (view === "isometric") await waitFor("the creatures standing as their models", () => page.evaluate(() => {
+        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; listening(): boolean; find(s: string): unknown[] }[] } }).Konva;
+        return konva.stages.some((st) => st.width() > 0 && st.listening() && st.find(".standeeModel").length >= 20) || null;
+      }), 30_000);
+      await frames(page, 30);
+      await addPan(MODEL_MODELS_ROW, (t) => touchPan(page, cdp, STEPS, t));
+    }
+    if (opts.only?.every((o) => MODEL_ROWS.some((r) => r.includes(o)))) return rows;
 
     // The typical scene.
     {
@@ -1802,6 +1847,9 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+const MODEL_PICTURES_ROW = "pan, 40 px, caps under heavy snow with 40 creatures wearing pictures";
+const MODEL_MODELS_ROW = "pan, 40 px, caps under heavy snow with 40 creatures wearing 3D models";
+const MODEL_ROWS = [MODEL_PICTURES_ROW, MODEL_MODELS_ROW];
 const OPEN_PAN_ROW = "pan, 40 px, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO)";
 const OPEN_TURN_ROW = "turn, 40 px, 16 openings of 8 by 8 over a mapped floor, each turn visited before (OPEN-ISO)";
 const OPEN_HEAP_ROW = "live heap after a forced collection, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO) (MB, not ms)";
@@ -1894,6 +1942,26 @@ async function uploadMap(context: BrowserContext, origin: string, roomId: string
   if (!res.ok()) throw new Error(`the map upload answered ${res.status()}`);
   const row = (await res.json()) as { id: string; width: number; height: number };
   return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx: 8, originPx: { x: 0, y: 0 } };
+}
+
+/** An image uploaded as `kind`, by its new asset id. */
+async function uploadImage(context: BrowserContext, origin: string, roomId: string, kind: "token" | "model", data: Buffer): Promise<string> {
+  const res = await context.request.put(`${origin}/api/rooms/${roomId}/assets?kind=${kind}`, { headers: { Origin: origin, "content-type": "image/png" }, data });
+  if (!res.ok()) throw new Error(`the ${kind} upload answered ${res.status()}`);
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** A model's sheet drawn from primitives, as the worker lays one out: 8 frames of 512 px, each a figure inside its drawn box [30, 20, 70, 90], turned a little more each frame. */
+function modelSheet(): Promise<Buffer> {
+  const parts: string[] = [];
+  for (let f = 0; f < 8; f++) {
+    const ox = (f % 4) * 512;
+    const oy = Math.floor(f / 4) * 512;
+    const a = (f * Math.PI) / 4;
+    parts.push(`<rect x="${ox + 174}" y="${oy + 184}" width="164" height="256" rx="20" fill="hsl(${f * 45},60%,45%)" stroke="#05070b" stroke-width="6"/>`);
+    parts.push(`<circle cx="${ox + 256 - Math.sin(a) * 40}" cy="${oy + 150 + Math.cos(a) * 8}" r="34" fill="#d9b38c" stroke="#05070b" stroke-width="6"/>`);
+  }
+  return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${parts.join("")}</svg>`)).png().toBuffer();
 }
 
 /** Each step sets the map image or takes it away, from another device of the DM's, and waits for the page to load and draw what follows. */
