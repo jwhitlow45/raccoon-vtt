@@ -35,7 +35,8 @@ const FOLDERS = [
 /**
  * Readers that mean every floor. The stairs builder checks a draft against both floors it joins. An area reaches the
  * floor across an opening, the outliner lists every floor's creatures, and Export every floor draws each floor
- * (docs/design/design-v1-floors.md phase 4, 9.2, 9.3 and 9.6).
+ * (docs/design/design-v1-floors.md phase 4, 9.2, 9.3 and 9.6), and Export as VTT file writes each floor's walls
+ * (docs/design/design-v1-uvtt-export.md 7).
  */
 const SKIPPED = new Set([
   "features/areas/reminders.ts",
@@ -46,6 +47,7 @@ const SKIPPED = new Set([
   "features/areas/through.ts",
   "features/outliner/otherFloors.ts",
   "features/mapexport/everyFloor.ts",
+  "features/mapexport/UvttExport.tsx",
 ]);
 const FLOOR_SCOPED = "tokens|buildChunks|fogTiles|exploredTiles|labels|stamps|lights|pins|traps|templates|drawings|fogDrafts|holders|exploredBy|memory|memoryBy";
 const OFFENDING = new RegExp(`\\b(?:s|v)\\.view\\??\\.(?:${FLOOR_SCOPED})\\b|getState\\(\\)\\.view\\b`);

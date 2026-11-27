@@ -76,4 +76,5 @@ export const SCENES_ENTRIES: readonly CatalogEntry[] = [
   section(at(SIZE), "scenes.size", SCENE_GROUP_LABELS.scene, { names: ["scene size", "starting view"], when: shown }),
   action(SIZE, "scenes.size.save-view", "Save current view", { names: ["starting view"], when: shown }),
   action(SCENES, "scenes.export", "Export as image", { names: ["export the map", "download the map", "png"], when: shown }),
+  action(SCENES, "scenes.export-vtt", "Export as VTT file", { names: ["universal vtt", "dd2vtt", "uvtt", "foundry", "export walls"], when: shown }),
 ];

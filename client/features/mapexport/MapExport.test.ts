@@ -6,7 +6,11 @@ import { scene } from "#shared/testutil.ts";
 import { ATTIC, tower, TOWER, UPPER } from "../floors/testing.ts";
 import { everyFloorFits, everyFloorHelp, everyFloorZip, EVERY_FLOOR_PIXELS, exportedFloors, floorEntries, makingText, reachedText, sharedBounds, tooMuchText } from "./everyFloor.ts";
 import { everyFloorFileName, floorEntryName } from "./fileName.ts";
+import { api } from "../../lib/api.ts";
+import { floorPicture, PLAYER_VIEW_FAILED } from "./picture.ts";
+import { ExportError } from "./render.ts";
 import { MAX_EXPORT_PIXELS } from "./size.ts";
+import { lossLine, vttNotes, type FloorFile } from "./vttNotes.ts";
 
 /*
  * Export every floor (docs/design/design-v1-floors.md phase 4, 9.3): the
@@ -151,5 +155,66 @@ describe("Export every floor's pictures", () => {
       }),
       /players' view/,
     );
+  });
+});
+
+describe("Export as VTT file's notes", () => {
+  const counts = { secretAsDoors: 0, lightsOff: 0, clipped: 0, short: false, walls: 1, doors: 0, windows: 0, lights: 0 };
+  const one = (over: Partial<FloorFile> = {}): FloorFile => ({ content: { secretDoors: 0, hiddenLabels: 0, hiddenStamps: 0 }, counts, bytes: 1000, check: { changes: false }, mapMissing: false, ...over });
+
+  test("say nothing for a file with nothing to say", () => {
+    assert.deepEqual(vttNotes([one()], "player"), []);
+  });
+
+  test("count what each view writes otherwise or leaves out, summed over the floors", () => {
+    const content = { secretDoors: 3, hiddenLabels: 1, hiddenStamps: 2 };
+    assert.deepEqual(vttNotes([one({ content, counts: { ...counts, clipped: 4 } })], "player"), [
+      "3 secret doors written as walls, as players see them.",
+      "2 stamps players cannot see left out of the map.",
+      "1 label under the fog left out.",
+      "4 walls, doors or lights past the scene's edge cut or left out.",
+    ]);
+    const dm = { ...counts, secretAsDoors: 2, lightsOff: 1 };
+    assert.deepEqual(vttNotes([one({ name: "Ground floor", counts: dm }), one({ name: "Upper floor", counts: { ...dm, clipped: 1 } })], "dm"), [
+      "4 secret doors written as plain doors.",
+      "2 lights switched off left out.",
+      "1 wall, door or light past the scene's edge cut or left out.",
+    ]);
+  });
+
+  test("a file over 40 MB says phones cannot import it, and on Every floor names the floor", () => {
+    const big = 40 * 1024 * 1024 + 1;
+    assert.deepEqual(vttNotes([one({ bytes: big })], "dm"), ["Phones import files up to 40 MB, so this one imports on a computer."]);
+    assert.deepEqual(vttNotes([one({ bytes: 40 * 1024 * 1024 })], "dm"), [], "40 MB itself imports on a phone");
+    assert.deepEqual(vttNotes([one({ name: "Ground floor" }), one({ name: "Upper floor", bytes: big })], "dm"), ["Upper floor's file is over 40 MB, so it imports on a computer."]);
+  });
+
+  test("the import check's answers, by the file they are about", () => {
+    assert.deepEqual(vttNotes([one({ check: { changes: true } })], "dm"), ["Some walls change when this file is imported here (a door sits very close to a wall)."]);
+    const refused = "This map has 4,100 walls off the grid even simplified, more than a scene holds (4,000).";
+    assert.deepEqual(vttNotes([one({ check: { refused } })], "dm"), [`This app's import would refuse this file: ${refused}`]);
+    assert.deepEqual(vttNotes([one({ name: "Ground floor" }), one({ name: "Upper floor", check: { refused } })], "dm"), [`This app's import would refuse Upper floor's file: ${refused}`]);
+    assert.deepEqual(vttNotes([one({ check: null })], "dm"), [], "a check that could not run says nothing");
+  });
+
+  test("the loss line adds other floors and short walls only where they apply", () => {
+    const base = "The file keeps the map, walls, doors, windows and lights. Heights, traps, tokens, fog, locks, open doors and secret doors stay here.";
+    assert.equal(lossLine({ otherFloors: false, short: false }), base);
+    assert.equal(lossLine({ otherFloors: true, short: true }), `${base} Other floors stay here too. A wall or door shorter than a fifth of a square may not come back.`);
+  });
+
+  test("a server that fails the player view ends in the image's error line", async () => {
+    const real = api.getPlayerView;
+    api.getPlayerView = async () => {
+      throw new Error("offline");
+    };
+    try {
+      const floor = scene("s1", { fogEnabled: true });
+      const state = { ...tower(), scenes: { s1: floor } } as RoomState;
+      const made = floorPicture({ floor, purpose: "file", view: "player", pxPerCell: 70, grid: false, alone: true, room: state, roomId: "r", assets: { url: () => "" }, stale: () => false });
+      await assert.rejects(made, (err: unknown) => err instanceof ExportError && err.message === PLAYER_VIEW_FAILED);
+    } finally {
+      api.getPlayerView = real;
+    }
   });
 });
