@@ -78,6 +78,7 @@ const LISTED: Record<string, Uses> = {
   "scripts/guide-scenes/s80-tower.ts": TOOL,
   "scripts/guide-scenes/s86-lair.ts": TOOL,
   "scripts/guide-search.ts": TOOL,
+  "scripts/guide-slots.ts": TOOL,
   "scripts/guide-snapoff.ts": TOOL,
   "scripts/guide-table.ts": TOOL,
   "scripts/guide-theme.ts": TOOL,
