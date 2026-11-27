@@ -285,6 +285,34 @@ export function dieGuard(onChange: (held: boolean) => void) {
 }
 export type DieGuard = ReturnType<typeof dieGuard>;
 
+/** What settleOnReceipt reads of the page's receipts (client/features/dice/useReceipt.ts ReceiptTracker). */
+export type RollReceipts = { state(tag: string): { state: string } | null; subscribe(listener: () => void): () => void };
+
+/**
+ * Calls `done` once the roll sent under `tag` has its answer, from that
+ * roll's own receipt (SLOTS-ASTRA-05): never the die row's latest roll,
+ * which another surface showing the same row may have replaced, and never
+ * hung on whether this surface's pane is shown. A receipt the page forgot
+ * counts as answered. Returns the stop, for a surface that goes first.
+ */
+export function settleOnReceipt(receipts: RollReceipts, tag: string, done: () => void): () => void {
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+    unsubscribe();
+  };
+  const check = () => {
+    if (stopped) return;
+    const receipt = receipts.state(tag);
+    if (receipt !== null && (receipt.state === "sending" || receipt.state === "checking")) return;
+    stop();
+    done();
+  };
+  const unsubscribe = receipts.subscribe(check);
+  check();
+  return stop;
+}
+
 // ------------------------------------------------------------ classes
 
 /** "Wizard 5", "Other class 3 (d8)", "Fighter 3 (its subclass casts spells)". */

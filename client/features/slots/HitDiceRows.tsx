@@ -10,6 +10,7 @@ import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { useReceipts } from "../dice/useReceipt.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
 import { reasonText } from "../resources/logic.ts";
@@ -19,6 +20,7 @@ import {
   conChoice,
   conSource,
   dieGuard,
+  settleOnReceipt,
   dieBackLabel,
   dieFullText,
   dieName,
@@ -151,16 +153,16 @@ function DieLine(props: {
   const card = useCardRoll(dieRollRow(character.id, row.die));
   const [sent, setSent] = useState<{ n: number; back: boolean } | null>(null);
   const busy = useAnyPending(sent === null ? [] : [sent.n]);
-  // The roll this row sent, freed from the card's guard once its answer is in.
-  const rolling = useRef<{ tag: string; done(): void } | null>(null);
-  useEffect(() => {
-    const mine = rolling.current;
-    if (mine && card.tag === mine.tag && card.receipt !== null && !card.waiting) {
-      rolling.current = null;
-      mine.done();
-    }
-  });
-  useEffect(() => () => rolling.current?.done(), []);
+  // The roll this row sent frees the card's guard from its own receipt, whatever the row shows or the pane hides.
+  const receipts = useReceipts();
+  const rolling = useRef<{ stop(): void; done(): void } | null>(null);
+  useEffect(
+    () => () => {
+      rolling.current?.stop();
+      rolling.current?.done();
+    },
+    [],
+  );
   const [typing, setTyping] = useState<{ text: string; error: string | null } | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const typeButton = useRef<HTMLButtonElement>(null);
@@ -200,7 +202,11 @@ function DieLine(props: {
         props.onStatus("That roll could not be sent. Try again.");
         return false;
       }
-      rolling.current = { tag, done };
+      const settled = () => {
+        rolling.current = null;
+        done();
+      };
+      rolling.current = { stop: settleOnReceipt(receipts, tag, settled), done };
       return true;
     });
   };

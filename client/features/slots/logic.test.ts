@@ -10,6 +10,7 @@ import {
   conChoice,
   conSource,
   dieGuard,
+  settleOnReceipt,
   dieRows,
   foldedBack,
   foldedUse,
@@ -33,6 +34,7 @@ import {
   startRows,
   typedOutcome,
   type ClassRow,
+  type DieGuard,
 } from "./logic.ts";
 
 /** Bree with these classes and spent counts, the rest as a test character needs. */
@@ -169,9 +171,50 @@ describe("Hit Point Dice", () => {
     assert.equal(guard.held(), false);
     assert.deepEqual(sent, ["roll d10", "spend d8 4", "restore d8"]);
     assert.deepEqual(heldSeen, [true, false, true, false, true, false]);
-    // A send that sent nothing frees the guard at once.
+    // A send that sent nothing frees the guard at once (and the rest of this test's sequence goes on below).
     assert.equal(guard.run(() => false), true);
     assert.equal(guard.held(), false);
+  });
+  test("a roll frees its own guard from its own receipt, whichever surface rolled the die row since (SLOTS-ASTRA-05)", () => {
+    // The page's receipts, as ReceiptTracker keeps them: one state per tag, every listener told of each change.
+    const states = new Map<string, { state: string }>();
+    const listeners = new Set<() => void>();
+    const receipts = {
+      state: (tag: string) => states.get(tag) ?? null,
+      subscribe: (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener)),
+    };
+    const answer = (tag: string, state = "committed") => {
+      states.set(tag, { state });
+      for (const listener of [...listeners]) listener();
+    };
+    // Astra's sequence: the token panel rolls the d6 and is hidden before the answer, then the character page rolls the
+    // same die row, whose latest tag is now the page's, and the panel comes back. Each surface has its own guard.
+    const panel = dieGuard(() => undefined);
+    const page = dieGuard(() => undefined);
+    const roll = (guard: DieGuard, tag: string) =>
+      guard.run((done) => {
+        states.set(tag, { state: "sending" });
+        settleOnReceipt(receipts, tag, done);
+        return true;
+      });
+    assert.equal(roll(panel, "t1"), true);
+    assert.equal(roll(page, "t2"), true);
+    // The page's answer frees only the page.
+    answer("t2");
+    assert.deepEqual([panel.held(), page.held()], [true, false]);
+    answer("t1", "checking");
+    assert.equal(panel.held(), true, "an answer still being checked holds the guard");
+    answer("t1");
+    assert.deepEqual([panel.held(), page.held()], [false, false]);
+    assert.equal(listeners.size, 0, "each watch stops once its roll is answered");
+    // A refusal answers too, and a roll the page forgot counts as answered.
+    assert.equal(roll(panel, "t3"), true);
+    answer("t3", "refused");
+    assert.equal(panel.held(), false);
+    assert.equal(roll(page, "t4"), true);
+    states.delete("t4");
+    for (const listener of [...listeners]) listener();
+    assert.equal(page.held(), false);
   });
 });
 
