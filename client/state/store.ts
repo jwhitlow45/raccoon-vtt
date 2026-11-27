@@ -36,7 +36,7 @@ import { applyEph, clearTokens, floorEph, keepFloors, keepLocal, keepMembers, ne
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { floorViewOf } from "./floorView.ts";
 import { followsTurn } from "../features/encounter/followTurn.ts";
-import { heldHere, nextFloor, pickOf, type FloorPick } from "../features/floors/follow.ts";
+import { heldHere, nextFloor, noteOwnFloorMoves, ownFloorMove, pickOf, type FloorInput, type FloorMove, type FloorPick } from "../features/floors/follow.ts";
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
@@ -773,6 +773,9 @@ export function replayPending(input: {
 }
 
 const EMPTY_BUSY: Readonly<Record<string, true>> = Object.freeze({});
+/** Whose floor changes a change holds, for a DM's floor (follow.ts FloorInput): every one in this device's own ops, none in another device's. */
+const ALL_OWN: FloorInput["own"] = () => true;
+const NOT_OWN: FloorInput["own"] = () => false;
 
 export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const clock = options.clock ?? realClock;
@@ -975,6 +978,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   let dmViewFloor: SceneId | null = null;
   /** A DM's switch to a floor of another scene, shown once that scene's snapshot lands (wantFloor). */
   let wanted: SceneId | null = null;
+  /** This device's own floor moves by token (follow.ts noteOwnFloorMoves), so the answer to its undo or redo follows only what that moves. */
+  const ownFloorMoves = new Map<string, FloorMove>();
 
   /**
    * The floor shown after a change and everything that reads it
@@ -983,7 +988,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * own ephemeral events, and the switch for the polite status. `shown` is
    * the floor shown before, or the one the change asks for.
    */
-  function floorState(next: { view: RoomStoreState["view"]; before: RoomStoreState["view"]; you: You | null; anchor: SceneId | null; shown: SceneId | null; selected: readonly string[]; floors: FloorEphemeral; own?: boolean }): Pick<RoomStoreState, "sceneId" | "floorView" | "floorFollow" | "floorShift" | "ephemeral" | "ephemeralFloors"> {
+  function floorState(next: { view: RoomStoreState["view"]; before: RoomStoreState["view"]; you: You | null; anchor: SceneId | null; shown: SceneId | null; selected: readonly string[]; floors: FloorEphemeral; own?: FloorInput["own"] }): Pick<RoomStoreState, "sceneId" | "floorView" | "floorFollow" | "floorShift" | "ephemeral" | "ephemeralFloors"> {
     const s = get();
     const out = nextFloor({
       role: next.you?.role ?? "player",
@@ -997,7 +1002,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       selected: next.selected,
       dmFloor: followingDm ? dmViewFloor : null,
       followsTurn: next.you?.role === "dm" && followsTurn(),
-      own: next.own === true,
+      own: next.own ?? NOT_OWN,
     });
     pick = out.pick;
     const held = new Set(heldHere(next.view, next.anchor).map((f) => f.id));
@@ -1125,10 +1130,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * One store update with a fresh view, and the floor shown after it. A
    * patch's `sceneId` is the floor it asks to show, which the role's rule
    * may overrule (follow.ts), and its `ephemeralFloors` replace every
-   * floor's events. `own` marks this device's own change, which a DM's
-   * floor follows (follow.ts FloorInput).
+   * floor's events. `own` says whose change it is, for a DM's floor
+   * (follow.ts FloorInput): "sent" for this device's own ops, whose
+   * floor moves it notes, or "restored" for a batch holding its undo or
+   * redo, whose own changes are those that note names.
    */
-  function commit(patch: Partial<RoomStoreState>, own = false): void {
+  function commit(patch: Partial<RoomStoreState>, own: "sent" | "restored" | null = null): void {
     const s = get();
     const next = {
       confirmed: patch.confirmed !== undefined ? patch.confirmed : s.confirmed,
@@ -1138,6 +1145,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       projectedSceneId: patch.projectedSceneId !== undefined ? patch.projectedSceneId : s.projectedSceneId,
     };
     const derived = derive(next);
+    if (own === "sent") noteOwnFloorMoves(ownFloorMoves, s.view, derived.view);
     const floor = floorState({
       view: derived.view,
       before: s.view,
@@ -1146,7 +1154,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       shown: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
       selected: (patch.local ?? s.local).selectedIds,
       floors: patch.ephemeralFloors ?? s.ephemeralFloors,
-      own,
+      own: own === "sent" ? ALL_OWN : own === "restored" ? (id, was, now) => ownFloorMove(ownFloorMoves, id, was, now) : NOT_OWN,
     });
     store.setState({ ...patch, projectedSceneId: next.projectedSceneId, ...derived, ...floor });
     history.refresh();
@@ -1613,7 +1621,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const tells: (() => void)[] = [];
       const pendingOp = queued(op, opts, tells);
       if (!pendingOp) return null;
-      commit({ pending: [...get().pending, pendingOp] }, true);
+      commit({ pending: [...get().pending, pendingOp] }, "sent");
       for (const tell of tells) tell();
       flush();
       return pendingOp.n;
@@ -1631,7 +1639,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         return pendingOp?.n ?? null;
       });
       if (added.length === 0) return ns;
-      commit({ pending: [...get().pending, ...added] }, true);
+      commit({ pending: [...get().pending, ...added] }, "sent");
       for (const tell of tells) tell();
       flush();
       return ns;
@@ -1928,8 +1936,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         if (!("value" in change) || !change.key.startsWith("log:")) continue;
         serverOffset = withServerReading(serverOffset, (change.value as { at?: unknown } | null)?.at);
       }
-      // A batch that holds this device's undo or redo is its own change: only the server works one out.
-      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) }, (msg.restored?.length ?? 0) > 0);
+      // Only the server works out this device's undo or redo, and its batch may hold other devices' changes too (LP55FIX-SOL-01).
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) }, (msg.restored?.length ?? 0) > 0 ? "restored" : null);
       const refusedNow = new Map(rejects.map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n) && !retried.has(p.n)),

@@ -105,9 +105,52 @@ export type FloorInput = {
   dmFloor: SceneId | null;
   /** A DM device whose camera follows the turn (features/encounter/followTurn.ts). */
   followsTurn: boolean;
-  /** The change is this device's own: an op it just sent, or the server's answer to its undo or redo. */
-  own: boolean;
+  /**
+   * Whether a token's change from floor `was` to `now` is this device's
+   * own: made by an op it just sent, or taken back or done again by its
+   * own undo or redo (ownFloorMove). A DM's view follows only those.
+   */
+  own: (tokenId: string, was: SceneId, now: SceneId) => boolean;
 };
+
+/** A floor move this device's own op made of a token, from one floor of a scene to another. */
+export type FloorMove = { from: SceneId; to: SceneId };
+
+/** How many tokens' last own floor moves a device keeps, the oldest going first. */
+export const OWN_FLOOR_MOVES = 200;
+
+/**
+ * Notes in `moves` every token whose floor changed from `before` to
+ * `after`, a change this device's own op made, as each token's latest own
+ * floor move. A server batch carries every device's changes at once and
+ * names no op behind any of them, so this record is how the answer to
+ * this device's undo or redo tells its own floor changes from another
+ * device's in the same batch (LP55FIX-SOL-01).
+ */
+export function noteOwnFloorMoves(moves: Map<string, FloorMove>, before: Pick<RoomState, "tokens"> | null, after: Pick<RoomState, "tokens"> | null): void {
+  if (!before || !after || before.tokens === after.tokens) return;
+  for (const id of Object.keys(after.tokens)) {
+    const now = ownEntry(after.tokens, id);
+    const was = ownEntry(before.tokens, id);
+    if (!now || !was || now === was || now.sceneId === was.sceneId) continue;
+    moves.delete(id);
+    moves.set(id, { from: was.sceneId, to: now.sceneId });
+  }
+  for (const id of moves.keys()) {
+    if (moves.size <= OWN_FLOOR_MOVES) break;
+    moves.delete(id);
+  }
+}
+
+/**
+ * Whether a token's change from `was` to `now`, in a batch holding this
+ * device's undo or redo, is that undo or redo's: it takes back, or does
+ * again, the last floor move this device's own op made of it.
+ */
+export function ownFloorMove(moves: ReadonlyMap<string, FloorMove>, tokenId: string, was: SceneId, now: SceneId): boolean {
+  const move = moves.get(tokenId);
+  return move !== undefined && ((move.from === now && move.to === was) || (move.from === was && move.to === now));
+}
 
 export type FloorOutput = {
   sceneId: SceneId | null;
@@ -138,10 +181,10 @@ function dmFloor(input: FloorInput, view: View, held: readonly Scene[], ids: Rea
   let movedBy: string | null = null;
   // This device's own Move to floor of a selected token follows it (7.3), as do its climb and its undo. Another device's move
   // of one leaves the view where it is, so a co-DM's or a player's act never takes the DM's board away (D-261127-529).
-  for (const id of input.own ? input.selected : []) {
+  for (const id of input.selected) {
     const was = ownEntry(input.before?.tokens, id)?.sceneId;
     const now = ownEntry(view.tokens, id)?.sceneId;
-    if (was === sceneId && now !== undefined && now !== sceneId && ids.has(now)) {
+    if (was === sceneId && now !== undefined && now !== sceneId && ids.has(now) && input.own(id, was, now)) {
       sceneId = now;
       movedBy = id;
       break;

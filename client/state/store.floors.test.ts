@@ -91,6 +91,20 @@ describe("a DM's floors", () => {
     assert.equal(s.state().sceneId, TOWER, "this device's undo follows Thorn back");
   });
 
+  test("a batch holding this device's undo of Bree's move and another device's move of the selected Thorn leaves the DM's view (LP55FIX-SOL-01)", () => {
+    const state = tower();
+    const s = storeOf(DM, dmCopy(state), TOWER);
+    let seq = 1;
+    const move = s.room.dispatch({ t: "token.update", tokenId: "bree", patch: { sceneId: ATTIC } })!;
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "bree", { sceneId: ATTIC })], acks: [move] });
+    s.room.ui.select("thorn");
+    assert.equal(s.state().sceneId, TOWER);
+    const undo = s.room.dispatch({ t: "undo", scope: "play", head: "00000000-0000-4000-8000-000000001001" })!;
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "bree", { sceneId: TOWER }), tokenAt(state, "thorn", { sceneId: UPPER })], acks: [undo], restored: [{ n: undo, what: "moving Bree to Attic" }] });
+    assert.equal(s.state().view?.tokens.thorn?.sceneId, UPPER);
+    assert.equal(s.state().sceneId, TOWER, "Thorn's move is another device's, though the batch holds this device's undo");
+  });
+
   test("Camera follows the turn shows the floor of whoever acts, in the same change as the turn", () => {
     const state = tower({ encounter: { rev: 0, round: 1, activeEntryId: "e-bree", entries: [entry("e-bree", { tokenId: "bree", value: 20 }), entry("e-imp", { tokenId: "imp", value: 10 })] } });
     state.tokens.imp = token("imp", { sceneId: UPPER, name: "Imp" });

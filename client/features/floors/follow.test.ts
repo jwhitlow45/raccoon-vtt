@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import type { RoomState } from "#shared/model.ts";
 import { entry, token } from "#shared/testutil.ts";
-import { floorBeside, followedOf, heldHere, nextFloor, pickOf, type FloorInput, type FloorPick } from "./follow.ts";
+import { floorBeside, followedOf, heldHere, nextFloor, noteOwnFloorMoves, OWN_FLOOR_MOVES, ownFloorMove, pickOf, type FloorInput, type FloorMove, type FloorPick } from "./follow.ts";
 import { ATTIC, CAVE, playerCopy, TOWER, tower, UPPER } from "./testing.ts";
 
 /*
@@ -15,7 +15,7 @@ import { ATTIC, CAVE, playerCopy, TOWER, tower, UPPER } from "./testing.ts";
 const FLOORS = [TOWER, UPPER, ATTIC];
 
 function input(over: Partial<FloorInput> & Pick<FloorInput, "view">): FloorInput {
-  return { role: "player", display: false, memberId: "p1", before: null, anchor: TOWER, shown: TOWER, pick: null, selected: [], dmFloor: null, followsTurn: false, own: false, ...over };
+  return { role: "player", display: false, memberId: "p1", before: null, anchor: TOWER, shown: TOWER, pick: null, selected: [], dmFloor: null, followsTurn: false, own: () => false, ...over };
 }
 
 describe("the creature a player's device follows", () => {
@@ -65,7 +65,7 @@ describe("a DM's floor", () => {
     assert.equal(dm({ shown: CAVE }), TOWER, "a floor of another scene is not held");
     assert.equal(dm({ shown: null }), TOWER);
     const moved = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: ATTIC } } };
-    const own = (over: Partial<FloorInput>) => nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, own: true, ...over }));
+    const own = (over: Partial<FloorInput>) => nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, own: () => true, ...over }));
     assert.deepEqual(own({ selected: ["thorn"] }), { sceneId: ATTIC, pick: null, follow: null, movedBy: "thorn" });
     assert.equal(own({ selected: ["bree"] }).sceneId, TOWER);
     assert.equal(own({ selected: ["thorn"], shown: UPPER }).sceneId, UPPER, "a move from another floor than the one shown takes the DM nowhere");
@@ -80,6 +80,38 @@ describe("a DM's floor", () => {
       const out = nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected }));
       assert.deepEqual(out, { sceneId: TOWER, pick: null, follow: null, movedBy: null }, `selected ${selected.join(", ")}`);
     }
+  });
+
+  test("in one change, the view follows only the selected creature whose floor change is this device's own (LP55FIX-SOL-01)", () => {
+    const state = tower();
+    const moved = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: UPPER }, bree: { ...state.tokens.bree!, sceneId: ATTIC } } };
+    const at = (own: FloorInput["own"]) => nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected: ["thorn", "bree"], own })).sceneId;
+    assert.equal(at((id) => id === "bree"), ATTIC, "Bree's own, Thorn another device's");
+    assert.equal(at((id) => id === "thorn"), UPPER);
+    assert.equal(at(() => false), TOWER);
+  });
+
+  test("this device notes its own floor moves, and its undo or redo of one is its own, never another token's or another pair of floors", () => {
+    const state = tower();
+    const moves = new Map<string, FloorMove>();
+    const up = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: UPPER, x: 9 }, bree: { ...state.tokens.bree!, x: 7 } } };
+    noteOwnFloorMoves(moves, state, up);
+    assert.deepEqual([...moves], [["thorn", { from: TOWER, to: UPPER }]], "a move on its floor is no floor move");
+    assert.equal(ownFloorMove(moves, "thorn", UPPER, TOWER), true, "an undo takes it back");
+    assert.equal(ownFloorMove(moves, "thorn", TOWER, UPPER), true, "a redo does it again");
+    assert.equal(ownFloorMove(moves, "thorn", UPPER, ATTIC), false, "another floor");
+    assert.equal(ownFloorMove(moves, "bree", UPPER, TOWER), false, "a token this device never moved between floors");
+    noteOwnFloorMoves(moves, up, { ...up, tokens: { ...up.tokens, thorn: { ...up.tokens.thorn!, sceneId: ATTIC } } });
+    assert.deepEqual(moves.get("thorn"), { from: UPPER, to: ATTIC }, "the last own move counts");
+    assert.equal(ownFloorMove(moves, "thorn", UPPER, TOWER), false);
+    noteOwnFloorMoves(moves, null, up);
+    noteOwnFloorMoves(moves, up, up);
+    assert.equal(moves.size, 1, "nothing to compare notes nothing");
+    const many = new Map<string, FloorMove>();
+    for (let i = 0; i < OWN_FLOOR_MOVES + 5; i++) noteOwnFloorMoves(many, { tokens: { [`t${i}`]: token(`t${i}`, { sceneId: TOWER }) } }, { tokens: { [`t${i}`]: token(`t${i}`, { sceneId: UPPER }) } });
+    assert.equal(many.size, OWN_FLOOR_MOVES);
+    assert.equal(many.has("t0"), false, "the oldest goes first");
+    assert.equal(many.has(`t${OWN_FLOOR_MOVES + 4}`), true);
   });
 });
 
