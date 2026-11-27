@@ -81,7 +81,7 @@ export function HitDiceRows(props: { character: Character; actor: Pick<Actor, "h
   const con = source.kind === "numbers" ? source.con : source.kind === "field" ? (typedCon ?? 0) : null;
   const sendCon = source.kind === "field" ? (typedCon ?? 0) : undefined;
   return (
-    <div data-hit-dice="" style={{ display: "grid", gap: theme.space(1) }}>
+    <div data-hit-dice="" style={{ display: "grid", gap: theme.space(3) }}>
       {source.kind === "field" ? (
         <FieldRow label="Constitution modifier" hint="-5 to 10. No stat block to read it from. This device keeps it.">
           <Input
