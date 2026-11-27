@@ -24,7 +24,7 @@ const inventory = {
     "sound.update", "playlist.create", "playlist.update", "playlist.delete", "playlist.add",
   ],
   none: [
-    "roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo",
+    "roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "actor.hitDieRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo",
     "sound.create", "sound.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.stop", "music.set", "music.queue", "music.jump", "loop.start", "loop.set", "loop.stop", "effect.fire", "sound.mix", "sound.scene", "sound.stopAll",
   ],
 } satisfies Record<UndoScope, string[]>;

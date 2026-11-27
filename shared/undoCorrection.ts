@@ -46,6 +46,9 @@ function mechanics(key: string, projected: Value, owner: boolean): Value {
     out.level = projected.level;
     out.knownForms = projected.knownForms;
     out.resources = Array.isArray(projected.resources) ? projected.resources.map((resource) => without(object(resource), ["id", "edited", "atLevel"])) : projected.resources;
+    // A character's classes and what it has spent of them (docs/design/design-v1-slots.md 6), its owners' alone.
+    out.classes = projected.classes;
+    out.spent = projected.spent;
   }
   return out;
 }

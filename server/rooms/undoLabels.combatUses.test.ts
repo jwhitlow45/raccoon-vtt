@@ -37,6 +37,15 @@ describe("combat uses' undo step labels (docs/design/design-v1-combat-controls.m
     assert.equal(describeOp({ t: "actor.rechargeRoll", tag: "r1", target: { tokenId: "dragon" }, key: "actions:fire-breath", name: "Fire Breath", min: 5 }, s), "rolling the recharge of Fire Breath for Adult Red Dragon");
   });
 
+  test("a slot or die use and a classes change name what they did (docs/design/design-v1-slots.md 6)", () => {
+    const s = state();
+    assert.equal(describeOp({ t: "actor.use", target: { characterId: "thorn" }, use: { kind: "slot", level: 3 } }, s), "using a level 3 spell slot for Thorn");
+    assert.equal(describeOp({ t: "actor.use", target: { tokenId: "thorn" }, use: { kind: "pact" } }, s), "using a Pact Magic slot for Thorn");
+    assert.equal(describeOp({ t: "actor.use", target: { characterId: "thorn" }, use: { kind: "hitDie", die: 10 }, back: true }, s), "giving back a d10 Hit Point Die for Thorn");
+    assert.equal(describeOp({ t: "actor.hitDieRoll", tag: "t1", target: { characterId: "thorn" }, die: 10 }, s), "rolling a d10 Hit Point Die for Thorn");
+    assert.equal(describeOp({ t: "character.update", characterId: "thorn", patch: { classes: [{ id: "wizard", level: 5 }], level: 5 } }, s), "changing Thorn's classes");
+  });
+
   test("an update of a character's class resources names them", () => {
     assert.equal(describeOp({ t: "character.update", characterId: "thorn", patch: { resources: [] } }, state()), "changing Thorn's class resources");
   });
