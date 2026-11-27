@@ -648,7 +648,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           ) : null}
 
           {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} {...drawers.grid} /> : null}
-          {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token, labels)} onClose={drawers.close} /> : null}
+          {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token, labels)} onClose={drawers.close} folded={frame.rest !== null} /> : null}
 
           {rows.passing.some((id) => !inStrip(id)) ? (
             <ButtonRow row="passing">{rows.passing.filter((id) => !inStrip(id)).map(button)}</ButtonRow>

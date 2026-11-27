@@ -465,9 +465,15 @@ function legendaryOff(action: LegendaryUse, at: { ownTurn: boolean; left: number
   return null;
 }
 
-/** How many uses a card's folded row counts (4.2): each row a viewer can act on or read a count from, and each class resource. */
-export function usesCount(rows: readonly UseRow[], resources: readonly ClassResource[] | undefined): number {
-  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + (resources?.length ?? 0);
+/**
+ * How many uses a card's folded row counts (4.2): each row a viewer can act
+ * on or read a count from, each class resource, and a character's spell
+ * slots as 1 and its Pact Magic as 1 (`slots`, slots/logic.ts slotCount,
+ * docs/design/design-v1-slots.md 3.2), so a caster with nothing else still
+ * gets its turn card.
+ */
+export function usesCount(rows: readonly UseRow[], resources: readonly ClassResource[] | undefined, slots = 0): number {
+  return rows.filter((r) => r.kind === "legendary" || r.kind === "resist" || r.kind === "ability" || r.kind === "other").length + (resources?.length ?? 0) + slots;
 }
 
 // ------------------------------------------------------------ the rows' words
@@ -646,7 +652,7 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
 /**
  * Whether a creature shows a Uses button, group or section (6): only where
  * its list (`usesRows`, the `list` form) has a row or it has class
- * resources, so none ever opens empty. A skipped prompt of its current
+ * resources or spell slots, so none ever opens empty. A skipped prompt of its current
  * record (`record`, currentRecord's) is a row, so a goblin whose only row
  * is its skipped death save shows Uses while its turn lasts. Before its
  * block is read, spent uses show at once, with the list's loading line
@@ -656,11 +662,13 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
 export function usesPresence(input: {
   actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined;
   resources: readonly unknown[] | undefined;
+  /** The character's slot rows (slots/logic.ts slotCount): a caster with nothing else shows Uses too. */
+  slots?: number;
   uses: readonly LimitedUse[] | null;
   loading: boolean;
   record: TurnRecord | null;
 }): "yes" | "loading" | "no" {
-  if ((input.resources?.length ?? 0) > 0) return "yes";
+  if ((input.resources?.length ?? 0) > 0 || (input.slots ?? 0) > 0) return "yes";
   if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: input.record }).length > 0) return "yes";
   if (input.uses !== null) return "no";
   if (Object.keys(input.actor?.uses ?? {}).length > 0) return "yes";

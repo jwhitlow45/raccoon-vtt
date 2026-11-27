@@ -744,3 +744,31 @@ describe("the list's trouble line: the newest failure of its own rolls, on the t
     assert.equal(turnKey(undefined), null);
   });
 });
+
+describe("a caster's turn card, from its slots alone (docs/design/design-v1-slots.md 3.2)", () => {
+  /** Bree alone in a fight on her turn, with these classes and nothing else to use. */
+  function casterTurn(classes: NonNullable<RoomState["characters"][string]["classes"]>) {
+    let state = room({
+      tokens: { bree: token("bree", { kind: "pc", name: "Bree", actor: { ref: "bree" } }) },
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"], classes, actor: actor({ hp: { cur: 20, max: 20, temp: 0 } }) }) },
+    });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "eb", tokenId: "bree", value: 12 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      state = r.state;
+    }
+    assert.equal(state.encounter?.activeEntryId, "eb");
+    return cards(state, patYou).turn;
+  }
+  test("a Wizard 3 with no attacks or class resources gets a turn card, its slots counted as 1", () => {
+    const turn = casterTurn([{ id: "wizard", level: 3 }]);
+    assert.ok(turn, "a turn card");
+    assert.equal(turn.count, 1);
+  });
+  test("a Wizard 5 and Warlock 5 counts 2, the slot group and Pact Magic", () => {
+    assert.equal(casterTurn([{ id: "wizard", level: 5 }, { id: "warlock", level: 5 }])?.count, 2);
+  });
+  test("a Fighter with no slots gets no card", () => {
+    assert.equal(casterTurn([{ id: "fighter", level: 5 }]), null);
+  });
+});

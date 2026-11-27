@@ -18,6 +18,8 @@ import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { ClassResourceRows } from "../resources/ResourceRows.tsx";
+import { slotCount, slotsListLabel } from "../slots/logic.ts";
+import { SlotRows } from "../slots/SlotRows.tsx";
 import { reasonText } from "../resources/logic.ts";
 import { useOption } from "../dice/optionState.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
@@ -82,13 +84,14 @@ import {
  * off button keeps its focus and its tap (`aria-disabled`), so a touch
  * reaches its reason too.
  */
-export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesForm; uses: readonly LimitedUse[] | null; loading: boolean; failed: boolean; ownTurn: boolean; name: string }) {
+export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesForm; uses: readonly LimitedUse[] | null; loading: boolean; failed: boolean; ownTurn: boolean; name: string; folded?: boolean }) {
   const { target, form } = props;
   const actor = useRoomView((s) => (s.view ? actorOf(s.view, target) : undefined));
   const encounter = useRoomView((s) => s.view?.encounter);
   const characterId = useRoomView((s) => (s.view ? characterIdOf(s.view, target) : undefined));
   const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
   const resourceCount = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
+  const slotRows = useRoomView((s) => (characterId !== undefined ? slotCount(s.view?.characters[characterId]?.classes) : 0));
   const record = currentRecord(encounter, actor);
   const turnWait = useTurnWait();
   const turn = turnKey(encounter);
@@ -112,7 +115,7 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
   }, [seenTag, see]);
   const waits = props.uses === null && (props.loading || props.failed);
   // Nothing to show draws nothing, not an empty box that would take a gap in the section around it.
-  if (rows.length === 0 && !waits && resourceCount === 0) return null;
+  if (rows.length === 0 && !waits && resourceCount === 0 && slotRows === 0) return null;
   return (
     // Its parts stand as far apart as its rows, as the class resource rows' do, so a companion's start one gap under the block's last row.
     <div data-combat-uses={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3) }}>
@@ -125,7 +128,9 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
       ) : null}
       {waits ? props.failed ? <SrdLoadFailed what="The uses" inline /> : <Loading text="Loading the uses…" style={{ minHeight: theme.touch }} /> : null}
       {/* Named as the uses list where it is the only one (docs/design/design-v1-token-sections.md 7), and apart from it beside a block's uses. */}
-      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} label={rows.length > 0 ? `${props.name}'s class resources` : `${props.name}'s uses`} edit={props.edit} /> : null}
+      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} label={rows.length > 0 || slotRows > 0 ? `${props.name}'s class resources` : `${props.name}'s uses`} edit={props.edit} /> : null}
+      {/* After the class resources, wherever they show (docs/design/design-v1-slots.md 3.2): folded on the turn card and an upright phone's drawer. */}
+      {characterId !== undefined ? <SlotRows characterId={characterId} form={form === "card" ? "folded" : props.folded ? "drawer" : "full"} label={slotsListLabel(props.name)} search={props.slotsSearch} /> : null}
       {shown ? (
         <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: shown.refused ? theme.color.dangerText : theme.color.textMuted }}>
           {shown.text}
@@ -136,10 +141,10 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
 }
 
 /** What a uses list adds where it stands: Edit on each class resource's line. */
-export type UsesSlots = { edit?(resource: ClassResource, opener: HTMLElement): void };
+export type UsesSlots = { edit?(resource: ClassResource, opener: HTMLElement): void; /** The room search's anchor on the spell slot rows (tokens/search.ts). */ slotsSearch?: string };
 
 /** The off-turn list for a creature, reading its block and whose turn it is itself: the tracker row's Uses group, a companion's, the token bar's Uses drawer and the Combat section's Uses. */
-export function CreatureUses(props: UsesSlots & { target: ActorTarget; name: string }) {
+export function CreatureUses(props: UsesSlots & { target: ActorTarget; name: string; folded?: boolean }) {
   const read = useCreatureUses(props.target);
   const ownTurn = useActsNow(props.target);
   return <CombatUses {...props} form="list" ownTurn={ownTurn} uses={read.uses} loading={read.loading} failed={read.failed} />;
@@ -153,7 +158,7 @@ export function CreatureUses(props: UsesSlots & { target: ActorTarget; name: str
  * leaves it with no button, as Restore beside Regeneration does, so that
  * Escape still reaches it.
  */
-export function UsesDrawer(props: { target: ActorTarget; name: string; onClose(): void }) {
+export function UsesDrawer(props: { target: ActorTarget; name: string; onClose(): void; folded?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const box = ref.current;
@@ -177,7 +182,7 @@ export function UsesDrawer(props: { target: ActorTarget; name: string; onClose()
       style={{ display: "grid", gap: theme.space(1) }}
     >
       <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Uses</div>
-      <CreatureUses target={props.target} name={props.name} />
+      <CreatureUses target={props.target} name={props.name} folded={props.folded} />
     </div>
   );
 }
@@ -190,9 +195,13 @@ export function useUsesPresence(target: ActorTarget | null): "yes" | "loading" |
     const id = target && s.view ? characterIdOf(s.view, target) : undefined;
     return id !== undefined ? s.view?.characters[id]?.resources : undefined;
   });
+  const slots = useRoomView((s) => {
+    const id = target && s.view ? characterIdOf(s.view, target) : undefined;
+    return id !== undefined ? slotCount(s.view?.characters[id]?.classes) : 0;
+  });
   const read = useCreatureUses(target);
   if (!target) return "no";
-  return usesPresence({ actor, resources, uses: read.uses, loading: read.loading, record: currentRecord(encounter, actor) });
+  return usesPresence({ actor, resources, slots, uses: read.uses, loading: read.loading, record: currentRecord(encounter, actor) });
 }
 
 function rowKey(row: UseRow): string {

@@ -21,6 +21,7 @@ import {
   type RechargePromptState,
   type RegenerationPrompt,
 } from "./logic.ts";
+import { slotCount } from "../slots/logic.ts";
 import { promptId, regenerationIn, turnId, useCreaturesUses, useDismissed } from "./state.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { useLabels } from "../../state/labels.ts";
@@ -168,8 +169,8 @@ export function combatAlerts(input: {
     if (!answers) return;
     const rows = usesRows({ form: "card", uses, actor, ownTurn: true, record: p.record });
     const characterId = characterIdOf(view, p.target);
-    const resources = characterId !== undefined ? view.characters[characterId]?.resources : undefined;
-    const count = usesCount(rows, resources);
+    const character = characterId !== undefined ? view.characters[characterId] : undefined;
+    const count = usesCount(rows, character?.resources, slotCount(character?.classes));
     const skipped = rows.some((r) => r.kind === "skipped");
     const attacks = input.attacks?.[i] ?? 0;
     // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands. One whose table failed keeps it with the failure and its reload.

@@ -149,52 +149,54 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
 
   return (
     <li style={{ display: "grid", gap: theme.space(1) }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
-        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-          {/*
-           * The count stands at the name line's right end, as pips do for monster rows (docs/design/design-v1-monster-uses.md 3.7).
-           * A pool keeps its words at every size: it is spent by an amount, not a pip at a time, and a small one would flip to words as it grows (D-261026-2).
-           */}
-          <NameLine name={r.name} spoken={countWords({ left: remaining, max: r.max })} end={<CountPips left={remaining} max={r.max} words={pool} />} />
-          <div style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>{RESET_WORDS[r.reset]}</div>
-        </div>
-        <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+      {/*
+       * The count stands at the name line's right end, as pips do for monster rows (docs/design/design-v1-monster-uses.md 3.7).
+       * A pool keeps its words at every size: it is spent by an amount, not a pip at a time, and a small one would flip to words as it grows (D-261026-2).
+       */}
+      <CountRowHead
+        name={r.name}
+        spoken={countWords({ left: remaining, max: r.max })}
+        end={<CountPips left={remaining} max={r.max} words={pool} />}
+        sub={RESET_WORDS[r.reset]}
+        hidden={
+          <>
+            <span id={`${id}-none`} hidden>
+              {emptyText(r)}
+            </span>
+            <span id={`${id}-full`} hidden>
+              {fullText(r)}
+            </span>
+          </>
+        }
+      >
+        <RowButton
+          ref={useButton}
+          label={useLabel(r)}
+          off={remaining === 0 ? `${id}-none` : undefined}
+          busy={busy && amount === null && sent?.back === false}
+          expanded={pool ? verb === "Spend" : undefined}
+          onClick={() => (pool ? toggle("Spend") : use(false))}
+        >
+          {pool ? "Use…" : "Use"}
+        </RowButton>
+        {props.back ? (
           <RowButton
-            ref={useButton}
-            label={useLabel(r)}
-            off={remaining === 0 ? `${id}-none` : undefined}
-            busy={busy && amount === null && sent?.back === false}
-            expanded={pool ? verb === "Spend" : undefined}
-            onClick={() => (pool ? toggle("Spend") : use(false))}
+            label={backLabel(r)}
+            off={r.used === 0 ? `${id}-full` : undefined}
+            busy={busy && amount === null && sent?.back === true}
+            expanded={pool ? verb === "Restore" : undefined}
+            onClick={() => (pool ? toggle("Restore") : use(true))}
           >
-            {pool ? "Use…" : "Use"}
+            {pool ? "Restore…" : "Restore"}
           </RowButton>
-          {props.back ? (
-            <RowButton
-              label={backLabel(r)}
-              off={r.used === 0 ? `${id}-full` : undefined}
-              busy={busy && amount === null && sent?.back === true}
-              expanded={pool ? verb === "Restore" : undefined}
-              onClick={() => (pool ? toggle("Restore") : use(true))}
-            >
-              {pool ? "Restore…" : "Restore"}
-            </RowButton>
-          ) : null}
-          {props.edit ? (
-            // The pencil alone, at its 44 px, so Use and Restore take the rest of the line (docs/design/design-v1-token-sections.md 3.1).
-            <Button size="sm" icon="edit" iconOnly="always" onClick={(e) => props.edit?.(r, e.currentTarget)} style={{ flex: "none" }}>
-              {`Edit ${r.name}`}
-            </Button>
-          ) : null}
-        </div>
-        {/* What an off button's description reads. Hidden, as a description may name a hidden element. */}
-        <span id={`${id}-none`} hidden>
-          {emptyText(r)}
-        </span>
-        <span id={`${id}-full`} hidden>
-          {fullText(r)}
-        </span>
-      </div>
+        ) : null}
+        {props.edit ? (
+          // The pencil alone, at its 44 px, so Use and Restore take the rest of the line (docs/design/design-v1-token-sections.md 3.1).
+          <Button size="sm" icon="edit" iconOnly="always" onClick={(e) => props.edit?.(r, e.currentTarget)} style={{ flex: "none" }}>
+            {`Edit ${r.name}`}
+          </Button>
+        ) : null}
+      </CountRowHead>
       {amount ? (
         <form
           onSubmit={(e) => {
@@ -247,11 +249,32 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
 }
 
 /**
+ * A count row's head, the class resource row's shape that spell slot rows
+ * reuse whole (docs/design/design-v1-slots.md 3.2, D-261127-273): its name
+ * and count at the line's right end, the muted line under them, then its
+ * buttons (`children`) on a line of their own. `hidden` holds the off
+ * buttons' descriptions.
+ */
+export function CountRowHead(props: { name: ReactNode; spoken: string; end: ReactNode; sub: ReactNode; hidden?: ReactNode; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
+      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+        <NameLine name={props.name} spoken={props.spoken} end={props.end} />
+        <div style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>{props.sub}</div>
+      </div>
+      <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>{props.children}</div>
+      {/* What an off button's description reads. Hidden, as a description may name a hidden element. */}
+      {props.hidden}
+    </div>
+  );
+}
+
+/**
  * A row's Use or Restore. Off, it keeps its focus and says why through
  * the line `off` names (docs/design/design-v1-combat-controls.md 9), rather than
  * dropping out of the Tab order as a disabled button would.
  */
-function RowButton(props: { ref?: Ref<HTMLButtonElement>; label: string; off?: string; busy?: boolean; expanded?: boolean; onClick(): void; children: ReactNode }) {
+export function RowButton(props: { ref?: Ref<HTMLButtonElement>; label: string; off?: string; busy?: boolean; expanded?: boolean; onClick(): void; children: ReactNode }) {
   const off = props.off !== undefined;
   return (
     <Button
