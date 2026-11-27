@@ -302,16 +302,42 @@ export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
 /** Set, the browser's JavaScript coverage is saved into this folder for `pnpm coverage --e2e` (e2e/coverage.ts). */
 const COVERAGE_DIR = process.env.E2E_COVERAGE_DIR;
 
+/**
+ * Set, every launch that asks for the system Google Chrome (`channel: "chrome"`) runs this executable instead. CI sets it
+ * to a pinned Chrome for Testing, so a runner image update cannot change the browser under a run. Unset, the system
+ * Chrome runs, as on a developer's machine.
+ */
+const CHROME_PATH = process.env.E2E_CHROME_PATH;
+
+function pinChrome<T extends { channel?: string; executablePath?: string }>(options: T | undefined): T | undefined {
+  if (!CHROME_PATH || options?.channel !== "chrome") return options;
+  const { channel: _channel, ...rest } = options;
+  return { ...rest, executablePath: CHROME_PATH } as unknown as T;
+}
+
+let browserTold = false;
+/** The version each run used goes to its log once per test file: a pinned build and the image's Chrome both show. */
+function tellBrowser(version: string): void {
+  if (browserTold) return;
+  browserTold = true;
+  console.error(`e2e browser: Chrome ${version}${CHROME_PATH ? " (E2E_CHROME_PATH)" : " (system)"}`);
+}
+
 // Every e2e file imports this module before it launches a browser, and shares this one `chromium`.
 const launch = chromium.launch.bind(chromium);
-chromium.launch = async (...args: Parameters<typeof chromium.launch>) => {
-  const browser = await launch(...args);
+chromium.launch = async (options?: Parameters<typeof chromium.launch>[0]) => {
+  const browser = await launch(pinChrome(options));
+  tellBrowser(browser.version());
   if (COVERAGE_DIR) coverBrowser(browser, COVERAGE_DIR);
   return browser;
 };
 const launchPersistent = chromium.launchPersistentContext.bind(chromium);
 chromium.launchPersistentContext = async (...args: Parameters<typeof chromium.launchPersistentContext>) => {
-  const context = await launchPersistent(...args);
+  const [dir, options] = args;
+  const context = await launchPersistent(dir, pinChrome(options));
+  // A persistent context has no browser object in some Playwright builds, so it only tells when it has one.
+  const version = context.browser()?.version();
+  if (version) tellBrowser(version);
   if (COVERAGE_DIR) await coverContext(context, COVERAGE_DIR);
   return context;
 };
