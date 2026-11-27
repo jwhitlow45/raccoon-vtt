@@ -327,6 +327,8 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
   const walked: number[] = [];
   let visits = 0;
   const stack: { node: number; parent: number }[] = [];
+  // Every node pushed is visited or refused, so the stack is held to the visits left: a list of two million children never builds.
+  if (roots.length > L.glbNodeVisits) refuse(MODEL_WORDS.tooComplex);
   for (let r = roots.length - 1; r >= 0; r--) stack.push({ node: indexOf(roots[r], nodes.length), parent: -1 });
   while (stack.length > 0) {
     const { node: n, parent } = stack.pop()!;
@@ -342,6 +344,7 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
     worlds.push(world);
     walked.push(n);
     const children = node.children === undefined ? [] : Array.isArray(node.children) ? node.children : notModel();
+    if (visits + stack.length + children.length > L.glbNodeVisits) refuse(MODEL_WORDS.tooComplex);
     for (let c = children.length - 1; c >= 0; c--) stack.push({ node: indexOf(children[c], nodes.length), parent: slotOf[n]! });
   }
 
@@ -548,9 +551,9 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
       const t = info as Json;
       const ext = isObject(t.extensions) && isObject(t.extensions.KHR_texture_transform) ? t.extensions.KHR_texture_transform : null;
       texCoord = whole(ext?.texCoord ?? t.texCoord, 0);
-      const image = keptImage(t.index);
-      // A primitive without the coordinate set its texture names draws untextured.
-      if (image >= 0 && attributes[`TEXCOORD_${texCoord}`] !== undefined) {
+      // A primitive without the coordinate set its texture names draws untextured, and its image takes no place among the kept.
+      const image = attributes[`TEXCOORD_${texCoord}`] !== undefined ? keptImage(t.index) : -1;
+      if (image >= 0) {
         texture = image;
         const def = item(textures, t.index);
         if (def.sampler !== undefined) {
@@ -576,6 +579,7 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
 
   // Every reference checked and grouped, still before any output exists.
   const groups = new Map<string, Group>();
+  const skinChecked = new Set<string>();
   const list: Ref[] = [];
   for (const n of walked) {
     const mesh = meshOf(n);
@@ -603,12 +607,20 @@ export function readGlb(file: Uint8Array, device: ModelDevice, limits: GlbLimits
       if (skinned && attributes.JOINTS_0 !== undefined && attributes.WEIGHTS_0 !== undefined) {
         joints = same(accessor(attributes.JOINTS_0, USAGE.joints, "joints"));
         weights = same(accessor(attributes.WEIGHTS_0, USAGE.weights, "weights"));
-        const readJ = readerOf(bin!, joints);
-        const readW = readerOf(bin!, weights);
-        for (let i = 0; i < vertices; i++) {
-          for (let k = 0; k < 4; k++) {
-            const w = readW(i, k);
-            if (!Number.isFinite(w) || w < 0 || readJ(i, k) >= skinned.joints) notModel();
+        // Only the corners drawn, once per accessor set and skin: the work is bounded by the triangles counted, not by POSITION's count for each reference.
+        const key = `${String(attributes.JOINTS_0)}:${String(attributes.WEIGHTS_0)}:${String(p.indices)}:${skinned.joints}`;
+        if (!skinChecked.has(key)) {
+          skinChecked.add(key);
+          const readJ = readerOf(bin!, joints);
+          const readW = readerOf(bin!, weights);
+          const readC = indices ? readerOf(bin!, indices) : null;
+          const corners = indices ? indices.count : vertices;
+          for (let c = 0; c < corners; c++) {
+            const i = readC ? readC(c, 0) : c;
+            for (let k = 0; k < 4; k++) {
+              const w = readW(i, k);
+              if (!Number.isFinite(w) || w < 0 || readJ(i, k) >= skinned.joints) notModel();
+            }
           }
         }
       }

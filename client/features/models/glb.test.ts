@@ -345,6 +345,21 @@ describe("the GLB reader's textures", () => {
     assert.ok(mesh.parts.every((p) => p.material.texture === -1 && p.uvs === null));
   });
 
+  test("gives a texture no place among the 16 when no primitive drawing it has its coordinates", async () => {
+    const g = new Glb();
+    const images = await Promise.all(Array.from({ length: 17 }, () => png(2, 2)));
+    g.json.images = images.map((bytes) => ({ bufferView: g.view(bytes), mimeType: "image/png" }));
+    g.json.textures = images.map((_, i) => ({ source: i }));
+    g.json.materials = images.map((_, i) => ({ pbrMetallicRoughness: { baseColorTexture: { index: i } } }));
+    const uv = g.floats(new Array(72).fill(0.5), "VEC2");
+    // The first image's only part has no coordinates; the 16 after it all draw.
+    g.node({ mesh: g.meshOf(cube, { material: 0 }) });
+    for (let i = 1; i < 17; i++) g.node({ mesh: g.meshOf(cube, { material: i, attributes: { TEXCOORD_0: uv } }) });
+    const mesh = read(g);
+    assert.equal(mesh.textures.length, 16);
+    assert.equal(mesh.parts.filter((p) => p.material.texture >= 0).length, 16, "every drawable texture is kept");
+  });
+
   test("keeps 16 textures in reading order and leaves out the 17th, and holds 64 MP together", async () => {
     const images = await Promise.all(Array.from({ length: 17 }, async () => ({ bytes: await png(2, 2) })));
     const mesh = await textured(images);
@@ -456,6 +471,30 @@ describe("the GLB reader's skins", () => {
     (past.json.skins as Json[])[0]!.joints = [2];
     (past.json.skins as Json[])[0]!.inverseBindMatrices = undefined;
     assert.throws(() => readGlb(past.build(), "computer"), { message: MODEL_WORDS.notModel });
+  });
+
+  test("checks joints and weights only on the corners drawn", () => {
+    // Four vertices, one triangle over the first three: the fourth names a joint past the list and is never drawn.
+    const g = new Glb();
+    const position = g.floats([0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 5], "VEC3");
+    const joints = g.accessor({ bufferView: g.view(new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0])), componentType: 5121, type: "VEC4", count: 4 });
+    const weights = g.floats([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], "VEC4");
+    (g.json.meshes as Json[]).push({ primitives: [{ attributes: { POSITION: position, JOINTS_0: joints, WEIGHTS_0: weights }, indices: g.indices([0, 1, 2]) }] });
+    g.json.skins = [{ joints: [1] }];
+    g.node({ mesh: 0, skin: 0 });
+    g.node({ translation: [0, 2, 0] });
+    const part = read(g).parts[0]!;
+    assert.deepEqual([...part.positions.slice(0, 3)], [0, 2, 0]);
+    // Drawn, the same vertex is refused.
+    const g2 = new Glb();
+    const p2 = g2.floats([0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 5], "VEC3");
+    const j2 = g2.accessor({ bufferView: g2.view(new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0])), componentType: 5121, type: "VEC4", count: 4 });
+    const w2 = g2.floats([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], "VEC4");
+    (g2.json.meshes as Json[]).push({ primitives: [{ attributes: { POSITION: p2, JOINTS_0: j2, WEIGHTS_0: w2 }, indices: g2.indices([0, 1, 3]) }] });
+    g2.json.skins = [{ joints: [1] }];
+    g2.node({ mesh: 0, skin: 0 });
+    g2.node({});
+    assert.throws(() => read(g2), { message: MODEL_WORDS.notModel });
   });
 
   test("falls back to the face normal where a blend flattens a normal to nothing", () => {

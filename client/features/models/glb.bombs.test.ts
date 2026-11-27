@@ -103,6 +103,22 @@ describe("GLB bombs: counts before allocation", () => {
     await refused(chain(L.glbNodeVisits + 1), MODEL_WORDS.tooComplex);
   });
 
+  test("a node of two million children, or ten thousand and one roots, is refused before its list is stacked", async () => {
+    // Each names one node again and again: refused for its count, before a 2 million entry stack is built and before the second visit.
+    const wide = cubeGlb();
+    (wide.json.nodes as Json[]).push({});
+    (wide.json.nodes as Json[])[0]!.children = new Array(1_999_000).fill(1);
+    await refused(wide.build(), MODEL_WORDS.tooComplex);
+    const roots = cubeGlb();
+    (roots.json.scenes as Json[])[0]!.nodes = new Array(L.glbNodeVisits + 1).fill(0);
+    await refused(roots.build(), MODEL_WORDS.tooComplex);
+    // Children that fit the visits left are walked as ever.
+    const fits = cubeGlb();
+    for (let i = 0; i < 100; i++) (fits.json.nodes as Json[]).push({});
+    (fits.json.nodes as Json[])[0]!.children = Array.from({ length: 100 }, (_, i) => i + 1);
+    assert.equal(readGlb(fits.build(), "computer").triangles, 12);
+  });
+
   test("a node under two parents, a cycle and a node named twice as a root are no tree, refused as no model", async () => {
     const two = cubeGlb();
     (two.json.nodes as Json[]).push({ children: [0] });
