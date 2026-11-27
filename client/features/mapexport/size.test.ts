@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, MAX_EXPORT_PIXELS, MAX_EXPORT_SIDE } from "./size.ts";
+import { everyFloorFits } from "./everyFloor.ts";
+import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, MAX_EXPORT_PIXELS, MAX_EXPORT_SIDE, VTT_LIMITS } from "./size.ts";
 
 describe("exportSize", () => {
   test("a scene that fits keeps the chosen scale", () => {
@@ -92,5 +93,20 @@ describe("the export's words on a hex scene (docs/design/design-v1-hex-grids.md 
       assert.deepEqual(exportWords({ shape: "hex", orient }, { w: 30, h: 20 }, size), { cell: "hex", sizeLine: "2100 × 1400 px: hexes at 70 px.", gridSwitch: "Hex lines" });
     }
     assert.deepEqual(exportWords(SQUARES, { w: 30, h: 20 }, size), { cell: "square", sizeLine: "2100 × 1400 px: 30 × 20 squares at 70 px each.", gridSwitch: "Grid" });
+  });
+});
+
+describe("a Universal VTT file's image", () => {
+  test("a tall scene, 200 by 20 at 100 px, keeps its side within the 8,192 px the import takes", () => {
+    const size = exportSize({ w: 200, h: 20 }, 100, VTT_LIMITS);
+    assert.deepEqual(size, { pxPerCell: 40, requested: 100, width: 8000, height: 800 });
+    assert.equal(exportSize({ w: 200, h: 20 }, 100).pxPerCell, 64, "Export as image, by its pixels alone, is wider than the import takes");
+  });
+
+  test("Every floor keeps the side too: a floor past it at the chosen scale does not fit", () => {
+    // 10,000 px wide: within an image's pixels and side, past the import's side.
+    assert.equal(everyFloorFits([{ bounds: { w: 100, h: 10 } }, { bounds: { w: 20, h: 20 } }], 100, VTT_LIMITS), false);
+    assert.equal(everyFloorFits([{ bounds: { w: 100, h: 10 } }, { bounds: { w: 20, h: 20 } }], 100), true);
+    assert.equal(everyFloorFits([{ bounds: { w: 80, h: 20 } }], 100, VTT_LIMITS), true);
   });
 });

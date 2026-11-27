@@ -1,5 +1,6 @@
 import type { SceneMap } from "#shared/model.ts";
 import { cellWord, type Grid } from "#shared/rules/grid.ts";
+import { MAX_MAP_SIDE } from "../uvtt/limits.ts";
 
 /**
  * How large an exported map image is, and which copy of the map art it is
@@ -37,6 +38,13 @@ export type ExportSize = {
 export type ExportLimits = { maxPixels: number; maxSide: number };
 
 const LIMITS: ExportLimits = { maxPixels: MAX_EXPORT_PIXELS, maxSide: MAX_EXPORT_SIDE };
+
+/**
+ * A Universal VTT file's image also keeps within 8,192 px a side, the most
+ * this app's import takes (uvtt/limits.ts MAX_MAP_SIDE), so a file it
+ * exports imports here unresized (D-261127-208, 257).
+ */
+export const VTT_LIMITS: ExportLimits = { maxPixels: MAX_EXPORT_PIXELS, maxSide: MAX_MAP_SIDE };
 
 /**
  * The image size for a scene at the chosen scale, lowered to the largest

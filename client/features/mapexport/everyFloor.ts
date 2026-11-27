@@ -6,7 +6,7 @@ import { playersAt } from "../scenes/floorWords.ts";
 import type { ExportView } from "./content.ts";
 import { hasBuildOn } from "./content.ts";
 import { floorEntryName } from "./fileName.ts";
-import { exportSize, MAX_EXPORT_PIXELS } from "./size.ts";
+import { exportSize, MAX_EXPORT_PIXELS, type ExportLimits } from "./size.ts";
 import { storedZip } from "./zipStore.ts";
 
 /*
@@ -56,10 +56,10 @@ export function floorName(floor: Pick<Scene, "name" | "floor">): string {
  * EVERY_FLOOR_PIXELS. One export lowers its scale to fit, but the floors
  * of a file stay at one scale, so they still line up when stacked.
  */
-export function everyFloorFits(floors: readonly Pick<Scene, "bounds">[], pxPerCell: number): boolean {
+export function everyFloorFits(floors: readonly Pick<Scene, "bounds">[], pxPerCell: number, limits?: ExportLimits): boolean {
   let total = 0;
   for (const floor of floors) {
-    const size = exportSize(floor.bounds, pxPerCell);
+    const size = exportSize(floor.bounds, pxPerCell, limits);
     if (size.pxPerCell < size.requested) return false;
     total += size.width * size.height;
   }
