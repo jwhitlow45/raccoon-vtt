@@ -166,7 +166,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   // Chip menus
   { file: "client/pages/ChipMenus.tsx", sites: 29, ...CHIP_MENUS },
   // This device
-  { file: "client/features/device/DiceSetPicker.tsx", sites: 1, ...THIS_DEVICE },
+  { file: "client/features/device/DiceSetPicker.tsx", sites: 2, ...THIS_DEVICE },
   { file: "client/features/device/ThisDevice.tsx", sites: 29, ...THIS_DEVICE },
   { file: "client/features/sound/device/DeviceSound.tsx", sites: 5, ...THIS_DEVICE },
   // ft-2: the toolbar, top bar, Panels list, More and Hidden tools menu
@@ -637,6 +637,7 @@ export const PRIMITIVES: readonly string[] = [
   "client/features/combat/UsesSection.tsx#PencilButton",
   "client/features/combat/UsesSection.tsx#UsesSection",
   "client/features/device/DiceSetPicker.tsx#DiceSetPicker",
+  "client/features/device/DiceSetPicker.tsx#DiceSetTiles",
   "client/features/device/ShortcutSheet.tsx#KeyRows",
   "client/features/device/ShortcutSheet.tsx#ShortcutList",
   "client/features/device/ShortcutSheet.tsx#ShortcutSheetHost",

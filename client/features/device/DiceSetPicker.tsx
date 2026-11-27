@@ -58,7 +58,11 @@ export function tileStyle(picked: boolean): CSSProperties {
 }
 
 export function DiceSetPicker() {
-  const on = useModule("diceAnimation");
+  // The tiles are their own component, so hiding unmounts them with their drawn state, and showing again draws the new canvases (D-261127-710).
+  return useModule("diceAnimation") ? <DiceSetTiles /> : null;
+}
+
+function DiceSetTiles() {
   const lowPower = useLowPower();
   const chosen = useDiceSetId();
   const store = useThrows();
@@ -70,7 +74,7 @@ export function DiceSetPicker() {
   const ratio = Math.min(globalThis.devicePixelRatio || 1, 2);
 
   useEffect(() => {
-    if (!on || lowPower || loaded !== "ready" || drawn || throwing || !store.previewsAllowed) return;
+    if (lowPower || loaded !== "ready" || drawn || throwing || !store.previewsAllowed) return;
     const module = diceLoader.loaded();
     if (!module?.drawPreviews) return;
     let live = true;
@@ -90,9 +94,8 @@ export function DiceSetPicker() {
       live = false;
       cancel();
     };
-  }, [on, lowPower, loaded, drawn, throwing, store]);
+  }, [lowPower, loaded, drawn, throwing, store]);
 
-  if (!on) return null;
   const previews = drawn && !lowPower;
   return (
     <fieldset {...partMark("diceAnimation")} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
