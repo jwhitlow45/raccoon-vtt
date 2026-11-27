@@ -466,6 +466,17 @@ Lane FT-B (the page and its ways back) went its own way in these places. Its dec
 - **The keys sentence** in FEATURES.md lists the parts in the registry's order, "… Map builder B, Sound U, Outliner /, Isometric view I, Q and E.", which its test makes from the claims.
 - **features.e2e.ts** holds ft-1 to ft-4 (ft-4's first half, no op as everything toggles) and ft-8 to ft-10, and probes the toolbar, the side panel's tabs, the top bar and This device. The anchors lane FT-C gates are on its PENDING list, which fails once one is gated. ft-4's two-device twin and the prompts of ft-5 to ft-7 wait on lane FT-C's gates and lane FT-D's steps.
 
+Lane FT-D (spell slots and Hit Point Dice) went its own way in these places. Its decisions are D-261127-500 to 509.
+
+- **The rebase onto spell slots** brought control sites, primitives and search entries the first lists never saw: Hit Point Dice rows, the slot rows and offer, the Classes sheet, the party editor and the map's VTT export. They are placed in surfaces.ts and the ownership golden in a commit of their own before the gates, and the markup fixtures' Bree holds Barbarian 6 and Wizard 3, so her Rage still asks to update and she holds slots and dice (D-261127-500).
+- **Search.** Spell slots and Hit Point Dice claim their search fields and their anchors (`field:spell-slots`, `character.slots`, `field:hit-dice`, `character.hit-dice`). Classes is no one part's, so the golden keeps it core and tokens/search.ts leaves it out only while both hide (D-261127-501).
+- **The Classes sheet** hides only while both parts hide, so no one part marks it, and the Dialogs row of surfaces.ts covers neither slot part. Its gate, and the Classes and level lines', are drawn apart in parts.markup.test.ts, and ftd-1 checks the sheet stays shut once the parts show again (D-261127-502).
+- **The Long Rest note** leaves out "every spell slot back, " with Spell slots, as it leaves out the dice with Hit Point Dice, and Pact Magic slots are Spell slots' in every rest line (D-261127-503, 504).
+- **The rest home** stands at the foot of Rest with the uses home's holder: the character with `mayAdd` on its own page, as it is on its token (D-261127-505).
+- **A slot offer** sent while Spell slots hides stays in the options' store, so it shows with the part until a Use, Dismiss, another ask or leaving the room. dice/cast/cast.ts and dice/optionState.ts are unchanged (D-261127-506).
+- **ft-4's steps f and h** run as twins of their own in features.e2e.ts (ft-4f, ft-4h), each script played with every part shown, then with the player hiding every part but Areas and D&D Beyond, and their ops compared with frame numbers, tags and ids left out. The re-sync's fetch is answered by the test, and its JSON is pasted. Steps a to e and g, and ft-5 to ft-7, are still to build (D-261127-507).
+- **The alignment sweep** measures Uses and Rest with both slot parts hidden on a player's page (`slots-hidden-uses`, `slots-hidden-rest`) at every size the slot screens run (D-261127-508).
+
 ## Owner's round 4 edit
 - CL-37 (P2): the scan computes its primitive set to a fixed point instead of naming primitives (section 15 check (5), D-261127-426).
 - CL-38 (P3): `ChipMenuBody` is exported in FT-A's contract commit, so FT-C's chip menus fixture does not wait on FT-B (D-261127-427).
