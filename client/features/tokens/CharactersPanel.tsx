@@ -22,6 +22,8 @@ import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
+import { hiddenModules } from "../modules/gate.ts";
+import { useFeaturesHere } from "../modules/Gate.tsx";
 import { partyRestOps } from "../clock/ties.ts";
 import { partyRestNotes } from "../clock/words.ts";
 import { partyRestBackText } from "../resources/logic.ts";
@@ -260,7 +262,7 @@ function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly
  * character last finished a Long Rest and the earliest next start the rules
  * give, as a note and never a block.
  */
-function PartyLongRest(props: { characters: Character[] }) {
+export function PartyLongRest(props: { characters: Character[] }) {
   const actions = useRoomActions();
   const [asking, setAsking] = useState(false);
   // The press takes its own button away, so focus goes to the card's Finish, as the room search's case has it (docs/design/design-v1-qol.md 8), never to the page.
@@ -274,7 +276,8 @@ function PartyLongRest(props: { characters: Character[] }) {
   const moveClock = clock != null && moves;
   const resting = props.characters.filter((c) => c.actor.life === "alive" && c.actor.hp.cur >= 1);
   const left = props.characters.length - resting.length;
-  const back = partyRestBackText(resting);
+  const here = useFeaturesHere();
+  const back = partyRestBackText(resting, hiddenModules(here.role ?? "dm", here.choices));
   const notes = clock
     ? partyRestNotes(
         props.characters.map((c) => ({ id: c.id, name: c.name, stamp: c.longRest })),

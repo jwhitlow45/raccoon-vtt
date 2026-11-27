@@ -605,4 +605,40 @@ describe("gates read off a surface's element tree", () => {
       disposeDrawn();
     }
   });
+
+  test("the party's Long Rest card leaves class resources out of its words while they hide", async () => {
+    const { PartyLongRest } = await import("../tokens/CharactersPanel.tsx");
+    /** Every string a tree holds, through element children alone. */
+    const text = (node: unknown): string => {
+      if (typeof node === "string" || typeof node === "number") return String(node);
+      if (Array.isArray(node)) return node.map(text).join("");
+      const props = (node as { props?: { children?: unknown } } | null)?.props;
+      return props ? text(props.children) : "";
+    };
+    const card = async () => {
+      let asked = false;
+      const tree = await treeOf(() => {
+        const drawn = (PartyLongRest as (p: object) => unknown)({ characters: [tableRoom().characters.bree!] });
+        // The card opens from its own button, pressed once inside the first render.
+        if (!asked) {
+          asked = true;
+          const open = findAll(drawn, (_type, p) => p.children === "Long Rest for the party")[0]!;
+          (open.onClick as () => void)();
+        }
+        return drawn;
+      });
+      return text(tree);
+    };
+    try {
+      resetAllFeatures();
+      assert.match(await card(), /all HP back, lose Temporary HP and one Exhaustion level\. It also restores every class resource\./, "shown, Bree's spent Rage comes back");
+      setModuleShown("classResources", "dm", false);
+      const hidden = await card();
+      assert.match(hidden, /one Exhaustion level\./, "the card opens");
+      assert.doesNotMatch(hidden, /class resource/);
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
 });
