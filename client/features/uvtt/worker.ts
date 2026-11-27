@@ -3,7 +3,7 @@ import { decodeImageBase64, planImage, sniffImage, type ImagePlan } from "./imag
 import { fileSizeProblem, MAX_MAP_UPLOAD_BYTES, NOT_UVTT, RESIZE_QUALITY, type Device } from "./limits.ts";
 import type { FromWorker, PreparedImage, Stage, ToWorker } from "./messages.ts";
 import type { UvttMap } from "./schema.ts";
-import { checkFile, planScene, type ReadTarget } from "./steps.ts";
+import { checkExport, checkFile, planScene, type ReadTarget } from "./steps.ts";
 
 /**
  * The Universal VTT import's worker (docs/design/design-v1-maps-vision.md section
@@ -154,6 +154,7 @@ scope.addEventListener("message", (e) => {
   const run = async () => {
     if (message.t === "read") await read(message.file, message.device, message.target, message.options);
     else if (message.t === "convert") post({ t: "converted", ...convert(message.options) });
+    else if (message.t === "check") post({ t: "checked", check: checkExport(message.json, message.feetPerCell) });
     else post({ t: "image", image: await prepareImage() });
   };
   run().catch((err: unknown) => {

@@ -1,7 +1,8 @@
 import type { ImportOptions, ImportPlan } from "./convert.ts";
 import type { Device } from "./limits.ts";
 import type { FromWorker, PreparedImage, ReadInfo, Stage, ToWorker } from "./messages.ts";
-import type { ReadTarget } from "./steps.ts";
+import type { ExportCheck, ReadTarget } from "./steps.ts";
+import type { UvttHead } from "./write.ts";
 
 /**
  * The page's side of the Universal VTT worker: one request at a time, as a
@@ -72,6 +73,12 @@ export class UvttWorker {
     return answer.image;
   }
 
+  async check(json: Record<string, unknown>, feetPerCell: number): Promise<ExportCheck> {
+    const answer = await this.#ask({ t: "check", json, feetPerCell });
+    if (answer.t !== "checked") throw new Error(CRASHED);
+    return answer.check;
+  }
+
   /** Ends the worker and frees the file it holds. Whatever was waiting is told it was cancelled. */
   terminate(): void {
     this.#worker.terminate();
@@ -79,5 +86,21 @@ export class UvttWorker {
     const waiting = this.#waiting;
     this.#waiting = null;
     waiting?.reject(new DOMException("Cancelled", "AbortError"));
+  }
+}
+
+/**
+ * An exported file through this app's own import check, on a worker of its
+ * own made for it and ended after: an import's worker keeps its last file
+ * and takes one request at a time, so the two never share one. The
+ * conversion of a large build takes a while, and the page stays
+ * responsive meanwhile.
+ */
+export async function checkImport(head: UvttHead, feetPerCell: number): Promise<ExportCheck> {
+  const worker = new UvttWorker(() => {});
+  try {
+    return await worker.check(head.json, feetPerCell);
+  } finally {
+    worker.terminate();
   }
 }

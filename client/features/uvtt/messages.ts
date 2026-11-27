@@ -2,7 +2,7 @@ import type { UvttEnvironment } from "../vision/uvttLight.ts";
 import type { ImportOptions, ImportPlan } from "./convert.ts";
 import type { ImageType } from "./image.ts";
 import type { Device } from "./limits.ts";
-import type { ReadTarget } from "./steps.ts";
+import type { ExportCheck, ReadTarget } from "./steps.ts";
 
 /**
  * What the Universal VTT worker and the page say to each other
@@ -27,7 +27,9 @@ export type ReadInfo = {
 export type ToWorker =
   | { t: "read"; file: File; device: Device; target: ReadTarget; options: ImportOptions }
   | { t: "convert"; options: ImportOptions }
-  | { t: "image" };
+  | { t: "image" }
+  /** An exported file's head, without its image, through the import's own check (steps.ts checkExport). */
+  | { t: "check"; json: Record<string, unknown>; feetPerCell: number };
 
 export type PreparedImage = { blob: Blob; width: number; height: number; resized: boolean };
 
@@ -36,4 +38,5 @@ export type FromWorker =
   | { t: "read"; info: ReadInfo; plan: ImportPlan | null; problem: string | null }
   | { t: "converted"; plan: ImportPlan | null; problem: string | null }
   | { t: "image"; image: PreparedImage }
+  | { t: "checked"; check: ExportCheck }
   | { t: "error"; message: string };
