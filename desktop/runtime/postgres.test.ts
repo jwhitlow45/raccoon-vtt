@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -39,7 +39,7 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
   // pg_ctl start writes postmaster.pid naming RVTT_FAKE_PID, started now. pg_ctl stop removes it.
   // With RVTT_FAKE_HOLD it leaves a process holding its pipes, as the
   // Windows postmaster does, and writes its pid there. RVTT_FAKE_LATE fails
-  // after 0.8 s, RVTT_FAKE_FAIL fails at once, and RVTT_FAKE_HANG never
+  // after that many seconds, RVTT_FAKE_FAIL fails at once, and RVTT_FAKE_HANG never
   // ends, writing its own pid there and its log saying PostgreSQL is ready.
   //
   // With RVTT_FAKE_CHILD it launches a postmaster of its own, as
@@ -93,7 +93,7 @@ async function programs(dir: string): Promise<{ bin: string; calls: () => Promis
       `if [ "$RVTT_FAKE_PGCTL" = fail ]; then echo "pg_ctl: server did not start in time" >&2; exit 1; fi`,
       `if [ "$RVTT_FAKE_PGCTL" = failsoon ]; then sleep 0.3; echo "pg_ctl: could not start server" >&2; exit 1; fi`,
       `if [ "$RVTT_FAKE_PGCTL" = hang ]; then echo $$ > "$RVTT_FAKE_HANG"; exec sleep 30; fi`,
-      `if [ "$1" = start ] && [ -n "$RVTT_FAKE_LATE" ]; then sleep 0.8; echo "pg_ctl: could not start server" >&2; exit 1; fi`,
+      `if [ "$1" = start ] && [ -n "$RVTT_FAKE_LATE" ]; then sleep "$RVTT_FAKE_LATE"; echo "pg_ctl: could not start server" >&2; exit 1; fi`,
       `if [ "$1" = start ] && [ -n "$RVTT_FAKE_FAIL" ]; then echo "pg_ctl: could not start server" >&2; exit 1; fi`,
       `if [ "$1" = start ] && [ -n "$RVTT_FAKE_HANG" ]; then echo $$ > "$RVTT_FAKE_HANG"; echo "LOG:  database system is ready to accept connections" >> "$5"; exec sleep 30; fi`,
       "",
@@ -161,6 +161,29 @@ async function until(what: string, ready: () => boolean | Promise<boolean>, ms =
     if (Date.now() > deadline) throw new Error(`gave up waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+/** Whether the stand-in pg_ctl has launched its postmaster, which it records by writing the postmaster's pid. */
+function launched(file: string): boolean {
+  try {
+    return readFileSync(file, "utf8").trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Aborts a start `afterMs` after `ready` first holds. A start is cancelled at
+ * an event of the run (the postmaster launched, its postmaster.pid written),
+ * never at a fixed time from the test's start, which a loaded machine can pass
+ * before pg_ctl has even been started. Should the event never come, the abort
+ * comes at the deadline so the test fails on its own words, not by hanging.
+ */
+function abortWhen(abort: AbortController, what: string, ready: () => boolean, afterMs = 0): void {
+  until(what, ready).then(
+    () => setTimeout(() => abort.abort(), afterMs),
+    () => abort.abort(),
+  );
 }
 
 /** asStarted, counting each listing, so a test waits for passes rather than for time. */
@@ -367,7 +390,10 @@ describe("a start", { skip: posixOnly }, () => {
     }
     const ms = Date.now() - began;
     for (const file of Object.values(vars).filter((v) => v.startsWith(dir) && existsSync(v))) strays.push(Number((await readFile(file, "utf8")).trim()));
-    return { ms, error, pid: async (file) => Number((await readFile(file, "utf8")).trim()) };
+    return { ms, error, pid: async (file) => {
+      await until(`${file} to be written`, () => launched(file));
+      return Number((await readFile(file, "utf8")).trim());
+    } };
   }
 
   /** Whether a process has ended, given a moment for the system to reap it. */
@@ -423,9 +449,9 @@ describe("a start", { skip: posixOnly }, () => {
     const dir = await folder();
     const { bin } = await programs(dir);
     await mkdir(join(dir, "postgres"));
-    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, startLimitMs: 1_000 });
-    // It fails at 0.8 s, and the pipe it leaves open makes the drain run past 1 s.
-    const { error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_HOLD: join(dir, "holder.pid"), RVTT_FAKE_LATE: "1" });
+    const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, startLimitMs: 4_000 });
+    // It fails at 3.2 s, and the pipe it leaves open makes the drain run past 4 s. The seconds are long so a loaded machine's slow start of pg_ctl still lets it exit before the limit.
+    const { error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_HOLD: join(dir, "holder.pid"), RVTT_FAKE_LATE: "3.2" });
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl: could not start server", String(error));
   });
 
@@ -495,9 +521,9 @@ describe("a start", { skip: posixOnly }, () => {
   const STOPPED = ["pg_ctl start", "pg_ctl stop"];
   const KILLED = ["pg_ctl start"];
   for (const [when, vars, abortMs, expected] of [
-    ["while pg_ctl waits", { RVTT_FAKE_PGCTL: "wait" }, 500, STOPPED],
+    ["while pg_ctl waits", { RVTT_FAKE_PGCTL: "wait" }, "pidfile", STOPPED],
     ["before the postmaster has written postmaster.pid", { RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "0.8" }, 100, KILLED],
-    ["after pg_ctl failed and once the postmaster wrote postmaster.pid", { RVTT_FAKE_PGCTL: "fail", RVTT_FAKE_PIDAFTER: "0.5" }, 1_500, STOPPED],
+    ["after pg_ctl failed and once the postmaster wrote postmaster.pid", { RVTT_FAKE_PGCTL: "fail", RVTT_FAKE_PIDAFTER: "0.5" }, "pidfile", STOPPED],
     // The postmaster holds pg_ctl's stderr, so pg_ctl's failure is heard a second after its exit, still before the file.
     ["when pg_ctl then fails before the postmaster has written postmaster.pid", { RVTT_FAKE_PGCTL: "failsoon", RVTT_FAKE_PIDAFTER: "2" }, 100, KILLED],
     // The reviewers' probe: the controller fails, and its postmaster would publish its pid only 8 s later.
@@ -511,7 +537,9 @@ describe("a start", { skip: posixOnly }, () => {
       const unconfirmed: boolean[] = [];
       const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
       const abort = new AbortController();
-      setTimeout(() => abort.abort(), abortMs);
+      // A number is ms after the launch, "pidfile" the moment the postmaster has written postmaster.pid.
+      if (abortMs === "pidfile") abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+      else abortWhen(abort, "the postmaster's launch", () => launched(postmaster), abortMs);
       const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, ...vars }, abort.signal);
       assert.deepEqual(unconfirmed, [], "the pg_ctl start the cancel waits on is no doubt about the end");
       assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
@@ -535,7 +563,7 @@ describe("a start", { skip: posixOnly }, () => {
     const postmaster = join(dir, "postmaster.child");
     const c = cluster(dir, link, lookup(), { platform: "darwin" });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 100);
+    abortWhen(abort, "the postmaster's launch", () => launched(postmaster), 100);
     const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "0.8" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.ok(ms < 8_000, `the start answered after ${ms} ms`);
@@ -635,7 +663,7 @@ describe("a start", { skip: posixOnly }, () => {
     // The listing as it is, so the stand-in reads `/bin/sh <bin>/postgres ...`, as a postmaster the exact form misses would.
     const c = cluster(dir, bin, { ...lookup(), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 500);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
     const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "15" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.ok(ms < 10_000, `the start answered after ${ms} ms, not when the postmaster ended on its own`);
@@ -651,7 +679,7 @@ describe("a start", { skip: posixOnly }, () => {
     // leftover() reads a start the listing's row does not have, as for a pid reused between the two.
     const c = cluster(dir, bin, { ...lookup({ stamp: async () => 1 }), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 500);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
@@ -667,7 +695,7 @@ describe("a start", { skip: posixOnly }, () => {
     const replaced: ProcessLookup["facts"] = async (pid) => ({ exe: "/opt/other/postgres/bin/postgres", cwd: null, uid: 501, start: Date.now() + 1_000, stamp: ((await processStamp(pid)) ?? 0) + 1_000 });
     const c = cluster(dir, bin, { ...lookup({ facts: replaced }), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 500);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
@@ -1123,7 +1151,7 @@ describe("a start", { skip: posixOnly }, () => {
     const listing = counted();
     const c = cluster(dir, bin, { ...lookup(), list: listing.list }, { platform: "darwin" });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 300);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
     let alive: boolean | null = null;
     // Once the fast stop and the immediate one have failed, the file goes, and after two passes more the test ends the postmaster itself.
     const watching = (async () => {
@@ -1184,7 +1212,7 @@ describe("a start", { skip: posixOnly }, () => {
     const unconfirmed: boolean[] = [];
     const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 100);
+    abortWhen(abort, "the postmaster's launch", () => launched(postmaster), 100);
     let alive: boolean | null = null;
     setTimeout(() => {
       void readFile(postmaster, "utf8").then((text) => {
@@ -1234,7 +1262,7 @@ describe("a start", { skip: posixOnly }, () => {
     };
     const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, listRetryMs: 1_000 });
     const abort = new AbortController();
-    setTimeout(() => abort.abort(), 100);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
     setTimeout(() => (failing = false), 2_600);
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
@@ -1268,9 +1296,10 @@ describe("a program the cluster ends", { skip: posixOnly }, () => {
       () => (answered = "resolved"),
       (err: unknown) => (answered = err),
     );
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await until("the log line that the program has not ended", () => said.some((m) => /has not ended/.test(m)));
     assert.equal(answered, undefined, "not answered while the program still runs");
     assert.match(said.join("\n"), /^sh \(pid \d+\) has not ended \d+ s after it was ended, so the data folder stays locked until it does$/m);
+    await until(`${pidFile} to be written`, () => launched(pidFile));
     process.kill(Number((await readFile(pidFile, "utf8")).trim()), "SIGKILL");
     await assert.rejects(run, (err: unknown) => err instanceof Ended && err.message === "sh did not finish in 1 s");
   });
@@ -1293,12 +1322,13 @@ describe("a program the cluster ends", { skip: posixOnly }, () => {
         () => (answered = "resolved"),
         (err: unknown) => (answered = err),
       );
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await until("the log line that the kill failed", () => said.some((m) => /kill EPERM/.test(m)));
     } finally {
       ChildProcess.prototype.kill = kill;
     }
     assert.equal(answered, undefined, "not answered while the program still runs");
     assert.match(said.join("\n"), /^sh \(pid \d+\): kill EPERM, so the data folder stays locked until it exits$/m);
+    await until(`${pidFile} to be written`, () => launched(pidFile));
     process.kill(Number((await readFile(pidFile, "utf8")).trim()), "SIGKILL");
     await assert.rejects(run, (err: unknown) => err instanceof Ended && err.message === "sh did not finish in 1 s");
   });
