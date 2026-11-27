@@ -8,8 +8,9 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { drawnBase, drawnFootprintGround, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { readFileSync } from "node:fs";
 import { COVER_INSET } from "../../features/attach/groups.ts";
-import { DECOR_REACH_PX, ellipseBox, standeeParts, standeeShape } from "./standee.ts";
+import { DECOR_REACH_PX, ellipseBox, ON_GROUND, seatRise, standeeModel, standeeParts, standeeShape, type StandeeModel } from "./standee.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { ReliefIndex, type StandeeIn } from "./buckets.ts";
 
 const FEET = 5;
 
@@ -147,10 +148,10 @@ describe("standees", () => {
     assert.match(text, /if \(standee\) return \{ x: standee\.frame\.x0, y: standee\.frame\.y0, ring: standee\.ring \};/);
     // Its box is the drawn one (stand.ts standeeFooting, docs/design/design-v1-snap-off.md 6.2).
     assert.match(board, /const \{ box, cells \} = standeeFooting\(grid, t\);/);
-    assert.match(board, /standeeShape\(turn, box, base, ground, cam\.scale, size\.height, seat\)/);
+    assert.match(board, /standeeShape\(turn, box, base, ground, cam\.scale, size\.height, seat, shown\?\.shape \?\? null\)/);
     assert.match(board, /rise: seat\.rise,\n\s+inset: seat\.inset,/);
     const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
-    assert.match(node, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground, \{ w, h \}, iso\)/);
+    assert.match(node, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground, \{ w, h \}, iso, model\?\.shape \?\? null\)/);
   });
 
   test("the standee draws from the base the layout capped, never the logical one", () => {
@@ -170,5 +171,125 @@ describe("standees", () => {
     const ground = toView(isometric(0), { x: 6.5, y: 6.5 });
     assert.ok(Math.abs(at(12).art.y1 - (ground.y - 2 * K)) < 1e-12);
     assert.ok(Math.abs(at(11).art.y1 - ground.y) < 1e-12);
+  });
+});
+
+/** A model's frame as a sheet lays it out: a little over a footprint, anchored low, its figure in the middle. */
+const KNIGHT: StandeeModel = { side: 1.5, anchorY: 0.75, box: [30, 10, 70, 80] };
+
+describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 6)", () => {
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  const sameBox = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) => near(a.x0, b.x0) && near(a.y0, b.y0) && near(a.x1, b.x1) && near(a.y1, b.y1);
+
+  test("its frame hangs from its anchor on the ring's middle at its footprint's longer side, and only its drawn box paints", () => {
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      // A custom 2 by 1 footprint draws the model at 2, centered (D-261127-383).
+      const box = { x: 3, y: 4, w: 2, h: 1 };
+      const s = standeeShape(turn, box, 1, 0, 40, 800, ON_GROUND, KNIGHT);
+      const at = toView(isometric(turn), { x: 4, y: 4.5 }, 1);
+      assert.ok(sameBox(s.art, { x0: at.x - 1.5, x1: at.x + 1.5, y0: at.y - 2.25, y1: at.y + 0.75 }), `art at turn ${turn}`);
+      assert.ok(sameBox(s.drawnBox, { x0: at.x - 0.6, x1: at.x + 0.6, y0: at.y - 1.95, y1: at.y + 0.15 }), `drawn box at turn ${turn}`);
+      // The ring is the footprint's, as a picture's is.
+      assert.deepEqual(s.ring, standeeShape(turn, box, 1, 0, 40, 800).ring);
+    }
+  });
+
+  test("its decor sits over its drawn top, and culling holds its drawn box, its decor and its ring", () => {
+    const box = { x: 3, y: 4, w: 1, h: 1 };
+    // A tall model, its drawn top high over a picture's.
+    const tall: StandeeModel = { side: 3, anchorY: 0.9, box: [20, 5, 95, 92] };
+    const s = standeeShape(0, box, 0, 0, 40, 800, ON_GROUND, tall);
+    assert.ok(near(s.frame.y0, s.drawnBox.y0) && near(s.frame.y1 - s.frame.y0, 1) && near(s.frame.x1 - s.frame.x0, 1), "a footprint-sized frame from the drawn top");
+    assert.ok(s.frame.y0 < standeeShape(0, box, 0, 0, 40, 800).frame.y0 - 1);
+    const k = 1 / 40;
+    assert.ok(s.bounds.y0 <= s.drawnBox.y0 - DECOR_REACH_PX.top * k + 1e-9, "its chips over the drawn top");
+    assert.ok(s.bounds.x1 >= s.drawnBox.x1 + DECOR_REACH_PX.side * k - 1e-9, "a wing past the footprint");
+    assert.ok(s.bounds.x0 <= s.ring.x0 && s.bounds.y1 >= s.ring.y1 + DECOR_REACH_PX.bottom * k - 1e-9);
+    // A short one's decor frame reaches past its ring's bottom, and the bounds keep it.
+    const flat = standeeShape(0, box, 0, 0, 40, 800, ON_GROUND, { side: 1, anchorY: 0.6, box: [10, 40, 90, 70] });
+    assert.ok(flat.frame.y1 > flat.ring.y1 && flat.bounds.y1 >= flat.frame.y1 + DECOR_REACH_PX.bottom * k - 1e-9);
+  });
+
+  test("a picture keeps its shape, its drawn box its art", () => {
+    for (const seat of [ON_GROUND, { rise: 0.5, inset: 1 }, { rise: 1, inset: COVER_INSET }]) {
+      const s = standeeShape(2, { x: 3, y: 4, w: 2, h: 2 }, 2, 0, 40, 800, seat, null);
+      assert.deepEqual(s.drawnBox, s.art);
+      assert.deepEqual(s, standeeShape(2, { x: 3, y: 4, w: 2, h: 2 }, 2, 0, 40, 800, seat));
+    }
+  });
+
+  test("the drawing's square, its hit box and its decor's corner are the layout's art, drawn box and frame, at every turn and seat", () => {
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      for (const seat of [ON_GROUND, { rise: 0.7, inset: 1 }, { rise: 1, inset: COVER_INSET }]) {
+        for (const [base, ground] of [[0, 0], [2, 0], [400, 10]] as const) {
+          const box = { x: 3, y: 4, w: 2, h: 1 };
+          const shape = standeeShape(turn, box, base, ground, 40, 800, seat, KNIGHT);
+          const parts = standeeParts(turn, shape.drawnBase, ground, box, seat, KNIGHT);
+          const m = parts.model!;
+          const k = parts.art.scale;
+          // The art's group stands at the ring's middle in view units (the upright group), scaled by the seat's inset.
+          const art = { x0: shape.base.x + parts.art.x, y0: shape.base.y + parts.art.y, x1: shape.base.x + parts.art.x + m.side * k, y1: shape.base.y + parts.art.y + m.side * k };
+          assert.ok(sameBox(art, shape.art), `art at turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
+          const hit = { x0: art.x0 + m.hit.x * k, y0: art.y0 + m.hit.y * k, x1: art.x0 + (m.hit.x + m.hit.w) * k, y1: art.y0 + (m.hit.y + m.hit.h) * k };
+          assert.ok(sameBox(hit, shape.drawnBox), "a press lands on the drawn box alone");
+          assert.ok(near(shape.base.x + parts.decor.x, shape.frame.x0) && near(shape.base.y + parts.decor.y, shape.frame.y0), "a dragged model's decor on its frame");
+        }
+      }
+    }
+    // A picture's decor corner is its frame's too.
+    const box = { x: 3, y: 4, w: 2, h: 1 };
+    const seat = { rise: 0.7, inset: COVER_INSET };
+    const shape = standeeShape(1, box, 0, 0, 40, 800, seat);
+    const parts = standeeParts(1, shape.drawnBase, 0, box, seat);
+    assert.equal(parts.model, null);
+    assert.ok(near(shape.base.x + parts.decor.x, shape.frame.x0) && near(shape.base.y + parts.decor.y, shape.frame.y0));
+  });
+
+  test("a rider sits half its holder's picture up it, or at the middle of a model holder's drawn box, never under its ring", () => {
+    assert.equal(seatRise({ w: 2, h: 2 }, null), 1);
+    // Drawn from 0.1 to 0.8 of a 3 view unit frame anchored at 0.75: its middle 0.3 of the frame above the anchor.
+    assert.ok(near(seatRise({ w: 2, h: 1 }, KNIGHT), 0.9));
+    assert.equal(seatRise({ w: 1, h: 1 }, { side: 1, anchorY: 0.2, box: [0, 40, 100, 90] }), 0);
+  });
+
+  test("a model's frame is the one its turn and facing pick", () => {
+    const ref = { side: 1.2, anchorY: 0.7, boxes: Array.from({ length: 8 }, (_, i) => [i, 10, 50 + i, 90] as [number, number, number, number]) };
+    assert.deepEqual(standeeModel(ref, 5), { side: 1.2, anchorY: 0.7, box: [5, 10, 55, 90] });
+  });
+
+  test("a model takes a silhouette from what a later standee paints, never from its decor's reach, which the overlay draws over every piece", () => {
+    const relief = new ReliefIndex();
+    relief.sync({ sceneId: "s1", bounds: { w: 20, h: 20 }, chunks: {}, tiles: null, walls: new Map(), global: {}, grid: SQUARES, src: { ground: () => 0, terrain: () => null, look: () => ({ texture: null, color: "#808080" }), bounds: { w: 20, h: 20 }, grid: SQUARES } });
+    const standing = (id: string, x: number, y: number, model: StandeeModel | null): StandeeIn => {
+      const s = standeeShape(0, { x, y, w: 1, h: 1 }, 0, 0, 40, 800, ON_GROUND, model);
+      return { id, x: x + 0.5, y: y + 0.5, cells: [{ col: x, row: y }], base: 0, holder: null, bounds: s.bounds, art: s.drawnBox, paints: s.paints };
+    };
+    const outlined = (front: { x: number; y: number }) => {
+      const items = relief.layout(0, { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 }, [standing("knight", 5, 5, KNIGHT), standing("front", front.x, front.y, null)]);
+      const knight = items.find((i) => i.kind === "standee" && i.id === "knight");
+      assert.ok(knight?.kind === "standee" && items.indexOf(knight) < items.findIndex((i) => i.kind === "standee" && i.id === "front"), "the knight draws first");
+      return knight.silhouette;
+    };
+    // Two cells to the east and one south its name and chips would reach the knight, but nothing it paints does.
+    assert.equal(outlined({ x: 8, y: 6 }), false);
+    // Right in front, its picture covers the knight's feet.
+    assert.equal(outlined({ x: 6, y: 6 }), true);
+  });
+
+  test("the board's every standee shape reads the model modelShown gave, and the drawing reads the layout's", () => {
+    const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
+    // The layout, the bounds a waiting model asks by, a drag and a ghost.
+    const calls = board.match(/standeeShape\([^)]*\)/g) ?? [];
+    assert.equal(calls.length, 4);
+    for (const call of calls) assert.match(call, /, (shown\?\.shape \?\? null|want|model)\)$/, call);
+    assert.match(board, /const shown = modelShown\(t, actor, sheets\);/);
+    assert.match(board, /model: s\.model \}/);
+    assert.match(board, /model: shown \};/);
+    // A covered model's outline goes round its drawn box.
+    assert.match(board, /art: shape\.drawnBox,/);
+    const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
+    assert.match(node, /\{model && parts\.model \? <ModelArt model=\{model\} parts=\{parts\.model\} \/> : <TokenBody/);
+    const art = node.slice(node.indexOf("function ModelArt("), node.indexOf("\n}\n", node.indexOf("function ModelArt(")));
+    assert.match(art, /hitFunc=\{\(ctx, shape\) => \{\n\s+ctx\.beginPath\(\);\n\s+ctx\.rect\(hit\.x, hit\.y, hit\.w, hit\.h\);/);
   });
 });

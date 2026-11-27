@@ -33,7 +33,10 @@ import { useStore } from "zustand";
 import { seenSeat, dropView } from "../../features/movement/drop.ts";
 import { localDragSlot, type DragSpot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
-import { useRoomStore } from "../../state/view.ts";
+import { useAssets, useRoomStore } from "../../state/view.ts";
+import { frameFor } from "../../features/models/frames.ts";
+import { sheetCache, sheetsNearest, useSheets, type SheetCopy, type Sheets } from "../../features/models/sheets.ts";
+import { characterModelsKey, modelShown, modelWanted, tokenActor } from "../../features/models/shown.ts";
 import { DRAG_GROUND } from "../dragLayer.ts";
 import { useBoardFontEpoch } from "../boardFont.ts";
 import { FogShape } from "../FogShape.tsx";
@@ -44,7 +47,7 @@ import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardTe
 import { decorPlace, IsoNamesContext, isoTokenBoxes, mapLabelInk, tokenLayoutPills, viewPill } from "./isoText.ts";
 import { BoardViewContext, boardPillsSlot, boardViewsOf, type BoardViews } from "../boardView.ts";
 import { useDraggedIds } from "../draggedIds.ts";
-import type { IsoToken } from "../TokenNode.tsx";
+import type { IsoModel, IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
 import { WeatherMount } from "../../features/weather/WeatherController.tsx";
 import { IsoGroundContext, TreeShownContext, useShownView, useTreeShown, useTreeShownStore, useTreeShownView, type IsoGround } from "./context.ts";
@@ -61,7 +64,7 @@ import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { dimmedForDm, dragFootingCells, dragSpotBase, ghostStands, ghostTagStands, ringsAtBase, seatedStandBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
 import { useCommitCount, useKeptReport, useLayoutReport } from "./isoTest.ts";
-import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
+import { ON_GROUND, seatRise, standeeModel, standeeShape, type Seat, type StandeeModel } from "./standee.ts";
 import { hexBoxGround } from "../isoPlace.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
@@ -143,6 +146,7 @@ const NO_RING_PAIRS: ReadonlySet<string> = new Set();
 const VOLUME_LAYOUT_MS = 250;
 const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
 const NO_TOKENS: readonly ViewToken[] = [];
+const NO_SHEETS: readonly string[] = [];
 const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble"];
 const GROUND_LAYERS = isoLayersOf("ground", "board");
 const GROUND_MARKS = [...isoLayersOf("ground", "underDecor"), ...isoLayersOf("ground", "overlay")];
@@ -255,10 +259,30 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // Who stands and who lies flat, by the stand rule.
   const { standing, flat } = useMemo(() => splitTokens(fog, grid, props.tokens, props.aboveFog), [fog, grid, props.tokens, props.aboveFog]);
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
+
+  /*
+   * The 3D models creatures stand as (docs/design/design-v1-token-models.md 6):
+   * the sheets decoded at the map's copy, the phone one on Phone size map
+   * detail or in Low power (D-261127-178). The layout below, a drag's and a
+   * ghost's standee and the drawing all read modelShown on these sheets, so
+   * a sheet's arrival lays them out and draws them together. A character's
+   * life is read through one key, so its other edits lay nothing out.
+   */
+  const assets = useAssets();
+  const copy: SheetCopy = props.variant === "mobile" ? "mobile" : "full";
+  const sheets = useSheets(!hidden, copy, assets);
+  const characters = props.text.characters;
+  const charactersRef = useRef(characters);
+  charactersRef.current = characters;
+  const characterLives = characterModelsKey(props.tokens, characters);
+
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
     const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
     const holderOf = (id: string) => byId.get(id);
+    // Each one's model first, since a rider's seat reads its holder's.
+    const models = new Map<string, { want: StandeeModel | null; shown: IsoModel | null }>();
+    for (const t of standing) models.set(t.id, standingModel(t, turn, tokenActor(t, charactersRef.current), sheets));
     return standing.map((t): Standing => {
       // The art stands where it is drawn and sorts by that ground point, on the base its rules box's ground gives (stand.ts standeeFooting).
       const { box, cells } = standeeFooting(grid, t);
@@ -268,9 +292,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const link = t.attached;
       const holder = link && onHolder(link.kind) && standingIds.has(link.to) ? link.to : null;
       const holderToken = holder ? byId.get(holder) : undefined;
-      // One seat, read by the drawing (TokenNode.tsx Standee) and by every box below, so they agree.
-      const seat: Seat = holderToken ? { rise: footprint(holderToken).h / 2, inset: drawsInset(grid, all, t) ? COVER_INSET : 1 } : ON_GROUND;
-      const shape = standeeShape(turn, box, base, ground, cam.scale, size.height, seat);
+      // One seat, read by the drawing (TokenNode.tsx Standee) and by every box below, so they agree. A model holder seats it on its drawn box.
+      const seat: Seat = holderToken ? { rise: seatRise(footprint(holderToken), models.get(holderToken.id)?.shown?.shape ?? null), inset: drawsInset(grid, all, t) ? COVER_INSET : 1 } : ON_GROUND;
+      const { want, shown } = models.get(t.id)!;
+      const shape = standeeShape(turn, box, base, ground, cam.scale, size.height, seat, shown?.shape ?? null);
+      // Until its sheet comes, it asks by the bounds it will have then, so what it asks for never hangs on what it got.
+      const wanted = want && !shown ? standeeShape(turn, box, base, ground, cam.scale, size.height, seat, want).bounds : shape.bounds;
       return {
         id: t.id,
         x: box.x + box.w / 2,
@@ -279,7 +306,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
         base,
         holder,
         bounds: shape.bounds,
-        art: shape.art,
+        // What a later piece covers to give it a silhouette: a model's drawn box (D-261127-183). Its decor never covers one, as the overlay draws it over every piece.
+        art: shape.drawnBox,
+        paints: shape.paints,
         frame: shape.frame,
         keep: props.keepIds.has(t.id),
         ground,
@@ -288,12 +317,37 @@ function IsoBoardImpl(props: IsoBoardProps) {
         rise: seat.rise,
         inset: seat.inset,
         ring: shape.ring,
+        model: shown,
+        sheet: want ? (t.image?.model?.assetId ?? null) : null,
+        wanted,
+        at: shape.base,
       };
     });
-  }, [standing, src, heights, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
+  }, [standing, src, heights, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens, sheets, characterLives]);
 
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
   const { box: cull, key: cullKey } = cullOf(cam, size);
+  const clear = props.insets ?? NO_INSETS;
+
+  /*
+   * The sheets this layout asks for (D-261127-387): the creatures it holds
+   * that would stand as their models, nearest the middle of the canvas the
+   * panels leave clear first, as the area build ranks its slices. The board
+   * renders only at a cull step, so it asks for everything its cull box
+   * holds, a step past the screen. Hidden, it asks for nothing.
+   */
+  const sheetAsks = useMemo(() => {
+    if (hidden) return NO_SHEETS;
+    const mid = screenToView(cam, { x: (clear.left + size.width - clear.right) / 2, y: (clear.top + size.height - clear.bottom) / 2 });
+    return sheetsNearest(standees, cull, mid, (id) => assets.url(id, copy));
+  }, [hidden, standees, cullKey, cam.x, cam.y, cam.scale, size.width, size.height, clear.left, clear.right, clear.top, clear.bottom, assets, copy]);
+  // After each commit, so the cache frees a sheet only once this board no longer draws it.
+  const [board] = useState(() => ({}));
+  useLayoutEffect(() => {
+    if (hidden) sheetCache.forget(board);
+    else sheetCache.layout(board, copy, sheetAsks, sheets.version);
+  }, [hidden, board, copy, sheetAsks, sheets.version]);
+  useLayoutEffect(() => () => sheetCache.forget(board), [board]);
 
   /*
    * Areas standing as their real shapes (docs/design/design-v1-iso-area-shapes.md):
@@ -349,7 +403,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // Each frame's slice of building, and a render when something new can stand.
   const [volumeTick, setVolumeTick] = useState(0);
   // Areas build nearest the middle of what the viewer sees, past the panels over the board, at the camera on screen: a pan inside a cull step renders nothing.
-  const clear = props.insets ?? NO_INSETS;
   const sliceView = useRef({ turn, cull, world, clear, size, cam });
   sliceView.current = { turn, cull, world, clear, size, cam };
   /*
@@ -421,7 +474,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const store = useRoomStore();
   const spots = useStore(useScoped(localDragSlot), (st) => (hidden ? NO_SPOTS : st.spots));
   const movedIso = useCallback(
-    (t: ViewToken, spot: DragSpot, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
+    (t: ViewToken, spot: DragSpot, seat: Seat, model: StandeeModel | null): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
       const room = store.getState().floorView;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       // A seated token on its holder's base, where the holder stands or its drag puts it (stand.ts dragSpotBase).
@@ -443,7 +496,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const fp = footprint(t);
       const cells = dragFootingCells(grid, t, spot);
       const ground = standSurface(heights, cells);
-      const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
+      const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept, model);
       return { base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: kept.rise, inset: kept.inset };
     },
     [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, heights, grid, feet, turn, cam.scale, size.height],
@@ -460,10 +513,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const t = byId.get(item.id)!;
       const dim = props.role === "dm" && dimmedForDm(dmFog, grid, t, sightClip);
       const spot = spots[item.id];
-      const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
-      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => p.poly), dim, pressOnly: false, press: [], rings: rings?.byToken.get(item.id) ?? NO_RINGS };
+      const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }, s.model?.shape ?? null) : s;
+      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => p.poly), dim, pressOnly: false, press: [], rings: rings?.byToken.get(item.id) ?? NO_RINGS, model: s.model };
       const old = isoCache.current.get(item.id);
-      next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
+      next.set(item.id, old && sameIso(old, fresh) && sameModel(old.model ?? null, fresh.model ?? null) ? old : fresh);
     }
     isoCache.current = next;
     return next;
@@ -720,14 +773,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const base = drawnStandBase(src, heights, cells, landing, feet);
       const ground = standSurface(heights, cells);
       if (ghostStands(fog, grid, t, at)) {
-        const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
-        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false, press: [] };
-        // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
-        return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
+        // It stands as its model where its standee would, the frame its facing picks.
+        const { shown } = standingModel(t, turn, tokenActor(t, charactersRef.current), sheets);
+        const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, ON_GROUND, shown?.shape ?? null);
+        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false, press: [], model: shown };
+        // The tag stands over the drawn art when the pill Top-down draws for it is clear too, and is left out otherwise.
+        return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.drawnBox.x0 + shape.drawnBox.x1) / 2, y: shape.drawnBox.y0 } : null };
       }
       return { standee: null, clip: fog.revealedRects(tokenBox(grid, t, at)), tag: null };
     },
-    [src, heights, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
+    [src, heights, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role, sheets, characterLives],
   );
 
   // The ground stage's layers cull by the layout's box, a step past the view, so a pan between steps finds them drawn. Its pills keep their points (5.8).
@@ -928,8 +983,49 @@ function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide
   return out;
 }
 
-/** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
-type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
+/**
+ * A standing token as the board lays it out: its depth entry, its drawn
+ * base and seat, the box its decor lays out on, and the model it stands as,
+ * with the sheet it would ask for and the bounds it would have then.
+ */
+type Standing = StandeeIn & {
+  ground: number;
+  capped: boolean;
+  drawn: number;
+  rise: number;
+  inset: number;
+  frame: VBox;
+  ring: VBox;
+  model: IsoModel | null;
+  /** The asset id of the sheet it waits for or stands as, while its life lets it stand as its model. */
+  sheet: string | null;
+  /** Its bounds as its model, which it asks for its sheet by while it waits. */
+  wanted: VBox;
+  /** The ring's middle at the drawn base, in view units. */
+  at: { x: number; y: number };
+};
+
+/**
+ * A standing creature's model (features/models/shown.ts): the shape it would
+ * stand as while its life lets it, and what it stands as now, by modelShown,
+ * at the frame its turn and facing pick.
+ */
+function standingModel(t: ViewToken, turn: Turn, actor: Parameters<typeof modelShown>[1], sheets: Sheets): { want: StandeeModel | null; shown: IsoModel | null } {
+  const ref = modelWanted(t, actor);
+  if (!ref) return { want: null, shown: null };
+  const frame = frameFor(turn, t.rotation);
+  const shape = standeeModel(ref, frame);
+  const shown = modelShown(t, actor, sheets);
+  return { want: shape, shown: shown ? { image: shown.image, frame, shape } : null };
+}
+
+/** Whether a standee draws the same model: the same decoded sheet, frame and shape. */
+function sameModel(a: IsoModel | null, b: IsoModel | null): boolean {
+  if (!a || !b) return a === b;
+  const p = a.shape;
+  const q = b.shape;
+  return a.image === b.image && a.frame === b.frame && p.side === q.side && p.anchorY === q.anchorY && p.box.every((v, i) => v === q.box[i]);
+}
 
 /** The pieces each run's shape draws, so a scroll's walk over the relief's children can bound it (paintedBoxOf). */
 const RUN_PIECES = new WeakMap<Konva.Node, readonly DrawPiece[]>();
@@ -994,13 +1090,13 @@ function decorAt(
   return keep.has(t.id) || meets(box, cull) ? at : null;
 }
 
-/** A covered standee's outline over whatever covers it (5.6). */
-function Silhouette(props: { token: ViewToken; turn: Turn; standee: StandeeIn; scale: number }) {
+/** A covered standee's outline over whatever covers it (5.6): round its picture, or round a model's drawn box. */
+function Silhouette(props: { token: ViewToken; turn: Turn; standee: Standing; scale: number }) {
   const { token, standee } = props;
   const a = standee.art;
   const ring = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
   const common = { stroke: ring, strokeWidth: 2, strokeScaleEnabled: false, opacity: theme.relief.silhouetteOpacity, listening: false } as const;
-  return token.kind === "object" ? (
+  return token.kind === "object" || standee.model ? (
     <Rect x={a.x0} y={a.y0} width={a.x1 - a.x0} height={a.y1 - a.y0} {...common} />
   ) : (
     <Ellipse x={(a.x0 + a.x1) / 2} y={(a.y0 + a.y1) / 2} radiusX={(a.x1 - a.x0) / 2} radiusY={(a.y1 - a.y0) / 2} {...common} />

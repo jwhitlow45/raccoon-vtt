@@ -31,7 +31,9 @@ import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../f
 import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups.ts";
 import { groundGroups, type Turn } from "../lib/view.ts";
 import { pitSweep } from "./relief/drawRelief.ts";
-import { standeeParts } from "./relief/standee.ts";
+import { standeeParts, type ModelParts, type StandeeModel } from "./relief/standee.ts";
+import { frameCrop } from "../features/models/frames.ts";
+import type { SheetImage } from "../features/models/sheets.ts";
 import { useTreeShown } from "./relief/context.ts";
 import { CAUGHT_RING } from "../features/areas/TemplateLayer.tsx";
 
@@ -82,7 +84,12 @@ export type IsoToken = {
    * (docs/design/design-v1-iso-area-shapes.md 4.4, D-261026-31). None by default.
    */
   rings?: readonly string[];
+  /** The 3D model it stands as, by the layout's modelShown (features/models/shown.ts), or none for its picture. */
+  model?: IsoModel | null;
 };
+
+/** A model a standee draws: its decoded sheet, the frame its turn and facing pick, and that frame's shape (relief/standee.ts). */
+export type IsoModel = { image: SheetImage; frame: number; shape: StandeeModel };
 
 const APPLE = isAppleDevice();
 
@@ -334,19 +341,25 @@ export function clipToOpenings(ctx: Pick<Konva.Context, "save" | "translate" | "
 
 /**
  * A standee (5.4): the token's art upright, never turned by its rotation,
- * its bottom middle on the footprint's center at its base, on its ring, the
- * footprint's ellipse at the base filled 25% black. A base above the drawn
- * ground casts a shadow there, joined to the ring by a stem. A turned token
- * shows a short tick on its ring toward its facing. The node itself stays
- * at the token's world x and y inside the ground group, so a drag reads
- * world cells as it does in Top-down. A standee this device drags carries
- * its own decor (`decor`), upright on the box the overlay lays it out on
- * (standee.ts frame), so it travels with the standee in the drag layer.
+ * on its ring, the footprint's ellipse at the base filled 25% black. The
+ * art is its picture, its bottom middle on the footprint's center at its
+ * base, or the 3D model the layout found it standing as (`iso.model`,
+ * docs/design/design-v1-token-models.md 6), its sheet's frame hung from its
+ * anchor there, which takes a press only on the frame's drawn box. A base
+ * above the drawn ground casts a shadow there, joined to the ring by a
+ * stem. A turned token shows a short tick on its ring toward its facing,
+ * and a model turns with it, one frame each 45 degrees. The node itself
+ * stays at the token's world x and y inside the ground group, so a drag
+ * reads world cells as it does in Top-down. A standee this device drags
+ * carries its own decor (`decor`), upright on the box the overlay lays it
+ * out on (standee.ts frame), so it travels with the standee in the drag
+ * layer.
  */
 function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; face: Face; active: boolean; selected: boolean; hexes: SelectedHexes | null; iso: IsoToken; decor?: ReactNode }) {
   const { token, w, h, scale, iso } = props;
-  // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
-  const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
+  const model = iso.model ?? null;
+  // Drawn from the capped base and the model the layout read, so the art is where it culls, decorates and casts silhouettes.
+  const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso, model?.shape ?? null);
   const upright = groundGroups(iso.turn).upright;
   const ringPx = boardSizes(scale).ringPx;
   const ring = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
@@ -373,16 +386,44 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
           {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
           <Group x={parts.art.x} y={parts.art.y} scaleX={parts.art.scale} scaleY={parts.art.scale}>
-            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} face={props.face} upright />
+            {model && parts.model ? <ModelArt model={model} parts={parts.model} /> : <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} face={props.face} upright />}
           </Group>
           {props.decor ? (
-            <Group x={-w / 2} y={-h - iso.rise} listening={false}>
+            <Group x={parts.decor.x} y={parts.decor.y} listening={false}>
               {props.decor}
             </Group>
           ) : null}
         </Group>
       </Group>
     </>
+  );
+}
+
+/**
+ * A model's frame, cropped from its sheet in one image draw with no clip,
+ * cheaper than the picture it stands in for. Presses go through Konva's
+ * hit canvas, so its hit draws only the frame's drawn box: a tap on its
+ * clear corner reaches the creature behind (D-261127-379).
+ */
+function ModelArt(props: { model: IsoModel; parts: ModelParts }) {
+  const { image, frame } = props.model;
+  const { side, hit } = props.parts;
+  const crop = useMemo(() => frameCrop(frame, image), [frame, image]);
+  return (
+    <KImage
+      name="standeeModel"
+      image={image}
+      width={side}
+      height={side}
+      crop={crop}
+      perfectDrawEnabled={false}
+      hitFunc={(ctx, shape) => {
+        ctx.beginPath();
+        ctx.rect(hit.x, hit.y, hit.w, hit.h);
+        ctx.closePath();
+        ctx.fillStrokeShape(shape);
+      }}
+    />
   );
 }
 

@@ -68,6 +68,8 @@ export type StandeeIn = {
   bounds: VBox;
   /** Its art box in view units: what a later piece covers to give it a silhouette. */
   art: VBox;
+  /** What it paints among the pieces, its decor left out (standee.ts StandeeShape paints): what it covers an earlier standee with. Its bounds where absent. */
+  paints?: VBox;
   /** Always laid out, culled or not: the token being dragged here or selected, whose node must not go away. */
   keep?: boolean;
 };
@@ -647,7 +649,7 @@ export class ReliefIndex {
       }
       bandsBefore(j);
       flush();
-      items.push({ kind: "standee", id: s.standee.id, silhouette: false, pits: s.pits, bounds: s.standee.bounds, art: s.standee.art, key: s.key });
+      items.push({ kind: "standee", id: s.standee.id, silhouette: false, pits: s.pits, bounds: s.standee.paints ?? s.standee.bounds, art: s.standee.art, key: s.key });
       // Its own cells above its base draw over it, wherever they sorted.
       for (const c of s.over) pushStatic(j + 1, c, keyOf(c, turn), boundsOf(c, turn));
     }

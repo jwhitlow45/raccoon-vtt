@@ -21,7 +21,11 @@ import { drawRun, NO_AREA_PITS, runPaintedBox, standeePaintedBox, type DrawConte
 import { keptHost, onDeviceGrid } from "./kept.ts";
 import type { VBox } from "./pieces.ts";
 import { FrameScheduler, type KeptHost, type KeptLayer } from "./scheduler.ts";
-import { standeeShape } from "./standee.ts";
+import { ON_GROUND, standeeModel, standeeShape } from "./standee.ts";
+import type { ImageRef } from "#shared/model.ts";
+import { frameFor } from "../../features/models/frames.ts";
+import type { Sheets } from "../../features/models/sheets.ts";
+import { modelShown } from "../../features/models/shown.ts";
 
 
 type Pt = { x: number; y: number };
@@ -453,13 +457,19 @@ export class TestCanvas {
 
 // ------------------------------------------------------------------ the rig
 
-type Shape = { art: VBox; ring: VBox; frame: VBox; bounds: VBox };
+type Shape = { art: VBox; ring: VBox; frame: VBox; bounds: VBox; drawn: VBox; frameIndex: number | null };
 
 /** A scene for the rig: its grid, size and each cell's ground in cells. */
 export type RigScene = { grid: Grid; w: number; h: number; ground: Map<string, number> };
 
-/** A creature standing on the rig's relief. */
-export type RigStandee = { id: string; x: number; y: number; size: number; look: number };
+/**
+ * A creature standing on the rig's relief. One whose `image` carries a 3D
+ * model stands as it once the rig's `sheets` hold its sheet, as the board's
+ * do (features/models/shown.ts), at the frame its `facing` picks.
+ */
+export type RigStandee = { id: string; x: number; y: number; size: number; look: number; image?: ImageRef; facing?: number };
+
+const NO_SHEETS: Pick<Sheets, "image"> = { image: () => null };
 
 /** An area standing on the rig's relief: one cube band over a cell. */
 export type RigArea = { id: string; x: number; y: number; z0: number; z1: number; selected: boolean };
@@ -487,6 +497,8 @@ export class KeptRig {
   /** The ground canvas's extra height past the view, in CSS pixels. */
   margin: number;
   standees: RigStandee[] = [];
+  /** The model sheets decoded, as the board's sheet cache answers. */
+  sheets: Pick<Sheets, "image"> = NO_SHEETS;
   areas: RigArea[] = [];
   /** Bumped by anything that changes the ground's pixels: a fog reveal, a map set. */
   groundLook = 0;
@@ -638,8 +650,12 @@ export class KeptRig {
   #standeeShapes(): Map<string, Shape> {
     const out = new Map<string, Shape>();
     for (const t of this.standees) {
-      const shape = standeeShape(this.turn, { x: t.x, y: t.y, w: t.size, h: t.size }, this.groundAt(t.x, t.y), this.groundAt(t.x, t.y), this.camera.scale, this.size.height);
-      out.set(t.id, { art: shape.art, ring: shape.ring, frame: shape.frame, bounds: shape.bounds });
+      // A standee's shape asks the board's one predicate, so a sheet's arrival lays it out as the board would.
+      const shown = modelShown({ kind: "monster", image: t.image }, undefined, this.sheets);
+      const frameIndex = shown ? frameFor(this.turn, t.facing ?? 0) : null;
+      const model = shown && frameIndex !== null ? standeeModel(shown.ref, frameIndex) : null;
+      const shape = standeeShape(this.turn, { x: t.x, y: t.y, w: t.size, h: t.size }, this.groundAt(t.x, t.y), this.groundAt(t.x, t.y), this.camera.scale, this.size.height, ON_GROUND, model);
+      out.set(t.id, { art: shape.art, ring: shape.ring, frame: shape.frame, bounds: shape.bounds, drawn: shape.drawnBox, frameIndex });
     }
     return out;
   }
@@ -655,7 +671,7 @@ export class KeptRig {
     this.#shapes = this.#standeeShapes();
     const standees: StandeeIn[] = this.standees.map((t) => {
       const shape = this.#shapes.get(t.id)!;
-      return { id: t.id, x: t.x + t.size / 2, y: t.y + t.size / 2, cells: [{ col: Math.floor(t.x), row: Math.floor(t.y) }], base: this.groundAt(t.x, t.y), holder: null, bounds: shape.bounds, art: shape.art };
+      return { id: t.id, x: t.x + t.size / 2, y: t.y + t.size / 2, cells: [{ col: Math.floor(t.x), row: Math.floor(t.y) }], base: this.groundAt(t.x, t.y), holder: null, bounds: shape.bounds, art: shape.drawn };
     });
     const cull = this.cull();
     // The board's render sets the draw context at its own camera, which a draw sets again from the stage.
@@ -700,9 +716,10 @@ export class KeptRig {
     const k = this.ratio * this.camera.scale;
     g.save();
     g.setTransform(k, 0, 0, k, this.ratio * this.camera.x, this.ratio * this.camera.y);
-    g.fillStyle = `standee ${t.id} ${t.look} ${this.look}`;
+    // A model paints only its frame's drawn box, in a paint of its frame's own.
+    g.fillStyle = shape.frameIndex === null ? `standee ${t.id} ${t.look} ${this.look}` : `model ${t.id} ${t.look} ${shape.frameIndex}`;
     g.beginPath();
-    g.rect(shape.art.x0, shape.art.y0, shape.art.x1 - shape.art.x0, shape.art.y1 - shape.art.y0);
+    g.rect(shape.drawn.x0, shape.drawn.y0, shape.drawn.x1 - shape.drawn.x0, shape.drawn.y1 - shape.drawn.y0);
     g.fill();
     // Its ring, 2 px wide, inside its bounds.
     g.strokeStyle = `ring ${t.id}`;

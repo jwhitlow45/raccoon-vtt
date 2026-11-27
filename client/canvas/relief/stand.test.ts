@@ -390,6 +390,24 @@ describe("the stand rule", () => {
     assert.equal(creatureStands(fog, SQUARES, makeToken("l", { x: 2, y: 2, size: "large" }) as ViewToken, false), false);
   });
 
+  test("security: a creature wearing a 3D model under a player's fog lies flat as its picture, its model's taller frame read nowhere (docs/design/design-v1-token-models.md 3.2)", () => {
+    const scene: Scene = { id: "s1", bounds: { w: 16, h: 16 }, tiles: {} };
+    const bits = new Uint8Array(TILE_BYTES).fill(0xff);
+    const i = (3 * FOG_SUBCELLS + 3) * TILE_SUB + (3 * FOG_SUBCELLS + 3);
+    bits[i >> 3] = bits[i >> 3]! & ~(1 << (i & 7));
+    scene.tiles[tileKey("s1", 0, 0)] = { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) };
+    const fog = new FogView(scene.tiles, scene.id, scene.bounds);
+    const model = { assetId: "0198a1b2-0000-7000-8000-00000000c0de", side: 4, anchorY: 0.9, boxes: Array.from({ length: 8 }, () => [0, 0, 100, 100] as [number, number, number, number]) };
+    const plain = makeToken("g", { x: 3, y: 3 }) as ViewToken;
+    const wolf = makeToken("w", { x: 3, y: 3, image: { icon: "lorc/wolf-head", color: "#556b2f", model } }) as ViewToken;
+    const ids = (tokens: ViewToken[]) => {
+      const { standing, flat } = splitTokens(fog, SQUARES, tokens, () => false);
+      return { standing: standing.map((t) => t.id), flat: flat.map((t) => t.id) };
+    };
+    assert.deepEqual(ids([wolf, { ...plain, id: "p", x: 6 }]), { standing: ["p"], flat: ["w"] });
+    assert.deepEqual(ids([wolf]), ids([{ ...plain, id: "w" }]));
+  });
+
   test("a line along a sub-cell line, a line through a corner and a box with no area each count the sub-cells on both sides", () => {
     // Revealed everywhere but the column of sub-cells just left of x = 3, and the single sub-cell left of and above 5, 5.
     const bits = new Uint8Array(TILE_BYTES).fill(0xff);

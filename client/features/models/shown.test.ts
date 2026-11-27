@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { describe, test } from "node:test";
 import type { HpVisibility, ImageRef, LifeState, ModelRef, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
@@ -79,5 +81,27 @@ describe("modelShown", () => {
     // Another edit to the character, or any edit to one whose token wears no model, keeps the key.
     assert.equal(key({ ...alive, c1: character("c1", { name: "Renamed", actor: actor({ hp: { cur: 3, max: 20, temp: 0 } }) }) }), key(alive));
     assert.equal(key({ ...alive, c2: character("c2", { actor: actor({ life: "dead" }) }) }), key(alive));
+  });
+});
+
+describe("only the isometric board stands a model", () => {
+  test("Top-down, the tracker, the party bar and every panel keep the picture: no part of the client but the board reads modelShown or draws a sheet", () => {
+    const root = new URL("../../", import.meta.url).pathname;
+    const readers: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = path.join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name) && !/\.test\.ts$/.test(name) && /\bmodelShown\(|<ModelArt\b|\buseSheets\(/.test(readFileSync(p, "utf8"))) readers.push(path.relative(root, p));
+      }
+    };
+    walk(root);
+    assert.deepEqual(readers.sort(), ["canvas/TokenNode.tsx", "canvas/relief/IsoBoard.tsx", "canvas/relief/keptTesting.ts", "features/models/sheets.ts", "features/models/shown.ts"]);
+    // In TokenNode, only the standee draws one, and only from the model its layout passed.
+    const node = readFileSync(new URL("../../canvas/TokenNode.tsx", import.meta.url), "utf8");
+    assert.equal(node.match(/<ModelArt\b/g)?.length, 1);
+    const standee = node.slice(node.indexOf("function Standee("), node.indexOf("\n}\n", node.indexOf("function Standee(")));
+    assert.match(standee, /<ModelArt model=\{model\}/);
+    assert.match(standee, /const model = iso\.model \?\? null;/);
   });
 });
