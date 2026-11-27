@@ -426,17 +426,17 @@ describe("wall slabs (5.6)", () => {
     assert.ok(close(joined[0]!.slab!.b, { x: 2, y: 4 }));
   });
 
-  test("a slab draws every face toward the viewer in stone with the tint baked in and its light, its narrow end too, its cap in lighter baked stone, and one stroke", () => {
+  test("a slab draws every face toward the viewer in stone with the tint and its light baked in, its narrow end too, its cap in lighter baked stone, one fill each, and one stroke", () => {
     withCanvas(() => {
       const stone = image();
       const items = wallsOf({ "1,4,n": WALL });
       for (const turn of TURNS) {
         const r = recorder();
         drawRun(r.g, items, dc(turn, { stone }));
-        // One long side and one end face the viewer, each in stone and light, then the cap.
+        // One long side and one end face the viewer, each in stone with its light, then the cap.
         assert.deepEqual(
           r.fills.map((f) => (f.style === "baked" || f.style === "pattern" ? f.style : f.style === theme.relief.lit || f.style === theme.relief.shaded ? "light" : "flat")).sort(),
-          ["baked", "baked", "baked", "light", "light"],
+          ["baked", "baked", "baked"],
           `turn ${turn}`,
         );
         // The cap lies on the ground plane: its texture's rows run along the ground, not straight down the screen as a side's do.
@@ -665,6 +665,28 @@ describe("tints baked into textures (7)", () => {
     }
   });
 
+  test("a face's light bakes in with its tint, a pattern for each light, made once (ISOWALL)", () => {
+    withCanvas(() => {
+      const stone = image();
+      const r = recorder();
+      const lit = tintedPatternOf(r.g, stone, theme.relief.wallTint, theme.relief.lit);
+      const shaded = tintedPatternOf(r.g, stone, theme.relief.wallTint, theme.relief.shaded);
+      const plain = tintedPatternOf(r.g, stone, theme.relief.wallTint);
+      assert.ok(lit && shaded && plain && lit !== shaded && lit !== plain && shaded !== plain);
+      assert.equal(tintedPatternOf(r.g, stone, theme.relief.wallTint, theme.relief.lit), lit);
+      // A slab lit on one face and shaded on another fills each from its own pattern.
+      const items = wallsOf({ "1,4,n": WALL, "1,4,w": WALL });
+      for (const turn of TURNS) {
+        const rec = recorder();
+        for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(rec.g, [w], dc(turn, { stone }));
+        const sides = rec.fills.filter((f) => f.style === "baked" && (f.m as { m: number[] }).m[2] === 0);
+        assert.ok(sides.length >= 2, `turn ${turn}`);
+        assert.ok(sides.every((f) => f.pattern === lit || f.pattern === shaded), `turn ${turn}: each side from a lit or a shaded pattern`);
+        assert.ok(sides.some((f) => f.pattern === lit) && sides.some((f) => f.pattern === shaded), `turn ${turn}: both lights show`);
+      }
+    });
+  });
+
   test("a closed door's leaf wears its stain baked into the wood, and its cap the stained tone", () => {
     withCanvas(() => {
       const wood = image();
@@ -676,12 +698,11 @@ describe("tints baked into textures (7)", () => {
         assert.ok(!r.fills.some((f) => f.style === "pattern" || f.style === theme.relief.doorStain), `turn ${turn}: no raw wood, no stain laid over`);
         assert.ok(r.fills.length <= 12, `turn ${turn}: ${r.fills.length} fills`);
       }
-      // Below the detail a door is one stained plane.
+      // Below the detail a door is one stained plane, its light baked in with the stain.
       const plane = recorder();
       drawRun(plane.g, wallsOf({ "1,4,n": DOOR }, () => 0, false), dc(0, { wood }));
-      assert.equal(plane.fills.length, 2);
+      assert.equal(plane.fills.length, 1);
       assert.equal(plane.fills[0]!.style, "baked");
-      assert.ok(([theme.relief.lit, theme.relief.shaded] as string[]).includes(plane.fills[1]!.style));
     });
   });
 });

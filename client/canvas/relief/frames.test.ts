@@ -6,7 +6,6 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { rng } from "#shared/testutil.ts";
-import { theme } from "../../lib/theme.ts";
 import type { Turn } from "../../lib/view.ts";
 import { groupWalls } from "./buckets.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
@@ -305,7 +304,7 @@ describe("drawing frames", () => {
     }
   });
 
-  test("a closed door draws its posts in the walls' stone and light, capped as a wall is, and its leaf in stained wood, fifteen fills at most with textures loaded, an open frame its posts alone, a window its posts and pane", () => {
+  test("a closed door draws its posts in the walls' stone with its light baked in, capped as a wall is, and its leaf in stained wood, ten fills at most with textures loaded, an open frame its posts alone, a window its posts and pane", () => {
     const g = globalThis as { DOMMatrix?: unknown; OffscreenCanvas?: unknown };
     const had = [g.DOMMatrix, g.OffscreenCanvas];
     g.DOMMatrix = class {};
@@ -323,15 +322,14 @@ describe("drawing frames", () => {
         drawRun(r.g, [list.find((w) => w.piece.ax === x && w.piece.kind !== "leaf")!], dc(turn, { wood, stone: wood }));
         return r.fills;
       };
-      const light = (c: string) => c === theme.relief.lit || c === theme.relief.shaded;
       for (const turn of TURNS) {
         const closed = fillsOf(1, turn);
-        // Each post: two sides in stone and their light, and a cap in stone. The leaf: its sides toward the viewer in its wood and their light, and its cap.
-        assert.ok(closed.length <= 15, `turn ${turn}: ${closed.join(" ")}`);
+        // Each post: two sides in stone with their light baked in, and a cap in stone. The leaf: its sides toward the viewer in its wood with their light, and its cap.
+        assert.ok(closed.length <= 10, `turn ${turn}: ${closed.join(" ")}`);
         assert.ok(closed.filter((c) => c === "pattern").length >= 2 * 3 + 1, `turn ${turn}: the posts' sides and caps and the leaf in their textures`);
-        assert.equal(closed.filter((c) => c !== "pattern" && !light(c)).length, 1, `turn ${turn}: only the leaf's cap in a flat tone`);
-        assert.equal(fillsOf(3, turn).length, 10, `turn ${turn}: an open frame's two posts`);
-        assert.equal(fillsOf(5, turn).length, 11, `turn ${turn}: a window's posts and its pane`);
+        assert.equal(closed.filter((c) => c !== "pattern").length, 1, `turn ${turn}: only the leaf's cap in a flat tone`);
+        assert.equal(fillsOf(3, turn).length, 6, `turn ${turn}: an open frame's two posts`);
+        assert.equal(fillsOf(5, turn).length, 7, `turn ${turn}: a window's posts and its pane`);
       }
     } finally {
       [g.DOMMatrix, g.OffscreenCanvas] = had;

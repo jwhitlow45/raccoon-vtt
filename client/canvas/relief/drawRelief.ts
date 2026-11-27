@@ -650,8 +650,9 @@ export function blended(base: string, over: string): string | null {
  * length and of height, else its tone, then the light from the left. A
  * texture runs on from the world's origin along the edge's line (`along`,
  * SideShape), so faces side by side on one line show no seam in it. A tint
- * is baked into the texture's pattern (looks.ts tintedPatternOf), else laid
- * over it. A plain tone, its tint and its light fill once, mixed. Its
+ * is baked into the texture's pattern with the light (looks.ts
+ * tintedPatternOf), one fill, else each is laid over it. A plain tone, its
+ * tint and its light fill once, mixed. Its
  * outline follows unless the caller strokes it with others (`stroke` false).
  */
 function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null, stroke = true, path: Path2D | null = null, along = 0): void {
@@ -661,7 +662,7 @@ function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: Si
   }
   const light = left === null ? null : left ? theme.relief.lit : theme.relief.shaded;
   const img = look.texture && look.texture !== "pit" && look.texture !== "pillar" && look.texture !== "stairs" ? dc.textures[look.texture as TexturedTerrain] : undefined;
-  const baked = img && tint ? tintedPatternOf(g, img, tint) : null;
+  const baked = img && tint ? tintedPatternOf(g, img, tint, light) : null;
   const pattern = baked ?? (img ? patternOf(g, img) : null);
   if (pattern && img && img.naturalWidth > 0) {
     // Pattern pixels to view units: along the edge per cell of its length, and K view units down per cell of height.
@@ -672,7 +673,8 @@ function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: Si
     pattern.setTransform(new DOMMatrix([ux * k, uy * k, 0, K * k, a.x - ux * along, a.y - uy * along]));
     g.fillStyle = pattern;
     fillWith(g, path);
-    if (tint && !baked) {
+    if (baked) return outline(g, dc, stroke, path);
+    if (tint) {
       g.fillStyle = tint;
       fillWith(g, path);
     }
@@ -1192,8 +1194,8 @@ function capStyle(g: CanvasRenderingContext2D, z: number, dc: DrawContext): void
 
 /**
  * A wall slab (5.6): every face toward the viewer in stone with the wall's
- * tint baked in and the light from its direction, its narrow ends as its
- * long sides (D-261127-136), its cap in lighter stone (fillCap), and its
+ * tint and the light from its direction baked in, one fill a face, its
+ * narrow ends as its long sides (D-261127-136), its cap in lighter stone (fillCap), and its
  * outline in one stroke.
  */
 function drawSlab(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {

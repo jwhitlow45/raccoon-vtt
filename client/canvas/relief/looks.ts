@@ -239,7 +239,7 @@ export function patternOf(g: CanvasRenderingContext2D, image: HTMLImageElement):
   return p;
 }
 
-/** One pattern per texture image and tint, the tint laid over the image once. */
+/** One pattern per texture image, tint and light, laid over the image once. */
 const tinted = new WeakMap<HTMLImageElement, Map<string, CanvasPattern | null>>();
 
 /**
@@ -247,12 +247,15 @@ const tinted = new WeakMap<HTMLImageElement, Map<string, CanvasPattern | null>>(
  * D-261102-889): the image drawn once on a canvas of its own size with the
  * tint filled over it, as a repeating pattern, so a wall's stone or a door's
  * stained wood fills a face in one call where the image and its tint took
- * two. Null where no canvas can be made or the image has not decoded: the
- * caller fills the image and the tint apart, and a later call bakes it.
+ * two. A face's light from the left, when given, is baked in after the tint
+ * (D-261127-143), so a lit or shaded face is one fill too. Null where no
+ * canvas can be made or the image has not decoded: the caller fills the
+ * image, the tint and the light apart, and a later call bakes it.
  */
-export function tintedPatternOf(g: CanvasRenderingContext2D, image: HTMLImageElement, tint: string): CanvasPattern | null {
+export function tintedPatternOf(g: CanvasRenderingContext2D, image: HTMLImageElement, tint: string, light: string | null = null): CanvasPattern | null {
+  const key = light === null ? tint : `${tint}|${light}`;
   let byTint = tinted.get(image);
-  const kept = byTint?.get(tint);
+  const kept = byTint?.get(key);
   if (kept !== undefined) return kept;
   const w = image.naturalWidth;
   const h = image.naturalHeight;
@@ -264,10 +267,14 @@ export function tintedPatternOf(g: CanvasRenderingContext2D, image: HTMLImageEle
     c.drawImage(image, 0, 0);
     c.fillStyle = tint;
     c.fillRect(0, 0, w, h);
+    if (light !== null) {
+      c.fillStyle = light;
+      c.fillRect(0, 0, w, h);
+    }
     p = g.createPattern(canvas, "repeat");
   }
   if (!byTint) tinted.set(image, (byTint = new Map()));
-  byTint.set(tint, p);
+  byTint.set(key, p);
   return p;
 }
 
