@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
 import type { Character } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { levelUps } from "#shared/rules/classResources.ts";
+import { CLASS_NAMES, levelUps } from "#shared/rules/classResources.ts";
 import type { IconName } from "../../components/Icon.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { handFocusNow } from "../../lib/handFocus.ts";
@@ -10,6 +10,8 @@ import { theme } from "../../lib/theme.ts";
 import { updateTitle } from "../resources/logic.ts";
 import { ResourceSheet, type SheetMode } from "../resources/ResourceSheet.tsx";
 import { Section, SmallButton } from "../tokens/ui.tsx";
+import { ClassesSheet } from "../slots/ClassesSheet.tsx";
+import { classesLine, levelMismatch, NO_CLASSES } from "../slots/logic.ts";
 import { CreatureUses, useUsesPresence } from "./CombatUses.tsx";
 
 /** What Uses says with nothing in it, where class resources are added (the D&D Beyond stack's words). */
@@ -29,10 +31,12 @@ const ADD_BOX = "[data-uses-add]";
  * class's presets were read at asks once per class to update them, and
  * Add, or the limit's line, comes last.
  */
-export function UsesSection(props: { target: ActorTarget; name: string; character?: Character }) {
+export function UsesSection(props: { target: ActorTarget; name: string; character?: Character; search?: { classes: string; slots: string } }) {
   const { character } = props;
   const presence = useUsesPresence(props.target);
   const [sheet, setSheet] = useState<SheetMode | null>(null);
+  const [classesOpen, setClassesOpen] = useState(false);
+  const classesOpener = useRef<HTMLElement | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const box = useRef<HTMLElement | null>(null);
   /*
@@ -52,20 +56,44 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
     box.current = from?.closest("section") ?? null;
     setSheet(mode);
   };
+  const openClasses = (from: HTMLElement | null) => {
+    classesOpener.current = from;
+    setClassesOpen(true);
+  };
   const resources = character?.resources ?? [];
   const full = resources.length >= LIMITS.resourcesPerCharacter;
+  const classes = character?.classes;
+  const mismatch = character ? levelMismatch(character) : null;
   return (
     <Section title="Uses">
+      {mismatch ? (
+        <LineWith text={mismatch}>
+          <OpenerButton onOpen={(from) => openClasses(from)}>Edit classes</OpenerButton>
+        </LineWith>
+      ) : null}
       {character
-        ? levelUps(resources, character.level).map((up) => (
-            <div key={up.classId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
-              <p style={{ flex: "1 1 160px", minWidth: 0, margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>{`Your level went up. ${updateTitle(up.classId)}?`}</p>
+        ? levelUps(resources, character.level, classes).map((up) => (
+            <LineWith key={up.classId} text={classes && classes.length > 0 ? `Your ${CLASS_NAMES[up.classId]} level is now ${up.guess}. ${updateTitle(up.classId)}?` : `Your level went up. ${updateTitle(up.classId)}?`}>
               <OpenerButton onOpen={(from) => open({ kind: "update", up }, from)}>Update</OpenerButton>
-            </div>
+            </LineWith>
           ))
         : null}
-      <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} />
+      <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} slotsSearch={props.search?.slots} />
       {character && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
+      {/* Both edit controls at the foot (docs/design/design-v1-slots.md 3.1): the classes just above Add a class resource. */}
+      {character ? (
+        classes && classes.length > 0 ? (
+          <div data-uses-classes="" data-search={props.search?.classes} style={{ display: "flex", alignItems: "center", columnGap: theme.space(2), minHeight: theme.touch }}>
+            <p style={{ flex: "1 1 auto", minWidth: 0, margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>{classesLine(classes)}</p>
+            <PencilButton label="Edit classes" onOpen={(from) => openClasses(from)} />
+          </div>
+        ) : (
+          <div data-uses-classes="" data-search={props.search?.classes} style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+            <Help>{NO_CLASSES}</Help>
+            <OpenerButton onOpen={(from) => openClasses(from)}>Add your classes</OpenerButton>
+          </div>
+        )
+      ) : null}
       {!character ? null : full ? (
         <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>
       ) : (
@@ -76,7 +104,18 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
         </div>
       )}
       {sheet && character ? <ResourceSheet character={character} mode={sheet} opener={opener} onClose={() => setSheet(null)} /> : null}
+      {classesOpen && character ? <ClassesSheet character={character} opener={classesOpener} onClose={() => setClassesOpen(false)} /> : null}
     </Section>
+  );
+}
+
+/** A line of words with its button beside it, wrapping under them where they do not fit. */
+function LineWith(props: { text: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
+      <p style={{ flex: "1 1 160px", minWidth: 0, margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>{props.text}</p>
+      {props.children}
+    </div>
   );
 }
 
@@ -88,4 +127,10 @@ function OpenerButton(props: { onOpen(from: HTMLElement | null): void; icon?: Ic
       {props.children}
     </SmallButton>
   );
+}
+
+/** The pencil alone, its name its tooltip, which hands the sheet it opens the element to give focus back to. */
+function PencilButton(props: { label: string; onOpen(from: HTMLElement | null): void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return <SmallButton ref={ref} icon="edit" label={props.label} onClick={() => props.onOpen(ref.current)} />;
 }

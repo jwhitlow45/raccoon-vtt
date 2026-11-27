@@ -78,7 +78,7 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
   const resources = character.resources;
   const editing = mode.kind === "edit" ? resources?.find((r) => r.id === mode.id) : undefined;
   const [tab, setTab] = useState<Tab>("class");
-  const [pick, setPick] = useState<PickDraft>(() => (mode.kind === "update" ? startUpdate(resources, mode.up) : startPick(resources, character.level)));
+  const [pick, setPick] = useState<PickDraft>(() => (mode.kind === "update" ? startUpdate(resources, mode.up) : startPick(resources, character.level, character.classes)));
   const [modText, setModText] = useState<Partial<Record<CountAbility, string>>>({});
   const [own, setOwn] = useState<OwnDraft>(() => (editing ? editDraft(editing) : EMPTY_OWN));
   const [sending, setSending] = useState(false);
@@ -210,7 +210,7 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
                 characterLevel={character.level}
                 modText={modText}
                 onModText={change(setModText)}
-                onClass={(classId) => change(setPick)(pickClass(pick, classId, resources, character.level))}
+                onClass={(classId) => change(setPick)(pickClass(pick, classId, resources, character.level, character.classes))}
                 onLevel={(level) => change(setPick)(pickLevel(pick, level, resources))}
                 onTick={(id, on) => change(setPick)(tick(pick, id, on))}
                 upFrom={mode.kind === "update" ? mode.up.classLevel : undefined}

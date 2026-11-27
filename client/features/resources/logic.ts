@@ -1,5 +1,5 @@
 import { LIMITS } from "#shared/limits.ts";
-import type { ClassResource, PcStats } from "#shared/model.ts";
+import type { ClassLevel, ClassResource, PcStats, Spent } from "#shared/model.ts";
 import { clientOpSchema, combatUseSchemas } from "#shared/protocol.ts";
 import { abilityMod } from "#shared/statBlock.ts";
 import {
@@ -18,6 +18,7 @@ import {
   type ResourceInput,
 } from "#shared/rules/classResources.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
+import { pickStart, spentCounts } from "../slots/logic.ts";
 
 /**
  * The words and the drafts of a character's class resources
@@ -87,27 +88,52 @@ export function joinWords(words: readonly string[]): string {
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
+/** "1 spell slot", "3 spell slots": a count of what a rest gives back. */
+function counted(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 /**
  * What a rest also restores of what is spent (7.2), as the rules of
  * shared/rules/rest.ts give it: "A Short Rest also restores one Rage and
- * all Focus Points." Null when it restores none, so a creature with
- * nothing spent reads nothing new.
+ * all Focus Points." With classes it counts the spell slots, Pact Magic
+ * slots and Hit Point Dice spent too (docs/design/design-v1-slots.md 3.4):
+ * "A Long Rest also restores Rage, 3 spell slots and 2 Hit Point Dice.",
+ * "A Short Rest also restores 2 Pact Magic slots and one Rage." Null when
+ * it restores none, so a creature with nothing spent reads nothing new.
  */
-export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long"): string | null {
-  const spent = (resources ?? []).filter((r) => r.used > 0);
-  if (kind === "long") return spent.length > 0 ? `A Long Rest also restores ${joinWords(spent.map((r) => r.name))}.` : null;
-  const words = spent.flatMap((r) => (r.reset === "shortOne" ? [`one ${r.name}`] : r.reset === "short" ? [r.max > 1 ? `all ${r.name}` : r.name] : []));
+export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long", spent?: Spent): string | null {
+  const used = (resources ?? []).filter((r) => r.used > 0);
+  const counts = spentCounts(spent);
+  const pact = counts.pact > 0 ? [counted(counts.pact, "Pact Magic slot", "Pact Magic slots")] : [];
+  if (kind === "long") {
+    const words = [
+      ...used.map((r) => r.name),
+      ...(counts.slots > 0 ? [counted(counts.slots, "spell slot", "spell slots")] : []),
+      ...pact,
+      ...(counts.dice > 0 ? [counted(counts.dice, "Hit Point Die", "Hit Point Dice")] : []),
+    ];
+    return words.length > 0 ? `A Long Rest also restores ${joinWords(words)}.` : null;
+  }
+  const words = [...pact, ...used.flatMap((r) => (r.reset === "shortOne" ? [`one ${r.name}`] : r.reset === "short" ? [r.max > 1 ? `all ${r.name}` : r.name] : []))];
   return words.length > 0 ? `A Short Rest also restores ${joinWords(words)}.` : null;
 }
 
 /**
  * What the party's Long Rest also restores (7.2, LP20-CC-4): one line for
  * every character it rests, since a line per resource would grow its card
- * past a phone's sheet. Null when none of them has one spent, as a chosen
- * rest reads nothing new then.
+ * past a phone's sheet, naming each kind any of them has spent: "It also
+ * restores every class resource, spell slot and Hit Point Die."
+ * (docs/design/design-v1-slots.md 3.4). Null when none of them has one
+ * spent, as a chosen rest reads nothing new then.
  */
-export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[] }[]): string | null {
-  return characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "It also restores every class resource." : null;
+export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[]; spent?: Spent }[]): string | null {
+  const kinds = [
+    characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "class resource" : null,
+    characters.some((c) => spentCounts(c.spent).slots + spentCounts(c.spent).pact > 0) ? "spell slot" : null,
+    characters.some((c) => spentCounts(c.spent).dice > 0) ? "Hit Point Die" : null,
+  ].filter((k): k is string => k !== null);
+  return kinds.length > 0 ? `It also restores every ${joinWords(kinds)}.` : null;
 }
 
 /**
@@ -179,20 +205,24 @@ export type PickRow = {
 };
 
 /**
- * Where a new pick starts: the class of the character's first preset,
- * at the class level it was read at, or no class at the character's
- * level, 1 without one.
+ * Where a new pick starts: with classes, the first SRD class in them at its
+ * level (docs/design/design-v1-slots.md 3.1), else the class of the
+ * character's first preset, at the class level it was read at, or no class
+ * at the character's level, 1 without one.
  */
-export function startPick(resources: readonly ClassResource[] | undefined, characterLevel: number | undefined): PickDraft {
+export function startPick(resources: readonly ClassResource[] | undefined, characterLevel: number | undefined, classes?: readonly ClassLevel[]): PickDraft {
+  const own = pickStart(classes);
+  if (own) return pickClass({ classId: null, classLevel: own.level, ticks: [], modifiers: {} }, own.classId, resources, characterLevel, classes);
   const first = (resources ?? []).map((r) => presetById(r.preset)).find((p) => p !== undefined);
   const draft: PickDraft = { classId: null, classLevel: characterLevel ?? 1, ticks: [], modifiers: {} };
   return first ? pickClass(draft, first.classId, resources, characterLevel) : draft;
 }
 
-/** A class chosen: its level as its presets were read at, else the character's, and its own presets that start by then ticked. */
-export function pickClass(draft: PickDraft, classId: ClassId, resources: readonly ClassResource[] | undefined, characterLevel: number | undefined): PickDraft {
+/** A class chosen: its level among the classes, else as its presets were read at, else the character's, and its own presets that start by then ticked. */
+export function pickClass(draft: PickDraft, classId: ClassId, resources: readonly ClassResource[] | undefined, characterLevel: number | undefined, classes?: readonly ClassLevel[]): PickDraft {
   const read = (resources ?? []).flatMap((r) => (presetById(r.preset)?.classId === classId && r.level !== undefined ? [r.level] : []));
-  const classLevel = read.length > 0 ? Math.max(...read) : (characterLevel ?? draft.classLevel);
+  const own = classes?.find((c) => c.id === classId)?.level;
+  const classLevel = own ?? (read.length > 0 ? Math.max(...read) : (characterLevel ?? draft.classLevel));
   return { ...draft, classId, classLevel, ticks: defaultTicks(classId, classLevel, resources) };
 }
 
