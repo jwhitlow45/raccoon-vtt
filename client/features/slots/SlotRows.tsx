@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { Character, CharacterId } from "#shared/model.ts";
+import type { CharacterId } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { CountPips, countWords } from "../../components/CountPips.tsx";
