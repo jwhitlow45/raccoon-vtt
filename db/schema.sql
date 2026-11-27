@@ -390,6 +390,22 @@ begin
       );
   end if;
 end $$;
+-- 3D models (docs/design/design-v1-token-models.md 4.3). A model's sheet of 8
+-- views is an asset of its own kind, an image with neither media nor facts,
+-- which the media rule's last branch already holds. The kind check gains it
+-- only while it lacks it, as the thumb, video and sound kinds' steps did, so
+-- a boot does not re-check every row each time, and the new check accepts
+-- every row the old one did.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'assets'::regclass and conname = 'assets_kind_check' and pg_get_constraintdef(oid) like '%''model''%'
+  ) then
+    alter table assets drop constraint if exists assets_kind_check,
+      add constraint assets_kind_check check (kind in ('map', 'token', 'handout', 'thumb', 'video', 'sound', 'model'));
+  end if;
+end $$;
 -- The room's numbers (server/rooms/counted.ts). Each op row's `pub` is the
 -- number its envelope took, which its log lines and turns carry and replay
 -- reads in place of the row's seq. A member's op takes the server's clock in

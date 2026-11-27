@@ -19,6 +19,7 @@ export const API_ERROR_CODES = [
   "bad_invite",
   "bad_key",
   "bad_manifest",
+  "bad_model_sheet",
   "bad_password",
   "bad_query",
   "bad_request",

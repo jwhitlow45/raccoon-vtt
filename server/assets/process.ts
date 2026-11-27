@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { fileTypeFromFile } from "file-type";
 import sharp from "sharp";
+import { MODEL_LIMITS } from "#shared/limits.ts";
 import { AssetError } from "./errors.ts";
 import { KINDS, type AssetKind, type Variant } from "./kinds.ts";
 
@@ -87,11 +88,14 @@ const INPUT_OPTIONS = {
  * rotation keeps its orientation even when the client skipped its own
  * downscale. Variants are made from the original rather than from each
  * other, because JPEG shrink-on-load makes that both sharper and cheap.
+ * A model's sheet is checked for its shape first, and keeps its alpha as
+ * every image does.
  */
 export async function processImage(srcPath: string, kind: AssetKind, tmpDir: string): Promise<ProcessedVariant[]> {
   configureSharp();
   const out: ProcessedVariant[] = [];
   try {
+    if (kind === "model") await checkModelSheet(srcPath);
     for (const { name, maxSide } of KINDS[kind].variants) {
       const path = join(tmpDir, `variant-${randomUUID()}-${name}.webp`);
       out.push({ name, path, width: 0, height: 0, bytes: 0 });
@@ -111,6 +115,27 @@ export async function processImage(srcPath: string, kind: AssetKind, tmpDir: str
     if (err instanceof AssetError) throw err;
     throw new AssetError(422, "bad_image", { cause: err });
   }
+}
+
+/**
+ * Whether an image is a model's sheet as the client draws it
+ * (docs/design/design-v1-token-models.md 4.3, D-261127-188): 4 by 2 square
+ * frames, so 2:1, at one of the widths whose frames, mobile copy and
+ * thumbnail all keep whole-pixel edges.
+ */
+export function modelSheetFits(width: number, height: number): boolean {
+  return (MODEL_LIMITS.sheetWidthsPx as readonly number[]).includes(width) && height * MODEL_LIMITS.sheetColumns === width * MODEL_LIMITS.sheetRows;
+}
+
+/**
+ * Refuses a sheet of any other shape, before a variant is made. The size is
+ * read as drawn, after the EXIF turn `autoOrient` applies to every variant,
+ * so a tag that would turn a sheet on its side is refused rather than
+ * stored as frames the board would cut wrong.
+ */
+async function checkModelSheet(srcPath: string): Promise<void> {
+  const { autoOrient } = await sharp(srcPath, INPUT_OPTIONS).metadata();
+  if (!modelSheetFits(autoOrient.width, autoOrient.height)) throw new AssetError(422, "bad_model_sheet");
 }
 
 export async function removeFiles(paths: string[]): Promise<void> {

@@ -761,6 +761,14 @@ export const MODEL_LIMITS = {
   frames: 8,
   /** Each frame's clear edge at full size. The outline stays inside it, and the mobile copy and the thumbnail keep 4 and 2 px of it. */
   gutterPx: 8,
+  /**
+   * The sheet as the server takes it (docs/design/design-v1-token-models.md
+   * 4.3): 2:1, at one of these widths as drawn, and at most this many bytes.
+   * Powers of two keep every frame's edge on a whole pixel in each variant.
+   */
+  sheetWidthsPx: [512, 1024, 2048],
+  sheetBytes: 10 * MiB,
+  sheetUploadMs: 60_000,
   /** A frame's side in footprint sides (ModelRef.side). Past 4 a frame's pixels spread too thin to stay sharp. */
   minSide: 0.25,
   maxSide: 4,

@@ -1158,7 +1158,7 @@ export async function readLogEntries(client: Queryable, roomId: string, ids: rea
  * which `withAssetSizes` copies over every field of a map's `video` but its id.
  * Absent for an image.
  */
-export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video" | "sound"; width: number; height: number; uploaders: string[]; video?: VideoFacts; audio?: SoundFacts };
+export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video" | "sound" | "model"; width: number; height: number; uploaders: string[]; video?: VideoFacts; audio?: SoundFacts };
 
 /** An asset row as loadAssetFacts reads it. */
 export type AssetFactRow = { id: string; room_id: string; kind: AssetFact["kind"]; width: number; height: number; uploaders: string[] | null; media?: unknown; video?: unknown; audio?: unknown };

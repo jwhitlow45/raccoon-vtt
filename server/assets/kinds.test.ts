@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
+import { MODEL_LIMITS, SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
 import { ASSET_KINDS, KINDS, PLAYER_UPLOAD_KINDS, SOUND_PIPELINE, VIDEO_PIPELINE, cellPxHint, isAssetKind, nameGrid } from "./kinds.ts";
+import { hourlyChecks } from "./limits.ts";
 
 test("a cols x rows name suggests the cell size when both axes agree", () => {
   assert.equal(cellPxHint("crypt_30x20.jpg", 3000, 2000), 100);
@@ -83,4 +84,29 @@ test("a sound is a kind of its own: the DM's alone to add, players read it while
   });
   assert.ok(!PLAYER_UPLOAD_KINDS.includes("sound"));
   assert.ok(Number.isInteger(SOUND_PIPELINE) && SOUND_PIPELINE >= 1);
+});
+
+test("a 3D model's sheet is a kind of its own: anyone who may set a picture adds one, players read it when shown, at 2048, 1024 and 512 (docs/design/design-v1-token-models.md 4.3)", () => {
+  assert.equal(isAssetKind("model"), true);
+  assert.deepEqual(KINDS.model, {
+    maxUploadBytes: 10 * 1024 * 1024,
+    deadlineMs: 60_000,
+    variants: [
+      { name: "full", maxSide: 2048 },
+      { name: "mobile", maxSide: 1024 },
+      { name: "thumb", maxSide: 512 },
+    ],
+    dmOnly: false,
+    playersRead: true,
+  });
+  assert.deepEqual([KINDS.model.maxUploadBytes, KINDS.model.deadlineMs], [MODEL_LIMITS.sheetBytes, MODEL_LIMITS.sheetUploadMs]);
+  // The full copy is the sheet the client draws: 4 frames of 512 across.
+  assert.equal(KINDS.model.variants[0]!.maxSide, MODEL_LIMITS.framePx * MODEL_LIMITS.sheetColumns);
+  assert.ok(PLAYER_UPLOAD_KINDS.includes("model"), "so a player's own sheet is theirs to read and to wear");
+  assert.deepEqual([...PLAYER_UPLOAD_KINDS].sort(), ["model", "token"]);
+});
+
+test("a sheet's upload spends the shared hourly budgets, as a token picture's does", () => {
+  assert.deepEqual(hourlyChecks("s1", "ip1", "r1", "model"), hourlyChecks("s1", "ip1", "r1", "token"));
+  assert.deepEqual(hourlyChecks("s1", "ip1", "r1", "model", { memberId: "m1" }), hourlyChecks("s1", "ip1", "r1", "token", { memberId: "m1" }));
 });

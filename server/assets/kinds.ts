@@ -1,4 +1,4 @@
-import { LIMITS, SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
+import { LIMITS, MODEL_LIMITS, SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
 import type { SoundFacts, VideoFacts } from "#shared/model.ts";
 import type { AssetCredit } from "#shared/protocol.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
@@ -29,7 +29,7 @@ export const VIDEO_PIPELINE = 1;
  */
 export const SOUND_PIPELINE = 1;
 
-export const ASSET_KINDS = ["map", "token", "handout", "thumb", "video", "sound"] as const;
+export const ASSET_KINDS = ["map", "token", "handout", "thumb", "video", "sound", "model"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export const VARIANTS = ["full", "mobile", "thumb"] as const;
@@ -123,6 +123,25 @@ export const KINDS: Record<AssetKind, KindSpec> = {
     deadlineMs: SOUND_LIMITS.uploadDeadlineMs,
     variants: [{ name: "full", maxSide: 0 }],
     dmOnly: true,
+    playersRead: true,
+  },
+  /**
+   * A 3D model's sheet of 8 views (docs/design/design-v1-token-models.md
+   * 4.3): the file stays on the device that drew it, and the room keeps only
+   * this image, checked for its shape before it is made (process.ts). Its
+   * mobile copy is what phones draw in play, and the thumbnail the Library's.
+   * Whoever may set a picture may add one, and a player reads it only while
+   * an image their copy holds names it.
+   */
+  model: {
+    maxUploadBytes: MODEL_LIMITS.sheetBytes,
+    deadlineMs: MODEL_LIMITS.sheetUploadMs,
+    variants: [
+      { name: "full", maxSide: 2048 },
+      { name: "mobile", maxSide: 1024 },
+      { name: "thumb", maxSide: 512 },
+    ],
+    dmOnly: false,
     playersRead: true,
   },
 };

@@ -373,6 +373,21 @@ describe("asset ids an op names", () => {
     assert.deepEqual(assetIdsOf({ t: "build.stamps", sceneId: "s", put: [{ id: "st", art: { assetId: c } }] }), [c]);
     assert.deepEqual(assetIdsOf({ t: "scene.update", sceneId: "s", patch: { thumb: "not-a-uuid" } }), []);
   });
+
+  test("a 3D model's sheet is looked up with its picture, wherever the image sits in the op (docs/design/design-v1-token-models.md 4.2)", () => {
+    const face = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const sheet = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const boxes = Array.from({ length: 8 }, () => [20, 10, 80, 95]);
+    const model = { assetId: sheet, side: 1.4, anchorY: 0.82, boxes };
+    const upload = { assetId: face, crop: { cx: 0, cy: 0, zoom: 1 }, model };
+    const icon = { icon: "lorc/wolf-head", color: "#336699", model };
+    assert.deepEqual(assetIdsOf({ t: "token.update", tokenId: "t", patch: { image: upload } }), [face, sheet]);
+    assert.deepEqual(assetIdsOf({ t: "token.update", tokenId: "t", patch: { image: icon } }), [sheet]);
+    assert.deepEqual(assetIdsOf({ t: "token.updateMany", tokenIds: ["t"], patch: { image: icon } }), [sheet]);
+    // The deepest place an op names one: a restore's token, in its other images.
+    const restore = { t: "sys.restore", from: "undo", deps: true, entries: [{ key: "token:t", value: { id: "t", altImages: [upload, icon] }, expectRev: null }] };
+    assert.deepEqual(assetIdsOf(restore), [face, sheet, sheet]);
+  });
 });
 
 describe("a sound row's facts (docs/design/design-v1-music.md 7.2)", () => {
