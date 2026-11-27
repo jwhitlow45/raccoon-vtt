@@ -4,16 +4,33 @@ import { CULL_STEP_PX, cullFit, cullOf } from "./cull.ts";
 
 /*
  * The isometric board's cull box (docs/design/design-v1-relief-pan.md 5.6), one
- * implementation for the board (128 px steps) and the kept picture's rig
+ * implementation for the board (256 px steps) and the kept picture's rig
  * (24 px), so the two cannot drift (review HXPERF2B-OPUS-01).
  */
 
 const SIZE = { width: 390, height: 844 };
 
 describe("the cull box and how a camera stands to it", () => {
+  test("a steady pan across a computer's canvas relays out, and so repaints the relief whole, at most once per 256 px it crosses on each axis", () => {
+    // ISOPAN: at 128 px a steady pan on a 100 by 100 dungeon dropped a frame about every 16.
+    const size = { width: 1440, height: 900 };
+    for (const scale of [14, 32, 60]) {
+      let relayouts = 0;
+      let last = cullOf({ x: -5000, y: -3000, scale }, size).key;
+      // 1,536 px across and 768 px down at 8 and 4 px a frame, as a mouse drags.
+      for (let m = 1; m <= 192; m++) {
+        const key = cullOf({ x: -5000 - m * 8, y: -3000 - m * 4, scale }, size).key;
+        if (key !== last) relayouts++;
+        last = key;
+      }
+      // At most one for each 256 px on each axis, and one more on each for where the start lies in its step.
+      assert.ok(relayouts <= 1536 / 256 + 768 / 256 + 2, `${scale} px a cell: ${relayouts} relayouts`);
+    }
+  });
+
   for (const step of [CULL_STEP_PX, 24]) {
     test(`in steps of ${step} px: a step to spare on every side, one size at a zoom, the key changing only across the top-left's step, and inside, step and out at the box's edges`, () => {
-      const cam = { x: -1000.25, y: -2000.5, scale: 12 };
+      const cam = { x: -1025.25, y: -2000.5, scale: 12 };
       const rendered = cullOf(cam, SIZE, step);
       const s = step / cam.scale;
       const { box, view } = rendered;

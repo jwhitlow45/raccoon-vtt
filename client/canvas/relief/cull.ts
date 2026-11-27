@@ -2,8 +2,16 @@ import { screenToView, type Camera } from "../../lib/camera.ts";
 import type { CameraFit } from "../../state/liveCamera.ts";
 import type { VBox } from "./pieces.ts";
 
-/** The culling box grows in steps of screen pixels, so a pan sorts the view again only when it crosses one (docs/design/design-v1-relief-pan.md 5.6). */
-export const CULL_STEP_PX = 128;
+/**
+ * The culling box grows in steps of screen pixels, so a pan sorts the view
+ * again only when it crosses one (docs/design/design-v1-relief-pan.md 5.6).
+ * Each step crossed is a board render and a whole repaint of the relief,
+ * about three times a scrolled frame's cost and the one frame a steady pan
+ * drops on a large map. At 128 px a pan dropped one about every 16 frames
+ * on a 100 by 100 dungeon. 256 px halves those frames for a layout a step
+ * wider, which scrolled frames do not feel (ISOPAN, D-261127-151).
+ */
+export const CULL_STEP_PX = 256;
 
 /** The layout's cull box at a camera, its key, and the view on screen, in view units. */
 export type Cull = { box: VBox; key: string; view: VBox };
