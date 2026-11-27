@@ -3,6 +3,7 @@ import { createContext } from "react";
 import type { MeasureText } from "#shared/rules/labels.ts";
 import { LABEL_INK, labelInkBox, labelShape } from "../../features/builder/labelShape.ts";
 import type { Box } from "../../lib/boardText.ts";
+import { boardSizes } from "../../lib/boardScale.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { drawnAt, footprint, type ViewToken } from "../../lib/scene.ts";
 import { toView, type View } from "../../lib/view.ts";
@@ -35,10 +36,14 @@ export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<st
     const halo = Math.max(0, ...b.lines.map((line) => line.px / 8));
     return [id, { ...block, label: { ...b, x: b.x - halo, y: b.y - halo, width: b.width + 2 * halo, height: b.height + 2 * halo } }] as const;
   }));
+  // A Large or bigger creature's ring is wide enough that a name on its stroke reads as on the creature (LP54-ISO-2), so its
+  // box holds the stroke, which TokenNode draws half outside the ellipse. A smaller one's stroke may be touched by a pixel.
+  const stroke = (boardSizes(scale).ringPx / 2 + 1) / scale;
   return [
     ...placed.flatMap((t) => {
       const fp = footprint(t);
-      return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(t.ring ? [t.ring] : [])];
+      const ring = t.ring && Math.min(fp.w, fp.h) >= 2 ? { x0: t.ring.x0 - stroke, y0: t.ring.y0 - stroke, x1: t.ring.x1 + stroke, y1: t.ring.y1 + stroke } : t.ring;
+      return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(ring ? [ring] : [])];
     }),
     ...placedTextBoxes(placed, ink, scale).map((b) => ({ x0: b.x0 / scale, y0: b.y0 / scale, x1: b.x1 / scale, y1: b.y1 / scale })),
   ];

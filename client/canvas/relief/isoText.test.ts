@@ -11,6 +11,7 @@ import { isometric, toView, toWorld, type Turn } from "../../lib/view.ts";
 import { pillInkReach, pillPlace, pillReach } from "../../features/measure/pillPlace.ts";
 import { tokenBoxes as topDownBoxes } from "../../features/areas/labelSpot.ts";
 import { standeeShape } from "./standee.ts";
+import { boardSizes } from "../../lib/boardScale.ts";
 
 const { layoutBoardText } = await import("../useBoardText.ts");
 const { areaNamePill } = await import("../../features/areas/TemplateLayer.tsx");
@@ -160,6 +161,17 @@ test("FU40B-OPUS-3: only isometric name obstacles include the drawn halo", () =>
   const plate = new Map([[t.id, { label, plate: label, marks: null } as unknown as TokenText]]);
   const plated = isoTokenBoxes([t], plate, 40, () => ({ x: 2, y: 3 }));
   assert.deepEqual(plated[1], { x0: 69.5 / 40, y0: 166.5 / 40, x1: 130.5 / 40, y1: 193.5 / 40 }, "a plate keeps only its own padding and stroke");
+});
+
+test("a Large or bigger creature's ring box holds the ring's stroke, and a smaller one's is the ellipse alone (LP54-ISO-2)", () => {
+  const ring = { x0: 2, y0: 4, x1: 4, y1: 5 };
+  const stroke = (boardSizes(40).ringPx / 2 + 1) / 40;
+  for (const [size, padded] of [["tiny", false], ["medium", false], ["large", true], ["huge", true], ["gargantuan", true]] as const) {
+    const t = token(size, { x: 2, y: 3, size }) as ViewToken;
+    const boxes = isoTokenBoxes([t], new Map(), 40, () => ({ x: 2, y: 3, ring }));
+    const want = padded ? { x0: ring.x0 - stroke, y0: ring.y0 - stroke, x1: ring.x1 + stroke, y1: ring.y1 + stroke } : ring;
+    assert.deepEqual(boxes[1], want, size);
+  }
 });
 
 test("ISO34-LABELS: area and trap names avoid the raised token's actual label at every turn and viewport edge", () => {
