@@ -109,3 +109,20 @@ describe("clock lines (docs/design/design-v1-calendar.md 4.7)", () => {
     assert.equal(describeEvent(line, renamed), "The DM sets the date and time: Deepwinter 3, 1204 AF, 6:00 AM.");
   });
 });
+
+describe("spell slot and Hit Point Die lines (docs/design/design-v1-slots.md 7)", () => {
+  const names = room({ characters: { bree: character("bree", { name: "Bree" }), thorn: character("thorn", { name: "Thorn" }) }, members: { ...room().members, kim: { id: "kim", rev: 0, name: "Kim", color: "#ff0000", kind: "player", createdAt: "2026-01-01T00:00:00.000Z" } } });
+  const use = (line: Partial<Extract<LogEvent, { type: "use" }>>): LogEvent => ({ type: "use", what: "slot", characterId: "bree", ...line }) as LogEvent;
+  test("each reads its counts", () => {
+    assert.equal(describeEvent(use({ level: 3, left: 2, max: 3 }), names), "Bree used a level 3 spell slot (2 of 3 left).");
+    assert.equal(describeEvent(use({ what: "pact", level: 3, left: 1, max: 2 }), names), "Bree used a Pact Magic slot (1 of 2 left).");
+    assert.equal(describeEvent(use({ level: 3, left: 3, max: 3, back: true }), names), "Bree: a level 3 spell slot is back (3 of 3).");
+    assert.equal(describeEvent(use({ what: "hitDie", die: 10, left: 2, max: 5, characterId: "thorn" }), names), "Thorn spent a d10 Hit Point Die (2 of 5 left).");
+    assert.equal(describeEvent(use({ what: "hitDie", die: 10, left: 3, max: 5, back: true, characterId: "thorn" }), names), "Thorn: a d10 Hit Point Die is back (3 of 5).");
+  });
+  test("the DM's log marks them hidden from players, and the roll reads its die", () => {
+    assert.equal(describeEvent(use({ level: 1, left: 0, max: 2, hidden: true }), names, true), "Bree used a level 1 spell slot (0 of 2 left) (hidden from players).");
+    const roll: LogEvent = { type: "dice", tag: "t", batch: "b", by: "kim", to: "all", rolls: [{ formula: "1d10+2", faces: [7], total: 9, label: "Hit Point Die (d10)", characterId: "bree", hitDie: 10 }] };
+    assert.equal(describeEvent(roll, names), "Kim rolled for Bree, Hit Point Die (d10): 1d10+2 (7) = 9.");
+  });
+});
