@@ -41,7 +41,10 @@
  *   creatures round the camera, each facing its own way, panned at 40 px
  *   wearing pictures and then wearing 3D models on them
  *   (docs/design/design-v1-token-models.md 6 and Appendix A): a model must
- *   cost no more than its picture. The sheet is drawn from primitives here.
+ *   cost no more than its picture. The models wear 26 sheets, past the 24
+ *   a phone's copies fit in the cache's budget, and in Isometric the
+ *   frames while the sheets arrive are timed too. The sheets are drawn
+ *   from primitives here.
  * - dungeon: a 50 by 50 generated dungeon with rooms raised and sunk and
  *   the runs of stairs to them (docs/design/design-v1-iso-depth.md 7), with
  *   a pan, a drag up a run and a turn at 40 and 24 px, and in Low power at
@@ -1229,28 +1232,79 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
      * The models rows (docs/design/design-v1-token-models.md 6): the same 40
      * creatures panned at 40 px under heavy snow, wearing a picture each and
      * then the same pictures with a 3D model on them, its sheet decoded at
-     * the copy this phone draws. Second of the rows, while its room, built
-     * last, is still loaded.
+     * the copy this phone draws. The models wear MODEL_SHEETS sheets, more
+     * than the cache holds at a phone's copy, so two stay pictures and the
+     * cache stands full while the page pans. Second of the rows, while its
+     * room, built last, is still loaded.
      */
     if (!opts.only || opts.only.some((o) => MODEL_ROWS.some((r) => r.includes(o)))) {
       const { room, scene } = built.models!;
       const dm = await dmOf("models");
       const picture = await uploadImage(context, server.origin, room.roomId, "token", await sharp({ create: { width: 256, height: 256, channels: 3, background: { r: 150, g: 90, b: 60 } } }).png().toBuffer());
-      const sheet = await uploadImage(context, server.origin, room.roomId, "model", await modelSheet());
+      // One upload each, which with the picture and the bench's two maps stays inside a session's 30 an hour (server/assets/limits.ts hourlyChecks).
+      const sheets: string[] = [];
+      for (let i = 0; i < MODEL_SHEETS; i++) sheets.push(await uploadImage(context, server.origin, room.roomId, "model", await modelSheet(i)));
       const crop = { cx: 0.5, cy: 0.5, zoom: 1 };
-      const model = { assetId: sheet, side: 1.6, anchorY: 0.8, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) };
+      const modelOf = (i: number) => ({ assetId: sheets[i % MODEL_SHEETS]!, side: 1.6, anchorY: 0.8, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) });
       for (const tokenId of scene.models!) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop } } });
       await open("models", 40);
       await page.waitForTimeout(1000);
       await frames(page, 30);
       await addPan(MODEL_PICTURES_ROW, (t) => touchPan(page, cdp, STEPS, t));
-      for (const tokenId of scene.models!) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop, model } } });
-      if (view === "isometric") await waitFor("the creatures standing as their models", () => page.evaluate(() => {
-        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; listening(): boolean; find(s: string): unknown[] }[] } }).Konva;
-        return konva.stages.some((st) => st.width() > 0 && st.listening() && st.find(".standeeModel").length >= 20) || null;
-      }), 30_000);
+      for (const [i, tokenId] of scene.models!.entries()) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop, model: modelOf(i) } } });
+      if (view === "isometric") await waitFor("the creatures standing as their models", async () => ((await modelsStanding(page)) >= 20 ? true : null), 30_000);
       await frames(page, 30);
       await addPan(MODEL_MODELS_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      /*
+       * The sheets arriving: the page opened again, so its cache starts
+       * empty, with every sheet's answer held until the board has laid out
+       * with pictures, then let go at once. Each frame from then until the
+       * models stand, which is when every sheet let go has answered and the
+       * count of models has held for 10 frames.
+       */
+      if (view === "isometric" && (!opts.only || opts.only.some((o) => MODEL_ARRIVAL_ROW.includes(o)))) {
+        let holding = true;
+        const held: (() => void)[] = [];
+        let answered = 0;
+        const isSheet = (url: string) => sheets.some((id) => url.includes(id));
+        await page.route((url) => isSheet(url.href), async (route) => {
+          if (holding) await new Promise<void>((go) => held.push(go));
+          await route.continue();
+        });
+        const onAnswer = (r: { url(): string }) => {
+          if (isSheet(r.url())) answered++;
+        };
+        page.on("requestfinished", onAnswer);
+        page.on("requestfailed", onAnswer);
+        try {
+          const arrival = await throttled(() =>
+            rounds(async () => {
+              holding = true;
+              await openView(context, page, view, room.roomId);
+              await waitFor("the board asking for the sheets", () => (held.length > 0 ? true : null), 30_000);
+              await page.waitForTimeout(1000);
+              await frames(page, 30);
+              const letGo = held.length;
+              const from = answered;
+              const counts: number[] = [];
+              const got = await timedUntil(page, cdp, async () => {
+                holding = false;
+                for (const go of held.splice(0)) go();
+              }, async () => {
+                counts.push(await modelsStanding(page));
+                const last = counts.slice(-10);
+                return answered - from >= letGo && last.length === 10 && last[0]! > 0 && last.every((n) => n === last[0]);
+              });
+              return got.frames;
+            }),
+          );
+          rows.push({ row: MODEL_ARRIVAL_ROW, view, ms: frameStats(arrival) });
+        } finally {
+          page.off("requestfinished", onAnswer);
+          page.off("requestfailed", onAnswer);
+          await page.unroute((url) => isSheet(url.href));
+        }
+      }
     }
     if (opts.only?.every((o) => MODEL_ROWS.some((r) => r.includes(o)))) return rows;
 
@@ -1847,9 +1901,12 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+/** The distinct sheets the models row's creatures wear, past the 24 a phone's copies fit in the cache's budget (features/models/sheets.ts SHEET_BUDGET). */
+const MODEL_SHEETS = 26;
 const MODEL_PICTURES_ROW = "pan, 40 px, caps under heavy snow with 40 creatures wearing pictures";
-const MODEL_MODELS_ROW = "pan, 40 px, caps under heavy snow with 40 creatures wearing 3D models";
-const MODEL_ROWS = [MODEL_PICTURES_ROW, MODEL_MODELS_ROW];
+const MODEL_MODELS_ROW = `pan, 40 px, caps under heavy snow with 40 creatures wearing 3D models of ${MODEL_SHEETS} sheets`;
+const MODEL_ARRIVAL_ROW = `${MODEL_SHEETS} sheets arriving at once, 40 px, caps under heavy snow with 40 creatures wearing 3D models, each frame until they stand`;
+const MODEL_ROWS = [MODEL_PICTURES_ROW, MODEL_MODELS_ROW, MODEL_ARRIVAL_ROW];
 const OPEN_PAN_ROW = "pan, 40 px, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO)";
 const OPEN_TURN_ROW = "turn, 40 px, 16 openings of 8 by 8 over a mapped floor, each turn visited before (OPEN-ISO)";
 const OPEN_HEAP_ROW = "live heap after a forced collection, 16 openings of 8 by 8 over a mapped floor (OPEN-ISO) (MB, not ms)";
@@ -1951,14 +2008,22 @@ async function uploadImage(context: BrowserContext, origin: string, roomId: stri
   return ((await res.json()) as { id: string }).id;
 }
 
-/** A model's sheet drawn from primitives, as the worker lays one out: 8 frames of 512 px, each a figure inside its drawn box [30, 20, 70, 90], turned a little more each frame. */
-function modelSheet(): Promise<Buffer> {
+/** How many models stand on the board on screen. */
+function modelsStanding(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const konva = (globalThis as unknown as { Konva: { stages: { width(): number; listening(): boolean; find(s: string): unknown[] }[] } }).Konva;
+    return konva.stages.filter((st) => st.width() > 0 && st.listening()).reduce((n, st) => n + st.find(".standeeModel").length, 0);
+  });
+}
+
+/** Model `n`'s sheet drawn from primitives, as the worker lays one out: 8 frames of 512 px, each a figure inside its drawn box [30, 20, 70, 90], turned a little more each frame, in colors of its own. */
+function modelSheet(n: number): Promise<Buffer> {
   const parts: string[] = [];
   for (let f = 0; f < 8; f++) {
     const ox = (f % 4) * 512;
     const oy = Math.floor(f / 4) * 512;
     const a = (f * Math.PI) / 4;
-    parts.push(`<rect x="${ox + 174}" y="${oy + 184}" width="164" height="256" rx="20" fill="hsl(${f * 45},60%,45%)" stroke="#05070b" stroke-width="6"/>`);
+    parts.push(`<rect x="${ox + 174}" y="${oy + 184}" width="164" height="256" rx="20" fill="hsl(${f * 45 + n * 13},60%,45%)" stroke="#05070b" stroke-width="6"/>`);
     parts.push(`<circle cx="${ox + 256 - Math.sin(a) * 40}" cy="${oy + 150 + Math.cos(a) * 8}" r="34" fill="#d9b38c" stroke="#05070b" stroke-width="6"/>`);
   }
   return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${parts.join("")}</svg>`)).png().toBuffer();
