@@ -73,9 +73,10 @@ export function uvttGeometry(src: UvttSource, view: "player" | "dm"): UvttHead {
     if (f.kind !== "door") return f.kind;
     // The writer's own rule as well as the projection's: a player view file never holds a door players have not found.
     if (view === "player" && f.secret && !f.discovered) return "wall";
-    if (view === "dm" && f.secret) counts.secretAsDoors++;
     return "door";
   };
+  /** A DM view's secret door, counted once it is written, so one past the scene's edge counts as cut and not as a door too. */
+  const secretDoor = (f: WallFeature) => view === "dm" && f.kind === "door" && f.secret;
   /** One piece clipped to the scene and lengthened, or null where nothing of it is inside. */
   const fit = (p: Piece): Piece | null => {
     const cut = clipSegment({ x: p.ax, y: p.ay }, { x: p.bx, y: p.by }, W, H);
@@ -86,9 +87,10 @@ export function uvttGeometry(src: UvttSource, view: "player" | "dm"): UvttHead {
     if (lengthOf(q) < SHORT_LATTICE) counts.short = true;
     return q;
   };
-  const put = (p: Piece, kind: Kind) => {
+  const put = (p: Piece, kind: Kind, secret = false) => {
     const q = fit(p);
     if (!q) return;
+    if (secret) counts.secretAsDoors++;
     if (kind === "wall") lines.push(q);
     else portals.push({ p: q, kind });
   };
@@ -99,7 +101,7 @@ export function uvttGeometry(src: UvttSource, view: "player" | "dm"): UvttHead {
     for (const e of effectiveEdges(build, src.rule)) {
       const kind = kindOf(e.feature);
       if (kind !== "wall") {
-        put(e.side === "n" ? { ax: e.x * L, ay: e.y * L, bx: (e.x + 1) * L, by: e.y * L } : { ax: e.x * L, ay: e.y * L, bx: e.x * L, by: (e.y + 1) * L }, kind);
+        put(e.side === "n" ? { ax: e.x * L, ay: e.y * L, bx: (e.x + 1) * L, by: e.y * L } : { ax: e.x * L, ay: e.y * L, bx: e.x * L, by: (e.y + 1) * L }, kind, secretDoor(e.feature));
         continue;
       }
       // Walls merge into runs along each grid line: a north edge runs along its row, a west edge down its column.
@@ -121,7 +123,7 @@ export function uvttGeometry(src: UvttSource, view: "player" | "dm"): UvttHead {
     }
   }
   for (const { wall } of build.free) {
-    put({ ax: Math.round(wall.a[0] * L), ay: Math.round(wall.a[1] * L), bx: Math.round(wall.b[0] * L), by: Math.round(wall.b[1] * L) }, kindOf(wall.f));
+    put({ ax: Math.round(wall.a[0] * L), ay: Math.round(wall.a[1] * L), bx: Math.round(wall.b[0] * L), by: Math.round(wall.b[1] * L) }, kindOf(wall.f), secretDoor(wall.f));
   }
 
   // A pillar is its cell's square at PILLAR_INSET, as walls.ts blocks it: one closed line, or its sides one by one where the edge cuts it.

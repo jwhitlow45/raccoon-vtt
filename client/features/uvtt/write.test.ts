@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { BuildChunk, Light } from "#shared/model.ts";
+import type { BuildChunk } from "#shared/model.ts";
 import { chunksOf as heldChunks, edge, fogRoom, lift, paint } from "#shared/discoveryTestutil.ts";
 import { projectChunkForPlayer } from "#shared/project.ts";
 import { P1 } from "#shared/testutil.ts";
@@ -155,6 +155,12 @@ describe("secret doors and the player view", () => {
     assert.equal(head.counts.secretAsDoors, 3);
   });
 
+  test("a DM view secret door past the scene's edge counts as cut, not as a plain door too (UVTT-O-3)", () => {
+    const head = uvttGeometry(source({ edges: { "12,2,n": door({ secret: true }), "3,2,n": door({ secret: true }) }, walls: [{ a: [14, 4], b: [15, 5], f: door({ secret: true }) }] }, { rule: "off", scene: { bounds: { w: 10, h: 10 } } }), "dm");
+    assert.equal(head.counts.secretAsDoors, 1);
+    assert.equal(head.counts.clipped, 2);
+  });
+
   test("a player view file writes an undiscovered secret door, on an edge and free, as a wall and holds no light", () => {
     const src = source({ edges: secret, walls: freeSecret }, { rule: "off", lights: [light()] });
     // The writer's own rule, even on the DM's chunks, and on the players' projection the image is drawn from.
@@ -260,6 +266,3 @@ describe("hex scenes", () => {
     });
   }
 });
-
-/** Kept so a light's type stays in step with the model's. */
-export const _light: Light = light();
