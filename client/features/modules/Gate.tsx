@@ -86,19 +86,24 @@ export function useHiddenHere(home: Home, holder?: Holder): HiddenPart[] {
  * A way back where the parts lived (design section 6): "Hidden on this
  * device:" and a quiet Show button per part, nothing while none are hidden.
  * On a creature's surface pass `holder`, so only the parts that creature
- * holds are named (D-261127-391).
+ * holds are named (D-261127-391). The buttons wrap as one row of their
+ * own, so a line too narrow for the words and every button puts them all
+ * under the words, never one alone under the rest.
  */
 export function HiddenHere(props: { home: Home; holder?: Holder }): ReactNode {
   const parts = useHiddenHere(props.home, props.holder);
   if (parts.length === 0) return null;
+  const row = { display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) } as const;
   return (
-    <div role="group" aria-label="Hidden on this device" data-hidden-here={props.home} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
+    <div role="group" aria-label="Hidden on this device" data-hidden-here={props.home} style={row}>
       <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>Hidden on this device:</span>
-      {parts.map((p) => (
-        <Button key={p.id} size="sm" variant="quiet" onClick={p.show}>
-          {p.label}
-        </Button>
-      ))}
+      <span style={row}>
+        {parts.map((p) => (
+          <Button key={p.id} size="sm" variant="quiet" onClick={p.show}>
+            {p.label}
+          </Button>
+        ))}
+      </span>
     </div>
   );
 }
