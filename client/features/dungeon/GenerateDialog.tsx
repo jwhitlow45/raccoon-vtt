@@ -22,8 +22,8 @@ import { Choice, Choices as ChoiceRows, LimitLine } from "./Choices.tsx";
 import type { RoomEdit } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
 import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
-import { journalFull } from "./keyHold.ts";
-import { keyOps, type KeyInput } from "./keyPage.ts";
+import { keyOverfills } from "./keyHold.ts";
+import type { KeyInput, KeyStock } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { roomBox } from "./marks.ts";
@@ -93,7 +93,8 @@ const FRAME_MARGIN = 4;
 /** From this card width the preview takes the left half (4.7). */
 const TWO_COLUMNS_PX = 640;
 
-type Shown = { result: Extract<Preview, { ok: true }>; drawn: Drawn };
+/** A preview on screen, with the stock it was drawn with, which the key's journal check reads as Make would send it (D-261127-336). */
+type Shown = { result: Extract<Preview, { ok: true }>; drawn: Drawn; keyStock: KeyStock | null };
 /** What Bring them back restores beside the edits: the choices with their band and stock, the seed as typed, and the edited party (D-261127-219). */
 type Before = { choices: Choices; seedText: string; party: PartyGroup[] | null };
 type Sending = { answered: number; total: number };
@@ -262,7 +263,8 @@ export function GenerateDialog(props: {
           }
           const plan = result.plan;
           const drawn = { plan, room: result.room, name: previewName(result.summary, entranceSide({ w: plan.w, h: plan.h, entrance: roomBox(plan, plan.entrance) })) };
-          step({ k: "answer", id: asked, answer: { ok: true, value: { result, drawn } } });
+          const keyStock = stock && { choices: stock.choices, party: stock.party };
+          step({ k: "answer", id: asked, answer: { ok: true, value: { result, drawn, keyStock } } });
         },
         () => {
           if (mounted.current) step({ k: "answer", id: asked, answer: { ok: false, error: "bug" } });
@@ -285,6 +287,7 @@ export function GenerateDialog(props: {
   const fogWarning = useRoomView((s) => fogLine(startsDark ? { preset: "explore" } : pickNow(props.intent, s.view, "builder").pick, secretRooms));
   const { problem } = flow;
   const plan = current?.plan ?? null;
+  const keyStock = ready.current?.keyStock ?? null;
 
   // The key is held only when the live room's journal fits without it and not with it, so another cap the room is
   // already over never blames the journal (D-261107-270). The page is built from the plan, not the preview's ops,
@@ -297,14 +300,14 @@ export function GenerateDialog(props: {
     }
     let held = false;
     try {
-      held = journalFull(room, keyOps(plan, settings, { name: keyName, color: myColor, feetPerCell }, SCENE_PLACEHOLDER), store.getState().you?.memberId ?? "");
+      held = keyOverfills(room, plan, settings, { name: keyName, color: myColor, feetPerCell }, keyStock, store.getState().you?.memberId ?? "");
     } catch {
       // The key page is not built or the room cannot be read: nothing to hold.
     }
     setKeyHeld(held);
     // The plan and the journal are what the check reads. `settings` and `sceneName` only reshape the page and come with a new plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choices.key, plan, journal, myColor, feetPerCell]);
+  }, [choices.key, plan, keyStock, journal, myColor, feetPerCell]);
   // The preview's ops parsed once as it lands, in a task of their own, so the press's parse finds zod's checks built (send.ts warmOpChecks).
   useEffect(() => {
     if (!current) return;
