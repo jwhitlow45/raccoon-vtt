@@ -69,7 +69,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
-import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadCarries, leadNode as offsetNode, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
+import { altKeyups, deferredDropLands, GROUP_KEEPS, HEX_KEEPS, leadCarries, leadNode as offsetNode, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
@@ -1618,8 +1618,7 @@ export function MapStage(props: {
       // A drop whose route was searched after the let go can find a token taken off this board since, which its move would land
       // on another floor at the drop's spot (LP54-DRAG-1), or a rider taken off the mount it moved (LP55-DRAG-1): it lands nothing, as a cancel.
       const ids = [token.id, ...followers.map((f) => f.token.id), ...plan.moves.map((m) => m.tokenId)];
-      const tokensNow = store.getState().floorView?.tokens;
-      if (dragLeftBoard(tokensNow, sceneRef.current.id, ids) || !leadCarries(tokensNow, token.id, parts.lead.id)) {
+      if (!deferredDropLands(store.getState().floorView?.tokens, sceneRef.current.id, ids, token.id, parts.lead.id)) {
         putBack(node, token, followers, outgoing);
         return;
       }

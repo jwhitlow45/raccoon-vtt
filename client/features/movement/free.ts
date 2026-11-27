@@ -5,6 +5,7 @@ import { holderOf } from "#shared/rules/attach.ts";
 import { footprintSize, isSqueezed } from "#shared/rules/footprint.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { drawnSpot, freeDrawnAt } from "#shared/rules/nudge.ts";
+import { dragLeftBoard } from "../../canvas/dragLeft.ts";
 import { drawnAt, snapPosition } from "../../lib/scene.ts";
 import type { DropPlan, DropToken, Landed, Point } from "./drop.ts";
 
@@ -135,6 +136,18 @@ export function leadCarries(tokens: Readonly<Record<string, Linked | undefined>>
     seen.add(at.id);
   }
   return false;
+}
+
+/**
+ * Whether a drop that waited on its route still lands, in `tokens` as the
+ * room holds them once the route is found: every token it moves, `ids`,
+ * still on the board, and its lead still carrying the token it was pressed
+ * on. Another device can take a token off the floor (LP54-DRAG-1) or the
+ * rider off its mount (LP55-DRAG-1) between the let go and the answer,
+ * and the drop then lands nothing, as a cancel.
+ */
+export function deferredDropLands(tokens: Readonly<Record<string, Linked | undefined>> | undefined, boardSceneId: string, ids: Iterable<string>, pressedId: string, leadId: string): boolean {
+  return !dragLeftBoard(tokens, boardSceneId, ids) && leadCarries(tokens, pressedId, leadId);
 }
 
 export type FreeInput = {

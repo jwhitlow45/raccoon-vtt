@@ -6,7 +6,7 @@ import { WorkBudget } from "#shared/rules/walk.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { DropPlan } from "./drop.ts";
 import type { FreeDrop } from "./free.ts";
-import { leadCarries, leadNode, moveFrame } from "./free.ts";
+import { deferredDropLands, leadCarries, leadNode, moveFrame } from "./free.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { frameSpots } from "../areas/liveTokens.ts";
 import { dragAim, footprint, frameAim, snapPosition } from "../../lib/scene.ts";
@@ -94,7 +94,7 @@ function board(view: RoomState) {
     if (!landed) throw new Error("the drop never landed");
     return landed as { plan: DropPlan; free: Omit<FreeDrop, "plan"> };
   };
-  return { stops, scope, settle, drop };
+  return { stops, scope, settle, drop, frames, work };
 }
 
 const placed = (over: Partial<Token>, nudge: { x: number; y: number }): Token => ({ ...thorn(over), nudge });
@@ -172,6 +172,41 @@ describe("the drag boundary", () => {
     assert.deepEqual([stale.x(), stale.y()], [-3, 3], "read from Thorn as he stands now, the offset points off the map");
     assert.equal(leadCarries({ horse, thorn: moved }, rider.id, horse.id), false, "moved off the horse, the drag ends as a cancel");
   });
+
+  /*
+   * LP55-DRAG-1 after the let go: a player's drop of Thorn waits on its
+   * route, and another device takes him off the horse, or off the floor,
+   * before the answer comes. The drop then lands nothing, as a cancel.
+   */
+  type Room = Record<string, Token | undefined>;
+  for (const [what, after, lands] of [
+    ["still riding", (horse: Token, t: Token): Room => ({ horse, thorn: t }), true],
+    ["moved off the horse", (horse: Token, t: Token): Room => ({ horse, thorn: { ...t, x: 20, y: 13, attached: undefined } }), false],
+    ["got off beside it", (horse: Token, t: Token): Room => ({ horse, thorn: { ...t, x: 10, y: 11, attached: undefined } }), false],
+    ["sent to another floor", (horse: Token, t: Token): Room => ({ horse, thorn: { ...t, sceneId: "s2" } }), false],
+    ["sent to another floor riding", (horse: Token, t: Token): Room => ({ horse: { ...horse, sceneId: "s2" }, thorn: { ...t, sceneId: "s2" } }), false],
+    ["deleted", (horse: Token): Room => ({ horse }), false],
+  ] as const) {
+    test(`a rider's drop still searching its route when another device has him ${what}: it ${lands ? "lands" : "lands nothing"} (LP55-DRAG-1)`, () => {
+      const horse = thorn({ id: "horse", kind: "npc", name: "Warhorse", size: "large", x: 8, y: 11 });
+      const rider = thorn({ x: 8, y: 11, attached: { to: "horse", kind: "ride", steer: true } });
+      const b = board(world({ tokens: [horse, rider] }));
+      let room: Room = { horse, thorn: rider };
+      const finger = nodeAt(9, 5);
+      const lead = leadNode(finger, rider, horse);
+      b.stops.start(horse.id, rider);
+      // The frame's budget spent, so the drop's search runs in the frames after its let go.
+      b.work.budget().charge(2e9);
+      let decided: boolean | null = null;
+      b.stops.drop({ ...finger, x: lead.x, y: lead.y, position: lead.position }, horse, [horse], (plan) => {
+        decided = deferredDropLands(room, "s1", [rider.id, horse.id, ...plan.moves.map((m) => m.tokenId)], rider.id, horse.id);
+      }, { free: false, inPlace: true });
+      assert.equal(decided, null, "the drop waits on its route");
+      room = after(horse, rider);
+      for (let k = 0; k < 200 && decided === null; k++) b.frames.frame();
+      assert.equal(decided, lands);
+    });
+  }
 
   test("a drag's lead carries the pressed token up every link of its chain, and no longer once a link goes, moves to another holder or leaves the floor", () => {
     const mule = thorn({ id: "mule", kind: "npc", size: "large" });
