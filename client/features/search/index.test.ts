@@ -116,6 +116,9 @@ describe("the room's things (design-v1-qol.md 5, What it finds)", () => {
     assert.equal(hp?.value, "24 of 24");
     assert.ok(!index.byId.has("field:character:bree:hp"), "the token's field stands for the character's");
     assert.ok(index.byId.has("field:character:bree:long-rest"), "a field the token panel lacks stays the page's");
+    // The DM finds what play spends on every character's page, and Classes stays with its players (SLOTS-O-03).
+    assert.ok(index.byId.has("field:character:bree:spell-slots") && index.byId.has("field:character:bree:hit-dice"), "the DM finds slots and dice");
+    assert.ok(!index.byId.has("field:character:bree:classes"), "Classes stays with the character's players");
     assert.ok(index.byId.has("field:token:tbree:hidden"), "the DM's own token rows");
     const prone = index.byId.get("condition:prone")?.entry;
     assert.deepEqual(prone && { where: prone.where, act: prone.act, near: prone.near }, { where: "Remove from Bree", act: { t: "condition", condition: "prone", remove: true }, near: true });

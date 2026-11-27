@@ -102,10 +102,11 @@ export const CREATURE_FIELDS: readonly FieldDef[] = [
   // A character's rests, each its own choice on the page, so "long rest" lands on Long Rest itself. The token panel's rest is the same one step further.
   { key: "long-rest", title: "Long Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.long" }, everyCharacter: true, shown: combatShown },
   { key: "short-rest", title: "Short Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.short" }, everyCharacter: true, shown: combatShown },
-  // A character's classes and what they count (docs/design/design-v1-slots.md 4), on its page, only for a viewer whose copy holds them: the DM and its players.
+  // A character's classes and what they count (docs/design/design-v1-slots.md 4), on its page, only for a viewer whose copy holds them: the DM and its
+  // players. The DM finds the slots and dice on every character's page, as the rests, since play spends them, and Classes stays with the players.
   { key: "classes", title: "Classes", icon: "combat", page: { section: "page.combat", anchor: "character.classes" }, shown: (h) => combatShown(h) && editsClasses(h) },
-  { key: "spell-slots", title: "Spell slots", names: ["slots", "pact magic"], icon: "combat", page: { section: "page.combat", anchor: "character.slots" }, shown: (h) => combatShown(h) && hasSlots(h.character?.classes) },
-  { key: "hit-dice", title: "Hit Point Dice", names: ["hit dice"], icon: "combat", page: { section: "page.combat", anchor: "character.hit-dice" }, shown: (h) => combatShown(h) && (h.character?.classes?.length ?? 0) > 0 },
+  { key: "spell-slots", title: "Spell slots", names: ["slots", "pact magic"], icon: "combat", page: { section: "page.combat", anchor: "character.slots" }, everyCharacter: true, shown: (h) => combatShown(h) && hasSlots(h.character?.classes) },
+  { key: "hit-dice", title: "Hit Point Dice", names: ["hit dice"], icon: "combat", page: { section: "page.combat", anchor: "character.hit-dice" }, everyCharacter: true, shown: (h) => combatShown(h) && (h.character?.classes?.length ?? 0) > 0 },
   // The groups each creature's panel and page hold, landing on the group's header.
   { key: "combat", kind: "section", title: "Combat", icon: "combat", token: { section: "combat", anchor: "token.combat" }, page: { section: "page.combat", anchor: "character.combat" }, shown: combatShown },
   { key: "stats", kind: "section", title: "Stats", icon: "stats", token: { section: "stats", anchor: "token.stats" }, page: { section: "page.stats", anchor: "character.stats" }, shown: drawn((d) => panelHolds(d.parts, "stats"), (d) => d.parts.includes("stats")) },
