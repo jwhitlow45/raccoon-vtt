@@ -32,6 +32,7 @@ import {
 import { removeEntries } from "./encounter.ts";
 import { linkOf, relinked } from "./uses.ts";
 import { resourcesAfter } from "../rules/classResources.ts";
+import { spentWithin } from "../rules/spellSlots.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers, withUnshaped } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 import { ownEntry } from "../records.ts";
@@ -858,6 +859,12 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   }
   if (syncsFromDdb(tx.env.opVersion)) syncRecord(next, p.ddbSync, p.stats === null, tx.env.at);
   if (p.resources !== undefined) setOrDelete(next, "resources", p.resources.length > 0 ? keptResources(character.resources, p.resources) : null);
+  // The classes whole (docs/design/design-v1-slots.md 6): the spent counts clamp to their counts in the same write, a re-sync's
+  // Undo puts its exact spent counts back within them, and an empty list removes the classes and every spent count.
+  if (p.classes !== undefined) {
+    setOrDelete(next, "classes", p.classes.length > 0 ? p.classes : null);
+    setOrDelete(next, "spent", spentWithin(p.spent ?? character.spent, next.classes) ?? null);
+  }
   // Written before the actor patch, which reads whether the character ends the op with a block.
   tx.write(keys.character(character.id), next);
   // Whoever plays the character plays its companions, on every scene (docs/design/design-v1-combat-flow.md 3.6.4).
