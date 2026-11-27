@@ -8,7 +8,7 @@ import { renderMapPng } from "../mapexport/render.ts";
 import { uiScale } from "../device/settings.ts";
 import { encodeThumb } from "../scenes/thumbnail.ts";
 import type { DungeonPlan } from "./plan.ts";
-import { lightMarks, LIGHT_RING, NUMBER_SIZE, numberMarks, pickRoom, RING_OUTLINE, RING_RADIUS, roomBox, roomBoxes, type Numbered, type RoomBox } from "./marks.ts";
+import { lightMarks, LIGHT_RING, MONSTER_RING, monsterMarks, NUMBER_SIZE, numberMarks, pickRoom, RING_OUTLINE, RING_RADIUS, roomBox, roomBoxes, type Numbered, type RoomBox } from "./marks.ts";
 import { DRAWING, selectedName } from "./words.ts";
 
 /** What a preview draws: the plan, and the scratch room its ops made (client.ts `preview`). */
@@ -156,6 +156,12 @@ export function DungeonPreview(props: {
               <g key={`l${i}`}>
                 <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={RING_OUTLINE} strokeWidth={4} style={THIN} />
                 <circle cx={m.x} cy={m.y} r={RING_RADIUS} fill="none" stroke={LIGHT_RING} strokeWidth={2} style={THIN} />
+              </g>
+            ))}
+            {monsterMarks(plan, shown.room, sceneId).map((m, i) => (
+              <g key={`m${i}`}>
+                <circle cx={m.x} cy={m.y} r={m.r} fill="none" stroke={RING_OUTLINE} strokeWidth={4} style={THIN} />
+                <circle cx={m.x} cy={m.y} r={m.r} fill="none" stroke={MONSTER_RING} strokeWidth={2} style={THIN} />
               </g>
             ))}
             {numberMarks(plan, props.showNumbers ? props.rooms : undefined).map((m) => (

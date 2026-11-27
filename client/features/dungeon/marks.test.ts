@@ -124,3 +124,37 @@ test("DG3: after routing drops rooms, each room's box, number, ring and edit are
   assert.equal(now.lit, !entrance.lit);
   assert.ok(edited.plan.rooms[now.at]!.entrance, "the entrance took the edit");
 });
+
+/* DSTOCK (docs/design/design-v1-dungeon-stock.md 1 and 6): a ring round each stocked creature's footprint, in the hostile red over the dark halo. */
+const { contrast } = await import("../../lib/accent.ts");
+const { boardTheme } = await import("../../lib/theme.ts");
+const { MONSTER_RING, monsterMarks, RING_OUTLINE } = await import("./marks.ts");
+const { token } = await import("#shared/testutil.ts");
+
+test("DSTOCK-M: each creature the plan stocked is ringed inside its footprint, and a token it did not stock is not", () => {
+  const plan = { ...twoRooms(), monsters: [{ srdId: "goblin-warrior", room: 0, x: 3, y: 4 }, { srdId: "ogre", room: 1, x: 10, y: 6 }] };
+  const room = {
+    tokens: {
+      g: token("g", { sceneId: "scene", kind: "monster", x: 3, y: 4, size: "medium" }),
+      o: token("o", { sceneId: "scene", kind: "monster", x: 10, y: 6, size: "large" }),
+      old: token("old", { sceneId: "scene", kind: "monster", x: 1, y: 1, size: "medium" }),
+      stone: token("stone", { sceneId: "scene", kind: "object", x: 3, y: 4, size: "large" }),
+      away: token("away", { sceneId: "other", kind: "monster", x: 3, y: 4, size: "medium" }),
+    },
+  };
+  assert.deepEqual(monsterMarks(plan, room, "scene"), [
+    { x: 3.5, y: 4.5, r: 0.4 },
+    { x: 11, y: 7, r: 0.9 },
+  ]);
+  assert.deepEqual(monsterMarks(twoRooms(), room, "scene"), [], "none at None");
+  const calls: string[] = [];
+  const g = new Proxy({}, { get: (_t, name: string) => (name === "measureText" ? () => ({ width: 1 }) : (...args: unknown[]) => calls.push(`${name}:${args.join(",")}`)), set: (_t, name: string, v) => (calls.push(`${String(name)}=${String(v)}`), true) }) as unknown as CanvasRenderingContext2D;
+  drawMarks(g, plan, { ...scratchRoom(), tokens: room.tokens as never }, "scene", 40);
+  assert.equal(calls.filter((c) => c.startsWith("arc:")).length, 2, "a ring for each creature");
+  assert.ok(calls.includes(`strokeStyle=${MONSTER_RING}`));
+});
+
+test("DSTOCK-M: the ring is the board's hostile red, 3:1 against its halo", () => {
+  assert.equal(MONSTER_RING, boardTheme.color.hostile);
+  assert.ok(contrast(MONSTER_RING, RING_OUTLINE) >= 3, `${contrast(MONSTER_RING, RING_OUTLINE)}`);
+});

@@ -1,4 +1,5 @@
 import type { RoomState, Trap } from "#shared/model.ts";
+import { footprint } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { latticeFor } from "./lattice.ts";
@@ -18,9 +19,13 @@ import { isHexGrid } from "./settings.ts";
 /** The crest yellow with a black outline: 3:1 over floor and rock alike (section 13). Tokens, so the drift test keeps them. */
 export const LIGHT_RING = boardTheme.color.crest;
 export const RING_OUTLINE = boardTheme.color.textHalo;
+/** A stocked creature's ring: the board's hostile red, outlined as a light's ring is (docs/design/design-v1-dungeon-stock.md 1 and 6). */
+export const MONSTER_RING = boardTheme.color.hostile;
 
 export type LightMark = { x: number; y: number };
 export type NumberMark = { n: number; x: number; y: number };
+/** A stocked creature's footprint as a ring: its middle and radius, in cells. */
+export type MonsterMark = { x: number; y: number; r: number };
 /** A room's box in the scene, in cells, by its board index. */
 export type RoomBox = { room: number; x: number; y: number; w: number; h: number };
 /** A room's number, board index and place in `plan.rooms`, as the key numbers it (edits.ts `RoomFacts`). */
@@ -120,6 +125,24 @@ export function numberMarks(plan: Placed & Pick<DungeonPlan, "key" | "rooms">, n
   });
 }
 
+/**
+ * A ring round each stocked creature's footprint, read from the room the
+ * plan landed in: each monster token at a place the plan stocked, so a
+ * wing's ring never falls on a creature its scene held before. The ring
+ * stands just inside the footprint, so two side by side stay apart.
+ */
+export function monsterMarks(plan: Pick<DungeonPlan, "monsters">, room: Pick<RoomState, "tokens">, sceneId: string): MonsterMark[] {
+  const placed = new Set((plan.monsters ?? []).map((m) => `${m.x},${m.y}`));
+  if (placed.size === 0) return [];
+  const out: MonsterMark[] = [];
+  for (const t of Object.values(room.tokens)) {
+    if (!t || t.sceneId !== sceneId || t.kind !== "monster" || !placed.has(`${t.x},${t.y}`)) continue;
+    const fp = footprint(t);
+    out.push({ x: t.x + fp.w / 2, y: t.y + fp.h / 2, r: Math.max(0.2, Math.min(fp.w, fp.h) / 2 - 0.1) });
+  }
+  return out.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
 /** A light ring's radius and a number's text size, in squares. */
 export const RING_RADIUS = 0.4;
 export const NUMBER_SIZE = 1.1;
@@ -150,6 +173,14 @@ export function drawMarks(g: CanvasRenderingContext2D, plan: DungeonPlan, room: 
     stroke(4, RING_OUTLINE);
     g.stroke();
     stroke(2, LIGHT_RING);
+    g.stroke();
+  }
+  for (const m of monsterMarks(plan, room, sceneId)) {
+    g.beginPath();
+    g.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+    stroke(4, RING_OUTLINE);
+    g.stroke();
+    stroke(2, MONSTER_RING);
     g.stroke();
   }
   g.font = `700 ${NUMBER_SIZE}px sans-serif`;
