@@ -64,3 +64,83 @@ function slugOf(name: string): string {
     .slice(0, 48)
     .replace(/^-+|-+$/g, "");
 }
+
+/*
+ * A Universal VTT file's name (docs/design/design-v1-uvtt-export.md section 7,
+ * D-261127-253, 293): the scene's and the floor's names as written, so a
+ * name in any script or case comes back as it left. Only what a path
+ * forbids becomes `_`. No size, since the file states its grid. A name
+ * stays under 200 UTF-8 bytes, extension included, well inside the 255 a
+ * file system allows.
+ */
+
+export const VTT_EXTENSION = ".dd2vtt";
+/** The most bytes a whole name takes: under 200. */
+export const MAX_NAME_BYTES = 199;
+
+const FORBIDDEN = /[/\\:*?"<>|\p{Cc}]/gu;
+const encoder = new TextEncoder();
+
+function byteLength(text: string): number {
+  return encoder.encode(text).byteLength;
+}
+
+/** A name with what a path forbids as `_`, trimmed, or the fallback where nothing is left. */
+function asWritten(name: string, fallback: string): string {
+  return name.replace(FORBIDDEN, "_").trim() || fallback;
+}
+
+/** The longest start of `text` within `bytes`, cut between code points, and never shorter than one of them. */
+function cutTo(text: string, bytes: number): string {
+  let out = "";
+  for (const ch of text) {
+    if (out !== "" && byteLength(out + ch) > bytes) break;
+    out += ch;
+  }
+  return out.trimEnd();
+}
+
+/**
+ * The scene and floor parts that fit `MAX_NAME_BYTES` around the fixed
+ * bytes each name adds: the scene part cut first, then the floor part.
+ */
+function fitParts(scene: string, floor: string, fixed: number): [string, string] {
+  const sceneRoom = MAX_NAME_BYTES - fixed - byteLength(floor);
+  const s = byteLength(scene) <= sceneRoom ? scene : cutTo(scene, Math.max(1, sceneRoom));
+  const f = byteLength(floor) <= MAX_NAME_BYTES - fixed - byteLength(s) ? floor : cutTo(floor, Math.max(1, MAX_NAME_BYTES - fixed - byteLength(s)));
+  return [s, f];
+}
+
+/** One floor's file: `Crypt of Doom.dd2vtt`, `Crypt of Doom (DM).dd2vtt`, `Tower - Upper floor.dd2vtt`. */
+export function vttFileName(sceneName: string, view: "player" | "dm", floorName?: string): string {
+  const dm = view === "dm" ? " (DM)" : "";
+  const scene = asWritten(sceneName, "Map");
+  if (floorName === undefined) {
+    const [s] = fitParts(scene, "", byteLength(dm + VTT_EXTENSION));
+    return `${s}${dm}${VTT_EXTENSION}`;
+  }
+  const [s, f] = fitParts(scene, asWritten(floorName, "Floor"), byteLength(` - ${dm}${VTT_EXTENSION}`));
+  return `${s} - ${f}${dm}${VTT_EXTENSION}`;
+}
+
+/**
+ * Every floor's zip, `Tower.zip` or `Tower (DM).zip`, and its entries,
+ * `Tower - 01 - Ground floor.dd2vtt` and on, lowest first. The scene part
+ * is cut once, for the longest entry, so every entry carries the same one,
+ * which the several-file import reads back as the scene's name
+ * (uvtt/floorsImport.ts).
+ */
+export function vttZipNames(sceneName: string, view: "player" | "dm", floorNames: readonly string[]): { zip: string; entries: string[] } {
+  const scene = asWritten(sceneName, "Map");
+  const floors = floorNames.map((f) => asWritten(f, "Floor"));
+  const fixed = byteLength(` - 00 - ${VTT_EXTENSION}`);
+  let s = scene;
+  for (const f of floors) s = fitParts(s, f, fixed)[0];
+  const entries = floors.map((f, i) => {
+    const [, floor] = fitParts(s, f, fixed);
+    return `${s} - ${String(i + 1).padStart(2, "0")} - ${floor}${VTT_EXTENSION}`;
+  });
+  const dm = view === "dm" ? " (DM)" : "";
+  const [zipScene] = fitParts(s, "", byteLength(`${dm}.zip`));
+  return { zip: `${zipScene}${dm}.zip`, entries };
+}

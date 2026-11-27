@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cellPxHint } from "#server/assets/kinds.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { exportFileName } from "./fileName.ts";
+import { exportFileName, MAX_NAME_BYTES, vttFileName, vttZipNames } from "./fileName.ts";
 
 test("the name is the scene, its size in squares and the scale", () => {
   assert.equal(exportFileName(SQUARES, "Crypt", { w: 30, h: 20 }, 70, "player"), "crypt-30x20-70px.png");
@@ -69,4 +69,46 @@ test("a floor's name follows the scene's, before the size (docs/design/design-v1
   const name = exportFileName(SQUARES, "Tower", { w: 30, h: 20 }, 70, "player", "Room 3x3");
   assert.equal(name, "tower-room-3-x-3-30x20-70px.png");
   assert.equal(cellPxHint(name, 30 * 70, 20 * 70), 70);
+});
+
+const bytes = (name: string) => new TextEncoder().encode(name).byteLength;
+
+test("a VTT file keeps the scene's and floor's names as written, with (DM) for the DM view", () => {
+  assert.equal(vttFileName("Crypt of Doom", "player"), "Crypt of Doom.dd2vtt");
+  assert.equal(vttFileName("Crypt of Doom", "dm"), "Crypt of Doom (DM).dd2vtt");
+  assert.equal(vttFileName("Tower", "player", "Upper floor"), "Tower - Upper floor.dd2vtt");
+});
+
+test("a VTT file's name has only the characters a path forbids replaced: a slash becomes _, Japanese stays", () => {
+  assert.equal(vttFileName("Keep/Vault: 地下室?", "player"), "Keep_Vault_ 地下室_.dd2vtt");
+  assert.equal(vttFileName('a\\b*c"d<e>f|g\u0007', "player"), "a_b_c_d_e_f_g_.dd2vtt");
+});
+
+test("80-character Japanese scene and floor names stay under 200 bytes, the scene cut first on a code point boundary", () => {
+  const scene = "地".repeat(80);
+  const floor = "屋".repeat(40);
+  for (const view of ["player", "dm"] as const) {
+    const name = vttFileName(scene, view, floor);
+    assert.ok(bytes(name) <= MAX_NAME_BYTES, `${bytes(name)} bytes`);
+    assert.ok(name.includes(` - ${floor}`), "the floor part is whole");
+    assert.match(name, /^地+ - /u, "the scene part is cut between characters");
+    const alone = vttFileName(scene, view);
+    assert.ok(bytes(alone) <= MAX_NAME_BYTES);
+  }
+  // Four-byte characters cut whole too.
+  const emoji = vttFileName("🐉".repeat(80), "dm");
+  assert.ok(bytes(emoji) <= MAX_NAME_BYTES);
+  assert.ok(!emoji.includes("\ufffd"));
+  assert.equal(Array.from(emoji.replace(" (DM).dd2vtt", "")).every((c) => c === "🐉"), true);
+});
+
+test("a zip with a short and a long floor name under a long scene name carries one scene part in every entry", () => {
+  const scene = "Château ".repeat(12).trim();
+  const { zip, entries } = vttZipNames(scene, "dm", ["Ground floor", "屋".repeat(40)]);
+  const parts = entries.map((e) => /^(.+) - (\d{2}) - (.+)\.dd2vtt$/.exec(e)?.[1]);
+  assert.equal(new Set(parts).size, 1, entries.join(" | "));
+  for (const e of entries) assert.ok(bytes(e) <= MAX_NAME_BYTES, e);
+  assert.deepEqual(entries.map((e) => e.slice(parts[0]!.length)), [" - 01 - Ground floor.dd2vtt", ` - 02 - ${"屋".repeat(40)}.dd2vtt`]);
+  assert.equal(zip, `${parts[0]} (DM).zip`);
+  assert.deepEqual(vttZipNames("Tower", "player", ["Ground floor", "Upper floor"]), { zip: "Tower.zip", entries: ["Tower - 01 - Ground floor.dd2vtt", "Tower - 02 - Upper floor.dd2vtt"] });
 });
