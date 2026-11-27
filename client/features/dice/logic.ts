@@ -218,6 +218,8 @@ export function askedRoll(result: Pick<DiceResult, "formula" | "mode" | "crit">)
  * condition that fails it then, as the first roll did.
  */
 export function againInput(roll: DiceRoll): DiceRollInput | null {
+  // A Hit Point Die is spent by its roll, so a free roll again would spend nothing (docs/design/design-v1-slots.md 7).
+  if (roll.hitDie !== undefined) return null;
   const asked = askedRoll(roll);
   if (asked === null) return null;
   const input: DiceRollInput = { ...asked };

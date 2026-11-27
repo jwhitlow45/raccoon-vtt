@@ -233,7 +233,7 @@ function TokenDetails(props: PanelProps) {
           />
         );
       case "rest":
-        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={character?.resources} />;
+        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={character?.resources} character={character} />;
       case "sight":
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":
