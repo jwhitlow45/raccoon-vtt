@@ -759,6 +759,32 @@ describe("wall slabs (5.6)", () => {
     assert.ok(Math.abs(perPiece[1]! - perPiece[0]!) < 1, `the same ends a piece at 1,000 and 3,000: ${perPiece.join(", ")}`);
   });
 
+  test("a wall that reaches a through wall by several free walls a sixty-fourth of a cell each stops at its side, past all of them (ISOWALL-S3-1)", () => {
+    for (const k of [2, 3, 6]) {
+      const x = 5 - k / 64;
+      const walls: [[number, number], [number, number]][] = [
+        [
+          [2, 5],
+          [x, 5],
+        ],
+      ];
+      for (let i = 0; i < k; i++)
+        walls.push([
+          [x + i / 64, 5],
+          [x + (i + 1) / 64, 5],
+        ]);
+      walls.push([
+        [5, 3],
+        [5, 7],
+      ]);
+      const items = freeWalls(walls);
+      const slabs = items.filter((w) => w.slab);
+      const boxes = slabs.map(slabBox);
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!(overlapArea(boxes[i]!, boxes[j]!) > 1e-9), `k ${k}: ${slabs[i]!.id} and ${slabs[j]!.id} overlap`);
+      for (const w of slabs) for (const s of [0, 1] as const) assert.ok(w.slab!.gap[0][s] + w.slab!.gap[1][s] <= slabLength(w) + 1e-9, `k ${k}: ${w.id} strokes backward`);
+    }
+  });
+
   test("a crossing that is not square keeps both walls running through it (D-261127-575)", () => {
     const items = freeWalls([
       [
