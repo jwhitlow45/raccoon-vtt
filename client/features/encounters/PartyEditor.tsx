@@ -34,9 +34,8 @@ export function PartyEditor(props: { party: PartyGroup[] | null; roomParty: Retu
   const editing = party !== null;
   const opened = useRef(editing);
   useEffect(() => {
-    // Opening moves focus to the first stepper control that takes it (a party of one cannot step down), and closing back to Edit the
-    // party, so the keyboard never drops to the page.
-    if (editing && !opened.current) rows.current?.querySelector<HTMLElement>("input:not(:disabled), button:not(:disabled)")?.focus({ preventScroll: true });
+    // Opening moves focus to the first stepper, and closing back to Edit the party, so the keyboard never drops to the page.
+    if (editing && !opened.current) rows.current?.querySelector<HTMLElement>("input, button")?.focus({ preventScroll: true });
     if (!editing && opened.current) edit.current?.focus({ preventScroll: true });
     opened.current = editing;
   }, [editing]);

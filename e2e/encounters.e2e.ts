@@ -200,6 +200,9 @@ describe("raccoon-vtt: the Encounters panel's lines at every size", { timeout: 6
 
   test("DSTOCK-E. Edit the party moves focus to its first stepper, and Use the room's characters gives it back to Edit the party (STOCK-O-01)", async () => {
     await dm.setViewportSize({ width: 1440, height: 900 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await dm.goto(`${server.origin}/r/${run.roomId}`);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
     const panel = await openCrypt(dm);
     const focused = () => dm.evaluate(() => {
       type El = { getAttribute(name: string): string | null; textContent: string | null };
