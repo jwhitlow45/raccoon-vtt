@@ -154,6 +154,10 @@ describe("texture headers", () => {
     assert.deepEqual(imageHeader(loose), { mime: "image/avif", width: 32, height: 16 });
     const cut = real.slice(0, real.length - 3);
     assert.equal(imageHeader(cut), null);
+    // A file that ends inside a box's own header, after the extent was read, is cut short too.
+    const mdat = real.findIndex((_, i) => String.fromCharCode(...real.subarray(i, i + 4)) === "mdat") - 4;
+    assert.ok(mdat > 0, "the encoder's mdat follows meta");
+    assert.equal(imageHeader(real.slice(0, mdat + 5)), null);
   });
 
   test("walk at most 1,000 JPEG segments to the size, and give null past them", async () => {
