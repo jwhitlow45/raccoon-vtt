@@ -177,11 +177,13 @@ describe("ASCII STL", () => {
     await assert.rejects(readStl(blob("solid x\nfacet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 1e999 1 0\nendloop\nendfacet\n"), false), { message: MODEL_WORDS.notModel });
   });
 
-  test("refuses a line longer than any model's, so its carry stays bounded, across slices or within one", async () => {
+  test("refuses a line longer than any model's, across slices, at a slice's end or whole inside one", async () => {
     const long = `solid x\nfacet normal 0 0 0\n${"x".repeat(MODEL_LIMITS.lineBytes + 10)}`;
     // Carried slice after slice, and left over at the end of one large slice.
     await assert.rejects(eachLine(blob(long), () => {}, 1024), { message: MODEL_WORDS.notModel });
     await assert.rejects(eachLine(blob(long), () => {}), { message: MODEL_WORDS.notModel });
+    // Whole inside one slice, ended by its newline.
+    await assert.rejects(eachLine(blob(`${long}\nendsolid\n`), () => {}), { message: MODEL_WORDS.notModel });
     // At the cap, a line still reads.
     const lines: number[] = [];
     await eachLine(blob(`a\n${"x".repeat(MODEL_LIMITS.lineBytes)}`), (_b, start, end) => lines.push(end - start), 1024);

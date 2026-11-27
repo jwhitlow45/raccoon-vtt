@@ -133,8 +133,9 @@ export async function eachSlice(file: Blob, from: number, to: number, each: (byt
 /**
  * Calls `line` for each line of a text file, as a byte range of a slice,
  * reading the file a slice at a time. A line split between two slices is
- * carried into the next, up to `lineBytes`: past that the file is no model
- * text (a model's lines are short), and refusing keeps the carry bounded.
+ * carried into the next. Any line past `lineBytes`, carried or whole in one
+ * slice, means the file is no model text (a model's lines are short), and
+ * refusing keeps the carry bounded.
  */
 export async function eachLine(file: Blob, line: (bytes: Uint8Array, start: number, end: number) => void, sliceBytes: number = MODEL_LIMITS.sliceBytes): Promise<void> {
   const held: { carry: Uint8Array | null } = { carry: null };
@@ -161,6 +162,7 @@ export async function eachLine(file: Blob, line: (bytes: Uint8Array, start: numb
         start = nl + 1;
       }
       for (let nl = bytes.indexOf(10, start); nl >= 0; nl = bytes.indexOf(10, start)) {
+        if (nl - start > MODEL_LIMITS.lineBytes) throw new ModelRefusal(MODEL_WORDS.notModel);
         line(bytes, start, nl);
         start = nl + 1;
       }
