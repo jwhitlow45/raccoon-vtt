@@ -146,7 +146,7 @@ export const CHANGED_SINCE = "it was changed since";
 /** A token's light is its owners' to set (docs/design/design-v1-maps-vision.md 4.3.9). `partyVision` stays the DM's. */
 const OWNER_TOKEN_FIELDS = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
 /** A character's stat block and known forms are its players', as its light card is (docs/design/design-v1-pc-stats.md 4.1, docs/design/design-v1-known-forms.md 3.2). */
-const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync", "resources"]);
+const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync", "resources", "classes", "spent"]);
 const OWNER_ACTOR_FIELDS = new Set(["hp", "speeds", "ac", "initBonus", "passivePerception", "senses", "notes", "sheetUrl"]);
 /**
  * A character's players take a shape on its own actor (docs/design/design-v1-pc-stats.md

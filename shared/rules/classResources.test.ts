@@ -226,6 +226,13 @@ describe("class resources: adding and updating (7.1)", () => {
   const wind: ClassResource = { id: "b", name: "Second Wind", max: 2, used: 0, reset: "shortOne", preset: "fighter-second-wind", level: 2, atLevel: 7 };
   const own: ClassResource = { id: "c", name: "Superiority Dice", max: 4, used: 0, reset: "short" };
 
+  test("with classes each preset reads its own class's level (docs/design/design-v1-slots.md 3.1)", () => {
+    assert.deepEqual(levelUps([rage], 6, [{ id: "barbarian", level: 5 }, { id: "fighter", level: 1 }]), [], "Barbarian 5 and Fighter 1 at level 6 asks nothing");
+    assert.deepEqual(levelUps([rage], 6, [{ id: "barbarian", level: 6 }]), [{ classId: "barbarian", classLevel: 5, guess: 6 }], "Barbarian 6 asks with 6");
+    assert.deepEqual(levelUps([rage], 9, [{ id: "wizard", level: 9 }]), [], "a Rage preset with no Barbarian in the classes asks nothing");
+    assert.deepEqual(levelUps([rage], 6, []), [{ classId: "barbarian", classLevel: 5, guess: 6 }], "no classes keeps the total-level guess");
+  });
+
   test("a rise past a preset's character level asks about its class, with the rise added to its class level", () => {
     assert.deepEqual(levelUps([rage, own], 5), [], "no rise");
     assert.deepEqual(levelUps([rage, own], 4), [], "a level that went down asks nothing");

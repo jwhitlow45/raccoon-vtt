@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, LogEvent, RoomState } from "../model.ts";
-import type { Op } from "../protocol.ts";
+import { opSchema, type Op } from "../protocol.ts";
+import { canApply } from "../permissions.ts";
 import { applyOp } from "../reducer.ts";
-import { actor, apply, character, DM, env, P1, refused, room, token } from "../testutil.ts";
+import { actor, apply, character, DM, env, P1, P2, refused, room, token } from "../testutil.ts";
 
 /** Bree, a Wizard 5 and Warlock 5 played by P1, hurt to 10 of 30, with a token on s1. */
 function table(overrides: Partial<Character> = {}): RoomState {
@@ -128,5 +129,39 @@ describe("classes on a character.update", () => {
     assert.equal(bree(none).classes, undefined);
     assert.equal(bree(none).spent, undefined);
     assert.equal(bree(none).level, 10);
+  });
+});
+
+describe("who may spend slots and dice (docs/design/design-v1-slots.md 6)", () => {
+  const deps = { canUseAsset: () => true };
+  const ops: Op[] = [
+    { t: "actor.use", target: { tokenId: "t1" }, use: { kind: "slot", level: 1 } },
+    { t: "actor.use", target: { tokenId: "t1" }, use: { kind: "pact" } },
+    { t: "actor.use", target: { tokenId: "t1" }, use: { kind: "hitDie", die: 6, heal: 3 } },
+    { t: "actor.hitDieRoll", tag: "x1", target: { tokenId: "t1" }, die: 6 },
+  ];
+  test("the DM and the character's players spend, another player never", () => {
+    const s = table();
+    for (const op of ops) {
+      assert.ok(canApply(op, DM, s, deps).ok, op.t);
+      assert.ok(canApply(op, P1, s, deps).ok, op.t);
+      assert.equal(canApply(op, P2, s, deps).ok, false, op.t);
+    }
+  });
+  test("a player lent only the token is refused alike, whatever is left", () => {
+    for (const spent of [undefined, { slots: [4, 0, 0, 0, 0, 0, 0, 0, 0] }]) {
+      const s = table(spent ? { spent } : {});
+      s.tokens.t1 = { ...s.tokens.t1!, ownerIds: ["p2"] };
+      for (const op of ops) {
+        const d = canApply(op, P2, s, deps);
+        assert.deepEqual(d.ok ? null : [d.code, d.message], ["forbidden", "that is not yours"], op.t);
+      }
+    }
+  });
+  test("classes and spent are the owners' fields, spent only with a re-sync's Undo", () => {
+    const s = table();
+    assert.ok(canApply({ t: "character.update", characterId: "bree", patch: { classes: [{ id: "wizard", level: 6 }] } }, P1, s, deps).ok);
+    const bare = opSchema.safeParse({ t: "character.update", characterId: "bree", patch: { classes: [{ id: "wizard", level: 6 }], spent: { pact: 1 } } });
+    assert.equal(bare.success, false);
   });
 });

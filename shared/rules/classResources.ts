@@ -201,8 +201,25 @@ export type LevelUp = {
  * added: each with a preset whose `atLevel` the character's level has
  * passed. A multiclass character's rise may belong to another class, so
  * this only asks. A preset added with no character level never asks.
+ *
+ * With classes (docs/design/design-v1-slots.md 3.1, D-261127-268, 368) each
+ * preset reads its own class's level there instead: it asks, with that
+ * level, once the class's level passes the one its counts were read at, and
+ * a preset whose class is not among them asks nothing.
  */
-export function levelUps(resources: readonly ClassResource[] | undefined, characterLevel: number | undefined): LevelUp[] {
+export function levelUps(resources: readonly ClassResource[] | undefined, characterLevel: number | undefined, classes?: readonly { id: string; level: number }[]): LevelUp[] {
+  if (classes && classes.length > 0) {
+    const out: LevelUp[] = [];
+    for (const r of resources ?? []) {
+      const preset = presetById(r.preset);
+      const now = preset && classes.find((c) => c.id === preset.classId)?.level;
+      if (!preset || now === undefined || r.level === undefined || now <= r.level) continue;
+      const known = out.find((u) => u.classId === preset.classId);
+      if (!known) out.push({ classId: preset.classId, classLevel: r.level, guess: now });
+      else if (r.level > known.classLevel) known.classLevel = r.level;
+    }
+    return out;
+  }
   if (characterLevel === undefined) return [];
   const out: LevelUp[] = [];
   for (const r of resources ?? []) {
