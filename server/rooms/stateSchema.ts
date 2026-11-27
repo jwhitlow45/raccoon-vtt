@@ -10,6 +10,7 @@ import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { nudgeValid } from "#shared/rules/nudge.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
+import { isNormalSpent } from "#shared/rules/spellSlots.ts";
 import { sceneWeatherSchema } from "#shared/weather.ts";
 import { floorProblem } from "#shared/rules/floors.ts";
 import { NUMBER_NAMES_MOST, NUMBERS_MOST } from "#shared/numbering.ts";
@@ -515,6 +516,14 @@ const character = z.strictObject({
     .optional(),
   // Backups from before the clock have no stamp (docs/design/design-v1-calendar.md 6.6).
   longRest: z.strictObject({ at: clockSchemas.clockTime, clock: id }).optional(),
+  // Backups from before spell slots and Hit Point Dice have none of the three (docs/design/design-v1-slots.md 6). A hand-made
+  // empty list passes the shape, and the check below refuses it, since the reducer never stores one.
+  classes: combatUseSchemas.classLevels.refine((list) => list.length > 0, { message: "no classes is none, never an empty list" }).optional(),
+  spent: combatUseSchemas.spentSchema.optional(),
+  useRev: rev.optional(),
+}).superRefine((c, ctx) => {
+  // The one normal form the reducer writes, within the counts the classes give (D-261127-276).
+  if (!isNormalSpent(c.spent, c.classes)) ctx.addIssue({ code: "custom", path: ["spent"], message: "spent counts are out of their normal form or past what the classes give" });
 });
 
 /** The room's clock (docs/design/design-v1-calendar.md 6.1), by the bounds its ops keep, dawn and dusk too (docs/design/design-v1-calendar-c2c3.md 6.6). */
@@ -849,13 +858,15 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("use"),
     ...holder,
-    what: z.enum(["legendary", "resist", "ability", "resource"]),
+    what: z.enum(["legendary", "resist", "ability", "resource", "slot", "pact", "hitDie"]),
     name: combatUseSchemas.useName.optional(),
     cost: z.number().int().min(1).max(LIMITS.resourcePoolMax).optional(),
     left: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional(),
     max: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional(),
     back: z.literal(true).optional(),
     hidden: z.literal(true).optional(),
+    level: z.number().int().min(1).max(9).optional(),
+    die: combatUseSchemas.hitDieSize.optional(),
   }),
   z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause", "hide", "show"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional(), exact: z.literal(true).optional() }),
@@ -952,6 +963,7 @@ const logEvent = z.discriminatedUnion("type", [
           save: z.enum(ABILITY_KEYS).optional(),
           hidden: z.literal(true).optional(),
           type: z.enum(DAMAGE_TYPES).optional(),
+          hitDie: combatUseSchemas.hitDieSize.optional(),
         }),
       )
       .max(LIMITS.diceRollsPerOp),

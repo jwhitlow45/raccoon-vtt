@@ -3509,7 +3509,7 @@ export const actorSchemaForImport = actorSchema.extend({
   turnRecord: turnRecord.optional(),
 });
 /** The stored shapes of combat uses, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-combat-controls.md 3.6). */
-export const combatUseSchemas = { useKey, useName, useMark, uses, turnRecord, damageTypes, resourceName, resourceStored, turnRecordId };
+export const combatUseSchemas = { useKey, useName, useMark, uses, turnRecord, damageTypes, resourceName, resourceStored, turnRecordId, classLevels, spentSchema, hitDieSize };
 /** The stat block's fields, so the stored-state schema checks imported monsters by the same bounds. */
 export const statBlockFieldsForImport = statBlockFields;
 /** A custom monster as a create op carries it, for the editor to check a draft before it saves. */
