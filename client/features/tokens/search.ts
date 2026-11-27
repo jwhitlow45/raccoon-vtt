@@ -28,9 +28,9 @@ function conditionsOf(actor: ProjectedActor): string | undefined {
   return names.length > 0 ? names.join(", ") : undefined;
 }
 
-/** The viewer edits the character's classes: the DM, or one of its players. */
-function editsClasses(h: FieldHolder): boolean {
-  return h.character !== undefined && (h.role === "dm" || (h.memberId !== null && h.character.ownerIds.includes(h.memberId)));
+/** The viewer plays the character, so its page holds the Classes line. The DM's search never offers Classes (no everyCharacter). */
+function playsCharacter(h: FieldHolder): boolean {
+  return h.character !== undefined && h.memberId !== null && h.character.ownerIds.includes(h.memberId);
 }
 
 // Each field is offered where its surface draws its control (panelDraws.ts drawn).
@@ -102,9 +102,9 @@ export const CREATURE_FIELDS: readonly FieldDef[] = [
   // A character's rests, each its own choice on the page, so "long rest" lands on Long Rest itself. The token panel's rest is the same one step further.
   { key: "long-rest", title: "Long Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.long" }, everyCharacter: true, shown: combatShown },
   { key: "short-rest", title: "Short Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.short" }, everyCharacter: true, shown: combatShown },
-  // A character's classes and what they count (docs/design/design-v1-slots.md 4), on its page, only for a viewer whose copy holds them: the DM and its
-  // players. The DM finds the slots and dice on every character's page, as the rests, since play spends them, and Classes stays with the players.
-  { key: "classes", title: "Classes", icon: "combat", page: { section: "page.combat", anchor: "character.classes" }, shown: (h) => combatShown(h) && editsClasses(h) },
+  // A character's classes and what they count (docs/design/design-v1-slots.md 4), on its page. Its players find all three. The DM finds the slots and
+  // dice on every character's page, as the rests, since play spends them, and never Classes, which stays with the players (SLOTS-O-03).
+  { key: "classes", title: "Classes", icon: "combat", page: { section: "page.combat", anchor: "character.classes" }, shown: (h) => combatShown(h) && playsCharacter(h) },
   { key: "spell-slots", title: "Spell slots", names: ["slots", "pact magic"], icon: "combat", page: { section: "page.combat", anchor: "character.slots" }, everyCharacter: true, shown: (h) => combatShown(h) && hasSlots(h.character?.classes) },
   { key: "hit-dice", title: "Hit Point Dice", names: ["hit dice"], icon: "combat", page: { section: "page.combat", anchor: "character.hit-dice" }, everyCharacter: true, shown: (h) => combatShown(h) && (h.character?.classes?.length ?? 0) > 0 },
   // The groups each creature's panel and page hold, landing on the group's header.
