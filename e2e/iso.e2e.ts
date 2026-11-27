@@ -757,7 +757,8 @@ function isInside(c: PagePt, hull: readonly PagePt[]): boolean {
   return signs.every((k) => k >= 0) || signs.every((k) => k <= 0);
 }
 
-describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
+// CI's e2e shard runs this file past 300 s, so it gets 600 s until the file is split.
+describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
