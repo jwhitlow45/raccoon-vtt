@@ -62,6 +62,17 @@ export function frameCrop(frame: number, sheet: { width: number; height: number 
   return { x: (f % MODEL_LIMITS.sheetColumns) * side, y: Math.floor(f / MODEL_LIMITS.sheetColumns) * side, width: side, height: side };
 }
 
+/**
+ * The part of a sheet that frame i's drawn box covers, in the sheet's own
+ * pixels: all a standee needs to draw, since every pixel of the frame
+ * outside its box is clear (ModelRef.boxes).
+ */
+export function drawnCrop(frame: number, box: readonly [number, number, number, number], sheet: { width: number; height: number }): { x: number; y: number; width: number; height: number } {
+  const f = frameCrop(frame, sheet);
+  const k = f.width / MODEL_LIMITS.boxMax;
+  return { x: f.x + box[0] * k, y: f.y + box[1] * k, width: (box[2] - box[0]) * k, height: (box[3] - box[1]) * k };
+}
+
 function mod(a: number, n: number): number {
   return ((a % n) + n) % n;
 }

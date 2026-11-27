@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
-import { cameraAzimuth, frameCrop, frameFor, modelArtBox, modelDrawnBox } from "./frames.ts";
+import { cameraAzimuth, drawnCrop, frameCrop, frameFor, modelArtBox, modelDrawnBox } from "./frames.ts";
 import { frameYaw } from "./normalize.ts";
 
 /** Which of a model's 8 pictures Isometric shows, and where it draws (docs/design/design-v1-token-models.md 4.4, D-261127-167). */
@@ -94,5 +94,10 @@ describe("where a frame draws", () => {
     assert.deepEqual(frameCrop(3, { width: 2048, height: 1024 }), { x: 1536, y: 0, width: 512, height: 512 });
     assert.deepEqual(frameCrop(5, { width: 2048, height: 1024 }), { x: 512, y: 512, width: 512, height: 512 });
     assert.deepEqual(frameCrop(7, { width: 1024, height: 512 }), { x: 768, y: 256, width: 256, height: 256 });
+  });
+
+  test("a frame's drawn box crops the sheet to the part that paints, at either copy's size", () => {
+    assert.deepEqual(drawnCrop(5, [25, 10, 75, 90], { width: 2048, height: 1024 }), { x: 640, y: 563.2, width: 256, height: 409.6 });
+    assert.deepEqual(drawnCrop(2, [0, 0, 100, 100], { width: 1024, height: 512 }), frameCrop(2, { width: 1024, height: 512 }));
   });
 });

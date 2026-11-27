@@ -218,7 +218,7 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
     }
   });
 
-  test("the drawing's square, its hit box and its decor's corner are the layout's art, drawn box and frame, at every turn and seat", () => {
+  test("the drawing's corner, the box it draws and takes presses on, and its decor's corner are the layout's art, drawn box and frame, at every turn and seat", () => {
     for (const turn of [0, 1, 2, 3] as Turn[]) {
       for (const seat of [ON_GROUND, { rise: 0.7, inset: 1 }, { rise: 1, inset: COVER_INSET }]) {
         for (const [base, ground] of [[0, 0], [2, 0], [400, 10]] as const) {
@@ -228,10 +228,10 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
           const m = parts.model!;
           const k = parts.art.scale;
           // The art's group stands at the ring's middle in view units (the upright group), scaled by the seat's inset.
-          const art = { x0: shape.base.x + parts.art.x, y0: shape.base.y + parts.art.y, x1: shape.base.x + parts.art.x + m.side * k, y1: shape.base.y + parts.art.y + m.side * k };
-          assert.ok(sameBox(art, shape.art), `art at turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
-          const hit = { x0: art.x0 + m.hit.x * k, y0: art.y0 + m.hit.y * k, x1: art.x0 + (m.hit.x + m.hit.w) * k, y1: art.y0 + (m.hit.y + m.hit.h) * k };
-          assert.ok(sameBox(hit, shape.drawnBox), "a press lands on the drawn box alone");
+          const corner = { x: shape.base.x + parts.art.x, y: shape.base.y + parts.art.y };
+          assert.ok(near(corner.x, shape.art.x0) && near(corner.y, shape.art.y0), `art at turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
+          const drawn = { x0: corner.x + m.drawn.x * k, y0: corner.y + m.drawn.y * k, x1: corner.x + (m.drawn.x + m.drawn.w) * k, y1: corner.y + (m.drawn.y + m.drawn.h) * k };
+          assert.ok(sameBox(drawn, shape.drawnBox), "it draws, and takes a press, on the drawn box alone");
           assert.ok(near(shape.base.x + parts.decor.x, shape.frame.x0) && near(shape.base.y + parts.decor.y, shape.frame.y0), "a dragged model's decor on its frame");
         }
       }
@@ -289,7 +289,10 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
     assert.match(board, /art: shape\.drawnBox,/);
     const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
     assert.match(node, /\{model && parts\.model \? <ModelArt model=\{model\} parts=\{parts\.model\} \/> : <TokenBody/);
+    // The image is the drawn box itself, cropped to it, so its own hit is that box: no hitFunc may widen it.
     const art = node.slice(node.indexOf("function ModelArt("), node.indexOf("\n}\n", node.indexOf("function ModelArt(")));
-    assert.match(art, /hitFunc=\{\(ctx, shape\) => \{\n\s+ctx\.beginPath\(\);\n\s+ctx\.rect\(hit\.x, hit\.y, hit\.w, hit\.h\);/);
+    assert.match(art, /x=\{drawn\.x\} y=\{drawn\.y\} width=\{drawn\.w\} height=\{drawn\.h\} crop=\{crop\}/);
+    assert.match(art, /drawnCrop\(frame, shape\.box, image\)/);
+    assert.doesNotMatch(art, /hitFunc|sceneFunc/);
   });
 });

@@ -172,8 +172,12 @@ export function cappedBase(base: number, ground: number, scale: number, canvasHe
   return K * (base - ground) > cap ? ground + cap / K : base;
 }
 
-/** A model's square in the art's group, `side` view units across before the art's scale, and where a press lands on it: its drawn box alone (D-261127-379). */
-export type ModelParts = { side: number; hit: { x: number; y: number; w: number; h: number } };
+/**
+ * Where a model draws in the art's group, before the art's scale: its
+ * frame's drawn box alone, the only part of the frame that paints, so the
+ * image takes a press there and nowhere else in its frame (D-261127-379).
+ */
+export type ModelParts = { drawn: { x: number; y: number; w: number; h: number } };
 
 /**
  * Where a standee's parts draw inside the ground group, in world cells
@@ -206,5 +210,5 @@ export function standeeParts(
   const k = side / 100;
   const [x0, y0, x1, y1] = model.box;
   const art = { x: (-side * seat.inset) / 2, y: -seat.rise - model.anchorY * side * seat.inset, scale: seat.inset };
-  return { ...parts, art, decor: { x: -size.w / 2, y: art.y + y0 * k * seat.inset }, model: { side, hit: { x: x0 * k, y: y0 * k, w: (x1 - x0) * k, h: (y1 - y0) * k } } };
+  return { ...parts, art, decor: { x: -size.w / 2, y: art.y + y0 * k * seat.inset }, model: { drawn: { x: x0 * k, y: y0 * k, w: (x1 - x0) * k, h: (y1 - y0) * k } } };
 }

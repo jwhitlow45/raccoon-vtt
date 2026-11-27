@@ -32,7 +32,7 @@ import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups
 import { groundGroups, type Turn } from "../lib/view.ts";
 import { pitSweep } from "./relief/drawRelief.ts";
 import { standeeParts, type ModelParts, type StandeeModel } from "./relief/standee.ts";
-import { frameCrop } from "../features/models/frames.ts";
+import { drawnCrop } from "../features/models/frames.ts";
 import type { SheetImage } from "../features/models/sheets.ts";
 import { useTreeShown } from "./relief/context.ts";
 import { CAUGHT_RING } from "../features/areas/TemplateLayer.tsx";
@@ -400,31 +400,18 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
 }
 
 /**
- * A model's frame, cropped from its sheet in one image draw with no clip,
- * cheaper than the picture it stands in for. Presses go through Konva's
- * hit canvas, so its hit draws only the frame's drawn box: a tap on its
- * clear corner reaches the creature behind (D-261127-379).
+ * A model's frame in one image draw with no clip: only the frame's drawn
+ * box, cropped from its sheet, since the rest of the frame is clear. A
+ * frame's whole square is up to 16 times a footprint, and painting its clear
+ * part made a pan dearer than with pictures. Presses go through Konva's hit
+ * canvas, and the image's own hit is its box, so a tap on the frame's clear
+ * corner reaches the creature behind (D-261127-379).
  */
 function ModelArt(props: { model: IsoModel; parts: ModelParts }) {
-  const { image, frame } = props.model;
-  const { side, hit } = props.parts;
-  const crop = useMemo(() => frameCrop(frame, image), [frame, image]);
-  return (
-    <KImage
-      name="standeeModel"
-      image={image}
-      width={side}
-      height={side}
-      crop={crop}
-      perfectDrawEnabled={false}
-      hitFunc={(ctx, shape) => {
-        ctx.beginPath();
-        ctx.rect(hit.x, hit.y, hit.w, hit.h);
-        ctx.closePath();
-        ctx.fillStrokeShape(shape);
-      }}
-    />
-  );
+  const { image, frame, shape } = props.model;
+  const { drawn } = props.parts;
+  const crop = useMemo(() => drawnCrop(frame, shape.box, image), [frame, shape.box, image]);
+  return <KImage name="standeeModel" image={image} x={drawn.x} y={drawn.y} width={drawn.w} height={drawn.h} crop={crop} perfectDrawEnabled={false} />;
 }
 
 /**
