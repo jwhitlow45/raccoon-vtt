@@ -2549,29 +2549,34 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
        * The count is held to the raster's own noise over the same move,
        * measured in this run on this canvas (D-261127-585), in place of a
        * fixed share that held only while a cull step repainted whole every
-       * 128 px. KEPT_NOISE_FACTOR: the kept picture is a mosaic of strips
-       * drawn at cameras along the way, each clipped to its strip, and an
-       * edge cut by a clip lands on other pixels as one cut by the canvas's
-       * edge does, so on the software canvas the kept picture differed on
-       * up to 5.2 times the noise of the whole move (hex columns, a pan at
-       * turn 1, moving out: 9,680 against 1,879), and on the Mac's GPU up
-       * to 3.2 times. KEPT_NOISE_MARGIN covers a move too short for its
-       * noise to show: a few hundred values of antialiased edges. KEPT_MOST
-       * caps it all, since a repaint whole after the move also redraws what
-       * depends on where a cell stands on the screen (the tones by the
-       * screen's top, 5.3) and over deep ground that alone reached 5% of the
-       * canvas: no correct compare here came near one value in a hundred
-       * (0.33% at most), while a picture a device pixel off differs on every
-       * edge and a stale patch fills its 9 by 9 windows.
+       * 128 px. The kept picture is a mosaic of strips drawn at cameras
+       * along the way, each clipped to its strip, and an edge cut by a clip
+       * lands on other pixels as one cut by the canvas's edge does, so it
+       * differs from a whole repaint by a multiple of one move's noise.
+       * Both limits are 1.5 times the largest legitimate value in five full
+       * runs of this file on each canvas, the Mac's GPU and Chrome's
+       * software canvas (--disable-gpu, as on CI), 32 compares a run, 320
+       * in all (D-261127-164). KEPT_NOISE_FACTOR: the most past its noise
+       * was 5.15 times it, on the software canvas (hex columns, a pan at
+       * turn 1, moving out: 9,680 against 1,879). On the GPU no compare
+       * passed 323 values, inside KEPT_NOISE_MARGIN alone, which covers a
+       * move too short for its noise to show. KEPT_MOST caps it all, since
+       * a repaint whole after the move also redraws what depends on where
+       * a cell stands on the screen (the tones by the screen's top, 5.3),
+       * and over deep ground that alone read 5% of the canvas as noise: the
+       * most any compare differed was 0.28% of the canvas's values, on the
+       * software canvas (squares, a height edit mid-pan, moving back:
+       * 14,743). A picture a device pixel off differs on every edge, and a
+       * stale patch fills its 9 by 9 windows.
        */
       const bound = Math.min(KEPT_NOISE_FACTOR * noiseAll + KEPT_NOISE_MARGIN * x.data.length, KEPT_MOST * x.data.length);
       assert.ok(over <= bound && worst <= 128 && densest <= 48 && line <= 0.25, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values (at most ${Math.round(bound)}: the raster's own ${Math.round(noiseAll)} over a move of ${sx}, ${sy} device px) within ${JSON.stringify(box)} of ${w}x${h}, at most ${densest} pixels in a 9 by 9 window, ${(100 * line).toFixed(1)}% of a column or row`);
     };
     const maxDiffs: string[] = [];
     /** How far past the raster's own noise over a move the kept picture may differ from a whole repaint: see `compare`. */
-    const KEPT_NOISE_FACTOR = 6;
+    const KEPT_NOISE_FACTOR = 7.7;
     const KEPT_NOISE_MARGIN = 2e-4;
-    const KEPT_MOST = 1e-2;
+    const KEPT_MOST = 4.2e-3;
     /**
      * A pan of 30 small moves one way and back, each in a frame of its own,
      * with `midway` between the halves. At the end of each half, the
@@ -2680,7 +2685,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         assert.ok((await kept(page))!.boardCommits > crossing.commits, `${what}: the board laid out again at the cull step, while the gesture held`);
       }
       if (opts.midway) {
+        const before = (await kept(page))!.whole;
         await opts.midway();
+        // The step repaints whole, so the reference below holds what it changed: a picture that missed it would leave the reference before it, and the change would count as the raster's noise.
+        assert.ok((await kept(page))!.whole > before, `${what}: the step mid-pan repainted the relief whole`);
         await follow();
       }
       for (let k = i - 1; k >= 10; k--) await move(k);
@@ -2751,8 +2759,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
           await nextFrames(pat, 6);
         },
       });
+      const unturned = (await kept(pat))!.whole;
       await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { turn(t: number): void } }).__rvttIsoHook.turn(1));
       await nextFrames(pat, 6);
+      assert.ok((await kept(pat))!.whole > unturned, `${shape}: the turn repainted the relief whole`);
       await pan(pat, "touch", `${shape}, a pan at turn 1`);
       await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { turn(t: number): void } }).__rvttIsoHook.turn(0));
 
