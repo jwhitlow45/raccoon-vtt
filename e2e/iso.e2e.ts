@@ -2398,6 +2398,18 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
     await dmMouse.goto(dm.url());
     type Kept = { whole: number; scrolls: number; toned: number; why: Record<string, number>; probe: string; boardCommits: number; mapCommits: number };
     const kept = (page: Page) => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { kept(): Kept | null } }).__rvttIsoHook.kept());
+    // The board's own cull box (relief/cull.ts), imported at run time to keep the canvas code's browser types out of the server tools' compilation, as scripts/bench-iso.ts does.
+    const { CULL_STEP_PX, cullOf } = (await import(new URL("../client/canvas/relief/cull.ts", import.meta.url).href)) as {
+      CULL_STEP_PX: number;
+      cullOf(cam: { x: number; y: number; scale: number }, size: { width: number; height: number }): { key: string };
+    };
+    /** The isometric main stage's size in CSS px, the size the board culls by. */
+    const stageSize = (page: Page) =>
+      page.evaluate(() => {
+        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; height(): number; visible(): boolean; listening(): boolean }[] } }).Konva;
+        const main = konva.stages.find((st) => st.width() > 0 && st.visible() && st.listening())!;
+        return { width: main.width(), height: main.height() };
+      });
     const nextFrames = (page: Page, n: number) =>
       page.evaluate(
         (k) =>
@@ -2517,18 +2529,56 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
      * HXPERF2B-ASTRA-07). Each run gets `check` with the counts before and
      * after it. Returns the moves made.
      */
-    const pan = async (page: Page, how: "touch" | "space" | "middle", what: string, opts: { midway?: () => Promise<void>; check?: (before: Kept, after: Kept) => void } = {}) => {
+    const pan = async (page: Page, how: "touch" | "space" | "middle", what: string, opts: { midway?: () => Promise<void>; check?: (before: Kept, after: Kept) => void; cross?: boolean } = {}) => {
       // On open map left of the middle, clear of the bars: the isometric stage's own box, not the hidden Top-down one's.
       const board = await isoCamera(page);
       const start = { x: board.left + 120, y: board.top + 360 };
       const cdp = how === "touch" ? await page.context().newCDPSession(page) : null;
       const at = (i: number) => ({ x: start.x + i * 5, y: start.y + i * 3 });
-      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...start, id: 0 }] });
-      else {
-        if (how === "space") await page.keyboard.down("Space");
-        await page.mouse.move(start.x, start.y);
-        await page.mouse.down({ button: how === "middle" ? "middle" : "left" });
-      }
+      const press = async (p: { x: number; y: number }) => {
+        if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p, id: 0 }] });
+        else {
+          if (how === "space") await page.keyboard.down("Space");
+          await page.mouse.move(p.x, p.y);
+          await page.mouse.down({ button: how === "middle" ? "middle" : "left" });
+        }
+      };
+      const lift = async () => {
+        if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        else {
+          await page.mouse.up({ button: how === "middle" ? "middle" : "left" });
+          if (how === "space") await page.keyboard.up("Space");
+        }
+      };
+      /*
+       * The first leg moves the stage 150 px right, and the view's top-left
+       * crosses its next cull step to the left within it only when that step
+       * lies closer (cull.ts). A gesture of its own first brings the step to
+       * 40 px away, so the pan crosses one at the board's step, wherever the
+       * camera opened.
+       */
+      const crossing = opts.cross ? await (async () => {
+        const toStep = async () => {
+          const cam = await isoCamera(page);
+          return (((-cam.x) % CULL_STEP_PX) + CULL_STEP_PX) % CULL_STEP_PX;
+        };
+        const nudge = (await toStep()) - 40;
+        if (nudge > 0) {
+          await press(start);
+          for (let x = 5; x < nudge + 5; x += 5) {
+            const p = { x: start.x + Math.min(x, nudge), y: start.y };
+            if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...p, id: 0 }] });
+            else await page.mouse.move(p.x, p.y);
+            await nextFrames(page, 1);
+          }
+          await lift();
+          await nextFrames(page, 6);
+        }
+        const left = await toStep();
+        assert.ok(left < 100, `${what}: the nudge left the next cull step ${left} px away`);
+        return { key: cullOf(await isoCamera(page), await stageSize(page)).key, commits: (await kept(page))!.boardCommits };
+      })() : null;
+      await press(start);
       let i = 0;
       let moves = 0;
       const move = async (k: number) => {
@@ -2556,16 +2606,16 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
       };
       for (let k = 1; k <= 30; k++) await move(k);
       await held("moving out", 1);
+      if (crossing) {
+        // Still held: the view's cull key moved on, and the board rendered for it, the cull step's own render, before the gesture ended.
+        assert.notEqual(cullOf(await isoCamera(page), await stageSize(page)).key, crossing.key, `${what}: the pan crossed a ${CULL_STEP_PX} px cull step`);
+        assert.ok((await kept(page))!.boardCommits > crossing.commits, `${what}: the board laid out again at the cull step, while the gesture held`);
+      }
       if (opts.midway) await opts.midway();
       for (let k = i - 1; k >= 10; k--) await move(k);
       await held("moving back", -1);
-      if (cdp) {
-        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-        await cdp.detach();
-      } else {
-        await page.mouse.up({ button: how === "middle" ? "middle" : "left" });
-        if (how === "space") await page.keyboard.up("Space");
-      }
+      await lift();
+      await cdp?.detach();
       return moves;
     };
 
@@ -2606,7 +2656,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         await nextFrames(page, 6);
         const before = await kept(page);
         assert.equal(before!.probe, "ok", `${who}: the self-copy probe passed`);
-        const moves = await pan(page, how, `${shape}, ${who}, across cull steps`);
+        const moves = await pan(page, how, `${shape}, ${who}, across cull steps`, { cross: true });
         const after = await kept(page);
         // The two compares' forced repaints are whole draws of their own, not the pan's.
         const scrolls = after!.scrolls - before!.scrolls;
