@@ -1,4 +1,7 @@
-import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, maxSide, SIZE_SIDES, type DungeonSettings, type GridKind, type SizeChoice } from "./settings.ts";
+import type { PartyGroup } from "#shared/model.ts";
+import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
+import { partySize } from "../encounters/budget.ts";
+import { clampRooms, clampSettings, clampSide, clampStock, DEFAULT_SETTINGS, DEFAULT_STOCK, defaultRooms, maxSide, SIZE_SIDES, type DungeonSettings, type GridKind, type SizeChoice, type StockChoices } from "./settings.ts";
 
 /**
  * The dialog's choices, and this device's memory of them per room
@@ -8,15 +11,83 @@ import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, m
  * passes, so the tests run without a DOM.
  */
 
-export type Choices = Omit<DungeonSettings, "w" | "h"> & {
-  size: SizeChoice;
-  /** Custom's sides. A preset's are its own. */
-  across: number;
-  down: number;
-};
+export type Choices = Omit<DungeonSettings, "w" | "h"> &
+  StockChoices & {
+    size: SizeChoice;
+    /** Custom's sides. A preset's are its own. */
+    across: number;
+    down: number;
+    /**
+     * The DM's own Party level pick. `band`, the settings' band, follows the
+     * party while Monsters and Traps are both above None, and comes back to
+     * this pick when either goes to None (docs/design/design-v1-dungeon-stock.md
+     * 4, D-261127-219).
+     */
+    ownBand: LevelBand;
+  };
 
 const { w: _w, h: _h, ...DEFAULT_REST } = DEFAULT_SETTINGS;
-export const DEFAULT_CHOICES: Choices = { ...DEFAULT_REST, size: "medium", across: SIZE_SIDES.medium, down: SIZE_SIDES.medium };
+export const DEFAULT_CHOICES: Choices = { ...DEFAULT_REST, ...DEFAULT_STOCK, ownBand: DEFAULT_SETTINGS.band, size: "medium", across: SIZE_SIDES.medium, down: SIZE_SIDES.medium };
+
+/** The Monsters choices among the dialog's. */
+export function stockOf(c: StockChoices): StockChoices {
+  return { monsters: c.monsters, difficulty: c.difficulty };
+}
+
+/**
+ * The band of a party's mean level, each group weighted by its count and
+ * the mean rounded down, or null for a party with no level to read
+ * (D-261127-217, 219).
+ */
+export function partyBand(groups: readonly PartyGroup[]): LevelBand | null {
+  const level = partyLevel(groups);
+  if (level === null) return null;
+  return LEVEL_BANDS.find((b) => level <= Number(b.split("-")[1])) ?? LEVEL_BANDS[LEVEL_BANDS.length - 1]!;
+}
+
+/** A party's mean level, weighted by count and rounded down, or null with no characters. */
+export function partyLevel(groups: readonly PartyGroup[]): number | null {
+  const size = partySize(groups);
+  return size <= 0 ? null : Math.floor(groups.reduce((sum, g) => sum + g.count * g.level, 0) / size);
+}
+
+/** Monsters is held at None while the party has no level to budget for. */
+export function monstersHeld(groups: readonly PartyGroup[]): boolean {
+  return partySize(groups) <= 0;
+}
+
+/** Monsters as the generator stocks it: the DM's pick, or None while held. */
+export function stockedShare(c: Pick<StockChoices, "monsters">, groups: readonly PartyGroup[]): number {
+  return monstersHeld(groups) ? 0 : c.monsters;
+}
+
+/** Whether the Traps band follows the party: Monsters and Traps both above None, with a party that has a level. */
+export function bandFollows(c: Pick<Choices, "monsters" | "traps">, groups: readonly PartyGroup[]): boolean {
+  return stockedShare(c, groups) > 0 && c.traps > 0 && partyBand(groups) !== null;
+}
+
+/**
+ * The band the settings should carry, worked out only at the DM's
+ * transitions and Held changes (D-261127-219): the party's while it
+ * follows, else the DM's own pick. A live level-up in a standing party is
+ * no transition, so the band stays where the last one put it.
+ */
+export function followedBand(c: Pick<Choices, "monsters" | "traps" | "ownBand">, groups: readonly PartyGroup[]): LevelBand {
+  return bandFollows(c, groups) ? partyBand(groups)! : c.ownBand;
+}
+
+/**
+ * Whether a change of the choices or the party is a transition the band is
+ * worked out at: Monsters crossing None either way, Traps crossing None
+ * while Monsters is on, a party edit, or Monsters' Held state changing.
+ */
+export function bandTransition(before: Pick<Choices, "monsters" | "traps">, after: Pick<Choices, "monsters" | "traps">, was: readonly PartyGroup[], now: readonly PartyGroup[], partyEdit: boolean): boolean {
+  if (partyEdit) return true;
+  // Monsters' Held state changing moves the share across None, so it is the crossing below.
+  const on = (c: Pick<Choices, "monsters">, g: readonly PartyGroup[]) => stockedShare(c, g) > 0;
+  if (on(before, was) !== on(after, now)) return true;
+  return on(after, now) && (before.traps > 0) !== (after.traps > 0);
+}
 
 /** The longest a side may be on a grid (settings.ts `maxSide`): 87 across a hex scene's rows, else 100. The presets' 80 is within it. */
 export function sideCap(grid: GridKind, axis: "w" | "h"): number {
@@ -55,7 +126,7 @@ export function withSize(c: Choices, next: Partial<Pick<Choices, "size" | "acros
  */
 export function settingsOf(c: Choices, grid: GridKind = "squares"): DungeonSettings {
   const { w, h } = sidesOf(c, grid);
-  const { size: _size, across: _across, down: _down, ...rest } = c;
+  const { size: _size, across: _across, down: _down, monsters: _monsters, difficulty: _difficulty, ownBand: _ownBand, ...rest } = c;
   return clampSettings({ ...rest, w, h, rooms: clampRooms(c.rooms, w, h, grid) }, grid);
 }
 
@@ -108,7 +179,9 @@ export function parseChoices(raw: string | null): Choices | null {
   const down = typeof r.down === "number" ? clampSide(r.down) : DEFAULT_CHOICES.down;
   const { w, h } = sidesOf({ size, across, down });
   const { w: _sw, h: _sh, ...rest } = clampSettings({ ...r, w, h, rooms: typeof r.rooms === "number" ? r.rooms : defaultRooms(size, w, h) });
-  return { ...rest, size, across, down };
+  // A device that remembered no own pick, from before Monsters, kept the band it had: that was the DM's pick.
+  const ownBand = LEVEL_BANDS.includes(r.ownBand as LevelBand) ? (r.ownBand as LevelBand) : rest.band;
+  return { ...rest, ...clampStock({ monsters: r.monsters, difficulty: r.difficulty }), ownBand, size, across, down };
 }
 
 function browserStorage(): Storage | null {
@@ -156,10 +229,39 @@ export function saveChoices(roomId: string, c: Choices, storage: Storage | null 
     lit: c.lit,
     dressing: c.dressing,
     key: c.key,
+    monsters: c.monsters,
+    difficulty: c.difficulty,
+    ownBand: c.ownBand,
   };
   try {
     storage?.setItem(keyOf(roomId), JSON.stringify(kept));
   } catch {
     // Private mode or full storage: the next open starts from the defaults.
   }
+}
+
+/** What the band reads of the choices: the shares, the settings' band and the DM's own pick. */
+type Banded = Pick<Choices, "monsters" | "traps" | "band" | "ownBand">;
+
+/**
+ * A change of the Monsters choices or the party, as the dialog and the
+ * wing pane make it (D-261127-063, 219): the choices after it, and whether
+ * it drops the room edits. It keeps them, as stocking moves nothing they
+ * pin, unless it is a transition that moves the band, which shapes traps
+ * and the edits' frozen layout, so it drops them as any choice does.
+ */
+export function restocked<T extends Banded>(c: T, next: T, was: readonly PartyGroup[], now: readonly PartyGroup[], partyEdit: boolean): { next: T; drop: boolean } {
+  const band = bandTransition(c, next, was, now, partyEdit) ? followedBand(next, now) : c.band;
+  return band === c.band ? { next: { ...next, band: c.band }, drop: false } : { next: { ...next, band }, drop: true };
+}
+
+/**
+ * A change of a settings row, which always drops the edits: a Party level
+ * pick is the DM's own, kept to come back to, and Traps crossing None while
+ * Monsters is on is a transition the band follows.
+ */
+export function rowChanged<T extends Banded>(c: T, patch: Partial<T>, groups: readonly PartyGroup[]): T {
+  const next = { ...c, ...patch };
+  if (patch.band !== undefined && patch.band !== c.band) return { ...next, ownBand: patch.band };
+  return bandTransition(c, next, groups, groups, false) ? { ...next, band: followedBand(next, groups) } : next;
 }

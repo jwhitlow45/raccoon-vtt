@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
-import { DEFAULT_CHOICES, keptSize, loadChoices, parseChoices, roomsDefault, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
+import {
+  bandFollows,
+  bandTransition,
+  DEFAULT_CHOICES,
+  followedBand,
+  keptSize,
+  loadChoices,
+  monstersHeld,
+  parseChoices,
+  partyBand,
+  partyLevel,
+  restocked,
+  roomsDefault,
+  rowChanged,
+  saveChoices,
+  settingsOf,
+  sidesOf,
+  startChoices,
+  stockedShare,
+  withSize,
+  type Choices,
+} from "./remembered.ts";
 import { clampRooms, clampSettings, roomCap } from "./settings.ts";
 
 function memory() {
@@ -152,4 +173,90 @@ test("DG3: on hexes Custom stops at 87 across the rows, the presets stand, and R
 test("DG3: settings come in clampSettings' order, so the JSON an edit freezes is the planner's", () => {
   const s = settingsOf({ ...DEFAULT_CHOICES, rooms: 9 });
   assert.equal(JSON.stringify(s), JSON.stringify(clampSettings(s)));
+});
+
+/*
+ * DSTOCK (docs/design/design-v1-dungeon-stock.md 4, D-261127-061, 219): the
+ * Monsters choices are remembered beside the rest, and the Traps band
+ * follows the party only at the DM's transitions and Held changes.
+ */
+
+test("DSTOCK-R: the Monsters choices and the DM's own band round trip, and an older device's band is its own pick", () => {
+  const storage = memory();
+  const c: Choices = { ...DEFAULT_CHOICES, monsters: 50, difficulty: "high", band: "5-10", ownBand: "11-16" };
+  saveChoices("ROOMS", c, storage);
+  assert.deepEqual(loadChoices("ROOMS", storage), c);
+  const { monsters: _m, difficulty: _d, ownBand: _o, ...old } = { ...DEFAULT_CHOICES, band: "11-16" as const };
+  storage.setItem("rvtt.dungeon.OLDER", JSON.stringify(old));
+  assert.deepEqual(loadChoices("OLDER", storage), { ...DEFAULT_CHOICES, band: "11-16", ownBand: "11-16" });
+  storage.setItem("rvtt.dungeon.ODD", JSON.stringify({ ...c, monsters: 33, difficulty: "deadly", ownBand: "9-12" }));
+  const odd = loadChoices("ODD", storage)!;
+  assert.deepEqual([odd.monsters, odd.difficulty, odd.ownBand], [35, "moderate", "5-10"]);
+  // The settings the generator reads hold no stock, so the frozen layout of an edit never moves with it (D-261127-061).
+  assert.deepEqual(settingsOf(c), settingsOf({ ...c, monsters: 0, difficulty: "low", ownBand: "1-4" }));
+});
+
+test("DSTOCK-R: the party's band is its mean level, weighted by count and rounded down", () => {
+  assert.equal(partyBand([]), null);
+  assert.equal(partyBand([{ count: 4, level: 3 }]), "1-4");
+  assert.equal(partyBand([{ count: 3, level: 4 }, { count: 1, level: 5 }]), "1-4");
+  assert.equal(partyBand([{ count: 2, level: 4 }, { count: 2, level: 6 }]), "5-10");
+  assert.equal(partyBand([{ count: 1, level: 16 }, { count: 1, level: 17 }]), "11-16");
+  assert.equal(partyBand([{ count: 1, level: 20 }]), "17-20");
+  assert.equal(partyLevel([{ count: 3, level: 4 }, { count: 1, level: 6 }]), 4);
+  assert.equal(monstersHeld([]), true);
+  assert.equal(stockedShare({ monsters: 50 }, []), 0, "held at None without a level");
+  assert.equal(stockedShare({ monsters: 50 }, [{ count: 1, level: 1 }]), 50);
+});
+
+const FOUR_3 = [{ count: 4, level: 3 }];
+const FOUR_5 = [{ count: 4, level: 5 }];
+const banded = (over: Partial<Choices> = {}): Choices => ({ ...DEFAULT_CHOICES, traps: 2, band: "1-4", ownBand: "1-4", ...over });
+
+test("DSTOCK-R: Monsters None to Few with a party in another band moves the band and drops the edits, and back to None returns the DM's pick", () => {
+  const c = banded();
+  const on = restocked(c, { ...c, monsters: 25 }, FOUR_5, FOUR_5, false);
+  assert.deepEqual([on.next.band, on.drop], ["5-10", true]);
+  assert.equal(on.next.ownBand, "1-4", "the DM's own pick is kept");
+  const off = restocked(on.next, { ...on.next, monsters: 0 }, FOUR_5, FOUR_5, false);
+  assert.deepEqual([off.next.band, off.drop], ["1-4", true]);
+  // In the party's own band the same crossing keeps the edits.
+  assert.deepEqual(restocked(c, { ...c, monsters: 25 }, FOUR_3, FOUR_3, false), { next: { ...c, monsters: 25 }, drop: false });
+});
+
+test("DSTOCK-R: Monsters, Difficulty and party changes keep the edits while the band holds", () => {
+  const c = banded({ monsters: 50 });
+  assert.equal(restocked(c, { ...c, monsters: 75 }, FOUR_3, FOUR_3, false).drop, false, "a share above None to another");
+  assert.equal(restocked(c, { ...c, difficulty: "high" }, FOUR_3, FOUR_3, false).drop, false, "Difficulty");
+  assert.equal(restocked(c, c, FOUR_3, [{ count: 5, level: 3 }], true).drop, false, "a party edit in the same band");
+  const across = restocked(c, c, FOUR_3, FOUR_5, true);
+  assert.deepEqual([across.next.band, across.drop], ["5-10", true], "a party edit across a band moves it");
+});
+
+test("DSTOCK-R: a live level-up across a band is no transition: the band and the edits stay, and the next change moves it", () => {
+  const c = banded({ monsters: 50 });
+  assert.equal(bandTransition(c, c, FOUR_3, FOUR_5, false), false);
+  assert.deepEqual(restocked(c, c, FOUR_3, FOUR_5, false), { next: c, drop: false });
+  assert.deepEqual(restocked(c, { ...c, difficulty: "low" }, FOUR_5, FOUR_5, false), { next: { ...c, difficulty: "low" }, drop: false }, "Difficulty is no transition either");
+  assert.equal(restocked(c, { ...c, monsters: 0 }, FOUR_5, FOUR_5, false).next.band, "1-4");
+});
+
+test("DSTOCK-R: Traps at None follows nothing, Traps crossing None while Monsters is on follows, and a band pick is the DM's own", () => {
+  const c = banded({ traps: 0, monsters: 50 });
+  assert.equal(bandFollows(c, FOUR_5), false);
+  assert.equal(rowChanged(c, { theme: "crypt" }, FOUR_5).band, "1-4");
+  const traps = rowChanged(c, { traps: 2 }, FOUR_5);
+  assert.equal(traps.band, "5-10", "Traps crossing None while Monsters is on");
+  assert.equal(rowChanged(traps, { traps: 0 }, FOUR_5).band, "1-4", "and back to the DM's pick");
+  const pick = rowChanged(banded(), { band: "11-16" }, FOUR_5);
+  assert.deepEqual([pick.band, pick.ownBand], ["11-16", "11-16"]);
+});
+
+test("DSTOCK-R: Monsters' Held state changing is a transition, both ways", () => {
+  const c = banded({ monsters: 50 });
+  assert.equal(bandTransition(c, c, [], FOUR_5, false), true);
+  assert.deepEqual(restocked(c, c, [], FOUR_5, false), { next: { ...c, band: "5-10" }, drop: true });
+  const held = restocked({ ...c, band: "5-10" }, { ...c, band: "5-10" }, FOUR_5, [], false);
+  assert.deepEqual([held.next.band, held.drop], ["1-4", true]);
+  assert.equal(followedBand(c, []), "1-4");
 });

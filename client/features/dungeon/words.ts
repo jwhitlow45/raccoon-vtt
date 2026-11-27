@@ -7,6 +7,10 @@ import { sceneHexSpan } from "#shared/rules/hex.ts";
 import { hexGridOf } from "./lattice.ts";
 import type { DungeonOutcome } from "./send.ts";
 import type { Summary } from "./client.ts";
+import type { PartyGroup } from "#shared/model.ts";
+import type { Difficulty } from "#shared/srd/xp-budget.ts";
+import type { LevelBand } from "#shared/srd/traps.ts";
+import { DIFFICULTY_LABEL, partySize, xpText } from "../encounters/budget.ts";
 
 /**
  * Every sentence the Generate a dungeon dialog shows
@@ -43,6 +47,8 @@ export const DRESSING_HELP = "Furniture, bones and clutter from the shipped stam
 export const KEY_HELP = "A DM-only journal page describing each room by number, and a DM-only numbered pin in each room.";
 export const KEY_FULL = "The journal is full, so there is no room for a key.";
 export const SEED_HELP = "A seed makes the same dungeon again on this version of the app, at the same feet per square.";
+/** The seed's promise while Monsters is above None, since the party shapes each fight (docs/design/design-v1-dungeon-stock.md 4, D-261127-062). */
+export const SEED_HELP_STOCKED = "A seed makes the same dungeon again on this version of the app, at the same feet per square, for the same party.";
 export const NO_FOG_WARNING = "Players see this scene without fog, so every room shows at once. Explore or Reveal by hand keeps rooms dark until found.";
 export const NO_FOG_SECRET_WARNING = "Players see this scene without fog, so every room shows at once, secret rooms too. Explore or Reveal by hand keeps rooms dark until found.";
 
@@ -92,6 +98,66 @@ export function litWords(share: number, rooms: number): string {
   const n = litCount(share, rooms);
   return n === 0 ? "No lights" : `About ${n} of ${rooms} rooms lit`;
 }
+
+/*
+ * The Monsters rows (docs/design/design-v1-dungeon-stock.md 1).
+ */
+
+export const MONSTERS_HELP = "Each of those rooms holds one fight for the party at this difficulty, from the SRD monsters that suit the theme. They stand hidden from players until you show them.";
+export const MONSTERS_HELD = "Give the party a level to stock rooms: set one on a character's card, or edit the party below.";
+export const MONSTERS_LOADING = "Loading monsters…";
+/** What each theme stocks its rooms from (stockPools.ts `THEME_FAMILIES`). */
+export const MONSTERS_THEME: Readonly<Record<Theme, string>> = {
+  dungeon: "Goblins, bandits, cultists, beasts of the deep, oozes and constructs.",
+  crypt: "The undead and the constructs that guard them.",
+  cave: "Beasts, swarms, oozes, fungi and the things that lair in the dark.",
+  mine: "Elementals, constructs, burrowers, goblins and kobolds.",
+  sewer: "Rats, snakes, crocodiles, swarms, oozes, otyughs and wererats.",
+};
+
+/** Monsters in words, for the Rooms asked, as Heights rounds: "No monsters", or "About 3 rooms of 12 get monsters". */
+export function monstersWords(share: number, rooms: number): string {
+  const n = raisedCount(share, rooms);
+  return n === 0 ? "No monsters" : `About ${n} ${n === 1 ? "room" : "rooms"} of ${rooms} ${n === 1 ? "gets" : "get"} monsters`;
+}
+
+/** "4 characters at level 3", or "5 characters: 4 at level 3, 1 at level 4". */
+export function partyWords(groups: readonly PartyGroup[]): string {
+  const size = partySize(groups);
+  const who = `${size} ${size === 1 ? "character" : "characters"}`;
+  const only = groups.length === 1 ? groups[0] : undefined;
+  return only ? `${who} at level ${only.level}` : `${who}: ${groups.map((g) => `${g.count} at level ${g.level}`).join(", ")}`;
+}
+
+/** Difficulty's help from the live budget: "Moderate: 900 XP a room for 4 characters at level 3." */
+export function difficultyHelp(d: Difficulty, budget: number, groups: readonly PartyGroup[]): string {
+  return `${DIFFICULTY_LABEL[d]}: ${xpText(budget)} a room for ${partyWords(groups)}.`;
+}
+
+const bandWords = (band: LevelBand) => `levels ${band.replace("-", " to ")}`;
+
+/**
+ * The Party level row's lines while it follows the party (D-261127-229):
+ * where the band was set from, and when a live level-up has put the party
+ * in another band since, what the party is now and when the band moves.
+ */
+export function bandLines(band: LevelBand, now: LevelBand | null, level: number | null): string[] {
+  const lines = [`Set from the party: ${bandWords(band)}.`];
+  if (now !== null && now !== band && level !== null) lines.push(`The party is now level ${level}. The band moves when you next change the party or Monsters.`);
+  return lines;
+}
+
+/** The over-limit line in the Monsters area (D-261127-280). */
+export function overLimitLine(by: number): string {
+  return `Over the creature limit by ${by}. Turn a room's monsters off, or lower Monsters.`;
+}
+
+/** A room's fight as the room panel lists it: "Goblin Boss, Goblin Warrior × 3 · 350 XP". Names keep the SRD's spelling, so no plurals are made. */
+export function fightLine(lines: readonly (readonly [string, number])[], xp: number): string {
+  return `${lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ")} · ${xpText(xp)}`;
+}
+
+export const OTHER_MONSTERS = "Other monsters";
 
 export const LOOK_CLOSER = "Look closer";
 export const LOOK_CLOSER_DETAILS = "The DM view: secret doors, traps and room numbers show only here.";
@@ -149,7 +215,9 @@ export function statusLine(s: Summary): string {
   const kinds = [...(s.locked > 0 ? [`${s.locked} locked`] : []), ...(s.secretDoors > 0 ? [`${s.secretDoors} secret`] : [])];
   const doors = s.doors === 0 ? "no doors" : counted(s.doors, "door", "doors") + (kinds.length > 0 ? ` (${kinds.join(", ")})` : "");
   const traps = s.traps === 0 ? "no traps" : counted(s.traps, "trap", "traps");
-  return `${rooms}, ${doors}, ${traps}.`;
+  // A stocked dungeon counts its creatures and the rooms that hold them. At None the line is as it always was.
+  const monsters = s.monsters === undefined ? "" : s.monsters === 0 ? ", no monsters" : `, ${counted(s.monsters, "monster", "monsters")} in ${counted(s.stockedRooms ?? 0, "room", "rooms")}`;
+  return `${rooms}, ${doors}, ${traps}${monsters}.`;
 }
 
 /** Said when fewer rooms fit than were asked for, else null. On hexes the walls are what bind (phase 3, 7). */
@@ -185,10 +253,11 @@ export function entranceSide(plan: Pick<DungeonPlan, "w" | "h" | "entrance">): S
 }
 
 /** The preview image's name: "Preview of the dungeon: 12 rooms, 2 secret doors, 3 lit rooms, entrance on the west side." */
-export function previewName(s: Pick<Summary, "rooms"> & Partial<Pick<Summary, "secretDoors" | "lights">>, side: Side): string {
+export function previewName(s: Pick<Summary, "rooms"> & Partial<Pick<Summary, "secretDoors" | "lights" | "monsters">>, side: Side): string {
   const secret = s.secretDoors ? [counted(s.secretDoors, "secret door", "secret doors")] : [];
   const lit = s.lights ? [counted(s.lights, "lit room", "lit rooms")] : [];
-  return `Preview of the dungeon: ${[counted(s.rooms, "room", "rooms"), ...secret, ...lit].join(", ")}, entrance on the ${side} side.`;
+  const monsters = s.monsters ? [counted(s.monsters, "monster", "monsters")] : [];
+  return `Preview of the dungeon: ${[counted(s.rooms, "room", "rooms"), ...secret, ...lit, ...monsters].join(", ")}, entrance on the ${side} side.`;
 }
 
 /**
@@ -302,7 +371,7 @@ export function editedLine(rooms: number): string {
 }
 
 /** The rows a report stands under in the room panel. */
-export type ReportRow = "height" | "doors" | "trap" | "dressing" | "lit" | "other";
+export type ReportRow = "height" | "doors" | "trap" | "dressing" | "lit" | "monsters" | "other";
 
 /**
  * Which row each report belongs under, by what it speaks of (4.1): stairs
@@ -312,6 +381,7 @@ export type ReportRow = "height" | "doors" | "trap" | "dressing" | "lit" | "othe
  */
 export function reportRow(line: string): ReportRow {
   if (line.startsWith("No room for its stairs")) return "height";
+  if (/\bmonsters\b/.test(line)) return "monsters";
   if (/\bdoor\b/.test(line)) return "doors";
   if (/\btrap\b/.test(line)) return "trap";
   if (/\bstamp\b/.test(line)) return "dressing";
@@ -320,7 +390,7 @@ export function reportRow(line: string): ReportRow {
 }
 
 export function reportsByRow(lines: readonly string[]): Record<ReportRow, string[]> {
-  const out: Record<ReportRow, string[]> = { height: [], doors: [], trap: [], dressing: [], lit: [], other: [] };
+  const out: Record<ReportRow, string[]> = { height: [], doors: [], trap: [], dressing: [], lit: [], monsters: [], other: [] };
   for (const line of lines) out[reportRow(line)].push(line);
   return out;
 }

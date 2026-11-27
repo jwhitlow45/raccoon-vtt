@@ -186,3 +186,38 @@ test("DG3: the room panel's words, the edits line and the preview's name with a 
   assert.equal(selectedName("Preview of the dungeon: 12 rooms, entrance on the west side.", 3), "Preview of the dungeon: 12 rooms, entrance on the west side. Room 3 selected.");
   assert.equal(selectedName("Preview.", null), "Preview.");
 });
+
+/* DSTOCK (docs/design/design-v1-dungeon-stock.md 1): the Monsters rows' words, the foot's count and the room panel's list. */
+const { bandLines, difficultyHelp, fightLine, monstersWords, overLimitLine, reportRow: rowOf } = await import("./words.ts");
+const { REPORTS } = await import("./edits.ts");
+
+test("DSTOCK-T: the foot counts the creatures and the rooms that hold them, and says nothing of them at None", () => {
+  const counts = { rooms: 12, asked: 12, doors: 18, locked: 3, traps: 4, secretDoors: 2, secretRooms: 1, lights: 3 };
+  assert.equal(statusLine({ ...counts, monsters: 14, stockedRooms: 3 }), "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps, 14 monsters in 3 rooms.");
+  assert.equal(statusLine({ ...counts, monsters: 1, stockedRooms: 1 }), "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps, 1 monster in 1 room.");
+  assert.equal(statusLine({ ...counts, monsters: 0, stockedRooms: 0 }), "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps, no monsters.");
+  assert.equal(statusLine(counts), "12 rooms (1 secret), 18 doors (3 locked, 2 secret), 4 traps.");
+  assert.equal(previewName({ rooms: 12, monsters: 14 }, "west"), "Preview of the dungeon: 12 rooms, 14 monsters, entrance on the west side.");
+});
+
+test("DSTOCK-T: Monsters reads as Heights rounds, and Difficulty its live budget", () => {
+  assert.equal(monstersWords(0, 12), "No monsters");
+  assert.equal(monstersWords(25, 12), "About 3 rooms of 12 get monsters");
+  assert.equal(monstersWords(25, 3), "About 1 room of 3 gets monsters", "Few picks one room on a small map");
+  assert.equal(difficultyHelp("moderate", 900, [{ count: 4, level: 3 }]), "Moderate: 900 XP a room for 4 characters at level 3.");
+  assert.equal(difficultyHelp("high", 1_250, [{ count: 1, level: 3 }, { count: 2, level: 4 }]), "High: 1,250 XP a room for 3 characters: 1 at level 3, 2 at level 4.");
+  assert.equal(difficultyHelp("low", 50, [{ count: 1, level: 1 }]), "Low: 50 XP a room for 1 character at level 1.");
+});
+
+test("DSTOCK-T: the held band says where it came from, and a level-up since says when it moves", () => {
+  assert.deepEqual(bandLines("1-4", "1-4", 3), ["Set from the party: levels 1 to 4."]);
+  assert.deepEqual(bandLines("1-4", "5-10", 5), ["Set from the party: levels 1 to 4.", "The party is now level 5. The band moves when you next change the party or Monsters."]);
+  assert.equal(overLimitLine(3), "Over the creature limit by 3. Turn a room's monsters off, or lower Monsters.");
+});
+
+test("DSTOCK-T: a room's fight lists names as the SRD spells them with a count, and its report stands under Monsters", () => {
+  assert.equal(fightLine([["Goblin Boss", 1], ["Goblin Warrior", 3]], 350), "Goblin Boss, Goblin Warrior × 3 · 350 XP");
+  assert.equal(fightLine([["Swarm of Rats", 2]], 1_100), "Swarm of Rats × 2 · 1,100 XP");
+  assert.equal(rowOf(REPORTS.noMonsterSpot), "monsters");
+  assert.equal(rowOf(REPORTS.noTrapSpot), "trap");
+});
