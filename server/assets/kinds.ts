@@ -56,6 +56,9 @@ export type KindSpec = {
 
 const MiB = 1024 * 1024;
 
+/** A model sheet's three copies, each at one of the widths a sheet may have, so every frame's edge stays on a whole pixel in each. */
+const [MODEL_THUMB_PX, MODEL_MOBILE_PX, MODEL_FULL_PX] = MODEL_LIMITS.sheetWidthsPx;
+
 export const KINDS: Record<AssetKind, KindSpec> = {
   map: {
     maxUploadBytes: 32 * MiB,
@@ -130,16 +133,17 @@ export const KINDS: Record<AssetKind, KindSpec> = {
    * 4.3): the file stays on the device that drew it, and the room keeps only
    * this image, checked for its shape before it is made (process.ts). Its
    * mobile copy is what phones draw in play, and the thumbnail the Library's.
-   * Whoever may set a picture may add one, and a player reads it only while
-   * an image their copy holds names it.
+   * Whoever may set a picture may add one. A player reads one while an
+   * image their copy holds names it, or when they uploaded it themselves, as
+   * for a token picture (store.ts uploadedAssetIds).
    */
   model: {
     maxUploadBytes: MODEL_LIMITS.sheetBytes,
     deadlineMs: MODEL_LIMITS.sheetUploadMs,
     variants: [
-      { name: "full", maxSide: 2048 },
-      { name: "mobile", maxSide: 1024 },
-      { name: "thumb", maxSide: 512 },
+      { name: "full", maxSide: MODEL_FULL_PX },
+      { name: "mobile", maxSide: MODEL_MOBILE_PX },
+      { name: "thumb", maxSide: MODEL_THUMB_PX },
     ],
     dmOnly: false,
     playersRead: true,

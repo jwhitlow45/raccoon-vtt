@@ -102,6 +102,8 @@ test("a 3D model's sheet is a kind of its own: anyone who may set a picture adds
   assert.deepEqual([KINDS.model.maxUploadBytes, KINDS.model.deadlineMs], [MODEL_LIMITS.sheetBytes, MODEL_LIMITS.sheetUploadMs]);
   // The full copy is the sheet the client draws: 4 frames of 512 across.
   assert.equal(KINDS.model.variants[0]!.maxSide, MODEL_LIMITS.framePx * MODEL_LIMITS.sheetColumns);
+  // Every copy is a width a sheet may have, so the server would take each back as a sheet and its frames keep whole-pixel edges.
+  for (const { name, maxSide } of KINDS.model.variants) assert.ok((MODEL_LIMITS.sheetWidthsPx as readonly number[]).includes(maxSide), name);
   assert.ok(PLAYER_UPLOAD_KINDS.includes("model"), "so a player's own sheet is theirs to read and to wear");
   assert.deepEqual([...PLAYER_UPLOAD_KINDS].sort(), ["model", "token"]);
 });
