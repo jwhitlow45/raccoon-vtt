@@ -209,7 +209,7 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
   };
   const openPage = (pageId: string) => {
     scope.get(journalSlot).setState({ pageId });
-    ui.openPanel("journal");
+    ui.openPanel("journal", undefined, { link: true });
   };
 
   // One column no wider than the pane: a field's own minimum width would otherwise widen it and scroll the pane sideways.

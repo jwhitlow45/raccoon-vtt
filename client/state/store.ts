@@ -41,6 +41,7 @@ import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { canonicalPanelId, panelById } from "../features/panels.ts";
+import { claimShown, toolShown } from "../features/modules/gate.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OnRemint, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type ToastSends, type UnknownCause, type You, hasButtons } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
@@ -301,7 +302,13 @@ export type Outbox = { send(msg: ClientMessage): boolean };
 /** UI state setters for `local` (design section 14.1). They never touch the room. */
 export type RoomUi = {
   openHistory?(target: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null): void;
-  setTool(id: string): void;
+  /**
+   * Picks a tool. A tool of a part hidden on this device is refused, unless
+   * `borrow` says it serves another part's draft, as the Area tool aims a
+   * trap's rig with Areas hidden (docs/design/design-v1-features.md 8,
+   * D-261127-302, 303). The borrow lasts until the next tool change.
+   */
+  setTool(id: string, opts?: { borrow?: true }): void;
   /**
    * Selects a token, leaving its action bar as it is. Null lets go. `opens`
    * marks the viewer's own opening, such as a token just placed or
@@ -321,8 +328,14 @@ export type RoomUi = {
   /** Ends "Multi-select" and lets go of the group, as its Done does (selection.ts doneSelecting). */
   doneSelecting(): void;
   showActions(open: boolean): void;
-  /** Opens a panel, in the pane `how` asks for or the one its rules choose (state/types.ts withPanel, docs/design/design-v1-split-panel.md 5.1). */
-  openPanel(id: string, how?: PanelHow): void;
+  /**
+   * Opens a panel, in the pane `how` asks for or the one its rules choose
+   * (state/types.ts withPanel, docs/design/design-v1-split-panel.md 5.1).
+   * A panel of a part hidden on this device is refused, unless `link` says
+   * a link in shared content opens it, as a pin opens its journal page,
+   * which then shows once (docs/design/design-v1-features.md 8, D-261127-129).
+   */
+  openPanel(id: string, how?: PanelHow, opts?: { link?: true }): void;
   closePanel(): void;
   /**
    * Opens or closes the side panel's second panel (state/types.ts withSplit,
@@ -1460,9 +1473,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
   const ui: RoomUi = {
     openHistory: (historyReview) => store.setState({ historyReview }),
-    setTool(id) {
+    setTool(id, opts) {
       const local = get().local;
-      if (local.tool !== id) store.setState({ local: { ...local, tool: id } });
+      const role = get().you?.role;
+      const borrow = opts?.borrow === true;
+      if (role && !borrow && !toolShown(id, role)) return;
+      if (local.tool === id && (local.toolBorrowed === true) === borrow) return;
+      const { toolBorrowed: _was, ...rest } = local;
+      store.setState({ local: borrow ? { ...rest, tool: id, toolBorrowed: true } : { ...rest, tool: id } });
     },
     select(tokenId, opts) {
       setLocal(selectToken(get().local, tokenId, opts?.opens === true));
@@ -1488,9 +1506,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     showActions(open) {
       setLocal(showActions(get().local, open));
     },
-    openPanel(asked, how) {
+    openPanel(asked, how, opts) {
       // A stale caller's old id ("time", "sound") opens the panel that took its place, so local state never holds an id the registry lacks.
       const id = canonicalPanelId(asked);
+      const role = get().you?.role;
+      if (role && opts?.link !== true && !claimShown("panel", id, role)) return;
       setLocal(withPanel(get().local, id, how, panelById(id)?.narrowOnly === true));
     },
     splitPanels(on, pair) {

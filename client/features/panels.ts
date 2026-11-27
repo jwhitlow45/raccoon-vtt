@@ -14,6 +14,8 @@ import {
 import type { IconName } from "../components/Icon.tsx";
 import type { HeaderBack } from "../components/SheetHeader.tsx";
 import { retryableLazy } from "../lib/retryableLazy.ts";
+import { claimShown } from "./modules/gate.ts";
+import type { FeatureChoices } from "./modules/store.ts";
 import { scopeSlot, useScopedIfAny } from "../state/scope.ts";
 // The starter catalog's background load joins the panels' (features/starter/catalog.ts). Its pickers live in lazy panels, too late to register it.
 import "./starter/catalog.ts";
@@ -171,11 +173,19 @@ export const PANELS: readonly PanelDef[] = [
  * (docs/design/design-v1-music.md 4.1). The DM has both panels always. Room
  * works these out (pages/Room.tsx), so this only decides what is listed.
  */
-export type PanelsForOptions = { clock?: boolean; sound?: boolean };
+export type PanelsForOptions = {
+  clock?: boolean;
+  sound?: boolean;
+  /** This page's parts choices (features/modules/gate.ts): EVERYTHING in a preview or on a table display. Left out, this device's. */
+  choices?: FeatureChoices;
+  /** Whether a panel is open now, so a hidden part's panel that a link opened stays listed while it is open (D-261127-129). */
+  open?: (id: string) => boolean;
+};
 
-/** Whether a role is offered a panel (panelsFor). */
+/** Whether a role is offered a panel (panelsFor). A panel of a part hidden on this device is not, but while it is open. */
 export function panelOffered(p: PanelDef, role: "dm" | "player", wide = false, opts: PanelsForOptions = {}): boolean {
   if (p.dmOnly && role !== "dm") return false;
+  if (!claimShown("panel", p.id, role, opts.choices) && opts.open?.(p.id) !== true) return false;
   if (wide && p.narrowOnly) return false;
   if (role === "player" && p.needsClock && !opts.clock) return false;
   if (role === "player" && p.needsSound && !opts.sound) return false;

@@ -18,6 +18,8 @@ import { gridTool } from "./grid/tool.tsx";
 import { placeTool } from "./tokens/placeTool.tsx";
 import { SelectOptions } from "./select/SelectOptions.tsx";
 import { TOOL_ORDER } from "./toolbarOrder.ts";
+import { toolShown } from "./modules/gate.ts";
+import type { FeatureChoices } from "./modules/store.ts";
 
 /**
  * The toolbar's tools (design sections 14.2 to 14.4).
@@ -172,12 +174,22 @@ export const TOOLS: readonly ToolDef[] = [
   trapTool,
 ];
 
-/** The role's tools in toolbar order. With the room's state, those a tool's own rule hides are left out too. */
-export function toolsFor(role: "dm" | "player", state?: RoomView): ToolDef[] {
-  return TOOLS.filter((t) => t.roles.includes(role) && !(state && t.hidden?.(state))).sort((a, b) => a.order - b.order);
+/**
+ * The role's tools in toolbar order. With the room's state, those a tool's
+ * own rule hides are left out too, and those of a part hidden on this
+ * device always are (docs/design/design-v1-features.md 8). A preview or a
+ * table display passes EVERYTHING (features/modules/gate.ts).
+ */
+export function toolsFor(role: "dm" | "player", state?: RoomView, choices?: FeatureChoices): ToolDef[] {
+  return TOOLS.filter((t) => t.roles.includes(role) && toolShown(t.id, role, choices) && !(state && t.hidden?.(state))).sort((a, b) => a.order - b.order);
 }
 
-/** The tool with this id that the role may use, or the select tool. */
-export function activeTool(id: string, role: "dm" | "player"): ToolDef {
-  return TOOLS.find((t) => t.id === id && t.roles.includes(role)) ?? selectTool;
+/**
+ * The tool with this id that the role may use, or the select tool. A tool
+ * of a part hidden on this device gives Select too, unless `borrowed`: it
+ * serves another part's draft, as the Area tool aims a trap's rig
+ * (LocalUi `toolBorrowed`, D-261127-302, 303).
+ */
+export function activeTool(id: string, role: "dm" | "player", choices?: FeatureChoices, borrowed = false): ToolDef {
+  return TOOLS.find((t) => t.id === id && t.roles.includes(role) && toolShown(t.id, role, choices, borrowed)) ?? selectTool;
 }

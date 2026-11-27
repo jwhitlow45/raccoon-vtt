@@ -86,6 +86,23 @@ export function useRoomRoleIfAny(): { role: "dm" | "player"; display: boolean } 
 }
 
 /**
+ * The room's id and the viewer's role, null until the room says who you
+ * are, and whether the room is a table display's, or null outside a room,
+ * for the parts gate (features/modules/Gate.tsx), whose components also
+ * draw outside one.
+ */
+export function useRoomYouIfAny(): { roomId: string; role: "dm" | "player" | null; display: boolean } | null {
+  const ctx = useContext(RoomContext);
+  const store = ctx?.store ?? null;
+  const subscribe = useCallback((listener: () => void) => (store ? store.subscribe(listener) : () => {}), [store]);
+  const readRole = () => (store ? (store.getState().you?.role ?? null) : null);
+  const readRoom = () => (store ? store.getState().roomId : null);
+  const role = useSyncExternalStore(subscribe, readRole, readRole);
+  const roomId = useSyncExternalStore(subscribe, readRoom, readRoom);
+  return ctx && roomId !== null ? { roomId, role, display: ctx.display } : null;
+}
+
+/**
  * The room's connection state, or null outside a room, for a control that
  * also draws on Home (lib/shareOrigin.ts), where useRoomView would throw.
  */

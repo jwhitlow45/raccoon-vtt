@@ -249,6 +249,13 @@ export type Ended = { kind: "revoked" | "denied" | "deleted"; code: number };
 export type LocalUi = {
   /** The active tool's id from client/features/tools.ts. */
   tool: string;
+  /**
+   * The active tool serves another part's draft while its own part is
+   * hidden on this device, as the Area tool aims a trap's rig with Areas
+   * hidden (docs/design/design-v1-features.md 8, D-261127-303). Set by
+   * `setTool(id, { borrow: true })`, and gone with the next tool change.
+   */
+  toolBorrowed?: true;
   /** The selected token: the last of `selectedIds`, the one the single-token views show. */
   selectedId: string | null;
   /** Every selected token, in the order picked (state/selection.ts). */

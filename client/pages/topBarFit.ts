@@ -1,4 +1,6 @@
 import { STRIP_FACES, STRIP_FACES_FEW, STRIP_NAME_MIN_PX } from "../features/encounter/band.ts";
+import { claimShown } from "../features/modules/gate.ts";
+import type { FeatureChoices } from "../features/modules/store.ts";
 
 /**
  * The top bar's parts and the order it gives way in
@@ -183,6 +185,23 @@ export type BarContent = {
   yourTurn: boolean;
   words: readonly string[];
 };
+
+/** The parts a part of the app may take off the bar (features/modules/registry.ts `topBar` claims). */
+const GATED_PARTS = ["nowPlaying", "volume", "clock", "view"] as const satisfies readonly (TopBarPart & keyof BarContent)[];
+
+/**
+ * The content with the parts of parts hidden on this device left out
+ * (docs/design/design-v1-features.md 8): Sound's Now playing and speaker,
+ * Date and time's clock, Isometric view's View. Left out before the fit, so
+ * the steps never count a part the bar does not draw. A preview or a table
+ * display passes EVERYTHING (features/modules/gate.ts).
+ */
+export function shownBar(content: BarContent, choices?: FeatureChoices): BarContent {
+  const role = content.role;
+  if (role === null) return content;
+  const off = GATED_PARTS.filter((part) => content[part] && !claimShown("topBar", part, role, choices));
+  return off.length === 0 ? content : { ...content, ...Object.fromEntries(off.map((part) => [part, false])) };
+}
 
 /** The content as one string: two bars with the same key and width show the same. */
 export function fitKey(content: BarContent): string {

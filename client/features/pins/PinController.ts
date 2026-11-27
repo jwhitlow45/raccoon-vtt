@@ -101,7 +101,7 @@ function useTapPin(stage: Konva.Stage | null, enabled: boolean, board: BoardRef)
       if (hit.pageId !== undefined && view.journal[hit.pageId]) {
         pinState.setState({ popover: null });
         scope.get(journalSlot).setState({ pageId: hit.pageId });
-        ui.openPanel("journal");
+        ui.openPanel("journal", undefined, { link: true });
       } else if (hit.label) {
         pinState.setState({ popover: { id: hit.id, at: Date.now() } });
       }

@@ -445,7 +445,7 @@ export function DmClockChip(props: { onOpenTime(): void; onOpen?(open: boolean):
  * not the menu, since an answer may come after the menu closed, and
  * cleared as it closes.
  */
-function useChipHost(handle: PopoverHandle) {
+export function useChipHost(handle: PopoverHandle) {
   const ui = useRoomUi();
   const [ask, setAsk] = useState<ChipAsk | null>(null);
   const [said, setSaid] = useState<ReadonlyMap<string, string>>(new Map());
@@ -510,7 +510,7 @@ function useChipHost(handle: PopoverHandle) {
   return { ask, said, target, drawn, pick, shape, setShape };
 }
 
-type ChipHost = ReturnType<typeof useChipHost>;
+export type ChipHost = ReturnType<typeof useChipHost>;
 
 /** An item's line under its words: the warning in the warning color, a refusal in red, the shared wait, or why an item is off, dim with it as a note is (Menu.tsx). */
 function underLine(item: ChipItem): ReactNode {
@@ -549,7 +549,7 @@ export function menuItemOf(item: ChipItem): MenuItem {
 }
 
 /** One chip's menu, drawn while open: the sections as the host draws them, the pick through the host, and focus where the host moves it. */
-function ChipMenuBody(props: { host: ChipHost; env: ChipEnv; label: string; sections: readonly ChipSection[]; mark: string }) {
+export function ChipMenuBody(props: { host: ChipHost; env: ChipEnv; label: string; sections: readonly ChipSection[]; mark: string }) {
   const { host } = props;
   const drawn = asDrawn(props.sections, { ask: host.ask, said: host.said });
   const items = itemsOf(drawn);

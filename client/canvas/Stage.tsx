@@ -10,6 +10,7 @@ import { labelBox } from "#shared/rules/labels.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { drawnSpot } from "#shared/rules/nudge.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
+import { useFeatureChoicesHere } from "../features/modules/Gate.tsx";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
 import { ReadoutHost } from "../features/builder/heights/ReadoutHost.tsx";
 import { measureLabel as measureMapLabel } from "../features/builder/draw.ts";
@@ -293,8 +294,11 @@ export function MapStage(props: {
   const selectedIds = useRoomView((s) => s.local.selectedIds);
   const multi = useRoomView((s) => s.local.multi);
   const toolId = useRoomView((s) => s.local.tool);
+  const toolBorrowed = useRoomView((s) => s.local.toolBorrowed === true);
   const focus = useRoomView((s) => s.ephemeral.focus);
-  const tool = activeTool(toolId, role);
+  // A tool of a part hidden on this device gives Select, so its gesture ends at once, here or from another window (docs/design/design-v1-features.md 8).
+  const featureChoices = useFeatureChoicesHere();
+  const tool = activeTool(toolId, role, featureChoices, toolBorrowed);
   const selecting = !tool.pointer;
   /*
    * The view the board shows: the room's view choice (features/view), or a
@@ -504,7 +508,7 @@ export function MapStage(props: {
     const full = scope.get(dockSlot).getState().sheetFull;
     const layout = layoutSize(window, uiScale());
     const sideRoom = sideSheetRoom(layout, scope.get(barDockSlot).getState().chrome);
-    return local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layout, sheetOpen: sheetIsOpen(local), full, sideRoom });
+    return local.actionBar && local.selectedId !== null && !activeTool(local.tool, role, featureChoices, local.toolBorrowed === true).pointer && !foldsUnderSheet({ ...layout, sheetOpen: sheetIsOpen(local), full, sideRoom });
   };
   const barCoverRef = useRef<(viewport: Size, source: "drawn" | "opening" | "fresh", shows?: boolean) => Insets>(() => NO_INSETS);
   barCoverRef.current = (viewport, source, shows = barShowsRef.current()) => {
