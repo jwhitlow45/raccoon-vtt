@@ -561,7 +561,7 @@ describe("websocket: what a frame pays is what it parses to (design 7.6)", () =>
       const sceneId = sceneOf(snap.state as ProjectedState);
       // The eph burst spent whole, within the frame count's: 399 pings of the map, then a second's 101 more.
       for (let i = 0; i < 399; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await s.reached();
       frozenAt += 1_000;
       for (let i = 0; i < 101; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
       // An op that names `t` twice is an op to the parser, so it pays the bytes, which the pings left whole.
@@ -620,8 +620,8 @@ describe("websocket: what a frame pays is what it parses to (design 7.6)", () =>
       const sceneId = sceneOf(snap.state as ProjectedState);
       for (let second = 0; second < 12 && s.closeCode === null; second++) {
         for (let i = 0; i < 301; i++) s.send({ t: "eph", sceneId, e: { k: "ping", x: 1, y: 1 } });
-        // The frames reach the server before the clock moves on.
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // The server has read the frames before the clock moves on, however slowly a loaded machine carries them.
+        await s.reached();
         frozenAt += 1_000;
       }
       await s.waitClosed();

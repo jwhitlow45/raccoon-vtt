@@ -315,7 +315,8 @@ describe("a fault in the room engine", () => {
       for (let step = 0; step <= 12 && socket.closeCode === null; step++) {
         wsClock = from + step * 900;
         for (let i = 0; i < 500; i++) socket.send({ t: "ping", k: i });
-        await new Promise((done) => setTimeout(done, 100));
+        // The server has read the step's frames before the clock moves on, even on a socket that waits to close.
+        await socket.reached();
       }
       assert.equal((await socket.waitClosed()).code, 4008, "a flood past the frame budget closes it as abuse");
     } finally {
