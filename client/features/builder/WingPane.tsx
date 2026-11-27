@@ -134,12 +134,13 @@ export type WingKeyRoom = { name: string; color: string; titles: readonly string
  * apart.
  */
 export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: WingBase) => void = postWingBase, plan: typeof previewWing = previewWing): WingPlanner {
-  let posted: string | null = null;
+  let posted: { read: string; tokens: WingBase["state"]["tokens"] } | null = null;
   return async ({ settings, seed, base, feetPerCell, edits, stock }) => {
     const read = `${base.hash} ${JSON.stringify(base.join)}`;
-    if (posted !== read) {
+    // Tokens read again under the same hash (`withTokens`) are posted too, since the worker lands the creatures on the base it holds.
+    if (posted?.read !== read || posted.tokens !== base.state.tokens) {
       post(base);
-      posted = read;
+      posted = { read, tokens: base.state.tokens };
     }
     const grid = base.scene.gridShape ?? "squares";
     const sceneId = base.scene.id;
@@ -156,6 +157,17 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: ghostRooms(answer.plan, answer.facts) });
     return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout, stones: answer.plan.stones.length, ...(answer.unstocked ? { unstocked: true as const } : {}) };
   };
+}
+
+/**
+ * The base with the scene's tokens read again, its hash kept so the edits
+ * hold. The pane reads them as the scene's room for creatures moves: a
+ * base kept from before a token was deleted lands the wing's creatures
+ * past the cap the live count says they fit, and the wing stays without
+ * them (D-261127-601).
+ */
+export function withTokens(base: WingBase, tokens: WingBase["state"]["tokens"]): WingBase {
+  return tokens === base.state.tokens ? base : { ...base, state: { ...base.state, tokens } };
 }
 
 /** Add the wing's send: every id fresh at Make (dungeon/ops.ts wingIds), then sendWing behind its asks. */
@@ -401,11 +413,19 @@ export default function WingPane(props: {
   // The base is read when the area or join is set, not on every change to the room: Add the wing checks the live scene again (3.5).
   // A clash at Add the wing posts the base again (3.5): `reread` moves it on.
   const [reread, setReread] = useState(0);
-  const base = useMemo(() => {
+  const read = useMemo(() => {
     const view = roomStore.getState().floorView;
     return view && join ? wingBaseOf(view, scene, picks.area, join) : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomStore, scene, picks.area, join, reread]);
+  // The wing's scene group, sibling floors included, is what the creatures must fit (D-261127-075).
+  const tokensLeft = useTokensLeft(share > 0, scene.id);
+  // As that room moves, a token deleted or added, the scene's tokens are read again under the same hash, so the edits hold (D-261127-601).
+  const base = useMemo(() => {
+    const tokens = roomStore.getState().floorView?.tokens;
+    return read && tokens ? withTokens(read, tokens) : read;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomStore, read, tokensLeft]);
   // The key's room: the scene's name, the DM's color and the pages' titles, read as each plan asks.
   const planner = useMemo(
     () =>
@@ -430,8 +450,6 @@ export default function WingPane(props: {
   const warnings = useMemo(() => (view ? wingWarnings(view, scene, picks.area, join).join(" ") : ""), [view, scene, picks.area, join]);
 
   const source = useStockSource(share > 0, settings.theme);
-  // The wing's scene group, sibling floors included, is what the creatures must fit (D-261127-075).
-  const tokensLeft = useTokensLeft(share > 0, scene.id);
   const stock = stockRequest(stockChoices, share, groups, source.pool, tokensLeft);
   const stocked = stockKey(stockChoices, share, groups, tokensLeft, settings.theme, source.list !== null, source.imagesRev);
 
@@ -492,7 +510,10 @@ export default function WingPane(props: {
   // The creature limit is checked on every render, and again at Add the wing against the live scene (D-261127-280).
   const overBy = share > 0 && plan?.ok ? overLimitBy(plan.facts ?? [], edits.edits?.rooms ?? null, tokensLeft, plan.stones ?? 0) : 0;
   // A wing whose creatures did not land (scratch.ts `unstocked`) is never added, whatever the check says.
-  const stockWaits = share > 0 && (source.pool === null || overBy > 0 || (plan?.ok === true && plan.unstocked === true));
+  const unstocked = share > 0 && plan?.ok === true && plan.unstocked === true;
+  const stockWaits = share > 0 && (source.pool === null || overBy > 0 || unstocked);
+  // Within the count another cap refused the creatures, so the Monsters line says why Add is off (D-261127-602).
+  const noRoom = unstocked && overBy === 0;
   const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null && !stockWaits;
   const add = async () => {
     if (!ready || !plan?.ok || !plan.made || !plan.clear || !send) return;
@@ -597,7 +618,7 @@ export default function WingPane(props: {
               wing
               held={sending !== null}
               stocking={share > 0}
-              limit={share > 0 ? <LimitLine over={overBy} /> : null}
+              limit={share > 0 ? <LimitLine over={overBy} full={noRoom} /> : null}
               more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
             />
           ) : (
@@ -630,7 +651,7 @@ export default function WingPane(props: {
                     below: (
                       <>
                         {share > 0 && source.failed ? <SrdLoadFailed what="The monster list" inline /> : null}
-                        <LimitLine over={overBy} />
+                        <LimitLine over={overBy} full={noRoom} />
                       </>
                     ),
                   }}

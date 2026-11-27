@@ -58,6 +58,7 @@ import {
   MONSTERS_HELP,
   MONSTERS_THEME,
   monstersWords,
+  NO_ROOM_FOR_MONSTERS,
   overLimitLine,
   PARTY_LEVEL_HELP,
   roomsHint,
@@ -292,14 +293,20 @@ export function Choices(props: ChoicesProps) {
 
 export default Choices;
 
+/** The creature limit's words: the count past it, else whether the scene had no room for creatures within it (`full`), else none. */
+export function limitWords(over: number, full = false): string {
+  return over > 0 ? overLimitLine(over) : full ? NO_ROOM_FOR_MONSTERS : "";
+}
+
 /**
  * The creature limit's line (D-261127-280). Its polite live region always
  * stands, out of the layout, so a screen reader hears the count as edits
  * move it without an alert's interruption, and the line shows only past
- * the limit, so within it the rows keep their spacing.
+ * the limit, or on a wing whose creatures found no room (`full`,
+ * D-261127-602), so otherwise the rows keep their spacing.
  */
-export function LimitLine(props: { over: number }) {
-  const line = props.over > 0 ? overLimitLine(props.over) : "";
+export function LimitLine(props: { over: number; full?: boolean }) {
+  const line = limitWords(props.over, props.full);
   return (
     <>
       <span aria-live="polite" style={VISUALLY_HIDDEN}>

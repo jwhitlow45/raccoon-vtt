@@ -156,5 +156,51 @@ test("DSTOCK-W: a wing whose creatures pass the scene's 500 tokens keeps its gho
   assert.ok((plan.facts ?? []).some((f) => f.monsters?.on), "its room facts keep the fights");
   assert.ok(plan.made !== null && plan.made.ops.every((op) => !(op.t === "token.create" && op.token.kind === "monster")), "no creature lands");
   assert.ok(overLimitBy(plan.facts ?? [], null, 2, plan.stones ?? 0) > 0, "the limit line shows");
-  assert.match(pane, /const stockWaits = share > 0 && \(source\.pool === null \|\| overBy > 0 \|\| \(plan\?\.ok === true && plan\.unstocked === true\)\);/);
+  assert.match(pane, /const unstocked = share > 0 && plan\?\.ok === true && plan\.unstocked === true;\s*const stockWaits = share > 0 && \(source\.pool === null \|\| overBy > 0 \|\| unstocked\);/);
+});
+
+test("DSTOCK-W: a token deleted from the 498 lets all three creatures land, the scene's tokens read again under the same hash, and a wing that stays unstocked within the count says so (STOCK-ASTRA-05, STOCK-O-05)", async () => {
+  const { loadMonsters } = await import("#shared/srd/monsters.ts");
+  const { stockPool } = await import("../dungeon/stockPools.ts");
+  const { WING_SETTINGS } = await import("../dungeon/handPlans.ts");
+  const { overLimitBy } = await import("../dungeon/stockSource.ts");
+  const { limitWords } = await import("../dungeon/Choices.tsx");
+  const { NO_ROOM_FOR_MONSTERS } = await import("../dungeon/words.ts");
+  const { withTokens } = await import("./WingPane.tsx");
+  const { token } = await import("#shared/testutil.ts");
+  const open = squareWingBase();
+  const sceneId = open.scene.id;
+  const tokens = Object.fromEntries(Array.from({ length: 498 }, (_, i) => [`t${i}`, token(`t${i}`, { sceneId, x: 0, y: 0 })]));
+  const stale = { ...open, state: { ...open.state, tokens: { ...open.state.tokens, ...tokens } } };
+  const settings = { ...WING_SETTINGS, traps: 0 };
+  const seed = "1Q8V2DR4HJ0Y7ZB3";
+  const pool = stockPool(await loadMonsters(), "dungeon", { srdImages: {} });
+  const stock = (tokensLeft: number) => ({ choices: { monsters: 100, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool, tokensLeft });
+  // The worker plans on the base it was posted last, as dungeon/worker.ts holds it.
+  let held = stale;
+  const planner = wingPlanner(
+    () => null,
+    (b) => (held = b),
+    async (s, sd, context, key, edits, st) => wingPreviewOf(s, sd, held, context, key, edits, st),
+  );
+  const monsters = (plan: Awaited<ReturnType<typeof planner>>) => (plan.ok && plan.made ? plan.made.ops.filter((op) => op.t === "token.create" && op.token.kind === "monster").length : -1);
+  const left = { ...stale.state.tokens };
+  delete left.t0;
+  // Kept from before the delete, the base still holds 498: three creatures fit the live count of 3 and still do not land.
+  const kept = await planner({ settings, seed, base: stale, feetPerCell: 5, stock: stock(3) });
+  assert.ok(kept.ok && kept.unstocked === true, "not vacuous: the stale base leaves the wing unstocked");
+  const over = overLimitBy(kept.facts ?? [], null, 3, kept.stones ?? 0);
+  assert.equal(over, 0, "within the count, so the over-limit line is not shown");
+  assert.equal(limitWords(over, kept.unstocked === true), NO_ROOM_FOR_MONSTERS, "the Monsters line says why Add is off");
+  assert.equal(limitWords(0), "");
+  const fresh = withTokens(stale, left);
+  assert.equal(fresh.hash, stale.hash, "the hash holds, so the edits do");
+  assert.equal(withTokens(fresh, left), fresh, "the same tokens keep the base");
+  const plan = await planner({ settings, seed, base: fresh, feetPerCell: 5, stock: stock(3) });
+  assert.equal(held, fresh, "the base with the tokens read again is posted");
+  assert.ok(plan.ok && plan.unstocked !== true, "the wing is stocked again");
+  assert.equal(monsters(plan), 3, "all three creatures land");
+  assert.match(pane, /const base = useMemo\(\(\) => \{\s*const tokens = roomStore\.getState\(\)\.floorView\?\.tokens;\s*return read && tokens \? withTokens\(read, tokens\) : read;[\s\S]{0,80}\}, \[roomStore, read, tokensLeft\]\);/);
+  assert.match(pane, /const noRoom = unstocked && overBy === 0;/);
+  assert.equal(pane.match(/<LimitLine over=\{overBy\} full=\{noRoom\} \/>/g)?.length, 2, "both Monsters lines, the room panel's too");
 });

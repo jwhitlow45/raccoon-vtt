@@ -152,6 +152,13 @@ export function overLimitLine(by: number): string {
   return `Over the creature limit by ${by}. Turn a room's monsters off, or lower Monsters.`;
 }
 
+/**
+ * The Monsters line for a wing whose creatures did not land with the
+ * count within the limit: another of the scene's caps refused them, so
+ * the same two ways out stand (D-261127-602).
+ */
+export const NO_ROOM_FOR_MONSTERS = "This scene has no room for these monsters. Turn a room's monsters off, or lower Monsters.";
+
 /** "Goblin Boss, Goblin Warrior × 3": each kind by its SRD name, a count past one as sizes write it, so no plural is made. The key and the room panel both write a fight so. */
 export function fightWords(lines: readonly (readonly [string, number])[]): string {
   return lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ");
