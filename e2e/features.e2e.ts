@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { uuidv7 } from "#shared/ids.ts";
+import type { Character } from "#shared/model.ts";
 import { modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
-import { ConsoleWatch, openSideTab, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -14,7 +16,10 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * lived, on a phone held upright and on a computer (ft-1), every part's
  * probes in the toolbar, the top bar, the side panel's tabs and This device
  * gone once hidden and back from the search (ft-2), keys and an active
- * tool (ft-3), no op as the switches and presets change (ft-4), Reset all
+ * tool (ft-3), no op as the switches and presets change (ft-4), the
+ * player's Short Rest and D&D Beyond re-sync sending the same ops with the
+ * slot parts hidden as shown (ft-4f, ft-4h), the Classes sheet closing once
+ * both slot parts hide (ftd-1), Reset all
  * and a second window (ft-8), "view as a player" showing every part
  * (ft-9) and the search's Show results (ft-10). The surfaces gated inside
  * their own files (the creature homes, scene settings, the DM panel, the
@@ -45,7 +50,9 @@ const playerSocket = new SocketWatch("player");
 const dmConsole = new ConsoleWatch("dm");
 const playerConsole = new ConsoleWatch("player");
 
-const run = { roomId: "", roomName: `E2E features ${new Date().toISOString().slice(0, 19)}`, password: "" };
+const run = { roomId: "", roomName: `E2E features ${new Date().toISOString().slice(0, 19)}`, password: "", thorn: uuidv7() };
+/** The DM's own socket for the slot steps' setup, which is no device's choice. */
+let ops: OpSocket | null = null;
 
 /** The e2e files compile without the DOM library, so the page's globals are typed by hand. */
 type Win = {
@@ -157,6 +164,130 @@ async function ownerShot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: file });
 }
 
+/**
+ * An op frame as the twin compares it (docs/design/design-v1-features.md 14,
+ * ft-4): the op alone, its frame number and tags left out and every id
+ * written as <id>, so two runs of one script read the same.
+ */
+function opShape(frame: string): unknown {
+  const strip = (v: unknown): unknown => {
+    if (typeof v === "string") return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? "<id>" : v;
+    if (Array.isArray(v)) return v.map(strip);
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => k !== "tag").map(([k, x]) => [k, strip(x)]));
+    return v;
+  };
+  return strip((JSON.parse(frame) as { op: unknown }).op);
+}
+
+/** Run H's choices for the player (D-261127-398): every part hidden but Areas and D&D Beyond. */
+const RUN_H: Choices = { player: Object.fromEntries(modulesFor("player").filter((m) => m.id !== "areas" && m.id !== "ddb").map((m) => [m.id, false])) };
+
+function thorn(): Character | undefined {
+  return dmSocket.state?.characters[run.thorn];
+}
+
+/** Thorn's page in the player's Characters sheet: Pat plays him alone, so the sheet lands there. */
+async function thornsPage(): Promise<Locator> {
+  await closeSheets(player);
+  const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+  if (!(await sheet.isVisible())) {
+    await player.locator('button[title="Panels"]').click();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+  }
+  await sheet.waitFor();
+  const heading = sheet.locator("[data-creature-heading]").filter({ hasText: "Thorn" });
+  const opener = sheet.locator(`[data-opener="character:${run.thorn}"]`);
+  await heading.or(opener).first().waitFor();
+  if ((await heading.count()) === 0) await opener.click();
+  await heading.waitFor();
+  return sheet;
+}
+
+function section(scope: Locator, title: string): Locator {
+  return scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${title}"]]`);
+}
+
+/** A group of a page, unfolded. */
+async function openGroup(scope: Locator, name: string): Promise<Locator> {
+  const group = scope.locator("[data-panel-group]").filter({ has: scope.page().locator("[data-group-name]", { hasText: new RegExp(`^${name}$`) }) }).last();
+  const fold = group.locator("[data-group-fold]").first();
+  if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  return group;
+}
+
+/** Thorn hurt to 10 of 30 HP with every Hit Point Die there, as each run starts. */
+async function hurtThorn(): Promise<void> {
+  await ops!.send({ t: "actor.rest", target: { characterId: run.thorn }, kind: "long" });
+  await ops!.send({ t: "actor.hp", target: { characterId: run.thorn }, change: { kind: "damage", amount: 20 } });
+  await waitFor("Thorn at 10 HP, every die there", () => (thorn()?.actor.hp.cur === 10 && thorn()?.spent === undefined ? true : null));
+}
+
+/** Step f's script: a Short Rest, one d10 rolled with Constitution 2, then Finish. The ops it sent. */
+async function shortRest(): Promise<unknown[]> {
+  const rest = section(await thornsPage(), "Rest");
+  await rest.getByRole("radio", { name: "Short Rest" }).check();
+  await rest.getByRole("textbox", { name: "Constitution modifier" }).fill("2");
+  const from = playerSocket.sent.length;
+  await rest.getByRole("button", { name: "Roll a d10 Hit Point Die plus 2, 3 of 3 left" }).tap();
+  await waitFor("the die spent", () => (thorn()?.spent?.dice?.d10 === 1 ? true : null));
+  await rest.getByRole("button", { name: "Finish the Short Rest" }).tap();
+  const sent = await waitFor("the rest sent", () => {
+    const frames = opsSince(playerSocket, from);
+    return frames.some((f) => f.includes('"t":"actor.rest"')) ? frames : null;
+  });
+  return sent.map(opShape);
+}
+
+/** Thorn as D&D Beyond would send him after a level, Fighter 4, in the service's JSON shape with only the paths the reader reads (shared/ddb/read.ts). */
+const THORN_DDB = {
+  success: true,
+  data: {
+    id: 12345678,
+    name: "Thorn",
+    stats: [16, 12, 14, 10, 12, 8].map((value, i) => ({ id: i + 1, value })),
+    bonusStats: [],
+    overrideStats: [],
+    baseHitPoints: 36,
+    race: { weightSpeeds: { normal: { walk: 30 } } },
+    classes: [{ level: 4, definition: { name: "Fighter", hitDice: 10, spellCastingAbilityId: null }, classFeatures: [] }],
+    modifiers: { race: [], class: ["strength", "constitution"].map((a) => ({ type: "proficiency", subType: `${a}-saving-throws`, fixedValue: null, value: null })), background: [], feat: [], item: [], condition: [] },
+    inventory: [],
+    classSpells: [],
+    spells: { race: [], class: [], item: [], feat: [] },
+    actions: { race: [], class: [], feat: [] },
+  },
+};
+
+/** A refused fetch is a failed request, which Chrome logs as an error with the request's address. */
+const IMPORT_REFUSED = /Failed to load resource: the server responded with a status of 403\b.*\/ddb-import/;
+
+/** Step h's script: Re-sync, the fetch refused, its JSON pasted, the review's Classes line ticked, then Apply. The ops it sent, then Undo puts Thorn back. */
+async function resync(): Promise<unknown[]> {
+  const block = await openGroup(await thornsPage(), "Stat block");
+  const from = playerSocket.sent.length;
+  await block.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true }).tap();
+  const dialog = player.getByRole("dialog", { name: "Re-sync Thorn" });
+  await dialog.getByRole("alert").getByText(/^D&D Beyond would not share that character\./).waitFor();
+  await dialog.getByRole("button", { name: "Paste its JSON instead", exact: true }).tap();
+  await dialog.locator("textarea").fill(JSON.stringify(THORN_DDB));
+  await dialog.getByRole("button", { name: "Read it", exact: true }).tap();
+  const review = player.getByRole("dialog", { name: "Re-sync review" });
+  const classes = review.getByRole("checkbox", { name: "Classes: Fighter 4, now Fighter 3", exact: true });
+  await classes.waitFor();
+  assert.equal(await classes.isChecked(), true, "the Classes line ticked, whatever the slot parts show (D-261127-306)");
+  await review.getByRole("button", { name: "Apply", exact: true }).tap();
+  const done = player.getByRole("dialog", { name: "Thorn is re-synced" });
+  await done.waitFor();
+  await waitFor("Fighter 4 on the DM's device", () => (thorn()?.classes?.[0]?.level === 4 ? true : null));
+  const sent = opsSince(playerSocket, from).map(opShape);
+  await done.getByRole("button", { name: "Undo the re-sync", exact: true }).tap();
+  const undone = player.getByRole("dialog", { name: "Re-sync undone" });
+  await undone.getByRole("button", { name: "Done", exact: true }).tap();
+  await undone.waitFor({ state: "detached" });
+  await waitFor("Fighter 3 again", () => (thorn()?.classes?.[0]?.level === 3 ? true : null));
+  return sent;
+}
+
 /** The DM's panels a part takes, by their side panel names. */
 const PANEL_TITLES: Readonly<Record<string, string>> = { areas: "Areas", sound: "Sound", time: "Time", journal: "Journal", encounters: "Encounters", outliner: "Outliner" };
 
@@ -187,6 +318,7 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
         console.error(`Deleting room ${run.roomId} failed`, err);
       }
     }
+    ops?.close();
     await browser?.close();
     await server?.stop();
     rmSync(work, { recursive: true, force: true });
@@ -457,6 +589,71 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     await menu.getByRole("button", { name: /again to show every part, as the DM and as a player$/ }).click();
     await waitFor("every part back", async () => ((await storedChoices(dm)) === JSON.stringify({ v: 1, dm: {}, player: {} }) ? true : null));
     assert.deepEqual(opsSince(dmSocket, from), [], "a choice is this device's alone");
+  });
+
+  test("ft-4f. the player's Short Rest rolls one d10 and finishes, sending the same ops with Hit Point Dice hidden, whose card keeps its dice rows (D-261127-300)", async () => {
+    const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+    const patId = playerSocket.you!.memberId;
+    await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [patId], level: 3, actor: { hp: { cur: 30, max: 30, temp: 0 }, life: "alive", ac: 16, speeds: { walk: 30 }, initBonus: 0, passivePerception: 11, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } } });
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { classes: [{ id: "fighter", level: 3 }] } });
+    await waitFor("Thorn on Pat's device", () => playerSocket.state?.characters[run.thorn]?.classes ?? null);
+
+    // Run E: every part shown.
+    await hurtThorn();
+    let rest = section(await thornsPage(), "Rest");
+    await rest.getByText("Hit Point Dice: 3 of 3 d10", { exact: true }).waitFor();
+    const shown = await shortRest();
+    assert.deepEqual(
+      shown.map((o) => (o as { t: string }).t),
+      ["actor.hitDieRoll", "actor.rest"],
+    );
+
+    // Run H: the count line and its words go, the card's dice rows stay, and the same ops leave.
+    await hurtThorn();
+    await setChoices(player, RUN_H);
+    rest = section(await thornsPage(), "Rest");
+    await rest.getByRole("group", { name: "Hidden on this device" }).getByRole("button", { name: "Show Hit Point Dice" }).waitFor();
+    assert.equal(await rest.getByText(/^Hit Point Dice: /).count(), 0, "no count line");
+    await shots.take(player, "ft-4f-rest-hidden-here");
+    const hidden = await shortRest();
+    assert.deepEqual(hidden, shown, "the same ops with Hit Point Dice hidden");
+    await setChoices(player, null);
+  });
+
+  test("ftd-1. the Classes sheet closes once both slot parts hide, and stays closed as they show again", async () => {
+    const uses = section(await thornsPage(), "Uses");
+    await uses.getByRole("button", { name: "Edit classes" }).tap();
+    const sheet = player.getByRole("dialog", { name: "Classes", exact: true });
+    await sheet.waitFor();
+    await setChoices(player, { player: { spellSlots: false } });
+    assert.equal(await sheet.isVisible(), true, "one slot part shown keeps it");
+    await setChoices(player, { player: { spellSlots: false, hitDice: false } });
+    await sheet.waitFor({ state: "detached" });
+    assert.equal(await uses.locator("[data-uses-classes]").count(), 0, "the Classes line goes too");
+    await setChoices(player, null);
+    await uses.locator("[data-uses-classes]").waitFor();
+    assert.equal(await sheet.count(), 0, "showing them again opens no sheet");
+  });
+
+  test("ft-4h. the player's D&D Beyond re-sync from pasted JSON sends the same ops with Spell slots and Hit Point Dice hidden, its Classes line ticked (D-261127-306)", async () => {
+    await ops!.send({ t: "character.update", characterId: run.thorn, patch: { stats: { abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 12, cha: 8 }, saves: ["str", "con"], skills: {}, adjust: {}, defenses: {}, rolls: [] }, actor: { sheetUrl: "https://www.dndbeyond.com/characters/12345678" } } });
+    await waitFor("Thorn's block on Pat's device", () => playerSocket.state?.characters[run.thorn]?.stats ?? null);
+    // No request leaves for D&D Beyond: the fetch is refused here, and the JSON pasted is read on the device.
+    await player.route("**/api/rooms/*/ddb-import", (route) => route.fulfill({ status: 403, json: { error: "private" } }));
+    playerConsole.allow = [IMPORT_REFUSED];
+    try {
+      const shown = await resync();
+      assert.ok(shown.some((o) => (o as { t: string }).t === "character.update"), JSON.stringify(shown));
+      await setChoices(player, RUN_H);
+      const hidden = await resync();
+      assert.deepEqual(hidden, shown, "the same ops with Spell slots and Hit Point Dice hidden");
+    } finally {
+      playerConsole.allow = [];
+      await player.unroute("**/api/rooms/*/ddb-import");
+      await setChoices(player, null);
+      await closeSheets(player);
+    }
   });
 
   test("ft-8. Reset all shows every part for both roles, and a second window follows each choice at once, ending its active tool", async () => {
