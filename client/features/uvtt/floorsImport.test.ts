@@ -275,6 +275,31 @@ describe("files Export as VTT file's Every floor wrote", () => {
     assert.deepEqual(rows.map((r) => r.floor), ["Hall", "Tower - 07 - Top", "Roof"]);
   });
 
+  test("a scene name ending in - 03: Keep - 03 with Hall and Roof comes back whole (UVTT-SOL-2)", () => {
+    const { entries } = vttZipNames("Keep - 03", "player", ["Hall", "Roof"]);
+    assert.deepEqual(entries, ["Keep - 03 - 01 - Hall.dd2vtt", "Keep - 03 - 02 - Roof.dd2vtt"]);
+    const rows = rowsOf(entries.map(file));
+    assert.equal(sceneNameOf(rows), "Keep - 03");
+    assert.deepEqual(rows.map((r) => r.floor), ["Hall", "Roof"]);
+  });
+
+  test("two ordinal-like parts side by side in a floor's name, after a scene name ending in - 09, come back whole", () => {
+    const { entries } = vttZipNames("Tower - 09", "dm", ["04 - 05 - Hall", "Roof - 06 - 07 - Top"]);
+    assert.deepEqual(entries, ["Tower - 09 - 01 - 04 - 05 - Hall.dd2vtt", "Tower - 09 - 02 - Roof - 06 - 07 - Top.dd2vtt"]);
+    const rows = rowsOf(entries.map(file));
+    assert.equal(sceneNameOf(rows), "Tower - 09");
+    assert.deepEqual(rows.map((r) => r.floor), ["04 - 05 - Hall", "Roof - 06 - 07 - Top"]);
+  });
+
+  test("a scene named like a floor's number: Season - 02 and Act - 01 come back whole (UVTT-O-8)", () => {
+    const season = rowsOf(vttZipNames("Season - 02", "dm", ["Hall", "Roof"]).entries.map(file));
+    assert.equal(sceneNameOf(season), "Season - 02");
+    assert.deepEqual(season.map((r) => r.floor), ["Hall", "Roof"]);
+    const act = rowsOf(vttZipNames("Act - 01", "player", ["Cellar", "Hall", "Tower"]).entries.map(file));
+    assert.equal(sceneNameOf(act), "Act - 01");
+    assert.deepEqual(act.map((r) => r.floor), ["Cellar", "Hall", "Tower"]);
+  });
+
   test("two files with the same number are not one export's", () => {
     assert.equal(exportedParts(["Tower - 01 - Ground.dd2vtt", "Tower - 01 - Upper.dd2vtt"].map(file)), null);
   });

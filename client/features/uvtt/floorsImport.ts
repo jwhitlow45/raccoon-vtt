@@ -40,8 +40,12 @@ export function rowsOf(files: readonly File[]): FloorRow[] {
 
 /** The extensions a Universal VTT file goes by, which an exported file's name ends in. */
 const EXTENSION = /\.(?:dd2vtt|uvtt|df2vtt)$/i;
-/** Each ` - 01 - ` in a name: where a scene part may end and its floor's number stand. */
-const ORDINAL = / - (\d{2}) - /g;
+/**
+ * Each ` - 01 - ` in a name: where a scene part may end and its floor's
+ * number stand. A lookahead, so the match takes only the space before it
+ * and `Keep - 03 - 01 - Hall` yields both its markers, which share a ` - `.
+ */
+const ORDINAL = / (?=- (\d{2}) - )/g;
 
 /** Each way a file's name splits as `<scene> - NN - <floor>`, by every ` - NN - ` it holds. */
 function splits(name: string): { scene: string; ordinal: string; floor: string }[] {
@@ -50,7 +54,7 @@ function splits(name: string): { scene: string; ordinal: string; floor: string }
   const out: { scene: string; ordinal: string; floor: string }[] = [];
   for (const m of base.matchAll(ORDINAL)) {
     const scene = base.slice(0, m.index).trim();
-    const floor = base.slice(m.index + m[0].length).trim();
+    const floor = base.slice(m.index + " - 00 - ".length).trim();
     if (scene !== "" && floor !== "") out.push({ scene, ordinal: m[1]!, floor });
   }
   return out;
