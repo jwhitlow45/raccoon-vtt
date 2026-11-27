@@ -6,7 +6,7 @@ import type { StampInput } from "#shared/protocol.ts";
 import { decodeTile, rasterizeFogOps } from "#shared/rules/fog.ts";
 import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
 import { apply, P1, reveal, room, scene } from "#shared/testutil.ts";
-import { contentEmpty, exportContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
+import { contentEmpty, exportContent, fileImageContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
 
 const SECRET = { kind: "door", state: "closed", secret: true, discovered: false } as const;
 const FOUND = { kind: "door", state: "locked", secret: true, discovered: true } as const;
@@ -284,5 +284,23 @@ describe("the player view of a scene with fog on comes from the server (docs/des
     assert.equal(contentEmpty({ chunks: [wallOnly], labels: [], stamps: [] }), false);
     assert.equal(contentEmpty({ chunks: [{ ...wallOnly, walls: [], auto: "AA==" } as BuildChunk], labels: [], stamps: [] }), false);
     assert.equal(contentEmpty({ chunks: [], labels: [{ id: "l1", sceneId: "s1", x: 1, y: 1, text: "Hall", size: 1 } as Label], stamps: [] }), false, "a label alone");
+  });
+});
+
+describe("fileImageContent", () => {
+  test("the DM view's image content draws as players see it with fog off", () => {
+    let state = built(true);
+    state = apply(state, { t: "build.stamps", sceneId: "s1", put: [{ id: "secret", art: { key: "chest" }, x: 4, y: 4, w: 1, h: 1, rotation: 0, z: 0, visibility: "dm" }, { id: "shown", art: { key: "barrel" }, x: 3, y: 3, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] });
+    const file = fileImageContent({ scene: state.scenes.s1!, buildChunks: state.buildChunks, labels: state.labels, fogTiles: state.fogTiles, exploredTiles: state.exploredTiles, stamps: state.stamps });
+    assert.equal(file.role, "player", "no lock marks and no S");
+    const fogOff = exportContent({ scene: { ...state.scenes.s1!, fogEnabled: false }, buildChunks: state.buildChunks, labels: state.labels, fogTiles: state.fogTiles, stamps: state.stamps, view: "player" });
+    assert.deepEqual(drawn(file.chunks, state.scenes.s1!.autoWalls), drawn(fogOff.chunks, state.scenes.s1!.autoWalls));
+    const edges = edgesOf(file.chunks);
+    assert.ok(!Object.values(edges).some((e) => (e as { secret?: boolean; discovered?: boolean }).secret === true && !(e as { discovered?: boolean }).discovered), "no secret door not yet found");
+    assert.equal(file.secretDoors, 2);
+    assert.deepEqual(sortedLabels(file.labels), ["Hall", "Trap"], "the fog is off, so a label in the dark is drawn");
+    assert.equal(file.hiddenLabels, 0);
+    assert.deepEqual(file.stamps.map((st) => st.id), ["shown"], "no DM-only stamp");
+    assert.equal(file.hiddenStamps, 1);
   });
 });

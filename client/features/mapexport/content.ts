@@ -140,6 +140,17 @@ export function exportContent(
 }
 
 /**
+ * The DM view's image in a Universal VTT file (docs/design/design-v1-uvtt-export.md
+ * section 4, D-261127-200): the scene drawn as players see it with the fog
+ * off, so the art holds no lock marks, no "S", no secret door not yet
+ * found and no DM-only stamp, and another VTT's players never see them in
+ * it. The file's walls come from the DM's own chunks (uvtt/write.ts).
+ */
+export function fileImageContent(input: Pick<RoomState, "buildChunks" | "labels" | "fogTiles" | "stamps"> & Partial<Pick<RoomState, "exploredTiles">> & { scene: Pick<Scene, "id" | "autoWalls"> }): ExportContent {
+  return exportContent({ ...input, scene: { ...input.scene, fogEnabled: false }, view: "player" });
+}
+
+/**
  * The fog players get on a scene (docs/design/design-v1-maps-vision.md 4.3.3): the
  * DM's layer and the party's explored layer merged, a sub-cell revealed
  * where either reveals it, as the server's projection merges them. A DM's
