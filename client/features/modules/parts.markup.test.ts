@@ -27,7 +27,7 @@ import { after, describe, test } from "node:test";
  */
 
 const require = createRequire(import.meta.url);
-const react = require("react") as { useSyncExternalStore(subscribe: unknown, get: unknown, server?: unknown): unknown; useEffect(run: () => unknown, deps?: unknown): void };
+const react = require("react") as { useSyncExternalStore(subscribe: unknown, get: unknown, server?: unknown): unknown; useEffect(run: () => unknown, deps?: unknown): void; useLayoutEffect(run: () => unknown, deps?: unknown): void };
 const sync = react.useSyncExternalStore;
 react.useSyncExternalStore = (subscribe, get) => sync(subscribe, get, get);
 // A press that waits on an effect to hand out its setter runs that effect as it is declared (parts.markup.testutil.ts effectsNow).
@@ -35,6 +35,10 @@ const effects = { on: false };
 (globalThis as Record<symbol, unknown>)[Symbol.for("parts.markup.effects")] = effects;
 const effect = react.useEffect;
 react.useEffect = (run, deps) => (effects.on ? void run() : effect(run, deps));
+// A controller's layout effects, run the same way for the probes that ask (gates read off a surface's element tree), apart from the presses so no fixture's drawing changes.
+const layoutEffects = { on: false };
+const layoutEffect = react.useLayoutEffect;
+react.useLayoutEffect = (run, deps) => (layoutEffects.on ? void run() : layoutEffect(run, deps));
 (require("react-dom") as { createPortal(children: unknown): unknown }).createPortal = (children) => children;
 
 const noop = () => {};
@@ -536,6 +540,40 @@ describe("gates read off a surface's element tree", () => {
       assert.equal((await restResources())?.length, 2);
       setModuleShown("classResources", "dm", false);
       assert.equal(await restResources(), undefined);
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+
+  test("the weather draws Off and mounts no layer while Weather hides, and draws again once it shows", async () => {
+    const { createElement } = await import("react");
+    const { WeatherController } = await import("../weather/WeatherController.tsx");
+    const { weatherSlot } = await import("../weather/store.ts");
+    const { useScoped } = await import("../../state/scope.ts");
+    const scene = { ...tableRoom().scenes.s1!, weather: { kind: "rain", heavy: true, wind: "strong" } };
+    const weather = async () => {
+      let shown: { mounted: boolean; effective: string } | null = null;
+      function Probe() {
+        const room = useScoped(weatherSlot);
+        layoutEffects.on = true;
+        try {
+          (WeatherController as (p: object) => unknown)({ scene, role: "dm" });
+        } finally {
+          layoutEffects.on = false;
+        }
+        const { mounted, effective } = room.state.getState();
+        shown = { mounted, effective };
+        return null;
+      }
+      draw({ surface: "the element tree", name: "the weather's controller", roles: ["dm"], draw: () => createElement(Probe) }, "dm");
+      return shown;
+    };
+    try {
+      resetAllFeatures();
+      assert.deepEqual(await weather(), { mounted: true, effective: "moving" });
+      setModuleShown("weather", "dm", false);
+      assert.deepEqual(await weather(), { mounted: false, effective: "off" }, "this device's Moving draws Off");
     } finally {
       resetAllFeatures();
       disposeDrawn();

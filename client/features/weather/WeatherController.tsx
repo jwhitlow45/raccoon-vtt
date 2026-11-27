@@ -11,6 +11,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { useLowPower, useWeatherMode } from "../device/settings.ts";
 import { usePreview } from "../dm/previewContext.ts";
+import { useModule } from "../modules/Gate.tsx";
 import type { ControllerProps } from "../layers.ts";
 import { topDownTool } from "../view/choice.ts";
 import { lookOf } from "./looks.ts";
@@ -39,7 +40,10 @@ export function WeatherController(props: ControllerProps) {
   const covered = useStore(useScoped(dockSlot), (s) => s.sheetFull);
   const preview = useCoveredByPreview(usePreview() !== null);
   const loading = useSceneLoading() !== null;
+  const shown = useModule("weather");
 
+  // Ahead of the other inputs, so a page that loads with Weather hidden never mounts the layer or fetches its code (docs/design/design-v1-features.md 8).
+  useLayoutEffect(() => room.show(shown), [room, shown]);
   useLayoutEffect(() => room.setLook(look), [room, look]);
   useLayoutEffect(() => {
     room.input({ setting, reducedMotion, lowPower, pageVisible, setupTool, covered, preview, loading });
