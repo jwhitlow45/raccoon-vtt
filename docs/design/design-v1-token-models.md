@@ -355,6 +355,18 @@ The reader and renderer (lane B) are built. The other lanes add their parts here
 
 The worker's bundle is 578 kB minified and 147 kB gzipped, three's core and renderer included.
 
+**The contracts and the server (lane A).**
+
+- Models took change format 69 and room format 52 on their own, since spell slots shipped 68 and 51 first. Both are identity steps, `MODELS_OP_VERSION` and `MODELS_SNAPSHOT_VERSION` in shared/migrate.ts, with no replay predicate, and docs/self-hosting.md's update notes carry the step under Since v0.5.0.
+- The protocol's `model` is one strict schema on both shapes of image, so every op that carries an image carries it, and the stored-state schema takes it through `dmToolSchemas.imageRef`.
+- shared/imageRef.ts reads a model with `imageModelId` and `imageAssetIds` (the picture's upload, then the sheet), and writes with `copyImage`, `keepModel` and `withoutModel`, the last for Remove model (D-261127-611). `keepModel(next, current)` keeps a model `next` carries over `current`'s, so a monster's default with a model of its own wins on Apply (D-261127-612). `copyImage` copies the known fields only, as the copies it replaces did (D-261127-613).
+- The contracts commit also gives client/lib/api.ts's `AssetKind` the `model` kind, since the sheet's upload names it (D-261127-610).
+- The sheet's limits are `MODEL_LIMITS.sheetWidthsPx`, `sheetBytes` and `sheetUploadMs`, which the `model` kind reads (D-261127-614). The check reads the size sharp's `autoOrient` gives, before any copy is made, and a file sharp cannot read stays `bad_image`. `bad_model_sheet` joins shared/apiErrors.ts's list, a file outside the lane plan, since an asset refusal takes only a listed code (D-261127-615).
+- Link and Search the web still take any image kind, `model` included, as they did, since the sheet check runs in the pipeline whatever brought the file (D-261127-616).
+- On import, a picture that did not come through takes its model with it, as the model rides on the picture (D-261127-617).
+- A restore that puts a model back checks its sheet is still a `model` row, through `entityAssetRefs`, so the DM's Undo of a removal is refused once the sheet was deleted.
+- The twins read "a creature not yet found" as one under fog the players have not revealed, and add one on a scene they do not hold. The asset route's twin covers the table display and every copy of the sheet as well as a player's full read (D-261127-618). The backup round trip runs in server/assets/serve.models.itest.ts beside the twin, since it needs the database and the pipeline, and remap's branches in server/rooms/remap.models.test.ts (D-261127-619).
+
 ## 14. Design review
 
 Seven rounds of design review, by two reviewers each, changed this note before the build, and every finding was adopted:
