@@ -174,7 +174,7 @@ async function statusText(dialog: Locator, timeout = 30_000): Promise<string> {
 }
 
 async function previewImg(dialog: Locator): Promise<Locator> {
-  const img = dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?(, \d+ secret doors?)?(, \d+ lit rooms?)?, entrance on the (west|north|east|south) side\.$/ });
+  const img = dialog.getByRole("img", { name: /^Preview of the dungeon: \d+ rooms?(, \d+ secret doors?)?(, \d+ lit rooms?)?(, \d+ monsters?)?, entrance on the (west|north|east|south) side\.$/ });
   await img.waitFor({ timeout: 30_000 });
   return img;
 }
@@ -1277,6 +1277,61 @@ describe("dungeon generator", { concurrency: false }, () => {
     } finally {
       await phone.close();
     }
+    assert.deepEqual(lines, []);
+  });
+
+  /*
+   * DSTOCK (docs/design/design-v1-dungeon-stock.md 1, 3 and 8): Thorn has no
+   * level, so Monsters is held at None with the party under it. Edited to a
+   * level, Half stocks rooms, the band follows the party, the foot counts
+   * the creatures, the entrance starts Off, and Make lands them hidden:
+   * Pat gets none of them, and Undo setup takes them back with the rest.
+   */
+  test("DSTOCK-1. Monsters is held without a leveled party, an edited party stocks rooms at Half, and Make lands every creature hidden from Pat", async () => {
+    const form = await newSceneForm(await scenesPanel(dm));
+    if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
+    await form.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Squares", exact: true }).check();
+    const dialog = await openDialog(dm);
+    await (await seedField(dialog)).fill(SEED);
+    await statusText(dialog);
+    const monsters = dialog.getByRole("slider", { name: "Monsters", exact: true });
+    await monsters.scrollIntoViewIfNeeded();
+    assert.equal(await monsters.isDisabled(), true, "held at None: Thorn has no level");
+    await dialog.getByText("Give the party a level to stock rooms: set one on a character's card, or edit the party below.", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
+    assert.equal(await monsters.isDisabled(), false, "a party with a level gives Monsters back");
+    await mark(dialog, "Monsters", "Half").click();
+    await dialog.getByText(/^Moderate: [\d,]+ XP a room for 1 character at level 1\.$/).waitFor();
+    await dialog.getByText("Set from the party: levels 1 to 4.", { exact: true }).waitFor();
+    const status = await waitFor("the foot to count the monsters", async () => {
+      const line = await statusText(dialog);
+      return /\d+ monsters? in \d+ rooms?\.$|no monsters\.$/.test(line) ? line : null;
+    }, 30_000);
+    const counted = Number(/(\d+) monsters? in/.exec(status)?.[1] ?? 0);
+    assert.ok(counted > 0, `a stocked dungeon: ${status}`);
+    await shots.take(dm, "DSTOCK-1-monsters-choice");
+    const lines = alignmentLines(await measureAlignment(dialog), "DSTOCK-1 stocked dialog, desktop");
+    // The entrance is never in the share, so its Monsters row starts Off.
+    await dialog.getByRole("button", { name: "Edit rooms", exact: true }).click();
+    const room1 = dialog.getByRole("region", { name: "Room 1", exact: true });
+    await room1.waitFor();
+    assert.equal(await room1.getByRole("radiogroup", { name: "Monsters", exact: true }).getByRole("radio", { name: "Off", exact: true }).isChecked(), true, "the entrance starts Off");
+    await shots.take(dm, "DSTOCK-1-stocked-preview");
+    await room1.getByRole("button", { name: "Done", exact: true }).click();
+    const sent = dmSocket.sent.length;
+    await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
+    await dialog.waitFor({ state: "detached", timeout: 60_000 });
+    const frames = opsSent(dmSocket, sent) as unknown as { op: { t: string; scene?: { id: string }; token?: { kind: string; visibility: string; actor: { inline?: { srdId?: string } } } } }[];
+    const creatures = frames.flatMap((f) => (f.op.t === "token.create" && f.op.token?.kind === "monster" ? [f.op.token] : []));
+    assert.equal(creatures.length, counted, "Make sends the creatures the foot counted");
+    assert.ok(creatures.every((t) => t.visibility === "dm"), "every creature hidden from players");
+    assert.ok(frames.length <= 140, `${frames.length} ops`);
+    const sceneId = frames[0]!.op.scene!.id;
+    await waitFor("the creatures stored", () => (Object.values(state(dmSocket)?.tokens ?? {}).filter((t) => t?.sceneId === sceneId && t.kind === "monster").length === counted ? true : null), 30_000);
+    assert.deepEqual(Object.values(state(patSocket)?.tokens ?? {}).filter((t) => t?.sceneId === sceneId), [], "Pat holds no token of the new scene");
+    for (const id of new Set(creatures.map((t) => t.actor.inline?.srdId ?? ""))) assert.ok(id === "" || !patSocket.everSaw(`"${id}"`), `Pat never saw ${id}`);
+    await undoSetup(dm);
+    await waitFor("the dungeon and its creatures gone", () => (state(dmSocket)?.scenes[sceneId] || Object.values(state(dmSocket)?.tokens ?? {}).some((t) => t?.sceneId === sceneId) ? null : true), 30_000);
     assert.deepEqual(lines, []);
   });
 

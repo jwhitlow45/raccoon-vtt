@@ -1517,6 +1517,25 @@ async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: numbe
       await line.getByRole("button", { name: "Drop edits", exact: true }).click();
       await line.waitFor({ state: "detached" });
     } else await sweep.missing(page, "dungeon-room-panel", "Edit rooms never came on");
+    // DSTOCK (docs/design/design-v1-dungeon-stock.md 6): the Monsters rows stocked at Half with the party editor open, then back to None, so the next size opens as this one did.
+    const monsterMarks = dialog.getByRole("group", { name: "Monsters marks", exact: true });
+    const editParty = dialog.getByRole("button", { name: "Edit the party", exact: true });
+    const half = monsterMarks.getByRole("button", { name: "Half", exact: true });
+    // A room with no leveled characters holds Monsters at None with the party under it, and a party with a level shows it only above None.
+    const held = await editParty.isVisible();
+    if (!held) await half.click();
+    await editParty.scrollIntoViewIfNeeded();
+    await editParty.click();
+    if (held) await half.click();
+    await settled(preview);
+    const stockRows = dialog.locator('[data-choice="monsters"]');
+    await stockRows.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "dungeon-stocked-rows", stockRows);
+    await sweep.measure(page, "dungeon-dialog-stocked", dialog);
+    await shots.take(page, `alignment-${sweep.at}-dungeon-dialog-stocked`);
+    await monsterMarks.getByRole("button", { name: "None", exact: true }).click();
+    await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
+    await settled(preview);
     await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await dialog.waitFor({ state: "detached" });

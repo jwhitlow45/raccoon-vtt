@@ -32,6 +32,8 @@ import { mapCanvasBox, ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOptio
  * - LP37FIX-1: a ghost room's panel names it as the ghost does, and Done
  *   gives focus back to Edit rooms.
  * - LP37FIX-2: the first drag right after picking the mode draws the area.
+ * - DSTOCK-W: a player on the scene gets no monster token and draws no
+ *   ghost while the DM plans a stocked wing (docs/design/design-v1-dungeon-stock.md 3).
  *   DGW-3 also finds the sheet's foot in sight as it opens.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seventy. The other
@@ -68,9 +70,10 @@ let dmContext: BrowserContext;
 let dm: Page;
 let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
+const patSocket = new SocketWatch("pat");
 const consoles: ConsoleWatch[] = [];
 
-const run = { roomId: "", roomName: "The Sunken Keep", keepId: "", ruinsId: "", burrowId: "" };
+const run = { roomId: "", roomName: "The Sunken Keep", keepId: "", ruinsId: "", burrowId: "", password: "" };
 
 function state(): RoomState {
   return dmSocket.state as RoomState;
@@ -273,6 +276,7 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await dm.goto(`${server.origin}/`);
     await dm.getByLabel("Room name").fill(run.roomName);
     await dm.getByLabel("Your name").fill("Dana the DM");
+    run.password = await dm.getByLabel("Player password").inputValue();
     await dm.getByRole("button", { name: "Create room" }).click();
     await dm.getByRole("heading", { name: "Save your DM link" }).waitFor();
     const link = (await dm.locator("code").first().textContent()) ?? "";
@@ -375,6 +379,55 @@ describe("raccoon-vtt Add a wing: the DM's mode, pane and ghost", { timeout: 900
     await waitFor("the ghost gone", async () => ((await drawnIn(dm, area, KEEP)) <= before + 5 ? true : null));
     // The area and join stay for another try.
     await lineIs("Area 26 by 26 squares, joined at the ringed wall.");
+  });
+
+  test("DSTOCK-W. a player on the scene gets no monster token and draws no ghost while the DM plans a stocked wing", async () => {
+    const patContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    try {
+      const headers = { Origin: server.origin, "content-type": "application/json" };
+      const joined = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password: run.password } });
+      assert.ok(joined.ok(), `joining answered ${joined.status()}`);
+      const { ticket } = (await joined.json()) as { ticket: string };
+      const done = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name: "Pat", color: "#30a46c" } });
+      assert.ok(done.ok(), `completing the join answered ${done.status()}`);
+      const pat = await patContext.newPage();
+      const watch = new ConsoleWatch("pat");
+      watch.attach(pat);
+      consoles.push(watch);
+      await patSocket.attach(patContext, pat);
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.keepId });
+      await pat.goto(`${server.origin}/r/${run.roomId}`);
+      await waitFor("Pat on the Keep", () => (patSocket.state?.scenes[run.keepId] ? true : null), 30_000);
+      await pat.locator(".konvajs-content").first().waitFor();
+      const area = { x0: 22, y0: 4, x1: 48, y1: 30 };
+      // The Keep has no fog, so a creature or a ghost would draw on Pat's map at once.
+      const before = await drawnIn(pat, area, KEEP);
+      const frames = patSocket.received.length;
+
+      const bar = dm.getByRole("toolbar", { name: `${TOOL} options` });
+      await drag(dm, { x: 22.5, y: 4.5 }, { x: 47.5, y: 29.5 }, KEEP);
+      await tapWorld(dm, { x: 13, y: 8.5 }, KEEP);
+      await lineIs("Area 26 by 26 squares, joined at the ringed wall.");
+      await bar.getByRole("button", { name: "Generate a wing" }).click();
+      await pane().waitFor();
+      // The room has no characters, so Monsters is held at None until the party has a level.
+      await pane().getByRole("button", { name: "Edit the party", exact: true }).click();
+      await pane().getByRole("group", { name: "Monsters marks", exact: true }).getByRole("button", { name: "Half", exact: true }).click();
+      await waitFor("the stocked plan's counts", async () => (/\d+ monsters? in \d+ rooms?\.$/.test(await pane().getByRole("status").innerText()) ? true : null), PLAN_MS);
+      await shots.take(dm, "dstock-w-stocked-ghost");
+      const lines = alignmentLines(await measureAlignment(pane()), "the stocked wing pane at 1440 x 900");
+
+      const since = patSocket.received.slice(frames).join("\n");
+      assert.doesNotMatch(since, /"kind":"monster"/, "no monster token reached Pat");
+      assert.deepEqual(Object.values(patSocket.state?.tokens ?? {}).filter((t) => t?.sceneId === run.keepId), [], "Pat holds no token on the Keep");
+      assert.ok((await drawnIn(pat, area, KEEP)) <= before + 5, "Pat's map draws no ghost");
+      await shots.take(pat, "dstock-w-pat-map");
+      await dm.keyboard.press("Escape");
+      await pane().waitFor({ state: "detached" });
+      assert.deepEqual(lines, []);
+    } finally {
+      await patContext.close();
+    }
   });
 
   test("LP37FIX-1. a tap on a ghost room opens its panel named as the ghost numbers it, and Done gives focus back to Edit rooms", async () => {
