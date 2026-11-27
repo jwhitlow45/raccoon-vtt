@@ -84,6 +84,16 @@ export function readiness<T extends { drawn: object }>(f: Flow<T>): Readiness<T>
 }
 
 /**
+ * The newest dungeon answered, kept while the next request draws, or none
+ * beside a problem. The key's journal hold reads it, so a hold that drops
+ * the key from the next request stands while that request draws, and a
+ * completed preview without the key settles it (D-261127-600).
+ */
+export function lastAnswered<T extends { drawn: object }>(f: Flow<T>): T | null {
+  return f.problem === null ? f.shown : null;
+}
+
+/**
  * The answer the foot counts: the one on screen, kept while the next one
  * draws and while the seed does not read, as its picture is, so the foot
  * never loses its line between two pictures. Never one not on screen, and

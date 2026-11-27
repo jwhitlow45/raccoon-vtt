@@ -21,7 +21,7 @@ import { NumberInput } from "../scenes/controls.tsx";
 import { Choice, Choices as ChoiceRows, LimitLine } from "./Choices.tsx";
 import type { RoomEdit } from "./edits.ts";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
-import { counted, drawable, editedRooms, editsStep, flowStep, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
+import { counted, drawable, editedRooms, editsStep, flowStep, lastAnswered, readiness, startEdits, startFlow, type EditsEvent, type EditsState, type Flow, type FlowEvent } from "./flow.ts";
 import { keyOverfills } from "./keyHold.ts";
 import type { KeyInput, KeyStock } from "./keyPage.ts";
 import { LookCloser } from "./LookCloser.tsx";
@@ -287,27 +287,30 @@ export function GenerateDialog(props: {
   const fogWarning = useRoomView((s) => fogLine(startsDark ? { preset: "explore" } : pickNow(props.intent, s.view, "builder").pick, secretRooms));
   const { problem } = flow;
   const plan = current?.plan ?? null;
-  const keyStock = ready.current?.keyStock ?? null;
+  // The hold reads the newest answer, which stays while the next request draws (D-261127-600).
+  const judged = lastAnswered(flow);
+  const heldPlan = judged?.result.plan ?? null;
+  const keyStock = judged?.keyStock ?? null;
 
   // The key is held only when the live room's journal fits without it and not with it, so another cap the room is
   // already over never blames the journal (D-261107-270). The page is built from the plan, not the preview's ops,
   // because a held key leaves the preview without one.
   useEffect(() => {
     const room = store.getState().view;
-    if (!choices.key || !plan || !room || !myColor) {
+    if (!choices.key || !heldPlan || !room || !myColor) {
       setKeyHeld(false);
       return;
     }
     let held = false;
     try {
-      held = keyOverfills(room, plan, settings, { name: keyName, color: myColor, feetPerCell }, keyStock, store.getState().you?.memberId ?? "");
+      held = keyOverfills(room, heldPlan, settings, { name: keyName, color: myColor, feetPerCell }, keyStock, store.getState().you?.memberId ?? "");
     } catch {
       // The key page is not built or the room cannot be read: nothing to hold.
     }
     setKeyHeld(held);
     // The plan and the journal are what the check reads. `settings` and `sceneName` only reshape the page and come with a new plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choices.key, plan, keyStock, journal, myColor, feetPerCell]);
+  }, [choices.key, heldPlan, keyStock, journal, myColor, feetPerCell]);
   // The preview's ops parsed once as it lands, in a task of their own, so the press's parse finds zod's checks built (send.ts warmOpChecks).
   useEffect(() => {
     if (!current) return;

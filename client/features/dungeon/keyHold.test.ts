@@ -30,7 +30,8 @@ test("no key page in the ops holds nothing", () => {
   assert.equal(journalFull(roomWith(LIMITS.journalPagesPerRoom), [], "scratch-dm"), false);
 });
 
-test("a stocked key is measured with its fights: at the journal's byte boundary the stocked page holds the key and the bare page would not (STOCK-ASTRA-03)", async () => {
+/** A stocked plan, its stock, and a room at the journal's byte boundary: the bare key fits beside its filler and the stocked key does not. */
+async function boundary() {
   const { dressedRooms, handKey, HAND_SETTINGS } = await import("./handPlans.ts");
   const { keyOverfills } = await import("./keyHold.ts");
   const plan = dressedRooms();
@@ -69,15 +70,45 @@ test("a stocked key is measured with its fights: at the journal's byte boundary 
     if (keyOverfills(filled(mid), plan, HAND_SETTINGS, input, null, "scratch-dm")) hi = mid - 1;
     else lo = mid;
   }
-  const room = filled(lo);
+  return { plan, stock, input, settings: HAND_SETTINGS, room: filled(lo), next: filled(lo + 1), keyOverfills };
+}
+
+test("a stocked key is measured with its fights: at the journal's byte boundary the stocked page holds the key and the bare page would not (STOCK-ASTRA-03)", async () => {
+  const { plan, stock, input, settings: HAND_SETTINGS, room, next, keyOverfills } = await boundary();
   assert.equal(keyOverfills(room, plan, HAND_SETTINGS, input, null, "scratch-dm"), false, "the bare key fits");
   assert.equal(keyOverfills(room, plan, HAND_SETTINGS, input, stock, "scratch-dm"), true, "the stocked key, as Make sends it, does not");
-  assert.equal(keyOverfills(filled(lo + 1), plan, HAND_SETTINGS, input, null, "scratch-dm"), true, "the boundary is exact");
+  assert.equal(keyOverfills(next, plan, HAND_SETTINGS, input, null, "scratch-dm"), true, "the boundary is exact");
 });
 
 test("the dialog's journal check reads the stock its preview was drawn with", async () => {
   const { readFileSync } = await import("node:fs");
   const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /keyOverfills\(room, plan, settings, \{ name: keyName, color: myColor, feetPerCell \}, keyStock, /);
+  assert.match(dialog, /keyOverfills\(room, heldPlan, settings, \{ name: keyName, color: myColor, feetPerCell \}, keyStock, /);
   assert.match(dialog, /const keyStock = stock && \{ choices: stock\.choices, party: stock\.party \};/);
+});
+
+test("the hold stands while the request without the key draws, and a completed preview without it settles held (STOCK-ASTRA-04)", async () => {
+  const { flowStep, lastAnswered, readiness, startFlow } = await import("./flow.ts");
+  const { plan, stock, input, settings, room, keyOverfills } = await boundary();
+  type Shown = { drawn: object; plan: typeof plan; keyStock: typeof stock | null };
+  // The dialog's effect: the key is held while the last answered preview's key, with its stock, overfills the journal.
+  const held = (f: ReturnType<typeof startFlow<Shown>>) => {
+    const judged = lastAnswered(f);
+    return judged !== null && keyOverfills(room, judged.plan, settings, input, judged.keyStock, "scratch-dm");
+  };
+  let f = startFlow<Shown>();
+  f = flowStep(f, { k: "ask", id: 1 });
+  f = flowStep(f, { k: "answer", id: 1, answer: { ok: true, value: { drawn: {}, plan, keyStock: stock } } });
+  assert.equal(held(f), true, "the stocked preview's key overfills the journal");
+  // The hold drops the key, which asks again: the request draws with no current preview.
+  f = flowStep(f, { k: "ask", id: 2 });
+  assert.equal(readiness(f).current, null, "nothing is current while it draws");
+  assert.equal(held(f), true, "the hold stands while it draws, so the key stays out of the request");
+  // The same dungeon comes back without the key's ops, and the hold still reads its plan and stock: it settles held.
+  f = flowStep(f, { k: "answer", id: 2, answer: { ok: true, value: { drawn: {}, plan, keyStock: stock } } });
+  assert.equal(held(f), true, "a completed preview without the key keeps DM key held off");
+  const { readFileSync } = await import("node:fs");
+  const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /const judged = lastAnswered\(flow\);\n\s*const heldPlan = judged\?\.result\.plan \?\? null;\n\s*const keyStock = judged\?\.keyStock \?\? null;/);
+  assert.match(dialog, /keyOverfills\(room, heldPlan, settings,/);
 });
