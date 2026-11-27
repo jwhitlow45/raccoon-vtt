@@ -296,6 +296,30 @@ describe("the reducer and the stored-state schema agree on sound", () => {
   const lengths: Record<string, number> = { m1: 60_000, m2: 31_000, m3: 45_000, l1: 4_000, l2: 120_000, e1: 25_000 };
   const uses: Record<string, "music" | "loop" | "effect"> = { m1: "music", m2: "music", m3: "music", l1: "loop", l2: "loop", e1: "effect" };
 
+  type Steps = { step: typeof step extends fc.Arbitrary<infer S> ? S : never; wait: number }[];
+  /*
+   * One sequence that lands every op the coverage check names. Which ops
+   * random draws land is itself random, so the draws alone failed that
+   * check now and then. fast-check runs this first, as one of the 500.
+   */
+  const everyOp: Steps = [
+    { step: { t: "play", order: ["m1", "m2"], repeat: "all", fade: 0 }, wait: 0 },
+    { step: { t: "music.set", repeat: "off" }, wait: 1_000 },
+    { step: { t: "music.skip" }, wait: 1_000 },
+    { step: { t: "music.pause" }, wait: 1_000 },
+    { step: { t: "music.resume" }, wait: 1_000 },
+    { step: { t: "tick" }, wait: 70_000 },
+    { step: { t: "loop.start", id: "l1", key: "a" }, wait: 0 },
+    { step: { t: "effect.fire", id: "e1" }, wait: 0 },
+    { step: { t: "scene.sound", music: "m1", loops: ["l1"] }, wait: 0 },
+    { step: { t: "sound.scene", order: ["m1"] }, wait: 0 },
+    { step: { t: "sound.update", id: "m3", use: "loop" }, wait: 0 },
+    { step: { t: "undo" }, wait: 0 },
+    { step: { t: "playlist.update", sounds: ["m1", "m2"] }, wait: 0 },
+    { step: { t: "playlist.delete" }, wait: 0 },
+    { step: { t: "sound.delete", id: "e1" }, wait: 0 },
+  ];
+
   test("500 sequences leave the room parseable", () => {
     // What applied, so the property cannot pass on sequences the reducer refused throughout.
     const landed = new Set<string>();
@@ -349,7 +373,7 @@ describe("the reducer and the stored-state schema agree on sound", () => {
           }
         }
       }),
-      { numRuns: 500 },
+      { numRuns: 500, examples: [[everyOp]] },
     );
     for (const t of ["sound.update", "sound.delete", "playlist.update", "playlist.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.set", "loop.start", "effect.fire", "scene.update", "sound.scene", "sys.sound", "sys.restore"]) {
       assert.ok(landed.has(t), `no ${t} applied`);
