@@ -6,12 +6,15 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import type { JoinExpect } from "#shared/rules/wingClear.ts";
 import { builderScene } from "../scenes/create.ts";
-import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hexWingSide, hundredOps, hundredPlan } from "./handPlans.ts";
+import { loadMonsters } from "#shared/srd/monsters.ts";
+import { dialogScene, dressedRooms, hand140Ops, handPlan140, HAND_SETTINGS, HAND_STOCK, handKey, hexWingSide, hundredOps, hundredPlan } from "./handPlans.ts";
 import { endsKey, hexSide, NO_SPACE } from "./hexWalls.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder, wingIds, withIds } from "./ops.ts";
 import { planFitted, type DungeonPlan, type Planned, type WingBase } from "./plan.ts";
 import { parseSeed, versionChar } from "./seed.ts";
 import { landAll, landDungeon, previewOf, scratchRoom, summarize, wingPreviewOf } from "./scratch.ts";
+import { stockPool } from "./stockPools.ts";
+import type { StockRequest } from "./worker.ts";
 import { clampSettings, DEFAULT_CONTEXT, DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, LIT_MAX, roomCap, SECRETS_MAX, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
@@ -69,6 +72,17 @@ const CASES: { name: string; seed: string; settings: DungeonSettings; key: boole
 ];
 
 /** Every id Make gives a fresh one but the scene's, in the order it does. */
+/**
+ * The stocked dungeon (docs/design/design-v1-dungeon-stock.md 3 and 9): a
+ * Narrow Medium dungeon with the key, Half its rooms stocked at Moderate
+ * for 4 at level 3, for server/rooms/dungeon.stock.twin.test.ts. Besides
+ * its ops it names each creature's block, its place and the index in
+ * `rooms` of the room it stands in.
+ */
+const STOCKED = { name: "stocked", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: { ...DEFAULT_SETTINGS, key: true } };
+const SRD = await loadMonsters();
+const STOCK: StockRequest = { choices: { monsters: 50, difficulty: "moderate" }, party: [{ count: 4, level: 3 }], pool: stockPool(SRD, "dungeon", { srdImages: {} }), tokensLeft: 500 };
+
 function placeholders(ops: ClientOp[]): string[] {
   let n = 0;
   return [...withIds(ops, () => `x${++n}`).ids.keys()].filter((id) => id !== SCENE_PLACEHOLDER);
@@ -270,6 +284,19 @@ function today() {
         return wingOnMedium(made.ops);
       })(),
       hexWing(),
+      (() => {
+        const parsed = parseSeed(STOCKED.seed);
+        assert.ok(parsed.ok);
+        const made = previewOf(STOCKED.settings, parsed.seed, builderScene({ id: "fixture", name: "Dungeon", w: STOCKED.settings.w, h: STOCKED.settings.h }), DEFAULT_CONTEXT, handKey("Dungeon"), undefined, null, STOCK);
+        assert.ok(made.ok && (made.plan.monsters?.length ?? 0) > 0, "the stocked dungeon makes creatures");
+        const at = new Map(made.facts.map((f) => [f.room, f.at]));
+        const monsters = made.plan.monsters!.map((m) => ({ srdId: m.srdId, x: m.x, y: m.y, room: at.get(m.room)! }));
+        return { ...entry(STOCKED.name, made.plan, made.ops), seed: parsed.seed, settings: STOCKED.settings, stock: STOCK.choices, party: STOCK.party, monsters, summary: made.summary };
+      })(),
+      (() => {
+        const plan = handPlan140();
+        return { ...entry("hand140", plan, hand140Ops({ ...dialogScene(plan), id: SCENE_PLACEHOLDER })), plan, summary: summarize(plan), stock: HAND_STOCK.key.choices, party: HAND_STOCK.key.party };
+      })(),
     ],
   };
 }
