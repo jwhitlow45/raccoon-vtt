@@ -983,7 +983,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * own ephemeral events, and the switch for the polite status. `shown` is
    * the floor shown before, or the one the change asks for.
    */
-  function floorState(next: { view: RoomStoreState["view"]; before: RoomStoreState["view"]; you: You | null; anchor: SceneId | null; shown: SceneId | null; selected: readonly string[]; floors: FloorEphemeral }): Pick<RoomStoreState, "sceneId" | "floorView" | "floorFollow" | "floorShift" | "ephemeral" | "ephemeralFloors"> {
+  function floorState(next: { view: RoomStoreState["view"]; before: RoomStoreState["view"]; you: You | null; anchor: SceneId | null; shown: SceneId | null; selected: readonly string[]; floors: FloorEphemeral; own?: boolean }): Pick<RoomStoreState, "sceneId" | "floorView" | "floorFollow" | "floorShift" | "ephemeral" | "ephemeralFloors"> {
     const s = get();
     const out = nextFloor({
       role: next.you?.role ?? "player",
@@ -997,6 +997,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       selected: next.selected,
       dmFloor: followingDm ? dmViewFloor : null,
       followsTurn: next.you?.role === "dm" && followsTurn(),
+      own: next.own === true,
     });
     pick = out.pick;
     const held = new Set(heldHere(next.view, next.anchor).map((f) => f.id));
@@ -1124,9 +1125,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * One store update with a fresh view, and the floor shown after it. A
    * patch's `sceneId` is the floor it asks to show, which the role's rule
    * may overrule (follow.ts), and its `ephemeralFloors` replace every
-   * floor's events.
+   * floor's events. `own` marks this device's own change, which a DM's
+   * floor follows (follow.ts FloorInput).
    */
-  function commit(patch: Partial<RoomStoreState>): void {
+  function commit(patch: Partial<RoomStoreState>, own = false): void {
     const s = get();
     const next = {
       confirmed: patch.confirmed !== undefined ? patch.confirmed : s.confirmed,
@@ -1144,6 +1146,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       shown: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
       selected: (patch.local ?? s.local).selectedIds,
       floors: patch.ephemeralFloors ?? s.ephemeralFloors,
+      own,
     });
     store.setState({ ...patch, projectedSceneId: next.projectedSceneId, ...derived, ...floor });
     history.refresh();
@@ -1610,7 +1613,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const tells: (() => void)[] = [];
       const pendingOp = queued(op, opts, tells);
       if (!pendingOp) return null;
-      commit({ pending: [...get().pending, pendingOp] });
+      commit({ pending: [...get().pending, pendingOp] }, true);
       for (const tell of tells) tell();
       flush();
       return pendingOp.n;
@@ -1628,7 +1631,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         return pendingOp?.n ?? null;
       });
       if (added.length === 0) return ns;
-      commit({ pending: [...get().pending, ...added] });
+      commit({ pending: [...get().pending, ...added] }, true);
       for (const tell of tells) tell();
       flush();
       return ns;
@@ -1925,7 +1928,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         if (!("value" in change) || !change.key.startsWith("log:")) continue;
         serverOffset = withServerReading(serverOffset, (change.value as { at?: unknown } | null)?.at);
       }
-      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
+      // A batch that holds this device's undo or redo is its own change: only the server works one out.
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeralFloors, projectedSceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) }, (msg.restored?.length ?? 0) > 0);
       const refusedNow = new Map(rejects.map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n) && !retried.has(p.n)),

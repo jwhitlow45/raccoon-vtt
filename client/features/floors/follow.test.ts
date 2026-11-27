@@ -15,7 +15,7 @@ import { ATTIC, CAVE, playerCopy, TOWER, tower, UPPER } from "./testing.ts";
 const FLOORS = [TOWER, UPPER, ATTIC];
 
 function input(over: Partial<FloorInput> & Pick<FloorInput, "view">): FloorInput {
-  return { role: "player", display: false, memberId: "p1", before: null, anchor: TOWER, shown: TOWER, pick: null, selected: [], dmFloor: null, followsTurn: false, ...over };
+  return { role: "player", display: false, memberId: "p1", before: null, anchor: TOWER, shown: TOWER, pick: null, selected: [], dmFloor: null, followsTurn: false, own: false, ...over };
 }
 
 describe("the creature a player's device follows", () => {
@@ -58,16 +58,28 @@ describe("the creature a player's device follows", () => {
 });
 
 describe("a DM's floor", () => {
-  test("the floor picked while the scene holds it, else the main floor, and the selected token's Move to floor", () => {
+  test("the floor picked while the scene holds it, else the main floor, and this device's own Move to floor of the selected token", () => {
     const state = tower();
     const dm = (over: Partial<FloorInput>) => nextFloor(input({ role: "dm", memberId: "dm1", view: state, ...over })).sceneId;
     assert.equal(dm({ shown: UPPER }), UPPER);
     assert.equal(dm({ shown: CAVE }), TOWER, "a floor of another scene is not held");
     assert.equal(dm({ shown: null }), TOWER);
     const moved = { ...state, tokens: { ...state.tokens, thorn: { ...state.tokens.thorn!, sceneId: ATTIC } } };
-    assert.equal(nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected: ["thorn"] })).sceneId, ATTIC);
-    assert.equal(nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected: ["bree"] })).sceneId, TOWER);
-    assert.equal(nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected: ["thorn"], shown: UPPER })).sceneId, UPPER, "a move from another floor than the one shown takes the DM nowhere");
+    const own = (over: Partial<FloorInput>) => nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, own: true, ...over }));
+    assert.deepEqual(own({ selected: ["thorn"] }), { sceneId: ATTIC, pick: null, follow: null, movedBy: "thorn" });
+    assert.equal(own({ selected: ["bree"] }).sceneId, TOWER);
+    assert.equal(own({ selected: ["thorn"], shown: UPPER }).sceneId, UPPER, "a move from another floor than the one shown takes the DM nowhere");
+  });
+
+  test("another device's move of a selected creature to another floor leaves the DM's view, whoever made it and however many are selected (LP55-FLOOR-1)", () => {
+    const state = tower();
+    state.tokens.gob1 = token("gob1", { sceneId: TOWER, name: "Goblin" });
+    state.tokens.gob2 = token("gob2", { sceneId: TOWER, name: "Goblin" });
+    const moved = { ...state, tokens: { ...state.tokens, gob1: { ...state.tokens.gob1!, sceneId: UPPER } } };
+    for (const selected of [["gob1"], ["gob1", "gob2"], ["gob2", "gob1", "thorn"]]) {
+      const out = nextFloor(input({ role: "dm", memberId: "dm1", view: moved, before: state, selected }));
+      assert.deepEqual(out, { sceneId: TOWER, pick: null, follow: null, movedBy: null }, `selected ${selected.join(", ")}`);
+    }
   });
 });
 

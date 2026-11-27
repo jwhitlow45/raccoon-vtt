@@ -71,15 +71,24 @@ describe("a DM's floors", () => {
     assert.deepEqual([s.state().sceneId, s.state().projectedSceneId], [UPPER, TOWER]);
   });
 
-  test("a Move to floor of the selected token follows it, and another token's does not", () => {
+  test("this device's own Move to floor of the selected token follows it and its undo follows it back, while another device's move of it, or a move of another token, does not (LP55-FLOOR-1)", () => {
     const state = tower();
     const s = storeOf(DM, dmCopy(state), TOWER);
     s.room.ui.select("thorn");
-    s.ev([tokenAt(state, "bree", { sceneId: ATTIC })]);
+    let seq = 1;
+    const bree = s.room.dispatch({ t: "token.update", tokenId: "bree", patch: { sceneId: ATTIC } })!;
     assert.equal(s.state().sceneId, TOWER, "Bree is not selected");
-    s.ev([tokenAt(state, "thorn", { sceneId: UPPER })]);
-    assert.equal(s.state().sceneId, UPPER);
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "bree", { sceneId: ATTIC })], acks: [bree] });
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "thorn", { sceneId: UPPER })] });
+    assert.equal(s.state().sceneId, TOWER, "a co-DM's move of Thorn leaves the DM's view");
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "thorn", { sceneId: TOWER })] });
+    const move = s.room.dispatch({ t: "token.update", tokenId: "thorn", patch: { sceneId: UPPER } })!;
+    assert.equal(s.state().sceneId, UPPER, "this device's own move shows Thorn's floor as it sends it");
     assert.deepEqual(s.state().floorShift, { n: 1, tokenId: "thorn" }, "the status says Thorn is on Upper floor");
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "thorn", { sceneId: UPPER })], acks: [move] });
+    const undo = s.room.dispatch({ t: "undo", scope: "play", head: "00000000-0000-4000-8000-000000001001" })!;
+    s.room.applyEv({ t: "ev", seq: ++seq, changes: [tokenAt(state, "thorn", { sceneId: TOWER })], acks: [undo], restored: [{ n: undo, what: "moving Thorn to Upper floor" }] });
+    assert.equal(s.state().sceneId, TOWER, "this device's undo follows Thorn back");
   });
 
   test("Camera follows the turn shows the floor of whoever acts, in the same change as the turn", () => {

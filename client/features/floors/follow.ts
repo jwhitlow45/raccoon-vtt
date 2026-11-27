@@ -105,6 +105,8 @@ export type FloorInput = {
   dmFloor: SceneId | null;
   /** A DM device whose camera follows the turn (features/encounter/followTurn.ts). */
   followsTurn: boolean;
+  /** The change is this device's own: an op it just sent, or the server's answer to its undo or redo. */
+  own: boolean;
 };
 
 export type FloorOutput = {
@@ -134,8 +136,9 @@ function dmFloor(input: FloorInput, view: View, held: readonly Scene[], ids: Rea
   const anchor = input.anchor;
   let sceneId = input.shown !== null && ids.has(input.shown) ? input.shown : anchor !== null && ids.has(anchor) ? anchor : (held[0]?.id ?? anchor);
   let movedBy: string | null = null;
-  // A Move to floor of the selected token follows it (7.3).
-  for (const id of input.selected) {
+  // This device's own Move to floor of a selected token follows it (7.3), as do its climb and its undo. Another device's move
+  // of one leaves the view where it is, so a co-DM's or a player's act never takes the DM's board away (D-261127-529).
+  for (const id of input.own ? input.selected : []) {
     const was = ownEntry(input.before?.tokens, id)?.sceneId;
     const now = ownEntry(view.tokens, id)?.sceneId;
     if (was === sceneId && now !== undefined && now !== sceneId && ids.has(now)) {
