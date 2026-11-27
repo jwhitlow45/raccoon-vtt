@@ -108,8 +108,9 @@ function rig(answer: (text: string) => Answer, opts: Partial<MigrationOptions> =
 }
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 5));
+/** A real deadline that only fires on a hang, as a count of ticks is no bound on a loaded machine. */
 async function until(check: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 1_000 && !check(); i++) await tick();
+  for (const deadline = Date.now() + 20_000; Date.now() < deadline && !check(); ) await tick();
   assert.ok(check(), what);
 }
 

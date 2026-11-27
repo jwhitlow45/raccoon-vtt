@@ -292,8 +292,9 @@ export function scopeFixture() {
   return { state, dm, otherDm, player, unrelated, goblin, bree, pc, sceneId };
 }
 
+/** Waits for `get` to answer. The deadline only fires on a real hang: a snapshot or an answer waits on a batch's real timer, which a loaded machine runs seconds late. */
 export async function until<T>(get: () => T | undefined, what: string): Promise<T> {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const value = get();
     if (value !== undefined) return value;
