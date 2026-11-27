@@ -1,7 +1,8 @@
 import type { ProjectedActor } from "#shared/project.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { STATUSES } from "#shared/srd/statuses.ts";
-import type { FieldDef } from "../search/catalog/types.ts";
+import { hasSlots } from "#shared/rules/spellSlots.ts";
+import type { FieldDef, FieldHolder } from "../search/catalog/types.ts";
 import { drawn, panelGroupDrawn, panelHolds, type StatRows } from "./panelDraws.ts";
 
 /*
@@ -25,6 +26,11 @@ function conditionsOf(actor: ProjectedActor): string | undefined {
     return name ? [name] : [];
   });
   return names.length > 0 ? names.join(", ") : undefined;
+}
+
+/** The viewer edits the character's classes: the DM, or one of its players. */
+function editsClasses(h: FieldHolder): boolean {
+  return h.character !== undefined && (h.role === "dm" || (h.memberId !== null && h.character.ownerIds.includes(h.memberId)));
 }
 
 // Each field is offered where its surface draws its control (panelDraws.ts drawn).
@@ -96,6 +102,10 @@ export const CREATURE_FIELDS: readonly FieldDef[] = [
   // A character's rests, each its own choice on the page, so "long rest" lands on Long Rest itself. The token panel's rest is the same one step further.
   { key: "long-rest", title: "Long Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.long" }, everyCharacter: true, shown: combatShown },
   { key: "short-rest", title: "Short Rest", icon: "time", page: { section: "page.combat", anchor: "character.rest.short" }, everyCharacter: true, shown: combatShown },
+  // A character's classes and what they count (docs/design/design-v1-slots.md 4), on its page, only for a viewer whose copy holds them: the DM and its players.
+  { key: "classes", title: "Classes", icon: "combat", page: { section: "page.combat", anchor: "character.classes" }, shown: (h) => combatShown(h) && editsClasses(h) },
+  { key: "spell-slots", title: "Spell slots", names: ["slots", "pact magic"], icon: "combat", page: { section: "page.combat", anchor: "character.slots" }, shown: (h) => combatShown(h) && hasSlots(h.character?.classes) },
+  { key: "hit-dice", title: "Hit Point Dice", names: ["hit dice"], icon: "combat", page: { section: "page.combat", anchor: "character.hit-dice" }, shown: (h) => combatShown(h) && (h.character?.classes?.length ?? 0) > 0 },
   // The groups each creature's panel and page hold, landing on the group's header.
   { key: "combat", kind: "section", title: "Combat", icon: "combat", token: { section: "combat", anchor: "token.combat" }, page: { section: "page.combat", anchor: "character.combat" }, shown: combatShown },
   { key: "stats", kind: "section", title: "Stats", icon: "stats", token: { section: "stats", anchor: "token.stats" }, page: { section: "page.stats", anchor: "character.stats" }, shown: drawn((d) => panelHolds(d.parts, "stats"), (d) => d.parts.includes("stats")) },

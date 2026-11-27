@@ -143,11 +143,11 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
       case "conditions":
         return <EffectsSection key={id} effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} search="character.conditions" />;
       case "uses":
-        return <UsesSection key={id} target={{ characterId: character.id }} name={character.name} character={character} />;
+        return <UsesSection key={id} target={{ characterId: character.id }} name={character.name} character={character} search={{ classes: "character.classes", slots: "character.slots" }} />;
       case "reaction":
         return <ReactionSection key={id} self={{ characterId: character.id }} name={character.name} />;
       case "rest":
-        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} search={{ short: "character.rest.short", long: "character.rest.long" }} />;
+        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} character={character} search={{ short: "character.rest.short", long: "character.rest.long", hitDice: "character.hit-dice" }} />;
     }
   };
 

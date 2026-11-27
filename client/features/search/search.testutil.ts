@@ -86,7 +86,7 @@ export const DM_FIXTURE: Catalog = {
  * goblins hold the numbers the table gave them when the party met them.
  */
 export function seededRoom(): RoomState {
-  const bree: Character = character("bree", { name: "Bree", ownerIds: ["p1"], actor: actor({ hp: { cur: 24, max: 24, temp: 0 }, ac: 15, senses: "Darkvision 60 ft.", passivePerception: 13 }) });
+  const bree: Character = character("bree", { name: "Bree", ownerIds: ["p1"], classes: [{ id: "wizard", level: 3 }], actor: actor({ hp: { cur: 24, max: 24, temp: 0 }, ac: 15, senses: "Darkvision 60 ft.", passivePerception: 13 }) });
   const kel: Character = character("kel", { name: "Kel", ownerIds: ["p2"], actor: actor({ hp: { cur: 9, max: 18, temp: 0 }, ac: 12 }) });
   return numbered(room({
     members: { dm1: { ...member("dm1", "dm"), name: "DM" }, p1: { ...member("p1"), name: "Pat" }, p2: { ...member("p2"), name: "Sam" } },
