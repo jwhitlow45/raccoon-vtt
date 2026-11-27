@@ -395,13 +395,14 @@ describe("the checks find what they are for", async () => {
 /*
  * What the checks above cannot see, since it holds no control: a uses list
  * of class resources alone draws no box at all while they hide, rather than
- * an empty one taking a gap in the section around it (design section 3,
+ * an empty one taking a gap in the section around it, and her token says it
+ * has no uses, so no Uses button opens empty (design section 3,
  * D-261127-394).
  */
 describe("a uses list of class resources alone", () => {
   test("draws nothing while Class resources hides", async () => {
     const { createElement } = await import("react");
-    const { CreatureUses } = await import("../combat/CombatUses.tsx");
+    const { CreatureUses, useUsesPresence } = await import("../combat/CombatUses.tsx");
     const alone = () => {
       const state = tableRoom();
       const bree = state.characters.bree!;
@@ -409,11 +410,18 @@ describe("a uses list of class resources alone", () => {
       return state;
     };
     const list: Fixture = { surface: "Action bar Uses", name: "Bree's class resources alone", roles: ["dm"], room: alone, draw: () => createElement(CreatureUses, { target: { characterId: "bree" }, name: "Bree" }) };
+    // What the token bar's Uses button and the token panel's Uses section ask of her token.
+    function Presence() {
+      return createElement("output", null, useUsesPresence({ tokenId: "tbree" }));
+    }
+    const presence: Fixture = { ...list, name: "Bree's token's uses presence", draw: () => createElement(Presence) };
     try {
       resetAllFeatures();
       assert.match(draw(list, "dm"), /data-combat-uses="list"/, "shown, her resources make the list");
+      assert.equal(draw(presence, "dm"), "<output>yes</output>");
       setModuleShown("classResources", "dm", false);
       assert.doesNotMatch(draw(list, "dm"), /data-combat-uses/);
+      assert.equal(draw(presence, "dm"), "<output>no</output>", "no Uses button opens on them");
     } finally {
       resetAllFeatures();
       disposeDrawn();
