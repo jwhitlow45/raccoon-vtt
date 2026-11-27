@@ -710,18 +710,43 @@ const boxesMeet = (a: PageBox, b: PageBox) => Math.min(a.x1, b.x1) - Math.max(a.
 /**
  * Whether a box meets a creature's base ring by more than a pixel. Konva's
  * client rect of the ring is the box round its square turned a quarter and
- * squashed, so the ellipse is that box over the square root of 2, with its
- * stroke round it.
+ * squashed, its stroke included, so the ellipse to the stroke's outer edge
+ * is that box over the square root of 2. A name keeps `margin` px more off
+ * it: a Large or bigger creature's ring counts with room round its stroke,
+ * while a smaller one's stroke may be touched (LP54-ISO-2).
  */
-function meetsRing(b: PageBox, ring: PageBox): boolean {
+function meetsRing(b: PageBox, ring: PageBox, margin = 2): boolean {
   const cx = (ring.x0 + ring.x1) / 2;
   const cy = (ring.y0 + ring.y1) / 2;
-  const a = (ring.x1 - ring.x0) / (2 * Math.SQRT2) + 2;
-  const h = (ring.y1 - ring.y0) / (2 * Math.SQRT2) + 2;
+  const a = (ring.x1 - ring.x0) / (2 * Math.SQRT2) + margin;
+  const h = (ring.y1 - ring.y0) / (2 * Math.SQRT2) + margin;
   const s = { x0: b.x0 + LIMIT_PX, y0: b.y0 + LIMIT_PX, x1: b.x1 - LIMIT_PX, y1: b.y1 - LIMIT_PX };
   const px = Math.max(s.x0, Math.min(cx, s.x1));
   const py = Math.max(s.y0, Math.min(cy, s.y1));
   return s.x1 > s.x0 && s.y1 > s.y0 && ((px - cx) / a) ** 2 + ((py - cy) / h) ** 2 < 1;
+}
+
+/**
+ * The trap a badge belongs to, of the traps' `zones`: the one it stands in, or the nearest.
+ * On hexes a badge sits on its hex's corner, just outside the hex's own
+ * outline on the screen.
+ */
+function nearestZone(c: PagePt, zones: readonly { owner: string; hull: readonly PagePt[] }[]): string | undefined {
+  const reach = (hull: readonly PagePt[]) => {
+    if (isInside(c, hull)) return 0;
+    return Math.min(...hull.map((a, i) => {
+      const b = hull[(i + 1) % hull.length]!;
+      const len = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+      const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)) / len));
+      return Math.hypot(c.x - a.x - t * (b.x - a.x), c.y - a.y - t * (b.y - a.y));
+    }));
+  };
+  let best: { owner: string; d: number } | undefined;
+  for (const z of zones) {
+    const d = reach(z.hull);
+    if (!best || d < best.d) best = { owner: z.owner, d };
+  }
+  return best?.owner;
 }
 
 function isInside(c: PagePt, hull: readonly PagePt[]): boolean {
@@ -1772,109 +1797,136 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     }
   });
 
-  test("ISOLAB-1. a crowded 8 x 6 floor, four traps, a hole and stairs and two creatures, on phones of 375 x 667 and 320 x 568 and a desk at 100% and 130%, at every turn: no name covers another pill, another trap's squares or badge, a floor link's squares or a creature, each cut short or hidden instead (LP52-ISO-NAMES-PHONE)", async () => {
+  test("ISOLAB-1. a crowded 8 x 6 floor on squares, hex rows and hex columns, four traps, a hole and stairs and three creatures, one Large, on phones of 375 x 667 and 320 x 568 and a desk at 100% and 130%, at every turn: no name covers another pill, another trap's squares or badge, a floor link's squares or a creature, each cut short or hidden instead (LP52-ISO-NAMES-PHONE, LP54-ISO-1, LP54-ISO-2)", async () => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await context.addInitScript(HOOK_FLAG);
     const page = await context.newPage();
     consoles.keys.attach(page);
     const watch = new SocketWatch("isolab");
     await watch.attach(context, page);
-    const room = { id: "", name: `E2E isolab ${Date.now()}` };
+    const rooms: { id: string; name: string }[] = [];
     let crowdOps: OpSocket | null = null;
+    const found: string[] = [];
     try {
-      await page.goto(`${server.origin}/`);
-      await page.getByLabel("Room name").fill(room.name);
-      await page.getByLabel("Your name").fill("Dana the DM");
-      await page.getByRole("button", { name: "Create room" }).click();
-      await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
-      const link = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec((await page.locator("code").first().textContent()) ?? "");
-      assert.ok(link, "the DM link shows");
-      room.id = link[1]!.replace("-", "");
-      await page.getByLabel("I saved my DM link").check();
-      await page.getByRole("button", { name: "Continue to the room" }).click();
-      await page.locator(".konvajs-content").first().waitFor();
-      const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
-      crowdOps = await OpSocket.open({ origin: server.origin, roomId: room.id, cookie });
-      const nave = (await waitFor("the room's snapshot", () => watch.state)).meta.playerSceneId!;
-      const [belfry, under] = [uuidv7(), uuidv7()];
-      const bounds = { w: 8, h: 6 };
-      await crowdOps.send({ t: "scene.update", sceneId: nave, patch: { name: "Nave", bounds, fogEnabled: false } });
-      await crowdOps.send({ t: "scene.create", scene: { id: belfry, name: "Nave", bounds }, floor: { beside: nave, side: "above", besideName: "Nave", name: "Belfry" } });
-      await crowdOps.send({ t: "scene.create", scene: { id: under, name: "Nave", bounds }, floor: { beside: nave, side: "below", name: "Undercroft" } });
-      // The live play 52 floor: a hole and stairs, a trap with a long name in the far corner and one in the near, a pit beside the hole and a snare under the stairs.
-      const hole = { id: uuidv7(), rect: { x: 1, y: 2, w: 2, h: 1 } };
-      const stairs = { id: uuidv7(), rect: { x: 5, y: 1, w: 2, h: 2 } };
-      await crowdOps.send({ t: "floorLink.put", link: { id: hole.id, pairId: uuidv7(), sceneId: nave, to: under, rect: hole.rect, kind: "opening" } });
-      await crowdOps.send({ t: "floorLink.put", link: { id: stairs.id, pairId: uuidv7(), sceneId: nave, to: belfry, rect: stairs.rect, kind: "stairs" } });
-      const traps: [string, { x: number; y: number; w: number; h: number }][] = [["Hidden Pit", { x: 3, y: 2, w: 2, h: 1 }], ["Corner Dart Trap Of Long Name", { x: 7, y: 5, w: 1, h: 1 }], ["Edge snare", { x: 0, y: 0, w: 1, h: 1 }], ["Tripwire", { x: 4, y: 4, w: 1, h: 1 }]];
-      const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
-      for (const [name, cell] of traps) await crowdOps.send({ t: "trap.create", trap: { id: uuidv7(), sceneId: nave, name, zone: { cells: [cell] }, rig } } as Op);
-      const creatures = [{ id: uuidv7(), name: "Rat", x: 2, y: 4 }, { id: uuidv7(), name: "Bat", x: 6, y: 3 }];
-      for (const c of creatures) await crowdOps.send(tokenOp(c.id, { sceneId: nave, kind: "monster", name: c.name, x: c.x, y: c.y, disposition: "hostile" }) as Op);
-      const corners = (r: { x: number; y: number; w: number; h: number }) => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
-      const trapOf = (text: string) => traps.find(([n]) => {
-        const head = text.replace(/…$/, "");
-        return head.length >= 4 && n.startsWith(head);
-      })?.[0];
-      const linkOf = (text: string) => (/^(Down to|\d+ ft down)/.test(text) ? "hole" : /^Up to/.test(text) ? "stairs" : undefined);
-      let shownAll = 0;
-      for (const [width, height] of [[375, 667], [320, 568], [1440, 900]] as const) {
-        for (const scale of [1, 1.3]) {
-          await page.setViewportSize({ width, height });
-          await page.evaluate((k) => localStorage.setItem("rvtt.uiScale", String(k)), scale);
-          await page.reload();
-          await page.getByRole("status", { name: "Connected" }).first().waitFor();
-          await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
-          for (const turn of [0, 1, 2, 3] as const) {
-            // By the hook, since a phone keeps the View button in the room's menu.
-            await page.evaluate((t) => {
-              const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
-              hook.pick("isometric");
-              hook.turn(t);
-            }, turn);
-            const at = `${width} x ${height} at ${scale * 100}%, turn ${turn}`;
-            // The layers place their pills over a few renders, each reading what the one before published, so read once two looks agree.
-            let last = "";
-            const seen = await waitFor(`${at}: the pills at rest`, async () => {
-              await page.waitForTimeout(250);
-              const now = await crowdOnScreen(page, creatures.map((c) => c.id), TRAP_ICON_PATH);
-              const key = JSON.stringify(now);
-              if (key === last && now.figures.length === creatures.length) return now;
-              last = key;
-              return null;
-            });
-            const zones = [
-              ...await Promise.all(traps.map(async ([name, r]) => ({ owner: name, hull: hullOf(await groundOnScreen(page, hole.id, corners(r))) }))),
-              { owner: "hole", hull: hullOf(await groundOnScreen(page, hole.id, corners(hole.rect))) },
-              { owner: "stairs", hull: hullOf(await groundOnScreen(page, hole.id, corners(stairs.rect))) },
-            ];
-            const crowd = seen.pills.filter((p) => trapOf(p.text) !== undefined || linkOf(p.text) !== undefined);
-            const covers: string[] = [];
-            crowd.forEach((p, i) => {
-              const owner = trapOf(p.text) ?? linkOf(p.text)!;
-              for (const q of crowd.slice(i + 1)) if (boxesMeet(p.box, q.box)) covers.push(`"${p.text}" on "${q.text}"`);
-              for (const z of zones) if (z.owner !== owner && coversHull(p.box, z.hull)) covers.push(`"${p.text}" on ${z.owner}'s squares`);
-              for (const b of seen.badges) {
-                const mine = zones.some((z) => z.owner === owner && isInside({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }, z.hull));
-                if (!mine && boxesMeet(p.box, b)) covers.push(`"${p.text}" on a badge`);
-              }
-              seen.figures.forEach((f, k) => {
-                if (boxesMeet(p.box, f.art) || f.rings.some((r) => meetsRing(p.box, r))) covers.push(`"${p.text}" on ${creatures[k]!.name}`);
+      for (const shape of ["squares", "hexRows", "hexColumns"] as const) {
+        const room = { id: "", name: `E2E isolab ${shape} ${Date.now()}` };
+        await page.setViewportSize({ width: 1440, height: 900 });
+        // The last room's snapshot goes, so the next one read is this room's.
+        watch.state = null;
+        await page.goto(`${server.origin}/`);
+        await page.getByLabel("Room name").fill(room.name);
+        await page.getByLabel("Your name").fill("Dana the DM");
+        await page.getByRole("button", { name: "Create room" }).click();
+        await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
+        const link = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec((await page.locator("code").first().textContent()) ?? "");
+        assert.ok(link, "the DM link shows");
+        room.id = link[1]!.replace("-", "");
+        rooms.push(room);
+        await page.getByLabel("I saved my DM link").check();
+        await page.getByRole("button", { name: "Continue to the room" }).click();
+        await page.locator(".konvajs-content").first().waitFor();
+        const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+        crowdOps?.close();
+        crowdOps = await OpSocket.open({ origin: server.origin, roomId: room.id, cookie });
+        const nave = (await waitFor("the room's snapshot", () => watch.state)).meta.playerSceneId!;
+        const [belfry, under] = [uuidv7(), uuidv7()];
+        const bounds = { w: 8, h: 6 };
+        const hex: HexGrid | null = shape === "squares" ? null : { shape: "hex", orient: shape === "hexRows" ? "rows" : "columns" };
+        const gridShape = shape === "squares" ? {} : { gridShape: shape };
+        await crowdOps.send({ t: "scene.update", sceneId: nave, patch: { name: "Nave", bounds, fogEnabled: false, ...gridShape } });
+        await crowdOps.send({ t: "scene.create", scene: { id: belfry, name: "Nave", bounds }, floor: { beside: nave, side: "above", besideName: "Nave", name: "Belfry" } });
+        await crowdOps.send({ t: "scene.create", scene: { id: under, name: "Nave", bounds }, floor: { beside: nave, side: "below", name: "Undercroft" } });
+        // The live play 52 floor: a hole and stairs, a trap with a long name in the far corner (one hex in on hexes, whose odd rows or columns stop short) and one in the near, a pit beside the hole and a snare under the stairs.
+        const hole = { id: uuidv7(), rect: { x: 1, y: 2, w: 2, h: 1 } };
+        const stairs = { id: uuidv7(), rect: { x: 5, y: 1, w: 2, h: 2 } };
+        await crowdOps.send({ t: "floorLink.put", link: { id: hole.id, pairId: uuidv7(), sceneId: nave, to: under, rect: hole.rect, kind: "opening" } });
+        await crowdOps.send({ t: "floorLink.put", link: { id: stairs.id, pairId: uuidv7(), sceneId: nave, to: belfry, rect: stairs.rect, kind: "stairs" } });
+        const traps: [string, { x: number; y: number; w: number; h: number }][] = [["Hidden Pit", { x: 3, y: 2, w: 2, h: 1 }], ["Corner Dart Trap Of Long Name", { x: hex ? 6 : 7, y: 5, w: 1, h: 1 }], ["Edge snare", { x: 0, y: 0, w: 1, h: 1 }], ["Tripwire", { x: 4, y: 4, w: 1, h: 1 }]];
+        const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+        for (const [name, cell] of traps) await crowdOps.send({ t: "trap.create", trap: { id: uuidv7(), sceneId: nave, name, zone: { cells: [cell] }, rig } } as Op);
+        // A Large brute by the tripwire and the far corner, whose ring reaches past its squares (LP54-ISO-2). On hexes the bat and the brute
+        // stand on their hexes, as a drop puts them, and the rat where a squares map turned to hexes left it, drawn off its hex (LP54-ISO-1).
+        const creatures = [{ id: uuidv7(), name: "Rat", x: 2, y: 4, size: "medium", snap: false }, { id: uuidv7(), name: "Bat", x: 6, y: 3, size: "medium", snap: true }, { id: uuidv7(), name: "Brute", x: 5, y: 4, size: "large", snap: true }];
+        for (const c of creatures) {
+          const at = hex && c.snap ? placedOnHex(hex, { size: c.size as "medium" | "large", x: 0, y: 0 }, { col: c.x, row: c.y }) : { x: c.x, y: c.y };
+          await crowdOps.send(tokenOp(c.id, { sceneId: nave, kind: "monster", name: c.name, ...at, size: c.size, disposition: "hostile" }) as Op);
+        }
+        // What a trap's or an end's cells cover on the ground: its squares' corners, or each of its hexes' corners.
+        const corners = (r: { x: number; y: number; w: number; h: number }) => {
+          if (!hex) return [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
+          const out: PagePt[] = [];
+          for (let col = r.x; col < r.x + r.w; col++) for (let row = r.y; row < r.y + r.h; row++) out.push(...hexCorners(hex, { col, row }).map((k) => cornerAt(hex, k)));
+          return out;
+        };
+        const trapOf = (text: string) => traps.find(([n]) => {
+          const head = text.replace(/…$/, "");
+          return head.length >= 4 && n.startsWith(head);
+        })?.[0];
+        const linkOf = (text: string) => (/^(Down to|\d+ ft down)/.test(text) ? "hole" : /^Up to/.test(text) ? "stairs" : undefined);
+        let shownAll = 0;
+        for (const [width, height] of [[375, 667], [320, 568], [1440, 900]] as const) {
+          for (const scale of [1, 1.3]) {
+            await page.setViewportSize({ width, height });
+            await page.evaluate((k) => localStorage.setItem("rvtt.uiScale", String(k)), scale);
+            await page.reload();
+            await page.getByRole("status", { name: "Connected" }).first().waitFor();
+            await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+            for (const turn of [0, 1, 2, 3] as const) {
+              // By the hook, since a phone keeps the View button in the room's menu.
+              await page.evaluate((t) => {
+                const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
+                hook.pick("isometric");
+                hook.turn(t);
+              }, turn);
+              const at = `${shape}, ${width} x ${height} at ${scale * 100}%, turn ${turn}`;
+              // The layers place their pills over a few renders, each reading what the one before published, so read once two looks agree.
+              let last = "";
+              const seen = await waitFor(`${at}: the pills at rest`, async () => {
+                await page.waitForTimeout(250);
+                const now = await crowdOnScreen(page, creatures.map((c) => c.id), TRAP_ICON_PATH);
+                const key = JSON.stringify(now);
+                if (key === last && now.figures.length === creatures.length) return now;
+                last = key;
+                return null;
               });
-            });
-            assert.deepEqual(covers, [], `${at}: ${crowd.map((p) => p.text).join(", ")}`);
-            assert.ok(crowd.length > 0, `${at}: some name shows`);
-            if (width === 1440 && scale === 1) assert.equal(crowd.length, 7, `${at}: a desk at 100% has room for every name: ${crowd.map((p) => p.text).join(", ")}`);
-            shownAll += crowd.length;
-            if (width === 375 && scale === 1) await shots.take(page, `isolab-1-375-turn-${turn}`);
+              const zones = [
+                ...await Promise.all(traps.map(async ([name, r]) => ({ owner: name, hull: hullOf(await groundOnScreen(page, hole.id, corners(r))) }))),
+                { owner: "hole", hull: hullOf(await groundOnScreen(page, hole.id, corners(hole.rect))) },
+                { owner: "stairs", hull: hullOf(await groundOnScreen(page, hole.id, corners(stairs.rect))) },
+              ];
+              const crowd = seen.pills.filter((p) => trapOf(p.text) !== undefined || linkOf(p.text) !== undefined);
+              const covers: string[] = [];
+              crowd.forEach((p, i) => {
+                const owner = trapOf(p.text) ?? linkOf(p.text)!;
+                for (const q of crowd.slice(i + 1)) if (boxesMeet(p.box, q.box)) covers.push(`"${p.text}" on "${q.text}"`);
+                for (const z of zones) if (z.owner !== owner && coversHull(p.box, z.hull)) covers.push(`"${p.text}" on ${z.owner}'s squares`);
+                for (const b of seen.badges) {
+                  const mine = nearestZone({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }, zones.slice(0, traps.length)) === owner;
+                  if (!mine && boxesMeet(p.box, b)) covers.push(`"${p.text}" on a badge`);
+                }
+                seen.figures.forEach((f, k) => {
+                  const margin = creatures[k]!.size === "large" ? 2 : 0;
+                  if (boxesMeet(p.box, f.art) || f.rings.some((r) => meetsRing(p.box, r, margin))) covers.push(`"${p.text}" on ${creatures[k]!.name}`);
+                });
+              });
+              // Every look is read before the test fails, so one run names every cover.
+              if (covers.length > 0) found.push(`${at}: ${covers.join(", ")} (${crowd.map((p) => p.text).join(", ")})`);
+              if (crowd.length === 0) found.push(`${at}: no name shows`);
+              // The squares floor was laid out so a desk has room for every name. Hexes lie closer and can leave one without a clear spot.
+              if (shape === "squares" && width === 1440 && scale === 1 && crowd.length !== 7) found.push(`${at}: a desk at 100% has room for every name, but shows ${crowd.map((p) => p.text).join(", ")}`);
+              shownAll += crowd.length;
+              if (width === 375 && scale === 1) await shots.take(page, `isolab-1-${shape}-375-turn-${turn}`);
+            }
           }
         }
+        // Six sizes, four turns, seven pills each at most.
+        if (shownAll <= 24 * 7 * 0.6) found.push(`${shape}: most names show, but ${shownAll} of ${24 * 7} do`);
+        await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
       }
-      // Six sizes, four turns, seven pills each at most.
-      assert.ok(shownAll > 24 * 7 * 0.6, `most names show: ${shownAll} of ${24 * 7}`);
+      assert.deepEqual(found, [], "every look's names clear");
     } finally {
       crowdOps?.close();
-      if (room.id) await context.request.delete(`${server.origin}/api/rooms/${room.id}`, { headers: { Origin: server.origin }, data: { name: room.name } }).catch(() => null);
+      for (const room of rooms) await context.request.delete(`${server.origin}/api/rooms/${room.id}`, { headers: { Origin: server.origin }, data: { name: room.name } }).catch(() => null);
       await context.close();
     }
   });
