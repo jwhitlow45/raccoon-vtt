@@ -575,7 +575,7 @@ export function DdbStep(props: {
   );
 }
 
-const ALSO_WORDS: Record<keyof AlsoSet, string> = { level: "the level", name: "the name", ac: "AC", hpMax: "max HP", speeds: "the Speed", senses: "the senses", sheetUrl: "the sheet link" };
+const ALSO_WORDS: Record<keyof AlsoSet, string> = { level: "the level", name: "the name", ac: "AC", hpMax: "max HP", speeds: "the Speed", senses: "the senses", sheetUrl: "the sheet link", classes: "the classes" };
 
 /** "the level, AC and max HP" */
 function alsoWords(also: AlsoSet): string {

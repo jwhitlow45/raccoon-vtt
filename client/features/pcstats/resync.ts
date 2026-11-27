@@ -1,4 +1,4 @@
-import type { Character, ClassResource, PcRoll, PcStats } from "#shared/model.ts";
+import type { Character, ClassLevel, ClassResource, PcRoll, PcStats } from "#shared/model.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -8,7 +8,7 @@ import { sensesWords, type AlsoItem, type FieldItem, type FieldKey, type FieldVa
 import { countWords, RESET_WORDS } from "../resources/logic.ts";
 import { signed } from "#shared/statBlock.ts";
 import { speedText, whose } from "../tokens/companionBlocks.ts";
-import { readLine } from "./fill.ts";
+import { classesWords, readLine } from "./fill.ts";
 import { rollReading, rollTitle } from "./reading.ts";
 
 /**
@@ -65,7 +65,9 @@ export function bareValue(key: FieldKey, value: FieldValue): string {
     case "critOn":
       return value === 18 ? "18 to 20" : value === 19 ? "19 and 20" : "20";
     case "speeds":
-      return value && typeof value === "object" ? speedText(value) : "none";
+      return value && typeof value === "object" && !Array.isArray(value) ? speedText(value) : "none";
+    case "classes":
+      return classesWords(Array.isArray(value) ? value : undefined);
     case "senses":
       return (typeof value === "string" ? sensesWords(value) : "") || "none";
     default:
@@ -104,6 +106,8 @@ export function sayValue(key: FieldKey, value: FieldValue): string {
       return `Speed ${bare}`;
     case "senses":
       return `Senses ${bare}`;
+    case "classes":
+      return `Classes: ${bare}`;
     default:
       return `${FLAG_LABELS[key] ?? key}: ${capital(bare)}`;
   }
@@ -120,7 +124,7 @@ export function sayValue(key: FieldKey, value: FieldValue): string {
 export function overwriteWords(item: Pick<FieldItem, "key" | "theirs">): string {
   const { key, theirs } = item;
   const [part, sub] = key.split(".");
-  const none = theirs === undefined || theirs === null || theirs === false || theirs === "" || (part === "adjust" && theirs === 0) || (part === "critOn" && theirs === 20);
+  const none = theirs === undefined || theirs === null || theirs === false || theirs === "" || (Array.isArray(theirs) && theirs.length === 0) || (part === "adjust" && theirs === 0) || (part === "critOn" && theirs === 20);
   if (key in FLAG_LABELS || none) return "Overwrite with D&D Beyond's";
   const bare = bareValue(key, theirs);
   switch (part) {
@@ -225,7 +229,8 @@ export type KeptRow = { first: string; tag?: string; theirs: string; tick: strin
 export function keptRow(item: SyncItem, blocks: ReadingBlocks): KeptRow {
   const tag = item.conflict ? "Also changed in D&D Beyond" : undefined;
   if (item.type === "field") {
-    const theirs = item.conflict && item.base !== undefined ? `D&D Beyond now says ${bareValue(item.key, item.theirs)}. At the last sync it said ${bareValue(item.key, item.base)}.` : `D&D Beyond says ${bareValue(item.key, item.theirs)}.`;
+    const said = item.key === "classes" ? classesWords(item.theirs as ClassLevel[] | undefined, item.names) : bareValue(item.key, item.theirs);
+    const theirs = item.conflict && item.base !== undefined ? `D&D Beyond now says ${said}. At the last sync it said ${bareValue(item.key, item.base)}.` : `D&D Beyond says ${said}.`;
     return { first: sayValue(item.key, item.now), ...(tag ? { tag } : {}), theirs, tick: overwriteWords(item) };
   }
   if (item.type === "resource") return resourceKeptRow(item, tag);
@@ -319,6 +324,8 @@ export function alsoLine(item: AlsoItem, character: Pick<Character, "name" | "ac
     }
     case "ac":
       return { text: `${sayValue("ac", item.theirs)}, now ${bareValue("ac", item.now)}`, ...(source === "ddb" ? { help: "Worked out from the armor. Check it." } : {}) };
+    case "classes":
+      return { text: `Classes: ${classesWords(item.theirs as ClassLevel[] | undefined, item.names)}, now ${bareValue("classes", item.now)}` };
     default:
       return { text: `${sayValue(item.key, item.theirs)}, now ${bareValue(item.key, item.now)}` };
   }

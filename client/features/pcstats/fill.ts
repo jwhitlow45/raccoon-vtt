@@ -1,7 +1,8 @@
-import type { Actor, Character } from "#shared/model.ts";
+import type { Actor, Character, ClassLevel } from "#shared/model.ts";
+import { CLASS_NAMES } from "#shared/rules/classResources.ts";
 import type { ActorPatch, CharacterPatch, DdbSyncPatch } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { hpForMax, sensesWords } from "#shared/rules/pcSync.ts";
+import { hpForMax, sameClasses, sensesWords } from "#shared/rules/pcSync.ts";
 import { speedText } from "../tokens/companionBlocks.ts";
 
 /**
@@ -12,12 +13,29 @@ import { speedText } from "../tokens/companionBlocks.ts";
  * never set, since a player may not change it.
  */
 
-export type AlsoKey = "level" | "ac" | "hpMax" | "speeds" | "senses" | "sheetUrl" | "name";
+export type AlsoKey = "level" | "ac" | "hpMax" | "speeds" | "senses" | "sheetUrl" | "name" | "classes";
 
 export type AlsoLine = { key: AlsoKey; text: string; on: boolean };
 
 /** The fields a fill sets beside the block, as the review left them ticked. */
-export type AlsoSet = { level?: number; name?: string; ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string };
+export type AlsoSet = { level?: number; name?: string; ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string; classes?: ClassLevel[] };
+
+/**
+ * Classes in words (docs/design/design-v1-slots.md 8): "Fighter 3 (its
+ * subclass casts spells), Wizard 2", an Other class by the name D&D Beyond
+ * gave it where there is one, "Artificer 3 (Other class, d8)", else "Other
+ * class 3 (d8)", and "none" for none.
+ */
+export function classesWords(classes: readonly ClassLevel[] | undefined, names?: readonly string[]): string {
+  if (!classes || classes.length === 0) return "none";
+  return classes
+    .map((c, i) => {
+      if (c.id !== "other") return `${CLASS_NAMES[c.id]} ${c.level}${c.third ? " (its subclass casts spells)" : ""}`;
+      const name = names?.[i];
+      return name !== undefined ? `${name} ${c.level} (Other class, d${c.die})` : `Other class ${c.level} (d${c.die})`;
+    })
+    .join(", ");
+}
 
 /** "Read from D&D Beyond: Bree Tallow, level 5." or "Read from the pasted text." */
 export function readLine(fill: PcFill): string {
@@ -31,11 +49,14 @@ function sameSpeeds(a: Actor["speeds"], b: Actor["speeds"]): boolean {
 }
 
 /** One line per field the fill would change, in the review's order. */
-export function alsoLines(fill: PcFill, character: Pick<Character, "name" | "level" | "actor">): AlsoLine[] {
+export function alsoLines(fill: PcFill, character: Pick<Character, "name" | "level" | "actor" | "classes">): AlsoLine[] {
   const actor = character.actor;
   const lines: AlsoLine[] = [];
   if (fill.level !== undefined && fill.level !== character.level) {
     lines.push({ key: "level", text: `Level ${fill.level}, now ${character.level ?? "not set"}`, on: true });
+  }
+  if (fill.classes !== undefined && !sameClasses(fill.classes, character.classes)) {
+    lines.push({ key: "classes", text: `Classes: ${classesWords(fill.classes, fill.classNames)}, now ${classesWords(character.classes)}`, on: true });
   }
   const a = fill.actor;
   // In a shape the AC and speeds are the creature's, and End the shape puts the character's from before it back, so a fill leaves both (W7B-P-9).
@@ -63,6 +84,7 @@ export function alsoSet(fill: PcFill, lines: readonly AlsoLine[]): AlsoSet {
   if (on.has("speeds") && fill.actor.speeds !== undefined) out.speeds = fill.actor.speeds;
   if (on.has("senses") && fill.actor.senses !== undefined) out.senses = fill.actor.senses;
   if (on.has("sheetUrl") && fill.actor.sheetUrl !== undefined) out.sheetUrl = fill.actor.sheetUrl;
+  if (on.has("classes") && fill.classes !== undefined) out.classes = fill.classes;
   return out;
 }
 
@@ -71,10 +93,12 @@ export function alsoSet(fill: PcFill, lines: readonly AlsoLine[]): AlsoSet {
  * it is at Save. Max HP by the companion design's rule, as a re-sync sets
  * it (shared/rules/pcSync.ts hpForMax).
  */
-export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): Pick<CharacterPatch, "name" | "level" | "actor"> {
-  const out: Pick<CharacterPatch, "name" | "level" | "actor"> = {};
+export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): Pick<CharacterPatch, "name" | "level" | "actor" | "classes"> {
+  const out: Pick<CharacterPatch, "name" | "level" | "actor" | "classes"> = {};
   if (also.name !== undefined) out.name = also.name;
   if (also.level !== undefined) out.level = also.level;
+  // The reducer clamps the counts spent to the new classes, so a fill never sends them (D-261127-094).
+  if (also.classes !== undefined) out.classes = also.classes;
   const actor: ActorPatch = {};
   if (also.ac !== undefined) actor.ac = also.ac;
   if (also.speeds !== undefined) actor.speeds = also.speeds;
@@ -92,17 +116,18 @@ export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): P
  * the earlier fill took, not with what was saved (docs/design/design-v1-resync.md 1.1).
  */
 export function pendingCharacter(
-  character: Pick<Character, "name" | "actor" | "ddbSync">,
+  character: Pick<Character, "name" | "actor" | "ddbSync" | "classes">,
   also: AlsoSet,
   record: DdbSyncPatch | null,
-): Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch } {
+): Pick<Character, "name" | "actor" | "classes"> & { ddbSync?: DdbSyncPatch } {
   const actor: Actor = { ...character.actor };
   if (also.ac !== undefined) actor.ac = also.ac;
   if (also.speeds !== undefined) actor.speeds = also.speeds;
   if (also.senses !== undefined) actor.senses = also.senses;
   if (also.sheetUrl !== undefined) actor.sheetUrl = also.sheetUrl;
   if (also.hpMax !== undefined) actor.hp = { ...actor.hp, ...hpForMax(character.actor, also.hpMax) };
-  return { name: also.name ?? character.name, actor, ...(record ?? character.ddbSync ? { ddbSync: record ?? character.ddbSync } : {}) };
+  const classes = also.classes ?? character.classes;
+  return { name: also.name ?? character.name, actor, ...(classes && classes.length > 0 ? { classes } : {}), ...(record ?? character.ddbSync ? { ddbSync: record ?? character.ddbSync } : {}) };
 }
 
 /** Whether a fill set anything beside the block. */
