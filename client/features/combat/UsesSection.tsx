@@ -8,7 +8,7 @@ import { Help } from "../../components/Panel.tsx";
 import { handFocusNow } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { partMark } from "../modules/gate.ts";
-import { HiddenHere, Module, useModule } from "../modules/Gate.tsx";
+import { HiddenHere, useModule } from "../modules/Gate.tsx";
 import type { ModuleId } from "../modules/registry.ts";
 import { updateTitle } from "../resources/logic.ts";
 import { ResourceSheet, type SheetMode } from "../resources/ResourceSheet.tsx";
@@ -104,11 +104,8 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
           ))
         : null}
       <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} slotsSearch={props.search?.slots} />
-      {character && presence === "no" ? (
-        <Module id="classResources">
-          <Help>{NOTHING_TO_LIST}</Help>
-        </Module>
-      ) : null}
+      {/* Gated in place, not wrapped in <Module>: the section's spacing reads the boxes under its label, and a display: contents wrapper has none. */}
+      {character && resourcesShown && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
       {/* Both edit controls at the foot (docs/design/design-v1-slots.md 3.1): the classes just above Add a class resource. */}
       {character ? (
         classes && classes.length > 0 ? (
@@ -123,18 +120,18 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
           </div>
         )
       ) : null}
-      {character ? (
-        <Module id="classResources">
+      {character && resourcesShown ? (
+        <>
           {full ? (
             <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>
           ) : (
-            <div data-uses-add="">
+            <div data-uses-add="" {...partMark("classResources")}>
               <OpenerButton icon="plus" onOpen={(from) => open({ kind: "add" }, from)}>
                 Add a class resource
               </OpenerButton>
             </div>
           )}
-        </Module>
+        </>
       ) : null}
       {sheet && character ? <ResourceSheet character={character} mode={sheet} opener={opener} onClose={() => setSheet(null)} /> : null}
       {classesOpen && character ? <ClassesSheet character={character} opener={classesOpener} onClose={() => setClassesOpen(false)} /> : null}
