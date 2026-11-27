@@ -138,14 +138,15 @@ describe("the parts gate's source scans", () => {
     }
   });
 
-  /**
-   * Homes whose Hidden on this device line the lanes still to land place: FT-D (rest).
-   * tools and menu hold their ways back as menu items, which design section 6 gives them, from useHiddenHere: they have no line to find, and wait on this scan reading those too.
-   */
-  const HOMES_PENDING = ["rest", "tools", "menu"];
+  /** Homes whose Hidden on this device line the lanes still to land place: FT-D (rest). */
+  const HOMES_PENDING = ["rest"];
+  /** Homes whose ways back are a menu's own items, read from useHiddenHere, where a menu holds items and not a line of buttons (design section 6, D-261127-482). */
+  const MENU_HOMES = ["tools", "menu"];
 
   test("every home has its Hidden on this device line", () => {
-    const placed = new Set([...outside.flatMap((f) => [...f.text.matchAll(/<HiddenHere\b[^>]*\bhome="([a-zA-Z]+)"/g)].map((m) => m[1]!))]);
+    const lines = outside.flatMap((f) => [...f.text.matchAll(/<HiddenHere\b[^>]*\bhome="([a-zA-Z]+)"/g)].map((m) => m[1]!));
+    const items = outside.flatMap((f) => [...f.text.matchAll(/\buseHiddenHere\("([a-zA-Z]+)"/g)].map((m) => m[1]!)).filter((home) => MENU_HOMES.includes(home));
+    const placed = new Set([...lines, ...items]);
     for (const home of placed) assert.ok((HOMES as readonly string[]).includes(home), `${home} is not a home`);
     assert.deepEqual(
       HOMES.filter((h) => !placed.has(h)),

@@ -65,6 +65,7 @@ const { SURFACES } = await import("./surfaces.ts");
 const { moduleById, modulesFor } = await import("./registry.ts");
 type ModuleId = import("./registry.ts").ModuleId;
 type Role = import("./registry.ts").Role;
+type Home = import("./registry.ts").Home;
 const { hiddenAt, hiddenModules, showLabel } = await import("./gate.ts");
 const { featureChoices, resetAllFeatures, setModuleShown } = await import("./store.ts");
 
@@ -118,13 +119,17 @@ const ADMITTED: readonly InnerOwner[] = [`button "Collapse Bree's turn"`, `butto
  * land (the scans' pending lists do the same, D-261127-458).
  */
 const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B"; why: string }[] = [
-  { surface: "This device", part: "weather", lane: "FT-B", why: "device/ThisDevice.tsx's Weather section and its line" },
-  { surface: "This device", part: "sound", lane: "FT-B", why: "device/ThisDevice.tsx's Sounds rows through DeviceSound" },
-  { surface: "This device", part: "diceAnimation", lane: "FT-B", why: "device/ThisDevice.tsx's line for Dice animation in Rolls" },
-  { surface: "Chip menus", part: "time", lane: "FT-B", why: "pages/ChipMenus.tsx's Time item in the DM menu" },
-  { surface: "Chip menus", part: "isometric", lane: "FT-B", why: "pages/ChipMenus.tsx's View rows and the menu home's line" },
-  { surface: "Chip menus", part: "sound", lane: "FT-B", why: "pages/ChipMenus.tsx's Now playing and Volume items, which stand in for the top bar's chips" },
+  { surface: "Chip menus", part: "time", lane: "FT-B", why: "the DM menu's Time item hides through Room.tsx's timeGaveWay and carries no data-part, so no drawing here holds the part" },
+  { surface: "Chip menus", part: "isometric", lane: "FT-B", why: "the chip menus hold no View rows, only the menu home's Show items, so no drawing here holds the part" },
 ];
+
+/**
+ * Ways back that are a part's own switch at its home, not a Show on the
+ * home's line: This device's Roll animation switch is Dice animation's
+ * (design section 6, the thisDevice home, D-261127-301). The home check
+ * leaves them out, and the switch's own test reads it.
+ */
+const SWITCH_WAYS_BACK: readonly { home: Home; part: ModuleId }[] = [{ home: "thisDevice", part: "diceAnimation" }];
 
 const pendingHere = (surface: string, part: ModuleId) => PENDING.some((p) => p.surface === surface && p.part === part);
 
@@ -230,7 +235,9 @@ function changed(d: Drawn, h: Extract<Hidden, { drawing: Drawing }>): string[] {
 function lineFindings(d: Drawn, h: Extract<Hidden, { drawing: Drawing }>, choices: ReturnType<typeof featureChoices>): string[] {
   const out: string[] = [];
   for (const { home, holder } of d.fixture.homes ?? []) {
-    const want = hiddenAt(home, d.role, choices, holder).map((m) => showLabel(m.id, d.role, choices));
+    const want = hiddenAt(home, d.role, choices, holder)
+      .filter((m) => !SWITCH_WAYS_BACK.some((w) => w.home === home && w.part === m.id))
+      .map((m) => showLabel(m.id, d.role, choices));
     const got = h.drawing.lines.get(home) ?? [];
     if (JSON.stringify(want) !== JSON.stringify(got)) out.push(`${home}: wants ${JSON.stringify(want)}, draws ${JSON.stringify(got)}`);
   }
@@ -636,6 +643,25 @@ describe("gates read off a surface's element tree", () => {
       const hidden = await card();
       assert.match(hidden, /one Exhaustion level\./, "the card opens");
       assert.doesNotMatch(hidden, /class resource/);
+    } finally {
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
+
+  test("This device's Roll animation switch is Dice animation's way back, off while it hides for each role", () => {
+    const fixture = FIXTURES.find((f) => f.surface === "This device")!;
+    const roll = (role: Role) => /<button[^>]*role="switch"[^>]*aria-checked="(true|false)"[^>]*data-search="menu\.this-device\.rolls\.animation"/.exec(draw(fixture, role))?.[1];
+    try {
+      for (const role of ["dm", "player"] as const) {
+        resetAllFeatures();
+        assert.equal(roll(role), "true", role);
+        setModuleShown("diceAnimation", role, false);
+        assert.equal(roll(role), "false", `${role}: hidden, the switch is off`);
+        resetAllFeatures();
+        setModuleShown("diceAnimation", role === "dm" ? "player" : "dm", false);
+        assert.equal(roll(role), "true", `${role}: the other role's choice is not this one's`);
+      }
     } finally {
       resetAllFeatures();
       disposeDrawn();
