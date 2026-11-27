@@ -1031,7 +1031,17 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       const b = built[kind]!;
       if (live === kind) return b.dm;
       if (live !== null) built[live]!.dm.close();
-      b.dm = await Socket.open(server.origin, b.room.roomId, await cookieNow());
+      /*
+       * With --only skipping the blocks before, a room can open within the
+       * minute the rooms just made stay loaded, past the rooms one address
+       * may hold (server/rooms/manager.ts maxPerCreatorIp), and the server
+       * refuses it with 4011. Once the idle ones have unloaded it loads.
+       */
+      b.dm = await Socket.open(server.origin, b.room.roomId, await cookieNow()).catch(async (err: Error) => {
+        if (!err.message.includes("(4011)")) throw err;
+        await page.waitForTimeout(65_000);
+        return Socket.open(server.origin, b.room.roomId, await cookieNow());
+      });
       sockets.push(b.dm);
       live = kind;
       return b.dm;
@@ -1388,8 +1398,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           await addPan(hexRow(orient, `pan, ${zoom} px, with the walker's action bar shown`), (t) => touchPan(page, cdp, STEPS, t));
           await page.keyboard.press("Escape");
         }
-        // Across two cull steps among the four areas, each step restarting their build: every frame held, as a build's frames are, and the slow ones named by what they did.
-        const building = hexRow(orient, "pan across two cull steps among the four areas, 40 px, each frame held");
+        // 360 px among the four areas, across one cull step or two at 256 px (relief/cull.ts) as the camera opens, each step restarting their build: every frame held, as a build's frames are, and the slow ones named by what they did.
+        const building = hexRow(orient, "pan of 360 px across one or two cull steps among the four areas, 40 px, each frame held");
         if (!opts.only || opts.only.some((o) => building.includes(o))) {
           await open(kind, 40);
           if (view === "isometric") await waitStood(page);
