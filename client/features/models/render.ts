@@ -16,6 +16,7 @@ import {
   OrthographicCamera,
   RepeatWrapping,
   Scene,
+  TextureSource,
   SRGBColorSpace,
   Texture,
   WebGLRenderer,
@@ -23,7 +24,7 @@ import {
 } from "three";
 import { MODEL_LIMITS } from "#shared/limits.ts";
 import { boardTheme } from "../../lib/theme.ts";
-import { ModelRefusal, MODEL_WORDS, type ModelColor, type ModelMesh } from "./mesh.ts";
+import { ModelRefusal, MODEL_WORDS, type ModelColor, type ModelMesh, type ModelPart, type PartMaterial } from "./mesh.ts";
 import { frameYaw, type Fit, type Layout } from "./normalize.ts";
 
 /**
@@ -72,7 +73,7 @@ export function plainColor(color: ModelColor): Color {
  * it decodes draws the full decode down on a canvas. A texture that fails
  * to decode leaves its part in its base color.
  */
-async function decodeTexture(bytes: Uint8Array, mime: string, width: number, height: number): Promise<ImageBitmap | null> {
+export async function decodeTexture(bytes: Uint8Array, mime: string, width: number, height: number): Promise<ImageBitmap | null> {
   const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime });
   const k = Math.min(1, L.textureSidePx / Math.max(width, height));
   const w = Math.max(1, Math.round(width * k));
@@ -86,11 +87,63 @@ async function decodeTexture(bytes: Uint8Array, mime: string, width: number, hei
       const canvas = new OffscreenCanvas(w, h);
       canvas.getContext("2d")?.drawImage(full, 0, 0, w, h);
       full.close();
-      return await createImageBitmap(canvas);
+      return await createImageBitmap(canvas, { premultiplyAlpha: "none" });
     } catch {
       return null;
     }
   }
+}
+
+/**
+ * Each part's texture: one per kept image and wrap, shared by every group
+ * that reads it, over one source per image. three uploads a texture's
+ * source once, so 64 groups sharing an image cost one copy on the GPU, not
+ * 64. A part without its image or coordinates has none.
+ */
+export function partTextures(parts: readonly ModelPart[], bitmaps: readonly (ImageBitmap | null)[]): (Texture | null)[] {
+  const sources = new Map<number, TextureSource<ImageBitmap>>();
+  const textures = new Map<string, Texture>();
+  return parts.map((part) => {
+    const m = part.material;
+    const bitmap = m.texture >= 0 ? (bitmaps[m.texture] ?? null) : null;
+    if (!bitmap || !part.uvs) return null;
+    const key = `${m.texture}:${m.wrapS}:${m.wrapT}`;
+    let texture = textures.get(key);
+    if (!texture) {
+      let source = sources.get(m.texture);
+      if (!source) {
+        source = new TextureSource(bitmap);
+        sources.set(m.texture, source);
+      }
+      texture = new Texture();
+      texture.source = source;
+      texture.flipY = false;
+      texture.colorSpace = SRGBColorSpace;
+      texture.wrapS = WRAP[m.wrapS] ?? RepeatWrapping;
+      texture.wrapT = WRAP[m.wrapT] ?? RepeatWrapping;
+      texture.needsUpdate = true;
+      textures.set(key, texture);
+    }
+    return texture;
+  });
+}
+
+/** A part's one matte material, as glTF's alpha modes say (glTF 2.0, 3.9.4 Alpha Coverage). */
+export function materialFor(m: PartMaterial, map: Texture | null, vertexColors: boolean): MeshStandardMaterial {
+  return new MeshStandardMaterial({
+    color: new Color().setRGB(m.color[0], m.color[1], m.color[2], LinearSRGBColorSpace),
+    map,
+    vertexColors,
+    metalness: 0,
+    roughness: 0.8,
+    side: m.doubleSided ? DoubleSide : FrontSide,
+    transparent: m.alpha === "blend",
+    // MASK tests the base color's alpha, its factor included, against the cutoff. BLEND blends with it.
+    opacity: m.alpha === "opaque" ? 1 : m.color[3],
+    alphaTest: m.alpha === "mask" ? m.alphaCutoff : 0,
+    // A blended group's triangles draw in the file's order, so one that wrote depth would hide those behind it.
+    depthWrite: m.alpha !== "blend",
+  });
 }
 
 type Built = { root: Group; plain: MeshStandardMaterial[]; dispose: () => void };
@@ -151,42 +204,20 @@ export class SheetDrawer {
     const plain: MeshStandardMaterial[] = [];
     const geometries: BufferGeometry[] = [];
     const materials: MeshStandardMaterial[] = [];
-    const textures: Texture[] = [];
-    for (const part of mesh.parts) {
+    const maps = partTextures(mesh.parts, bitmaps);
+    mesh.parts.forEach((part, i) => {
       const geometry = new BufferGeometry();
       geometry.setAttribute("position", new BufferAttribute(part.positions, 3));
       geometry.setAttribute("normal", new BufferAttribute(part.normals, 3));
       if (part.index) geometry.setIndex(new BufferAttribute(part.index, 1));
       if (part.uvs) geometry.setAttribute("uv", new BufferAttribute(part.uvs, 2));
       if (part.colors) geometry.setAttribute("color", new BufferAttribute(part.colors, 4, true));
-      const m = part.material;
-      const bitmap = m.texture >= 0 ? (bitmaps[m.texture] ?? null) : null;
-      let map: Texture | null = null;
-      if (bitmap && part.uvs) {
-        map = new Texture(bitmap);
-        map.flipY = false;
-        map.colorSpace = SRGBColorSpace;
-        map.wrapS = WRAP[m.wrapS] ?? RepeatWrapping;
-        map.wrapT = WRAP[m.wrapT] ?? RepeatWrapping;
-        map.needsUpdate = true;
-        textures.push(map);
-      }
-      const material = new MeshStandardMaterial({
-        color: new Color().setRGB(m.color[0], m.color[1], m.color[2], LinearSRGBColorSpace),
-        map,
-        vertexColors: part.colors !== null,
-        metalness: 0,
-        roughness: 0.8,
-        side: m.doubleSided ? DoubleSide : FrontSide,
-        transparent: m.alpha === "blend",
-        opacity: m.alpha === "blend" ? m.color[3] : 1,
-        alphaTest: m.alpha === "mask" ? m.alphaCutoff : 0,
-      });
-      if (m.plain) plain.push(material);
+      const material = materialFor(part.material, maps[i] ?? null, part.colors !== null);
+      if (part.material.plain) plain.push(material);
       geometries.push(geometry);
       materials.push(material);
       root.add(new Mesh(geometry, material));
-    }
+    });
     this.#pivot.add(root);
     this.#built = {
       root,
@@ -195,7 +226,7 @@ export class SheetDrawer {
         this.#pivot.remove(root);
         for (const g of geometries) g.dispose();
         for (const m of materials) m.dispose();
-        for (const t of textures) t.dispose();
+        for (const t of new Set(maps)) t?.dispose();
         for (const b of bitmaps) b?.close();
       },
     };
@@ -249,25 +280,75 @@ export class SheetDrawer {
   }
 }
 
+/** The outline's color, the board's black, as bytes. */
+const OUTLINE_RGB = [1, 3, 5].map((i) => parseInt(boardTheme.color.stage.slice(i, i + 2), 16)) as [number, number, number];
+
+/** Where the outline samples the drawing, 1.5 px out round it in eight directions. */
+const OUTLINE_STEPS = (() => {
+  const d = OUTLINE_PX;
+  const e = OUTLINE_PX / Math.SQRT2;
+  return [[-d, 0], [d, 0], [0, -d], [0, d], [-e, -e], [e, e], [-e, e], [e, -e]] as const;
+})();
+
 /**
- * The drawing with a dark outline 1.5 px out, at 70%: the drawing stamped
- * round itself, filled dark where it landed, then the drawing on top. The
- * gutter keeps each frame's outline inside it.
+ * A dark outline 1.5 px out round the drawing, at 70%, so a grey figure
+ * reads on a grey floor, in the image's own RGBA bytes (not premultiplied,
+ * as getImageData gives them). It goes only where nothing is drawn: a
+ * pixel the drawing touches keeps its color and alpha, so a see-through
+ * cloak stays as see-through as its material. Outside, the outline is the
+ * drawing's alpha sampled at the eight offsets and joined, as stamping it
+ * eight times would make it. The gutter keeps each frame's outline inside it.
  */
+export function outline(rgba: Uint8ClampedArray, width: number, height: number): void {
+  const n = width * height;
+  const alpha = new Float32Array(n);
+  for (let p = 0; p < n; p++) alpha[p] = rgba[p * 4 + 3]! / 255;
+  // Only pixels within 2 px of something drawn can take any outline: find them in two passes of a running maximum.
+  const R = 2;
+  const rows = new Uint8Array(n);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let any = 0;
+      for (let k = Math.max(0, x - R); k <= Math.min(width - 1, x + R) && !any; k++) if (alpha[y * width + k]! > 0) any = 1;
+      rows[y * width + x] = any;
+    }
+  }
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= width || y >= height ? 0 : alpha[y * width + x]!);
+  /** The drawing's alpha at a point between pixels, as a canvas draws an image moved by a fraction of a pixel. */
+  const sample = (x: number, y: number) => {
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const fx = x - x0;
+    const fy = y - y0;
+    return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+  };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x;
+      if (alpha[p]! > 0) continue;
+      let near = 0;
+      for (let k = Math.max(0, y - R); k <= Math.min(height - 1, y + R) && !near; k++) near = rows[k * width + x]!;
+      if (!near) continue;
+      let clear = 1;
+      for (const [dx, dy] of OUTLINE_STEPS) clear *= 1 - sample(x - dx, y - dy);
+      const a = Math.round(255 * OUTLINE_ALPHA * (1 - clear));
+      if (a === 0) continue;
+      rgba[p * 4] = OUTLINE_RGB[0];
+      rgba[p * 4 + 1] = OUTLINE_RGB[1];
+      rgba[p * 4 + 2] = OUTLINE_RGB[2];
+      rgba[p * 4 + 3] = a;
+    }
+  }
+}
+
+/** The drawing on a 2D canvas, outlined. */
 function outlined(drawn: OffscreenCanvas): OffscreenCanvas {
   const out = new OffscreenCanvas(SHEET_W, SHEET_H);
   const ctx = out.getContext("2d")!;
-  const ring = new OffscreenCanvas(SHEET_W, SHEET_H);
-  const rctx = ring.getContext("2d")!;
-  const d = OUTLINE_PX;
-  const e = OUTLINE_PX / Math.SQRT2;
-  for (const [dx, dy] of [[-d, 0], [d, 0], [0, -d], [0, d], [-e, -e], [e, e], [-e, e], [e, -e]] as const) rctx.drawImage(drawn, dx, dy);
-  rctx.globalCompositeOperation = "source-in";
-  rctx.globalAlpha = OUTLINE_ALPHA;
-  rctx.fillStyle = boardTheme.color.stage;
-  rctx.fillRect(0, 0, SHEET_W, SHEET_H);
-  ctx.drawImage(ring, 0, 0);
   ctx.drawImage(drawn, 0, 0);
+  const image = ctx.getImageData(0, 0, SHEET_W, SHEET_H);
+  outline(image.data, SHEET_W, SHEET_H);
+  ctx.putImageData(image, 0, 0);
   return out;
 }
 
