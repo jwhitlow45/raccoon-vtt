@@ -9,7 +9,7 @@ import type { RoomState, Token } from "../shared/model.ts";
 import { occupiedHexes, placedOnHex } from "../shared/rules/footprint.ts";
 import { hexCenter, hexKey, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
-import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sleep, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * Attached tokens end to end (docs/design/design-v1-attach.md 13), on the real
@@ -1644,6 +1644,100 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
     await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
     for (const id of [keep.bree, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "scene.delete", sceneId: keep.scene });
+  });
+
+  /*
+   * LP55-DRAG-1: a rider's drag moves its mount by the offset between them
+   * as the drag began. A second DM device that moves the rider mid-drag
+   * takes him off the mount, so the drag ends as a cancel and sends no
+   * move, where its drop once sent the mount off the map. One that moves
+   * the mount instead, the rider with it, leaves the drag going, and the
+   * drop lands the mount under the finger.
+   */
+  test("lp55fix-1. a second DM device moves Thorn off the warhorse while the DM drags him: the drag ends as a cancel, sends no move and the horse stays; one that moves the horse instead leaves the drop under the finger", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const field = { w: 24, h: 16 };
+    const keep = { scene: uuidv7(), horse: uuidv7(), thorn: uuidv7() };
+    const seat = { x: 8, y: 11 };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "LP55 rider", bounds: field, fogEnabled: false } });
+    await waitFor("the rider's scene in the DM's copy", () => dmSocket.state?.scenes[keep.scene] ?? null);
+    await dmViews(keep.scene);
+    const mount = async () => {
+      await ops.send({ t: "token.attach", tokenId: keep.thorn, to: keep.horse, kind: "ride", steer: true, ...seat, elevation: 0 });
+      await waitFor("Thorn riding in the DM's copy", () => (token(dmSocket, keep.thorn)?.attached?.to === keep.horse ? true : null));
+    };
+    await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", ...seat, disposition: "ally", visibility: "all", actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+    await ops.send({ t: "token.create", token: { id: keep.thorn, sceneId: keep.scene, kind: "pc", name: "Thorn", size: "medium", ...seat, disposition: "ally", visibility: "all", actor: { inline: actor() } } });
+    await mount();
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    const drawn = (id: string) =>
+      dm.evaluate((id) => {
+        type Node = { x(): number; y(): number };
+        const konva = (globalThis as unknown as { Konva: { stages: { findOne(selector: string): Node | undefined }[] } }).Konva;
+        for (const stage of konva.stages) {
+          const n = stage.findOne(`#${id}`);
+          if (n) return [n.x(), n.y()];
+        }
+        return null;
+      }, id);
+    /** Drags Thorn from his seat toward 9, 5, running `midway` with the button down halfway there, and lets go. Returns every frame the DM's page sent from the press on. */
+    const dragThorn = async (midway: () => Promise<void>) => {
+      const from = await pagePoint(dm, field, { x: seat.x + 0.5, y: seat.y + 0.5 });
+      const mid = await pagePoint(dm, field, { x: 8.5, y: 8.5 });
+      const to = await pagePoint(dm, field, { x: 9.5, y: 5.5 });
+      await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+      const start = dmSocket.sent.length;
+      await dm.mouse.move(from.x, from.y);
+      await dm.mouse.down();
+      try {
+        await dm.mouse.move(from.x, from.y + (mid.y - from.y) * 0.1, { steps: 3 });
+        await dm.mouse.move(mid.x, mid.y, { steps: 8 });
+        await waitFor("the DM's drag of Thorn under way", () => (dmSocket.sent.slice(start).some((f) => f.includes('"dragMove"') && f.includes(keep.thorn)) ? true : null), 5_000);
+        await midway();
+        await sleep(300);
+        await dm.mouse.move(to.x, to.y, { steps: 8 });
+        await dm.mouse.up();
+      } finally {
+        await dm.mouse.up().catch(() => {});
+      }
+      await sleep(800);
+      return dmSocket.sent.slice(start);
+    };
+    const moves = (frames: readonly string[]) => frames.filter((f) => /"t":"token\.move(Many)?"/.test(f));
+
+    // The second device moves Thorn to 20, 13, which takes him off the horse.
+    let rest = 0;
+    const cancelled = await dragThorn(async () => {
+      await ops.send({ t: "token.move", tokenId: keep.thorn, x: 20, y: 13 });
+      await waitFor("Thorn off the horse in the DM's copy", () => (token(dmSocket, keep.thorn)?.x === 20 && !token(dmSocket, keep.thorn)?.attached ? true : null));
+      rest = dmSocket.sent.length;
+    });
+    assert.deepEqual(moves(cancelled), [], "no move sent for the drag");
+    assert.deepEqual(dmSocket.sent.slice(rest).filter((f) => f.includes('"dragMove"')), [], "the rest of the gesture previews nothing");
+    assert.deepEqual([token(dmSocket, keep.horse)?.x, token(dmSocket, keep.horse)?.y], [seat.x, seat.y], "the horse stays");
+    assert.deepEqual([token(dmSocket, keep.thorn)?.x, token(dmSocket, keep.thorn)?.y, token(dmSocket, keep.thorn)?.attached], [20, 13, undefined], "Thorn where the second device put him, on foot");
+    await waitFor("Thorn drawn at 20, 13", async () => ((await drawn(keep.thorn))?.join() === "20,13" ? true : null));
+    await waitFor("the horse drawn where it stands", async () => ((await drawn(keep.horse))?.join() === `${seat.x},${seat.y}` ? true : null));
+    await shots.take(dm, "lp55fix-1-cancelled-horse-stays");
+
+    // Back in the saddle, the second device moves the horse two squares east, Thorn riding along.
+    await ops.send({ t: "token.move", tokenId: keep.thorn, ...seat });
+    await mount();
+    const dropped = await dragThorn(async () => {
+      await ops.send({ t: "token.move", tokenId: keep.horse, x: seat.x + 2, y: seat.y });
+      await waitFor("the horse and Thorn moved in the DM's copy", () => (token(dmSocket, keep.horse)?.x === seat.x + 2 && token(dmSocket, keep.thorn)?.x === seat.x + 2 ? true : null));
+    });
+    assert.equal(moves(dropped).length, 1, "the drop sends the horse's move");
+    const landed = await waitFor("the horse landed", () => {
+      const t = token(dmSocket, keep.horse);
+      return t && t.y !== seat.y ? t : null;
+    });
+    assert.deepEqual([landed.x, landed.y], [9, 5], "the horse under the finger, Thorn's seat where his drag let go");
+    assert.deepEqual([token(dmSocket, keep.thorn)?.x, token(dmSocket, keep.thorn)?.y, token(dmSocket, keep.thorn)?.attached?.to], [9, 5, keep.horse], "Thorn riding");
+    await shots.take(dm, "lp55fix-1-horse-moved-drop-under-finger");
+    await dmViews(run.sceneId);
+    for (const id of [keep.thorn, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
     await ops.send({ t: "scene.delete", sceneId: keep.scene });
   });
 });
