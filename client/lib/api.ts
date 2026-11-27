@@ -68,7 +68,8 @@ export type JoinRequestList = { mode: JoinMode; challenged: boolean; requests: J
 export type LetInAs = { kind: "new" } | { kind: "member"; memberId: MemberId };
 /** `pending`: the server answered 202, still finishing, and the `joinRequests` signal settles the row. */
 export type LetInAnswer = { memberId: MemberId; pending?: true };
-export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound";
+/** An asset's kind, as server/assets/kinds.ts lists them. A `model` is a 3D model's sheet of 8 views (docs/design/design-v1-token-models.md 4.3). */
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound" | "model";
 export type AssetVariant = "full" | "mobile" | "thumb";
 export type AssetRow = {
   id: AssetId;

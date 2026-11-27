@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
-import { LIMITS, MARKED_SHARE_MOST, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
+import { LIMITS, MARKED_SHARE_MOST, MODEL_LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
 import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES, type QueueEdit } from "./sound.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -177,9 +177,27 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 const wholeText = { message: "text cannot hold half a character" };
 const whole = (s: string) => !LONE_SURROGATE.test(s);
 
+/** An edge of a model frame's drawn box, in whole hundredths of the frame. */
+const boxEdge = z.number().int().min(0).max(MODEL_LIMITS.boxMax);
+/**
+ * A 3D model on a picture (docs/design/design-v1-token-models.md 4.1 and
+ * 4.2): its sheet, which the permissions hold to an asset of kind `model`,
+ * a frame's side in footprint sides, the anchor down the frame, and each of
+ * the 8 frames' drawn box with its corners in order. Strict, as the image it
+ * rides on is, so a build from before models refuses it by its op version.
+ */
+const modelRef = z.strictObject({
+  assetId: id,
+  side: z.number().min(MODEL_LIMITS.minSide).max(MODEL_LIMITS.maxSide),
+  anchorY: z.number().min(0).max(1),
+  boxes: z
+    .array(z.tuple([boxEdge, boxEdge, boxEdge, boxEdge]).refine(([x0, y0, x1, y1]) => x0 < x1 && y0 < y1, { message: "a drawn box has its corners in order" }))
+    .length(MODEL_LIMITS.frames),
+});
 const assetImage = z.strictObject({
   assetId: id,
   crop: z.strictObject({ cx: z.number().min(-1).max(1), cy: z.number().min(-1).max(1), zoom: z.number().min(0.1).max(10) }),
+  model: modelRef.optional(),
 });
 /**
  * A shipped game-icons.net icon on a disk of `color` (docs/design/design-v1-dm-tools.md
@@ -187,7 +205,7 @@ const assetImage = z.strictObject({
  * draws as initials, as an unknown stamp key draws as a dashed box.
  */
 const iconKey = z.string().regex(ICON_KEY_RE, "not an icon key");
-const iconImage = z.strictObject({ icon: iconKey, color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/) });
+const iconImage = z.strictObject({ icon: iconKey, color: z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/), model: modelRef.optional() });
 /** A token's, a portrait's or a monster's image: an upload from the room's library, or a shipped icon. */
 const imageRef = z.union([assetImage, iconImage]);
 /**

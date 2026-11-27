@@ -1301,22 +1301,28 @@ export type ModelRef = {
 /**
  * An image from the room's library as a token wears it: an asset of kind
  * `token` and the crop that fits it to the token's circle or square (design
- * 11.4).
+ * 11.4), with the 3D model that stands in its place in Isometric when one
+ * was added to it.
  */
-export type AssetImage = { assetId: AssetId; crop: { cx: number; cy: number; zoom: number } };
+export type AssetImage = { assetId: AssetId; crop: { cx: number; cy: number; zoom: number }; model?: ModelRef };
 
 /**
  * A shipped game-icons.net icon on a colored disk (wave 5,
- * docs/design/design-v1-dm-tools.md 3.12). It names no asset, so it needs no
- * upload and no asset check. The glyph's color is worked out from `color`
- * on the device, never stored.
+ * docs/design/design-v1-dm-tools.md 3.12). The icon names no asset, so it
+ * needs no upload and no asset check, though a model added to it names its
+ * sheet. The glyph's color is worked out from `color` on the device, never
+ * stored.
  */
-export type IconImage = { icon: IconKey; color: string };
+export type IconImage = { icon: IconKey; color: string; model?: ModelRef };
 
 /**
  * An image as a token, a character's portrait or a monster's default
  * wears it: an uploaded asset or a shipped icon. shared/imageRef.ts reads
- * either.
+ * either. A model rides on the picture it was added to
+ * (docs/design/design-v1-token-models.md 3.4, D-261127-169), so it goes
+ * wherever that picture goes and reaches only those who receive the
+ * picture: a disguise's true face keeps its model among the other images,
+ * which only the DM and the token's owners receive.
  */
 export type ImageRef = AssetImage | IconImage;
 
