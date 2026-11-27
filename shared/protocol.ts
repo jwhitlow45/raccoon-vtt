@@ -939,6 +939,10 @@ const pcFill = z.strictObject({
   read: z.strictObject({ weapon: z.boolean(), spell: z.boolean(), other: z.boolean(), resource: z.boolean().optional() }).optional(),
   /** The class resources read (docs/design/design-v1-ddb-resources.md 3.1). Absent: not read. */
   resources: z.array(fillResource).max(MAX_FILL_RESOURCES).optional(),
+  /** The classes read whole (docs/design/design-v1-slots.md 8). Absent: not read. */
+  classes: classLevels.optional(),
+  /** Each read class's name as D&D Beyond gives it, one per entry of `classes`, so the review names an Other class. */
+  classNames: z.array(line(40)).max(MAX_CLASSES).optional(),
 });
 
 /*
@@ -970,6 +974,8 @@ const ddbBase = z.strictObject({
   hpMax: z.number().int().min(1).max(100_000).optional(),
   speeds: speeds.optional(),
   senses: shortText.optional(),
+  /** The classes D&D Beyond sent, read whole (docs/design/design-v1-slots.md 8). */
+  classes: classLevels.optional(),
 });
 const ddbSyncFields = {
   // The server writes it, always to the millisecond, so its length is fixed and the record's bound holds.
