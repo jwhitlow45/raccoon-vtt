@@ -126,9 +126,11 @@ for (const seed of [11, 23, 47]) {
         if (!next) continue;
         ({ op, who } = next);
       }
+      const held = stableStringify(state);
       const result = applyOp(state, op, who, env(seq));
       if (!result.ok) {
-        // Invariant 3: the state is the one before, held whole.
+        // Invariant 3: a refused op changed nothing, the state it was given included, held whole.
+        assert.equal(stableStringify(state), held, `step ${i}: a refused ${op.t} changed the state`);
         refusedCount++;
         continue;
       }
