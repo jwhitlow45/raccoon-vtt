@@ -118,9 +118,7 @@ const ADMITTED: readonly InnerOwner[] = [`button "Collapse Bree's turn"`, `butto
  * fails until it is taken off, so the list shrinks to empty as the gates
  * land (the scans' pending lists do the same, D-261127-458).
  */
-const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B"; why: string }[] = [
-  { surface: "Chip menus", part: "isometric", lane: "FT-B", why: "the chip menus hold no View rows, only the menu home's Show items, so no drawing here holds the part" },
-];
+const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B"; why: string }[] = [];
 
 /**
  * Ways back that are a part's own switch at its home, not a Show on the
@@ -332,11 +330,14 @@ describe("each drawn surface's parts (design section 14, checks 1 to 4)", () => 
   });
 
   test("check 4: each surface's drawings hold a data-part of every part it covers", () => {
+    // A part with no surface of its own here, as Isometric view in the chip menus, covers it by the Show its home there draws while it hides (D-261127-632).
+    const showsAt = (surface: string, part: ModuleId) =>
+      DRAWN.some((d) => d.fixture.surface === surface && d.hidden.some((h) => h.part === part && h.error === undefined && [...h.drawing.lines.values()].some((line) => line.includes(showLabel(part, d.role, choicesHiding(part, d.role))))));
     const missing: string[] = [];
     for (const surface of drawnSurfaces) {
       const parts = new Set(DRAWN.filter((d) => d.fixture.surface === surface && d.everything).flatMap((d) => [...d.everything!.parts]));
       for (const part of coversOf(surface)) {
-        if (FTD_PARTS.has(part) || parts.has(part)) continue;
+        if (FTD_PARTS.has(part) || parts.has(part) || showsAt(surface, part)) continue;
         if (pendingHere(surface, part)) failPending(surface, part);
         else missing.push(`${surface} covers ${part}, and no drawing of it holds data-part="${part}"`);
       }

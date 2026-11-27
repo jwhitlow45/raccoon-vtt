@@ -58,8 +58,8 @@ const { default: DicePanel } = await import("../dice/DicePanel.tsx");
 const { JournalEditor } = await import("../journal/JournalEditor.tsx");
 const { default: JournalPanel } = await import("../journal/JournalPanel.tsx");
 const { ChipMenuBody, useChipEnv, useChipHost, useDmMenuView } = await import("../../pages/ChipMenus.tsx");
-const { dmMenuSections, youMenuSections } = await import("../../pages/chipMenus.ts");
-const { useModule } = await import("./Gate.tsx");
+const { dmMenuSections, showSection, youMenuSections } = await import("../../pages/chipMenus.ts");
+const { useHiddenHere, useModule } = await import("./Gate.tsx");
 const { CHIP_WORDS } = await import("../../pages/chipWords.ts");
 const { default: ThisDevice } = await import("../device/ThisDevice.tsx");
 const { Popover } = await import("../../components/Popover.tsx");
@@ -192,7 +192,10 @@ export function readDrawing(html: string, surface: string, inner: readonly Inner
     if (part !== undefined) parts.add(part);
     const home = node.attrs["data-hidden-here"];
     if (home !== undefined) lines.set(home, [...walk(node)].filter((n) => n.tag === "button").map((n) => textOf(n)));
-    const wayBack = inside(node, "data-hidden-here");
+    // A chip menu's Show items are the menu home's way back, items where a menu holds no line (D-261127-632).
+    const menuShow = node.attrs["data-chip-item"]?.startsWith("show:") === true;
+    if (menuShow) lines.set("menu", [...(lines.get("menu") ?? []), textOf(node)]);
+    const wayBack = inside(node, "data-hidden-here") || menuShow;
     if (node.attrs["data-search"] !== undefined) anchors.push({ id: node.attrs["data-search"], owner: ownerAt(node), within: partsAround(node), wayBack });
     if (controlKind(node) === null) continue;
     const role = node.attrs.role;
@@ -430,12 +433,18 @@ function inMenu(body: ReactElement): ReactElement {
   return createElement(Popover, { handle: OPEN_MENU as never, side: "below", bound: () => ({ left: 0, top: 0, right: 1440, bottom: 900 }), children: body });
 }
 
+/** The menu home's hidden parts as the chip menus end with them (ChipMenus.tsx useMenuShows). */
+function useMenuShows() {
+  return useHiddenHere("menu").map((p) => ({ id: p.id, label: p.label, show: p.show }));
+}
+
 /** The DM menu as the DM chip draws it open (ChipMenus.tsx DmMenuBody), its Time item there while Date and time shows, as Room passes it (D-261127-631). */
 function DmMenu() {
   const host = useChipHost(OPEN_MENU as never);
   const view = useDmMenuView(useModule("time"), true, null, true);
   const env = useChipEnv(() => null);
-  return createElement(ChipMenuBody, { host, env, label: CHIP_WORDS.dmMenuName, sections: dmMenuSections(view), mark: "dm" });
+  const shows = useMenuShows();
+  return createElement(ChipMenuBody, { host, env, label: CHIP_WORDS.dmMenuName, sections: [...dmMenuSections(view), ...showSection(shows)], mark: "dm" });
 }
 
 /** The You menu as a player's chip draws it open (ChipMenus.tsx YouMenuBody). */
@@ -445,7 +454,8 @@ function YouMenu() {
   const memberId = useRoomView((s) => s.you?.memberId ?? "");
   const member = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId] : undefined));
   const characters = useRoomView((s) => s.view?.characters);
-  const sections = youMenuSections({ memberId, member, characters: characters ?? {}, preview: false, volume: null });
+  const shows = useMenuShows();
+  const sections = [...youMenuSections({ memberId, member, characters: characters ?? {}, preview: false, volume: null }), ...showSection(shows)];
   return createElement(ChipMenuBody, { host, env, label: CHIP_WORDS.youMenuName, sections, mark: "you" });
 }
 
