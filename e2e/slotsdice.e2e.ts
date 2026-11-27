@@ -452,6 +452,17 @@ describe("raccoon-vtt: spell slots and Hit Point Dice", { timeout: 900_000 }, ()
     await panel.getByRole("heading", { name: "Bree" }).first().waitFor();
     assert.equal(await panel.locator("[data-slot-rows], [data-hit-dice]").count(), 0, "Pat's panel draws Bree's rows");
     assert.equal(await panel.getByText(/Hit Point Dice:/).count(), 0, "Pat's panel names Bree's dice");
+    // Lent Bree's token, Pat may rest her, but he holds no Classes control, so the Short Rest note never points him to one (SLOTS-O-04).
+    await ops.send({ t: "token.update", tokenId: run.breeToken, patch: { ownerIds: [run.patId] } });
+    const rest = section(panel, "Rest");
+    const combat = panel.getByRole("button", { name: "Combat", exact: true });
+    await waitFor("Pat's panel holds Bree's Rest", async () => ((await combat.count()) > 0 || (await rest.count()) > 0 ? true : null));
+    if ((await combat.count()) > 0 && (await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    await rest.getByRole("radio", { name: "Short Rest" }).check();
+    await rest.getByText(/^Roll each Hit Point Die you spend/).waitFor();
+    assert.equal(await rest.getByText(/add your classes/).count(), 0, "the lent player's note offers the Classes control he lacks");
+    await ops.send({ t: "token.update", tokenId: run.breeToken, patch: { ownerIds: [] } });
+    await rest.waitFor({ state: "detached" });
   });
 
   test("sd-b-9. the measured screens line up within 1 px, and no console errors on any page", () => {
