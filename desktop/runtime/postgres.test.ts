@@ -1079,7 +1079,7 @@ describe("a start", { skip: posixOnly }, () => {
       await rmdir(file);
       const seen = listing.count();
       await until("two passes without the file, and the end unconfirmed", () => (listing.count() >= seen + 2 && unconfirmed.length > 0) || stopped);
-      assert.equal(isAlive(child), true, "nor once it is gone");
+      assert.equal(isAlive(child), true, `nor once it is gone (stop answered: ${stopped}, unconfirmed: ${JSON.stringify(unconfirmed)}, listings: ${listing.count()}, calls: ${JSON.stringify(await calls())})`);
       assert.equal(stopped, false, "the stop holds while it runs");
       assert.deepEqual(unconfirmed, [true]);
     } finally {
