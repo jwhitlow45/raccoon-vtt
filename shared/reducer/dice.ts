@@ -1,6 +1,6 @@
 import { naturalOf } from "../dice/roll.ts";
 import { startsSecret } from "../dice/secret.ts";
-import { healRevivesDead } from "../migrate.ts";
+import { healRevivesDead, usesStamped } from "../migrate.ts";
 import type { DiceRoll, LogEvent } from "../model.ts";
 import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "../permissions.ts";
 import { initiativeHidden, seenMark } from "../project.ts";
@@ -10,7 +10,8 @@ import { resultOf } from "../rules/rolls.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { answerOf, creatureOf, creatureRef, sameCreature, writeTarget } from "./rolls.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
-import { checkPrompt, markOf, rechargeLabel, withSettled, withUses } from "./uses.ts";
+import { checkPrompt, markOf, NO_SLOTS_HERE, rechargeLabel, spendDie, stamped, withSettled, withUses } from "./uses.ts";
+import { keys } from "../keys.ts";
 import { ownEntry } from "../records.ts";
 
 /**
@@ -35,7 +36,28 @@ export function sysDice(tx: Tx, op: Sys): void {
       return deathRoll(tx, op, asked);
     case "actor.rechargeRoll":
       return rechargeRoll(tx, op, asked);
+    case "actor.hitDieRoll":
+      return hitDieRoll(tx, op, asked);
   }
+}
+
+/**
+ * A Short Rest's Hit Point Die rolled on the server (docs/design/design-v1-slots.md 3.3, 6):
+ * one die spent and its total healed, at least 1 and up to the most, with
+ * the HP line its take back reads, as a death save's natural 20 heals. The
+ * roll names the character, never a token, and its `hitDie` mark keeps it
+ * to the DM and the character's own players (project.ts diceRollReach).
+ */
+function hitDieRoll(tx: Tx, op: Sys, asked: Asked<"actor.hitDieRoll">): void {
+  const result = op.results[0];
+  if (!result || op.results.length !== 1) throw invalid("a Hit Point Die rolls once");
+  const resolved = tx.resolveActor(asked.target);
+  if (!resolved.character) throw invalid(NO_SLOTS_HERE);
+  const character = tx.character(resolved.character.id);
+  const roll: DiceRoll = { ...result, label: `Hit Point Die (d${asked.die})`, characterId: character.id, hitDie: asked.die };
+  tx.addEvent({ type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: "all", rolls: [roll] });
+  spendDie(tx, resolved, character, asked.die, Math.max(1, result.total));
+  if (usesStamped(tx.env.opVersion)) tx.write(keys.character(character.id), stamped(tx.character(character.id)));
 }
 
 /** One roll's creature on its line: a token with its marks of who saw it, as other token events carry them (project.ts seenMark), or a character. */

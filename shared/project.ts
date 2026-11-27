@@ -3918,7 +3918,8 @@ function creatureReach(state: RoomState, data: { tokenId?: string; characterId?:
  * 11.3).
  */
 function diceRollReach(state: RoomState, roll: DiceRoll): Reach {
-  const own = roll.hidden ? creaturePlayers(state, roll) : "all";
+  // A Hit Point Die's roll tells the heal's size, so only the character's own players read it (docs/design/design-v1-slots.md 7).
+  const own = roll.hidden || roll.hitDie !== undefined ? creaturePlayers(state, roll) : "all";
   return roll.tokenId === undefined ? own : both(own, creatureReach(state, roll, false));
 }
 

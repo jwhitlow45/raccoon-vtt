@@ -1,7 +1,8 @@
 import type { Actor, DiceResult, RoomState } from "../model.ts";
+import { dieRefusal } from "../reducer/uses.ts";
 import type { ActorTarget, OpOf, RefusalCode } from "../protocol.ts";
 import { failingCondition } from "../rules/rollReminders.ts";
-import { creatureBonus, isSave, testOf, type D20Test, type SrdRolls } from "./bonus.ts";
+import { creatureBonus, creatureNumbers, isSave, testOf, type D20Test, type SrdRolls } from "./bonus.ts";
 import { critRuleOf, rollCritical } from "./crit.ts";
 import { formulaRange, parseExtra, parseFormula, type Formula } from "./formula.ts";
 import { CANNOT_REROLL, rerolled, rerollFace, rollFormula, withDie, withLucky, type Changed, type Draw } from "./roll.ts";
@@ -16,13 +17,13 @@ import { ownEntry } from "../records.ts";
  * too. The server's entry, with its secure draw and the batch id, is
  * server/rooms/dice.ts.
  */
-export type DiceOp = OpOf<"dice.roll" | "roll.dice" | "actor.deathRoll" | "actor.rechargeRoll">;
+export type DiceOp = OpOf<"dice.roll" | "roll.dice" | "actor.deathRoll" | "actor.rechargeRoll" | "actor.hitDieRoll">;
 
 export type Resolved = { ok: true; op: OpOf<"sys.dice"> } | { ok: false; code: RefusalCode; message: string };
 
 /** Whether an op is one the resolve rolls, which the server stores as `sys.dice` in its place. */
 export function isDiceOp(op: { t: string }): op is DiceOp {
-  return op.t === "dice.roll" || op.t === "roll.dice" || op.t === "actor.deathRoll" || op.t === "actor.rechargeRoll";
+  return op.t === "dice.roll" || op.t === "roll.dice" || op.t === "actor.deathRoll" || op.t === "actor.rechargeRoll" || op.t === "actor.hitDieRoll";
 }
 
 export type ResolveDeps = {
@@ -35,6 +36,8 @@ export type ResolveDeps = {
 
 export const NO_BONUS = "No bonus is known for that roll. Type your bonus or the total.";
 export const OUT_OF_RANGE = "That roll could total outside -50 to 100. Type the total instead.";
+export const CON_FROM_NUMBERS = "The character's numbers give the Constitution modifier.";
+export const CON_UNKNOWN = "The character's Constitution modifier is not known here.";
 
 function refuse(message: string, code: RefusalCode = "invalid"): Resolved {
   return { ok: false, code, message };
@@ -50,7 +53,40 @@ export function resolveDiceOp(op: DiceOp, state: RoomState, deps: ResolveDeps): 
       return deathRoll(op, state, deps);
     case "actor.rechargeRoll":
       return rechargeRoll(op, deps);
+    case "actor.hitDieRoll":
+      return hitDieRoll(op, state, deps);
   }
+}
+
+/**
+ * A Short Rest's Hit Point Die (docs/design/design-v1-slots.md 3.3, 6): one die
+ * of its size plus the Constitution modifier the character rolls with now,
+ * as the Dice panel reads it (creatureNumbers): its block's, in Wild Shape
+ * the beast's mixed in, in another shape the creature's own. The op's `con`
+ * counts only with no block and no shape, where the numbers give none.
+ * Every refusal comes before the draw.
+ */
+function hitDieRoll(op: OpOf<"actor.hitDieRoll">, state: RoomState, deps: ResolveDeps): Resolved {
+  const token = "tokenId" in op.target ? ownEntry(state.tokens, op.target.tokenId) : undefined;
+  const characterId = "characterId" in op.target ? op.target.characterId : token && "ref" in token.actor ? token.actor.ref : undefined;
+  const character = characterId !== undefined ? ownEntry(state.characters, characterId) : undefined;
+  if (!character) return refuse("Only a character has spell slots and Hit Point Dice.");
+  const refusal = dieRefusal(character, character.actor, op.die);
+  if (refusal !== null) return refuse(refusal);
+  const bare = character.stats === undefined && character.actor.srdId === undefined;
+  let con = 0;
+  if (bare) con = op.con ?? 0;
+  else {
+    if (op.con !== undefined) return refuse(CON_FROM_NUMBERS);
+    const numbers = creatureNumbers({ ...state, srd: deps.srd ?? null }, { characterId: character.id });
+    if (!numbers) return refuse(CON_UNKNOWN);
+    con = numbers.abilities.con.mod;
+  }
+  const formula: Formula = [{ kind: "dice", sign: 1, count: 1, sides: op.die }];
+  if (con !== 0) formula.push({ kind: "number", sign: con < 0 ? -1 : 1, value: Math.abs(con) });
+  const rolled = rollFormula(formula, deps.draw);
+  if (!rolled.ok) return refuse(rolled.error);
+  return { ok: true, op: { t: "sys.dice", asked: op, batch: deps.batch, results: [rolled.result] } };
 }
 
 function freeRolls(op: OpOf<"dice.roll">, state: RoomState, deps: ResolveDeps): Resolved {
