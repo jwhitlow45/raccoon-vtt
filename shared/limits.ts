@@ -745,6 +745,83 @@ export function soundUseFits(use: SoundUse, ms: number): boolean {
   return ms >= range.minMs && ms <= range.maxMs + SOUND_LIMITS.encodeAllowanceMs;
 }
 
+/**
+ * A token's 3D model (docs/design/design-v1-token-models.md 4 and 5). The
+ * model's file never leaves the device that adds it: the model worker reads
+ * it within these caps, each checked before the work or the memory it would
+ * cost, and the room stores only the sheet of its 8 views. "Touch" is the
+ * sound decode budget's test, a touch screen and no fine pointer: a phone
+ * or a tablet.
+ */
+export const MODEL_LIMITS = {
+  /** The sheet: 4 by 2 square frames of 512 px, 2048 by 1024 at full size. */
+  framePx: 512,
+  sheetColumns: 4,
+  sheetRows: 2,
+  frames: 8,
+  /** Each frame's clear edge at full size. The outline stays inside it, and the mobile copy and the thumbnail keep 4 and 2 px of it. */
+  gutterPx: 8,
+  /** A frame's side in footprint sides (ModelRef.side). Past 4 a frame's pixels spread too thin to stay sharp. */
+  minSide: 0.25,
+  maxSide: 4,
+  /** A drawn box's edges, in whole hundredths of its frame. */
+  boxMax: 100,
+  /** Size: from 50% in 10% steps, up to the largest whose frame side stays at most `maxSide`. */
+  minSizePercent: 50,
+  sizeStepPercent: 10,
+  /** The files read. STL and OBJ stream from the file in slices, so they may be larger than a GLB, which is read whole. */
+  stlBytes: 512 * MiB,
+  objBytes: 256 * MiB,
+  glbTouchBytes: 64 * MiB,
+  glbComputerBytes: 256 * MiB,
+  sliceBytes: 8 * MiB,
+  /** The longest line an ASCII STL or an OBJ may have: a real one is under 100 bytes. */
+  lineBytes: 64 * 1024,
+  /**
+   * Vertex clustering of STL and OBJ (D-261127-374, 419): the output's
+   * triangles, the open-addressing table's slots and cells, the candidate
+   * triangles a pass may hold, the passes, and the grid that only welds.
+   */
+  clusterTriangles: 250_000,
+  clusterSlots: 1 << 20,
+  clusterCells: 700_000,
+  clusterCandidates: 1_000_000,
+  clusterPasses: 4,
+  weldGrid: 4096,
+  /** OBJ's table of vertex positions, 48 MB of floats. */
+  objVertices: 4_000_000,
+  /** GLB drawing (D-261127-473, 520): triangles drawn, primitive references and node visits, then the output groups. */
+  glbTouchTriangles: 500_000,
+  glbComputerTriangles: 1_000_000,
+  glbPrimitiveRefs: 16_384,
+  glbNodeVisits: 10_000,
+  glbGroups: 64,
+  /** glTF's largest vertex stride. */
+  glbStrideMax: 252,
+  /** The JSON chunk and its pre-scan (D-261127-510), on a computer and on touch. */
+  glbJsonComputerBytes: 16 * MiB,
+  glbJsonTouchBytes: 4 * MiB,
+  glbJsonDepth: 64,
+  glbJsonComputerContainers: 200_000,
+  glbJsonTouchContainers: 50_000,
+  glbJsonComputerValues: 2_000_000,
+  glbJsonTouchValues: 500_000,
+  /** Skins (D-261127-526): joints in one skin, and in every drawn skin together. */
+  skinJoints: 1_024,
+  drawnJoints: 16_384,
+  /**
+   * Textures (D-261127-476, 415): kept images, the pixels of one and of all
+   * together, counted as 4096 by 4096 so a common 4K texture fits, and the
+   * side each is drawn down to.
+   */
+  textures: 16,
+  texturePixels: 4096 * 4096,
+  texturesPixels: 4 * 4096 * 4096,
+  textureSidePx: 1024,
+  /** The watchdog on one run of the worker, reading and drawing. */
+  drawMs: 20_000,
+} as const;
+
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
 
 function over(message: string): LimitCheck {

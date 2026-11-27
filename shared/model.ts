@@ -1286,6 +1286,18 @@ export const SIZE_CELLS: Record<Exclude<CreatureSize, "custom">, number> = {
 export type TokenKind = "pc" | "npc" | "monster" | "object";
 export type HpVisibility = "hidden" | "label" | "bar" | "exact";
 
+/** A 3D model drawn once into 8 views on one sheet (docs/design/design-v1-token-models.md). */
+export type ModelRef = {
+  /** An asset of kind `model`: 4 by 2 square frames, frame i the model turned 45 i degrees clockwise from facing the camera. */
+  assetId: AssetId;
+  /** A frame's side in footprint sides, 0.25 to 4. */
+  side: number;
+  /** The anchor, the footprint's center at its base, down the frame from its top, 0 to 1. Across, it is the middle. */
+  anchorY: number;
+  /** Each frame's drawn part, [x0, y0, x1, y1] in whole hundredths of the frame, 0 to 100: presses, outlines, culling and decor. */
+  boxes: [number, number, number, number][];
+};
+
 /**
  * An image from the room's library as a token wears it: an asset of kind
  * `token` and the crop that fits it to the token's circle or square (design
