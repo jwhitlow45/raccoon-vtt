@@ -278,9 +278,9 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
 
   test("the board's every standee shape reads the model modelShown gave, and the drawing reads the layout's", () => {
     const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
-    // The layout, the bounds a waiting model asks by, a drag and a ghost.
+    // The layout, the bounds a waiting model asks by, a drag, a ghost and the bounds a ghost's model asks by.
     const calls = board.match(/standeeShape\([^)]*\)/g) ?? [];
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
     for (const call of calls) assert.match(call, /, (shown\?\.shape \?\? null|want|model)\)$/, call);
     assert.match(board, /const shown = modelShown\(t, actor, sheets\);/);
     assert.match(board, /model: s\.model \}/);

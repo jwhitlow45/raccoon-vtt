@@ -63,3 +63,38 @@ export function characterModelsKey(tokens: readonly (ModelToken & Pick<Token, "i
   }
   return key;
 }
+
+/** Another member's drag of a token that may stand as its model, at its spot rounded to half a cell. */
+export type ModelDrag = { tokenId: string; x: number; y: number };
+
+/**
+ * The other members' drags of tokens that may stand as their models, as
+ * one string a board keys its sheet asks on (D-261127-700). A standing
+ * ghost asks for its sheet where it is drawn, as a standee does, so a drag
+ * from past the cull box, or of a token lying flat under the fog onto
+ * revealed ground, asks once its ghost comes on screen. Each spot is
+ * rounded to half a cell, so a drag lays the board out again only when it
+ * crosses one. That is at most a quarter cell off along each axis, which
+ * the cull box's step past the screen holds at every zoom up to MAX_SCALE
+ * (canvas/relief/cull.ts). `skip`
+ * is the token this device drags, which draws no ghost.
+ */
+export function modelDragsKey(
+  drags: Readonly<Record<string, { tokenId: string; x: number; y: number }>>,
+  tokens: ReadonlyMap<string, ModelToken & Pick<Token, "actor">>,
+  characters: Readonly<Record<string, Pick<Character, "actor"> | undefined>> | undefined,
+  skip: string | null,
+): string {
+  const out: ModelDrag[] = [];
+  for (const d of Object.values(drags)) {
+    const t = tokens.get(d.tokenId);
+    if (!t || d.tokenId === skip || !modelWanted(t, tokenActor(t, characters))) continue;
+    out.push({ tokenId: d.tokenId, x: Math.round(d.x * 2) / 2, y: Math.round(d.y * 2) / 2 });
+  }
+  return out.length === 0 ? "" : JSON.stringify(out);
+}
+
+/** The drags a `modelDragsKey` names. */
+export function modelDragsOf(key: string): ModelDrag[] {
+  return key === "" ? [] : (JSON.parse(key) as ModelDrag[]);
+}

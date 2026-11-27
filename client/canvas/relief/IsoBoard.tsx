@@ -35,8 +35,8 @@ import { localDragSlot, type DragSpot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomStore } from "../../state/view.ts";
 import { frameFor } from "../../features/models/frames.ts";
-import { sheetCache, sheetsNearest, useSheets, type SheetCopy, type Sheets } from "../../features/models/sheets.ts";
-import { characterModelsKey, modelShown, modelWanted, tokenActor } from "../../features/models/shown.ts";
+import { sheetCache, sheetsNearest, useSheets, type SheetCopy, type Sheets, type SheetWant } from "../../features/models/sheets.ts";
+import { characterModelsKey, modelDragsKey, modelDragsOf, modelShown, modelWanted, tokenActor } from "../../features/models/shown.ts";
 import { DRAG_GROUND } from "../dragLayer.ts";
 import { useBoardFontEpoch } from "../boardFont.ts";
 import { FogShape } from "../FogShape.tsx";
@@ -275,6 +275,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const charactersRef = useRef(characters);
   charactersRef.current = characters;
   const characterLives = characterModelsKey(props.tokens, characters);
+  // Other members' drags of tokens that may stand as their models, whose ghosts ask for their sheets where they stand (D-261127-700).
+  const modelDrags = useShownView(!hidden, (s) => modelDragsKey(s.ephemeral.drags, byId, charactersRef.current, props.draggingId));
 
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
@@ -328,26 +330,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
   const { box: cull, key: cullKey } = cullOf(cam, size);
   const clear = props.insets ?? NO_INSETS;
-
-  /*
-   * The sheets this layout asks for (D-261127-387): the creatures it holds
-   * that would stand as their models, nearest the middle of the canvas the
-   * panels leave clear first, as the area build ranks its slices. The board
-   * renders only at a cull step, so it asks for everything its cull box
-   * holds, a step past the screen. Hidden, it asks for nothing.
-   */
-  const sheetAsks = useMemo(() => {
-    if (hidden) return NO_SHEETS;
-    const mid = screenToView(cam, { x: (clear.left + size.width - clear.right) / 2, y: (clear.top + size.height - clear.bottom) / 2 });
-    return sheetsNearest(standees, cull, mid, (id) => assets.url(id, copy));
-  }, [hidden, standees, cullKey, cam.x, cam.y, cam.scale, size.width, size.height, clear.left, clear.right, clear.top, clear.bottom, assets, copy]);
-  // After each commit, so the cache frees a sheet only once this board no longer draws it.
-  const [board] = useState(() => ({}));
-  useLayoutEffect(() => {
-    if (hidden) sheetCache.forget(board);
-    else sheetCache.layout(board, copy, sheetAsks, sheets.version);
-  }, [hidden, board, copy, sheetAsks, sheets.version]);
-  useLayoutEffect(() => () => sheetCache.forget(board), [board]);
 
   /*
    * Areas standing as their real shapes (docs/design/design-v1-iso-area-shapes.md):
@@ -759,10 +741,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
 
-  // Each ghost of another member's drag, standing or flat and clipped, at each eased spot (5.2).
-  const ghostOf = useCallback(
-    (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
-      const fp = footprint(t);
+  // Where a ghost of another member's drag stands at a spot: its base and the ground under it.
+  const ghostFooting = useCallback(
+    (t: ViewToken, at: { x: number; y: number }) => {
       // A frame is the drawn spot (docs/design/design-v1-snap-off.md 5.6), so the ground and landing read its rules spot.
       const spot = rulesSpot(t, at);
       const cells = footprintCells(grid, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
@@ -771,7 +752,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       const landing = room ? previewLanding(room, props.role, seen, t, spot) : t.elevation;
       const base = drawnStandBase(src, heights, cells, landing, feet);
-      const ground = standSurface(heights, cells);
+      return { base, ground: standSurface(heights, cells) };
+    },
+    [src, heights, grid, feet, store, chunks, scene.id, w, h, props.viewerFog, props.role],
+  );
+
+  // Each ghost of another member's drag, standing or flat and clipped, at each eased spot (5.2).
+  const ghostOf = useCallback(
+    (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
+      const fp = footprint(t);
+      const { base, ground } = ghostFooting(t, at);
       if (ghostStands(fog, grid, t, at)) {
         // It stands as its model where its standee would, the frame its facing picks.
         const { shown } = standingModel(t, turn, tokenActor(t, charactersRef.current), sheets);
@@ -782,8 +772,45 @@ function IsoBoardImpl(props: IsoBoardProps) {
       }
       return { standee: null, clip: fog.revealedRects(tokenBox(grid, t, at)), tag: null };
     },
-    [src, heights, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role, sheets, characterLives],
+    [ghostFooting, grid, fog, turn, cam.scale, size.height, sheets, characterLives],
   );
+
+  /*
+   * The sheets this layout asks for (D-261127-387): the creatures it holds
+   * that would stand as their models, nearest the middle of the canvas the
+   * panels leave clear first, as the area build ranks its slices. The board
+   * renders only at a cull step, so it asks for everything its cull box
+   * holds, a step past the screen. Hidden, it asks for nothing. Each
+   * standing ghost of another member's drag asks by where it stands
+   * (D-261127-700), since its original may lie past the cull box, or flat
+   * under the fog where it asks for nothing.
+   */
+  const ghostWants = useMemo((): readonly SheetWant[] => {
+    const out: SheetWant[] = [];
+    for (const d of modelDragsOf(modelDrags)) {
+      const t = byId.get(d.tokenId);
+      const ref = t ? modelWanted(t, tokenActor(t, charactersRef.current)) : null;
+      if (!t || !ref || !ghostStands(fog, grid, t, d)) continue;
+      const fp = footprint(t);
+      const { base, ground } = ghostFooting(t, d);
+      const want = standeeModel(ref, frameFor(turn, t.rotation));
+      const shape = standeeShape(turn, { x: d.x, y: d.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, ON_GROUND, want);
+      out.push({ sheet: ref.assetId, at: shape.base, wanted: shape.bounds });
+    }
+    return out;
+  }, [modelDrags, byId, fog, grid, turn, ghostFooting, cam.scale, size.height]);
+  const sheetAsks = useMemo(() => {
+    if (hidden) return NO_SHEETS;
+    const mid = screenToView(cam, { x: (clear.left + size.width - clear.right) / 2, y: (clear.top + size.height - clear.bottom) / 2 });
+    return sheetsNearest(ghostWants.length === 0 ? standees : [...standees, ...ghostWants], cull, mid, (id) => assets.url(id, copy));
+  }, [hidden, standees, ghostWants, cullKey, cam.x, cam.y, cam.scale, size.width, size.height, clear.left, clear.right, clear.top, clear.bottom, assets, copy]);
+  // After each commit, so the cache frees a sheet only once this board no longer draws it.
+  const [board] = useState(() => ({}));
+  useLayoutEffect(() => {
+    if (hidden) sheetCache.forget(board);
+    else sheetCache.layout(board, copy, sheetAsks, sheets.version);
+  }, [hidden, board, copy, sheetAsks, sheets.version]);
+  useLayoutEffect(() => () => sheetCache.forget(board), [board]);
 
   // The ground stage's layers cull by the layout's box, a step past the view, so a pan between steps finds them drawn. Its pills keep their points (5.8).
   const groundView = useMemo((): BoardViews => ({ clear: cull, canvas: cull }), [cullKey]);

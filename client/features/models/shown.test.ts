@@ -6,7 +6,7 @@ import type { HpVisibility, ImageRef, LifeState, ModelRef, Token } from "#shared
 import { projectState } from "#shared/project.ts";
 import { actor, character, DM, P1, room, token } from "#shared/testutil.ts";
 import type { SheetImage, Sheets } from "./sheets.ts";
-import { characterModelsKey, modelShown, modelWanted, tokenActor } from "./shown.ts";
+import { characterModelsKey, modelDragsKey, modelDragsOf, modelShown, modelWanted, tokenActor } from "./shown.ts";
 
 /**
  * Whether a creature stands as its model (docs/design/design-v1-token-models.md
@@ -81,6 +81,24 @@ describe("modelShown", () => {
     // Another edit to the character, or any edit to one whose token wears no model, keeps the key.
     assert.equal(key({ ...alive, c1: character("c1", { name: "Renamed", actor: actor({ hp: { cur: 3, max: 20, temp: 0 } }) }) }), key(alive));
     assert.equal(key({ ...alive, c2: character("c2", { actor: actor({ life: "dead" }) }) }), key(alive));
+  });
+});
+
+describe("modelDragsKey", () => {
+  test("another member's drags of tokens that may stand as their models, each at its spot to half a cell, and none of the token this device drags", () => {
+    const wolf = token("wolf", wearing(ICON_WITH_MODEL));
+    const fallen = token("fallen", { ...wearing(ICON_WITH_MODEL), actor: { inline: actor({ life: "dead", hp: { cur: 0, max: 20, temp: 0 } }) } });
+    const plain = token("plain");
+    const mine = token("mine", wearing(UPLOAD_WITH_MODEL));
+    const tokens = new Map([wolf, fallen, plain, mine].map((t) => [t.id, t]));
+    const drags = { a: { tokenId: "wolf", x: 3.2, y: 7.8 }, b: { tokenId: "fallen", x: 1, y: 1 }, c: { tokenId: "plain", x: 2, y: 2 }, d: { tokenId: "mine", x: 4, y: 4 }, e: { tokenId: "gone", x: 5, y: 5 } };
+    const key = modelDragsKey(drags, tokens, undefined, "mine");
+    assert.deepEqual(modelDragsOf(key), [{ tokenId: "wolf", x: 3, y: 8 }]);
+    // A step inside the same half cell keeps the key, and one past it changes it.
+    assert.equal(modelDragsKey({ ...drags, a: { tokenId: "wolf", x: 3.24, y: 7.76 } }, tokens, undefined, "mine"), key);
+    assert.deepEqual(modelDragsOf(modelDragsKey({ ...drags, a: { tokenId: "wolf", x: 3.3, y: 7.8 } }, tokens, undefined, "mine")), [{ tokenId: "wolf", x: 3.5, y: 8 }]);
+    assert.equal(modelDragsKey({}, tokens, undefined, null), "");
+    assert.deepEqual(modelDragsOf(""), []);
   });
 });
 
