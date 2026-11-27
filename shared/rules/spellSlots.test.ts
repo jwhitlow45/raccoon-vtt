@@ -78,6 +78,9 @@ describe("multiclass spell slots", () => {
     // Below 3 the tick gives no Spellcasting, so the wizard is the one caster class on its own table.
     assert.deepEqual(slotsOf([{ id: "fighter", level: 2, third: true }, { id: "wizard", level: 3 }]).slots, nine(FULL[3]!));
   });
+  test("a ticked fighter 2 with a ticked rogue 5 is one caster class, the rogue's own one-third table", () => {
+    assert.deepEqual(slotsOf([{ id: "fighter", level: 2, third: true }, { id: "rogue", level: 5, third: true }]).slots, nine(THIRD[5]!));
+  });
   test("a ticked fighter 2 with paladin 3 is one caster class, the paladin's own table", () => {
     assert.deepEqual(slotsOf([{ id: "fighter", level: 2, third: true }, { id: "paladin", level: 3 }]).slots, nine(HALF[3]!));
   });
