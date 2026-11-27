@@ -21,6 +21,7 @@ const LISTED: Record<string, Uses> = {
   "shared/ids.ts": { uuidv7: 2, digit: 2, time: 2 },
   // Roll tags (M4): they reach only the roller, or a target's players with a line that states its time.
   "client/features/combat/CombatUses.tsx": { uuidv7: 2 },
+  "client/features/slots/HitDiceRows.tsx": { uuidv7: 2 },
   "client/features/combat/DeathSaveCard.tsx": { uuidv7: 2 },
   "client/features/dice/useDicePanel.ts": { uuidv7: 2 },
   "client/features/dice/useRollOption.ts": { uuidv7: 4 },
