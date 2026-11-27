@@ -447,6 +447,27 @@ export class Socket {
     return this.apply({ t, head, ...(scope ? { scope } : {}) });
   }
 
+  /**
+   * Resolves once the server has read every frame this socket sent before the call. A WebSocket control ping is answered
+   * in order with the data frames ahead of it, and the server's pong is no frame of the socket's budget, so it works for a
+   * socket whose budget is spent or that waits to close. A real-time sleep cannot promise that on a loaded machine.
+   */
+  async reached(timeoutMs = 10_000): Promise<void> {
+    const token = randomUUID();
+    const answered = new Promise<void>((resolve) => {
+      const onPong = (data: Buffer): void => {
+        if (data.toString() !== token) return;
+        this.ws.off("pong", onPong);
+        resolve();
+      };
+      this.ws.on("pong", onPong);
+    });
+    this.ws.ping(token);
+    const timer = new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("the server did not read the frames")), timeoutMs).unref());
+    // A socket the server closes on a frame is a socket that read them.
+    await Promise.race([answered, this.closed, timer]);
+  }
+
   async waitClosed(timeoutMs = 5_000): Promise<{ code: number; reason: string }> {
     const timer = new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("socket did not close")), timeoutMs).unref());
     return Promise.race([this.closed, timer]);
