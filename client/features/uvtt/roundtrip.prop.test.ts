@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
-import type { AutoWalls, BuildChunk, EdgeFeature, GridShape, Light, TerrainId, WallFeature } from "#shared/model.ts";
+import type { AutoWalls, EdgeFeature, GridShape, Light, TerrainId, WallFeature } from "#shared/model.ts";
 import { holds } from "#shared/propertyTestutil.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import { cornerAt, hexCorners, hexInScene, type HexGrid } from "#shared/rules/hex.ts";
@@ -402,6 +402,3 @@ describe("hex scenes", () => {
     });
   }
 });
-
-/** Kept so the chunk type stays in step with the model's. */
-export type _Chunk = BuildChunk;

@@ -1,4 +1,3 @@
-import type { WallFeature } from "#shared/model.ts";
 import type { ImportPlan } from "./convert.ts";
 import type { Point, UvttMap } from "./schema.ts";
 
@@ -49,15 +48,11 @@ export function canonicalOfFile(map: Pick<UvttMap, "walls" | "objects" | "portal
   return out;
 }
 
-function kindOf(f: WallFeature): Kind {
-  return f.kind;
-}
-
 /** The import's side, from what it would store. */
 export function canonicalOfPlan(plan: Pick<ImportPlan, "edges" | "walls">): Canonical {
   const out = empty();
-  for (const e of plan.edges) out.edges[kindOf(e.feature)].add(e.key);
-  for (const w of plan.walls) add(out, { x: w.a[0], y: w.a[1] }, { x: w.b[0], y: w.b[1] }, kindOf(w.f));
+  for (const e of plan.edges) out.edges[e.feature.kind].add(e.key);
+  for (const w of plan.walls) add(out, { x: w.a[0], y: w.a[1] }, { x: w.b[0], y: w.b[1] }, w.f.kind);
   return out;
 }
 
