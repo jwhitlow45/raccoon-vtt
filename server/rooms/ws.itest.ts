@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { after, before, describe, test } from "node:test";
+import pg from "pg";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
@@ -9,6 +10,7 @@ import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
 import { MAX_KEPT_REFUSALS, serverMessageSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
+import { TEST_DATABASE_URL } from "../auth/testing.ts";
 import { sha256 } from "../auth/tokens.ts";
 import { ViewBusyError, type RoomActor } from "./actor.ts";
 import { failCommits, numberOf, Socket, startEngine, type Engine } from "./testing.ts";
@@ -1031,17 +1033,23 @@ describe("websocket: refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => 
 
 describe("roster reads as of their moment", () => {
   let t: Engine;
+  // The run's own connections carry its name, so a probe tells them from another run's on the shared database.
+  const appName = `roster-itest-${randomBytes(6).toString("hex")}`;
+  const otherName = `${appName}-other`;
   before(async () => {
+    const url = new URL(TEST_DATABASE_URL);
+    url.searchParams.set("application_name", appName);
     // The test gives one actor a roster from the past. The engine's 200 ms idle unload would load the room afresh, and the
     // new actor reads the roster as it is, so the room stays loaded however long a slow machine takes.
-    t = await startEngine({ rooms: { idleUnloadMs: 60_000 } });
+    t = await startEngine({ env: { DATABASE_URL: url.toString() }, rooms: { idleUnloadMs: 60_000 } });
   });
   after(() => t.close());
 
-  /** Whether a query of this database waits on a lock of the grants table, as a grant read behind the test's lock does. */
-  async function grantReadWaits(): Promise<boolean> {
+  /** Whether a connection named `name` waits on a lock of the grants table, as a grant read behind the test's lock does. */
+  async function waitsOnGrants(name: string): Promise<boolean> {
     const { rows } = await t.pool.query<{ n: number }>(
-      "select count(*)::int as n from pg_locks where relation = 'grants'::regclass and not granted and database = (select oid from pg_database where datname = current_database())",
+      "select count(*)::int as n from pg_locks l join pg_stat_activity a on a.pid = l.pid where l.relation = 'grants'::regclass and not l.granted and a.datname = current_database() and a.application_name = $1",
+      [name],
     );
     return rows[0]!.n > 0;
   }
@@ -1068,19 +1076,30 @@ describe("roster reads as of their moment", () => {
       const holder = await t.pool.connect();
       await holder.query("begin");
       await holder.query("lock table grants in access exclusive mode");
-      const sent = Date.now();
-      const upgrade = preview(quinId).then(
-        (s) => (s.close(), "open"),
-        (err: Error) => err.message,
-      );
+      const other = new pg.Client({ connectionString: TEST_DATABASE_URL, application_name: otherName });
+      let otherRead: Promise<unknown> = Promise.resolve();
+      let sent: number;
+      let upgrade: Promise<string>;
       let released: number;
       try {
-        // The upgrade has arrived once its grant read waits on the lock, however slow the machine.
-        await until(grantReadWaits, "the grant read to wait on the lock");
+        // Another run on the shared database reads grants first. Its wait must not let the lock go before the upgrade's.
+        await other.connect();
+        otherRead = other.query("select count(*) from grants").catch(() => undefined);
+        await until(() => waitsOnGrants(otherName), "another run's read to wait on the lock");
+        assert.equal(await waitsOnGrants(appName), false, "another run's wait is none of this run's");
+        sent = Date.now();
+        upgrade = preview(quinId).then(
+          (s) => (s.close(), "open"),
+          (err: Error) => err.message,
+        );
+        // The upgrade has arrived once its own grant read waits on the lock, however slow the machine.
+        await until(() => waitsOnGrants(appName), "the upgrade's grant read to wait on the lock");
       } finally {
         released = Date.now();
         await holder.query("rollback");
         holder.release();
+        await otherRead;
+        await other.end();
       }
       const verdict = await upgrade;
       assert.equal(t.manager.get(roomId), actor, "the room kept the actor whose roster the test gave");
