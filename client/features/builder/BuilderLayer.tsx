@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { BuildChunk, Label, Light, Scene } from "#shared/model.ts";
 import { boardTheme } from "../../lib/theme.ts";
+import { MONSTER_RING, RING_OUTLINE } from "../dungeon/marks.ts";
 import { useAccent } from "../../state/accent.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -633,6 +634,17 @@ function GhostShape(props: { ghost: WingGhost; scene: Scene; scale: number; numb
           c.stroke();
         }
         c.setLineDash([]);
+        // Each stocked creature ringed in the hostile red over the dark halo, as the preview rings it.
+        for (const m of ghost.monsters) {
+          c.beginPath();
+          c.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+          c.lineWidth = 4 / scale;
+          c.strokeStyle = RING_OUTLINE;
+          c.stroke();
+          c.lineWidth = 2 / scale;
+          c.strokeStyle = MONSTER_RING;
+          c.stroke();
+        }
         // As a label is drawn, a number a steady 16 px tall on screen at any zoom.
         if (numbered) for (const room of ghost.rooms) drawLabel(c, { x: room.x, y: room.y, text: `W${room.n}`, size: 16 / scale });
         c.restore();

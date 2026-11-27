@@ -129,3 +129,15 @@ describe("the ghost's rooms (DG3 review round 1)", () => {
     }
   });
 });
+
+describe("DSTOCK: the ghost's creatures", () => {
+  test("a ring round each creature the wing stocks, never one the scene held already", async () => {
+    const { token } = await import("#shared/testutil.ts");
+    const s1 = scene("s1");
+    const held = token("held", { sceneId: "s1", kind: "monster", x: 2, y: 2 });
+    const base = room({ scenes: { s1 }, tokens: { held } });
+    const scratch = room({ scenes: { s1 }, tokens: { held, fresh: token("fresh", { sceneId: "s1", kind: "monster", x: 8, y: 9, size: "huge" }), stone: token("stone", { sceneId: "s1", kind: "object", x: 4, y: 4 }) } });
+    const ghost = ghostOf({ base, sceneId: "s1", scratch, scratchScene: s1, area: { x: 0, y: 0, w: 20, h: 20 }, offset: { x: 0, y: 0 }, feetPerCell: 5, rooms: [] });
+    assert.deepEqual(ghost.monsters, [{ x: 9.5, y: 10.5, r: 1.4 }]);
+  });
+});

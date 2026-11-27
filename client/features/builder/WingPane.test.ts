@@ -82,3 +82,49 @@ test("no way from the area names Reroll first, since another layout often finds 
   // LP37 polish: about one seed in six found no way that a Reroll then found.
   for (const hex of [false, true]) assert.match(problemWords("noWay", hex), /^No way from the area to that wall\. Reroll, /);
 });
+
+/*
+ * DSTOCK (docs/design/design-v1-dungeon-stock.md 1 and 4, D-261127-218 to
+ * 220): the pane holds its own stock from None, the planner carries the
+ * stock to the worker, and a stock or party change keeps the room edits
+ * unless the band moves.
+ */
+test("DSTOCK-W: the planner sends the stock with the plan and hands back the stones the claim check reserves", async () => {
+  const base = squareWingBase();
+  const settings = { ...DEFAULT_SETTINGS, w: base.area.w, h: base.area.h };
+  const asked: unknown[] = [];
+  const planner = wingPlanner(
+    () => null,
+    () => undefined,
+    async (s, seed, context, key, edits, stock) => {
+      asked.push(stock);
+      return wingPreviewOf(s, seed, base, context, key, edits, stock);
+    },
+  );
+  const stock = { choices: { monsters: 50, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool: [], tokensLeft: 480 };
+  const plan = await planner({ settings, seed: SEED, base, feetPerCell: 5, stock });
+  assert.deepEqual(asked, [stock]);
+  assert.ok(plan.ok && typeof plan.stones === "number");
+  await planner({ settings, seed: SEED, base, feetPerCell: 5 });
+  assert.deepEqual(asked[1], null, "no stock is null, as the worker takes it");
+});
+
+const { readFileSync } = await import("node:fs");
+const pane = readFileSync(new URL("./WingPane.tsx", import.meta.url), "utf8");
+
+test("DSTOCK-W: the pane's stock starts at None each time it opens, and Bring them back restores the band, stock and party", () => {
+  assert.match(pane, /useState<StockChoices>\(DEFAULT_STOCK\)/);
+  assert.match(pane, /type WingBefore = \{ settings: DungeonSettings; seed: Seed; stock: StockChoices; ownBand: DungeonSettings\["band"\]; party: PartyGroup\[\] \| null \}/);
+  const back = pane.slice(pane.indexOf("const bringBack"), pane.indexOf('editStep({ k: "bringBack" })'));
+  for (const restored of ["setSettingsNow(back.before.settings)", "setStockNow(back.before.stock)", "setOwnBand(back.before.ownBand)", "setEditedParty(back.before.party)"]) assert.ok(back.includes(restored), restored);
+});
+
+test("DSTOCK-W: a stock or party change drops the edits only when the band moves, and Add the wing checks the creature limit again on the live scene", () => {
+  const restock = pane.slice(pane.indexOf("const restock"), pane.indexOf("const editParty"));
+  assert.match(restock, /if \(changed\.drop\) editStep\(\{ k: "change", before: before\(\) \}\);/);
+  assert.match(pane, /onChange: \(next\) => restock\(next, groups, false\)/);
+  assert.match(pane, /const ready = [^\n]*&& !stockWaits;/);
+  const add = pane.slice(pane.indexOf("const add = async"), pane.indexOf("setSaid(null)"));
+  assert.match(add, /const live = tokensLeftNow\(roomStore, scene\.id\);\s*if \(share > 0 && live !== null && overLimitBy\(plan\.facts \?\? \[\], edits\.edits\?\.rooms \?\? null, live, plan\.stones \?\? 0\) > 0\) return;/);
+  assert.match(pane, /\}, \[planner, base, settings, seed, feetPerCell, builder, edits\.edits, stocked\]\);/);
+});

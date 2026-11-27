@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentType, type RefObject } from "react";
 import { useStore } from "zustand";
-import type { CellRect, RoomState, Scene } from "#shared/model.ts";
+import type { CellRect, PartyGroup, RoomState, Scene } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import type { WingClear } from "#shared/rules/wingClear.ts";
@@ -27,10 +27,17 @@ import type { WingBase } from "../dungeon/plan.ts";
 import { RoomPanel } from "../dungeon/RoomPanel.tsx";
 import { newSeed, type Seed } from "../dungeon/seed.ts";
 import { sendWing, WING_TOO_LARGE, type SendRoom, type WingOutcome } from "../dungeon/send.ts";
-import { DEFAULT_SETTINGS, isHexGrid, type DungeonSettings, type GridKind } from "../dungeon/settings.ts";
+import { DEFAULT_SETTINGS, DEFAULT_STOCK, isHexGrid, type DungeonSettings, type GridKind, type StockChoices } from "../dungeon/settings.ts";
+import { LimitLine, type BandRow, type StockRow } from "../dungeon/Choices.tsx";
+import { bandFollows, monstersHeld, partyBand, partyLevel, restocked, rowChanged, stockedShare } from "../dungeon/remembered.ts";
+import { overLimitBy, stockKey, stockRequest, tokensLeftNow, useStockSource, useTokensLeft } from "../dungeon/stockSource.ts";
+import type { StockRequest } from "../dungeon/worker.ts";
+import { partyFromCharacters } from "../encounters/budget.ts";
+import { PartyEditor } from "../encounters/PartyEditor.tsx";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import type { WingProblem } from "../dungeon/wing.ts";
 import { BUILD_ASKING } from "./ask.ts";
-import { BRING_BACK, DROP_EDITS, EDIT_OVER_WALLS, editedLine, EDITS_DROPPED, EDITS_GONE, statusLine } from "../dungeon/words.ts";
+import { bandLines, BRING_BACK, DROP_EDITS, EDIT_OVER_WALLS, editedLine, EDITS_DROPPED, EDITS_GONE, MONSTERS_LOADING, statusLine } from "../dungeon/words.ts";
 import { requestPan } from "../encounter/pan.ts";
 import { paneEscape } from "./labelEdit.ts";
 import { labelPaneFrame } from "./labelPaneFrame.ts";
@@ -51,18 +58,18 @@ import { pointerWords } from "../../lib/pointerWords.ts";
  */
 
 /** The shared choice rows' props (dungeon/Choices.tsx), `wing` set so they speak of a wing. */
-export type WingChoicesProps = { value: DungeonSettings; onChange(next: DungeonSettings): void; held: boolean; grid: GridKind; wing: boolean; flat?: boolean };
+export type WingChoicesProps = { value: DungeonSettings; onChange(next: DungeonSettings): void; held: boolean; grid: GridKind; wing: boolean; flat?: boolean; stock?: StockRow; band?: BandRow };
 
 /** What the wing would land, as a send takes it: its ops and the scratch room they landed in. */
 export type WingMade = { ops: ClientOp[]; room: RoomState; ids: ReadonlyMap<string, string> };
 
 /** A plan of the wing: its ghost, the foot's counts and what Add the wing sends with what its asks carry, or why there is none, in words when the planner says. */
 export type WingPlan =
-  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; layout?: DungeonEdits["layout"] }
+  | { ok: true; summary: Summary; ghost: WingGhost; made: WingMade | null; clear?: WingClear; facts?: RoomFacts[]; layout?: DungeonEdits["layout"]; stones?: number }
   | { ok: false; error: "fit" | "bug"; words?: string; why?: string };
 
 /** Plans the wing for the choices, seed and room edits on its base. Only the newest call's answer is shown. */
-export type WingPlanner = (input: { settings: DungeonSettings; seed: Seed; base: WingBase; feetPerCell: number; edits?: DungeonEdits | null }) => Promise<WingPlan>;
+export type WingPlanner = (input: { settings: DungeonSettings; seed: Seed; base: WingBase; feetPerCell: number; edits?: DungeonEdits | null; stock?: StockRequest | null }) => Promise<WingPlan>;
 
 /** Sends a planned wing behind its asks (dungeon/send.ts sendWing), saying how far it got, and asking the forget question. */
 export type WingSend = (made: WingMade & { sceneId: string; clear: WingClear }, onAnswered: (n: number, of: number) => void, ask: (q: "forget") => Promise<boolean>) => Promise<WingOutcome>;
@@ -128,7 +135,7 @@ export type WingKeyRoom = { name: string; color: string; titles: readonly string
  */
 export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: WingBase) => void = postWingBase, plan: typeof previewWing = previewWing): WingPlanner {
   let posted: string | null = null;
-  return async ({ settings, seed, base, feetPerCell, edits }) => {
+  return async ({ settings, seed, base, feetPerCell, edits, stock }) => {
     const read = `${base.hash} ${JSON.stringify(base.join)}`;
     if (posted !== read) {
       post(base);
@@ -139,7 +146,7 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const room = keyRoom();
     const held = Object.values(base.state.pins).filter((p) => p?.sceneId === sceneId).length;
     const key: KeyInput | null = settings.key && room ? { name: room.name, color: room.color, feetPerCell, wing: { from: highestWingPin(base.state.pins, sceneId), titles: room.titles, pins: Math.max(0, Math.floor(0.9 * LIMITS.pinsPerScene) - held) } } : null;
-    const answer: Preview = await plan(settings, seed, { feetPerCell, ...(isHexGrid(grid) ? { grid } : {}) }, key, edits ?? null);
+    const answer: Preview = await plan(settings, seed, { feetPerCell, ...(isHexGrid(grid) ? { grid } : {}) }, key, edits ?? null, stock ?? null);
     if (!answer.ok) {
       const words = answer.problem ? problemWords(answer.problem, isHexGrid(grid)) : answer.why === "tooMany" ? WING_HEX_TOO_MANY : undefined;
       return { ok: false, error: answer.error, ...(words ? { words } : {}), ...(answer.why ? { why: answer.why } : {}) };
@@ -147,7 +154,7 @@ export function wingPlanner(keyRoom: () => WingKeyRoom | null, post: (base: Wing
     const scratchScene = answer.room.scenes[sceneId];
     if (!scratchScene) return { ok: false, error: "bug" };
     const ghost = ghostOf({ base: base.state, sceneId, scratch: answer.room, scratchScene, area: base.area, offset: { x: 0, y: 0 }, feetPerCell, rooms: ghostRooms(answer.plan, answer.facts) });
-    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout };
+    return { ok: true, summary: answer.summary, ghost, made: { ops: answer.ops, room: answer.room, ids: new Map() }, ...(answer.clear ? { clear: answer.clear } : {}), facts: answer.facts, layout: answer.layout, stones: answer.plan.stones.length };
   };
 }
 
@@ -246,8 +253,8 @@ function useShortSheet(sheet: boolean, scroll: RefObject<HTMLElement | null>, he
 }
 
 type Planned = { asked: number; pending: boolean; plan: WingPlan | null };
-/** What Bring them back restores beside the edits. */
-type WingBefore = { settings: DungeonSettings; seed: Seed };
+/** What Bring them back restores beside the edits: the choices with their band, the seed, the stock and the edited party (D-261127-219). */
+type WingBefore = { settings: DungeonSettings; seed: Seed; stock: StockChoices; ownBand: DungeonSettings["band"]; party: PartyGroup[] | null };
 const EDITS_LINE = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 } as const;
 
 export default function WingPane(props: {
@@ -320,12 +327,52 @@ export default function WingPane(props: {
   const [edits, editStep] = useReducer((s: EditsState<WingBefore>, e: EditsEvent<WingBefore>) => editsStep(s, e), undefined, startEdits<WingBefore>);
   const editsRef = useRef(edits);
   editsRef.current = edits;
-  const setSettings = (next: DungeonSettings) => {
-    editStep({ k: "change", before: { settings, seed } });
-    setSettingsNow(next);
+  // The pane holds its own stock, starting at None each time it opens, as its settings start at the defaults (D-261127-218).
+  const [stockChoices, setStockNow] = useState<StockChoices>(DEFAULT_STOCK);
+  const [ownBand, setOwnBand] = useState<DungeonSettings["band"]>(DEFAULT_SETTINGS.band);
+  const characters = useRoomView((s) => s.view?.characters);
+  const roomParty = useMemo(() => partyFromCharacters(Object.values(characters ?? {}).flatMap((c) => (c ? [c] : []))), [characters]);
+  const [editedParty, setEditedParty] = useState<PartyGroup[] | null>(null);
+  const groups = editedParty ?? roomParty.groups;
+  const stockHeld = monstersHeld(groups);
+  const share = stockedShare(stockChoices, groups);
+  // The band's rules read the settings, the stock and the DM's own pick together, as the dialog's choices hold them (dungeon/remembered.ts).
+  const banded = { ...settings, ...stockChoices, ownBand };
+  const apply = (next: typeof banded) => {
+    const { monsters, difficulty, ownBand: own, ...rest } = next;
+    setSettingsNow(rest);
+    setStockNow({ monsters, difficulty });
+    setOwnBand(own);
   };
+  const before = (): WingBefore => ({ settings, seed, stock: stockChoices, ownBand, party: editedParty });
+  const setSettings = (next: DungeonSettings) => {
+    editStep({ k: "change", before: before() });
+    apply(rowChanged(banded, next, groups));
+  };
+  /** A stock or party change keeps the edits (D-261127-063) unless a transition moves the band, which goes the way any choice does. */
+  const restock = (st: StockChoices, now: readonly PartyGroup[], partyEdit: boolean, was: readonly PartyGroup[] = groups) => {
+    const changed = restocked(banded, { ...banded, ...st }, was, now, partyEdit);
+    if (changed.drop) editStep({ k: "change", before: before() });
+    apply(changed.next);
+  };
+  const editParty = (next: PartyGroup[] | null) => {
+    setEditedParty(next);
+    restock(stockChoices, next ?? roomParty.groups, true);
+  };
+  const heldWas = useRef(stockHeld);
+  const groupsWas = useRef(groups);
+  useEffect(() => {
+    if (heldWas.current !== stockHeld) restock(stockChoices, groups, false, groupsWas.current);
+    heldWas.current = stockHeld;
+    groupsWas.current = groups;
+    // Only the hold's change is a transition: a level-up in a standing party moves the budget, never the band.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockHeld]);
+  useEffect(() => {
+    groupsWas.current = groups;
+  }, [groups]);
   const setSeed = (next: Seed) => {
-    editStep({ k: "change", before: { settings, seed } });
+    editStep({ k: "change", before: before() });
     builder.setState({ wingRoom: null });
     setSeedNow(next);
   };
@@ -334,6 +381,9 @@ export default function WingPane(props: {
     if (!back) return;
     setSettingsNow(back.before.settings);
     setSeedNow(back.before.seed);
+    setStockNow(back.before.stock);
+    setOwnBand(back.before.ownBand);
+    setEditedParty(back.before.party);
     editStep({ k: "bringBack" });
   };
   // A "floor" scene's stairs make no walls, so its wing stays flat (3.2, D-261110-235).
@@ -379,6 +429,12 @@ export default function WingPane(props: {
   const view = useRoomView((s) => s.floorView);
   const warnings = useMemo(() => (view ? wingWarnings(view, scene, picks.area, join).join(" ") : ""), [view, scene, picks.area, join]);
 
+  const source = useStockSource(share > 0, settings.theme);
+  // The wing's scene group, sibling floors included, is what the creatures must fit (D-261127-075).
+  const tokensLeft = useTokensLeft(share > 0, scene.id);
+  const stock = stockRequest(stockChoices, share, groups, source.pool, tokensLeft);
+  const stocked = stockKey(stockChoices, share, groups, tokensLeft, settings.theme, source.list !== null, source.imagesRev);
+
   const [planned, setPlanned] = useState<Planned>({ asked: 0, pending: false, plan: null });
   const asked = useRef(0);
   useEffect(() => {
@@ -391,7 +447,7 @@ export default function WingPane(props: {
     setPlanned((p) => ({ ...p, asked: id, pending: true }));
     const sent = edits.edits;
     const timer = setTimeout(() => {
-      planner({ settings, seed, base, feetPerCell, edits: sent }).then(
+      planner({ settings, seed, base, feetPerCell, edits: sent, stock }).then(
         (plan) => {
           if (asked.current !== id) return;
           // Edits freeze a layout that fit, so a plan with them that does not fit is the newest edit's doing: undone, and asked again (4.2).
@@ -405,7 +461,9 @@ export default function WingPane(props: {
       );
     }, QUIET_MS);
     return () => clearTimeout(timer);
-  }, [planner, base, settings, seed, feetPerCell, builder, edits.edits]);
+    // `stocked` stands for the stock request, whose pool is never compared (D-261127-220).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planner, base, settings, seed, feetPerCell, builder, edits.edits, stocked]);
 
   // The ghost goes with the pane.
   useEffect(() => () => builder.setState({ wingGhost: null, wingEdit: false, wingRoom: null }), [builder]);
@@ -428,11 +486,17 @@ export default function WingPane(props: {
   }, [question]);
   const send = useMemo(() => (props.send === undefined ? wingSender(actions, { store: roomStore, shown: () => mounted.current }) : props.send), [props.send, actions, roomStore]);
   const sendLine = sending === "asking" ? BUILD_ASKING : sending ? (sending.n >= sending.of ? WING_WAITING : `Adding the wing… ${sending.n} of ${sending.of}`) : null;
-  const planLine = drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words !== undefined ? pointerWords(plan.words) : plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE);
+  const loadingMonsters = share > 0 && source.list === null && !source.failed;
+  const planLine = loadingMonsters ? MONSTERS_LOADING : drawing ? WING_DRAWING : plan === null ? "" : plan.ok ? statusLine(plan.summary) : (plan.words !== undefined ? pointerWords(plan.words) : plan.error === "fit" ? WING_FIT_NONE : WING_NOT_MADE);
   const status = sendLine ?? said ?? planLine;
-  const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null;
+  // The creature limit is checked on every render, and again at Add the wing against the live scene (D-261127-280).
+  const overBy = share > 0 && plan?.ok ? overLimitBy(plan.facts ?? [], edits.edits?.rooms ?? null, tokensLeft, plan.stones ?? 0) : 0;
+  const stockWaits = share > 0 && (source.pool === null || overBy > 0);
+  const ready = !planned.pending && sending === null && plan?.ok === true && plan.made !== null && plan.clear !== undefined && send !== null && joinProblem === null && !stockWaits;
   const add = async () => {
     if (!ready || !plan?.ok || !plan.made || !plan.clear || !send) return;
+    const live = tokensLeftNow(roomStore, scene.id);
+    if (share > 0 && live !== null && overLimitBy(plan.facts ?? [], edits.edits?.rooms ?? null, live, plan.stones ?? 0) > 0) return;
     setSaid(null);
     setSending("asking");
     const outcome = await send(
@@ -531,6 +595,8 @@ export default function WingPane(props: {
               flat={flat}
               wing
               held={sending !== null}
+              stocking={share > 0}
+              limit={share > 0 ? <LimitLine over={overBy} /> : null}
               more={pickedIndex !== null && edits.undone[pickedIndex] ? [edits.undone[pickedIndex]] : []}
             />
           ) : (
@@ -545,7 +611,30 @@ export default function WingPane(props: {
                   ) : null}
                 </div>
               ) : null}
-              {Choices ? <Choices value={settings} onChange={setSettings} held={sending !== null} grid={gridKind(grid)} wing flat={flat} /> : null}
+              {Choices ? (
+                <Choices
+                  value={settings}
+                  onChange={setSettings}
+                  held={sending !== null}
+                  grid={gridKind(grid)}
+                  wing
+                  flat={flat}
+                  stock={{
+                    value: stockChoices,
+                    onChange: (next) => restock(next, groups, false),
+                    held: stockHeld,
+                    groups,
+                    party: <PartyEditor party={editedParty} roomParty={roomParty} onChange={editParty} />,
+                    below: (
+                      <>
+                        {share > 0 && source.failed ? <SrdLoadFailed what="The monster list" inline /> : null}
+                        <LimitLine over={overBy} />
+                      </>
+                    ),
+                  }}
+                  band={{ held: bandFollows(banded, groups), lines: bandLines(settings.band, partyBand(groups), partyLevel(groups)) }}
+                />
+              ) : null}
               {edits.edits ? (
                 <div data-edits-line="" style={EDITS_LINE}>
                   <Help style={{ flex: "1 1 12em" }}>{editedLine(editedRooms(edits))}</Help>

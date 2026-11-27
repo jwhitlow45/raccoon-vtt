@@ -2,7 +2,8 @@ import { decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, e
 import type { BuildChunk, CellRect, FreeWall, RoomState, Scene } from "#shared/model.ts";
 import type { RoomFacts } from "../dungeon/edits.ts";
 import { latticeFor } from "../dungeon/lattice.ts";
-import { roomBox } from "../dungeon/marks.ts";
+import { roomBox, type MonsterMark } from "../dungeon/marks.ts";
+import { footprint } from "../../lib/scene.ts";
 import type { DungeonPlan } from "../dungeon/plan.ts";
 import { isHexGrid } from "../dungeon/settings.ts";
 
@@ -37,6 +38,8 @@ export type WingGhost = {
   lights: GhostLight[];
   /** Each room's number at its middle, shown with Edit rooms on, "W1" and on. */
   rooms: GhostRoom[];
+  /** A ring round each creature the wing stocks (docs/design/design-v1-dungeon-stock.md 1), on the DM's board alone. */
+  monsters: MonsterMark[];
 };
 
 const sameWall = (a: FreeWall, b: FreeWall) => a.a[0] === b.a[0] && a.a[1] === b.a[1] && a.b[0] === b.b[0] && a.b[1] === b.b[1] && JSON.stringify(a.f) === JSON.stringify(b.f);
@@ -77,7 +80,7 @@ export function addedChunk(scratch: BuildChunk, base: BuildChunk | undefined): B
   };
 }
 
-type Ghosted = Pick<RoomState, "buildChunks" | "traps" | "lights">;
+type Ghosted = Pick<RoomState, "buildChunks" | "traps" | "lights"> & Partial<Pick<RoomState, "tokens">>;
 
 /**
  * The ghost of a wing landed in `scratch` on its scene `scratchScene`,
@@ -115,6 +118,13 @@ export function ghostOf(input: {
     if (!light || light.sceneId !== scratchScene.id || (same && base.lights?.[light.id])) continue;
     lights.push({ x: light.x, y: light.y, reach: (light.bright + light.dim) / Math.max(1, input.feetPerCell) });
   }
+  // The wing's creatures are the scratch room's monsters the scene lacks, by id, as its traps and lights are.
+  const monsters: MonsterMark[] = [];
+  for (const t of Object.values(scratch.tokens ?? {})) {
+    if (!t || t.sceneId !== scratchScene.id || t.kind !== "monster" || (same && base.tokens?.[t.id])) continue;
+    const fp = footprint(t);
+    monsters.push({ x: t.x + fp.w / 2, y: t.y + fp.h / 2, r: Math.max(0.2, Math.min(fp.w, fp.h) / 2 - 0.1) });
+  }
   return {
     sceneId: input.sceneId,
     area: input.area,
@@ -124,6 +134,7 @@ export function ghostOf(input: {
     traps,
     lights,
     rooms: input.rooms,
+    monsters,
   };
 }
 
