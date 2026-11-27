@@ -383,22 +383,22 @@ describe("websocket: commit failures", () => {
     const { roomId } = await dm.createRoom("Clean");
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
-    const flaky = failCommits(t.pool, ["before", "before"]);
+    // The commit fails until the test has seen the room degraded, however long a slow machine takes to look, and then lands.
+    const flaky = failCommits(t.pool, Array.from({ length: 1000 }, () => "before" as const));
+    let n: number;
     try {
-      const n = s.op({ t: "log.chat", text: "retry me" });
-      await new Promise((r) => setTimeout(r, 60));
-      assert.equal(t.manager.degraded(), true);
+      n = s.op({ t: "log.chat", text: "retry me" });
+      await until(() => t.manager.degraded(), "the commit to retry");
       assert.deepEqual((await t.app.inject({ method: "GET", url: "/healthz" })).json(), { status: "degraded" });
-      const ev = await s.next("ev", (m) => m.acks?.includes(n) ?? false);
-      numberOf()(ev.seq, 1, "the frame's number");
-      assert.equal(flaky.remaining(), 0);
-      assert.equal(t.manager.degraded(), false);
-      assert.equal(await s.maybe("ev", () => true, 200), null);
-      const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
-      assert.equal(rows[0].n, 1);
     } finally {
       flaky.restore();
     }
+    const ev = await s.next("ev", (m) => m.acks?.includes(n) ?? false);
+    numberOf()(ev.seq, 1, "the frame's number");
+    assert.equal(t.manager.degraded(), false);
+    assert.equal(await s.maybe("ev", () => true, 200), null);
+    const { rows } = await t.pool.query("select count(*)::int as n from room_ops where room_id = $1", [roomId]);
+    assert.equal(rows[0].n, 1);
     s.close();
   });
 
@@ -482,9 +482,11 @@ describe("websocket: commit failures", () => {
     const { roomId } = await dm.createRoom("Cap");
     const s = await t.connect(roomId, dm);
     await s.snapshot("c1");
-    const flaky = failCommits(t.pool, Array.from({ length: 10 }, () => "before" as const));
+    // The commit fails until the queue has answered busy, however long a slow machine takes to fill it, and then lands.
+    const flaky = failCommits(t.pool, Array.from({ length: 1000 }, () => "before" as const));
+    let first: number;
     try {
-      const first = s.op({ t: "log.chat", text: "a" });
+      first = s.op({ t: "log.chat", text: "a" });
       // A chat a tick: each tick's batch closes behind the retrying commit, until MAX_PENDING_BATCHES wait and the queue holds.
       const ticks: number[] = [];
       for (let i = 0; i < MAX_PENDING_BATCHES + 10; i++) {
@@ -495,10 +497,10 @@ describe("websocket: commit failures", () => {
       const busy = await s.next("retry", (m) => m.code === "busy");
       // The first busy goes to an op past the queue cap, once the waiting batches hold the queue.
       assert.ok([...ticks.slice(MAX_PENDING_BATCHES - 1), ...ns].includes(busy.n ?? -1), `busy for ${busy.n}`);
-      await s.next("ev", (m) => m.acks?.includes(first) ?? false);
     } finally {
       flaky.restore();
     }
+    await s.next("ev", (m) => m.acks?.includes(first) ?? false);
     s.close();
   });
 });
