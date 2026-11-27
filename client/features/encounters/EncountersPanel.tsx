@@ -58,6 +58,7 @@ import {
 } from "./draft.ts";
 import { useSrdMonsters, type SrdList } from "./useSrd.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { PartyEditor } from "./PartyEditor.tsx";
 import { groundAtMiddle } from "../../lib/view.ts";
 
 /**
@@ -67,8 +68,6 @@ import { groundAtMiddle } from "../../lib/view.ts";
  * Players never receive a saved encounter (design 7.3), only the tokens it
  * places.
  */
-
-const LEVEL_OPTIONS = Array.from({ length: MAX_LEVEL - MIN_LEVEL + 1 }, (_, i) => ({ value: String(i + MIN_LEVEL), label: `Level ${i + MIN_LEVEL}` }));
 
 /** Search results shown at once. More than this and the DM types more or filters. */
 const MAX_RESULTS = 30;
@@ -491,77 +490,4 @@ function AddMonsters(props: { srd: SrdList; monsters: Readonly<Record<string, Cu
       {kindsFull && !full ? <Help>An encounter holds at most {MAX_ENCOUNTER_KINDS} kinds of monster.</Help> : null}
     </div>
   );
-}
-
-/**
- * The party the budget is for. By default the room's player characters by
- * level, followed live, and a character without a level is named rather
- * than guessed at. Editing makes the party the encounter's own, saved with
- * it, for a fight planned for another table size or a level to come.
- */
-function PartyEditor(props: { party: PartyGroup[] | null; roomParty: ReturnType<typeof partyFromCharacters>; onChange(next: PartyGroup[] | null): void }) {
-  const { party, roomParty } = props;
-  if (party === null) {
-    const size = partySize(roomParty.groups);
-    return (
-      <>
-        <Help>The room's characters{size > 0 ? `: ${groupsText(roomParty.groups)}` : ""}.</Help>
-        {roomParty.unleveled.length > 0 ? (
-          <Notice>
-            The budget leaves out {listText(roomParty.unleveled)}, who {roomParty.unleveled.length === 1 ? "has" : "have"} no level yet. Set one on {roomParty.unleveled.length === 1 ? "the" : "each"} character's card, or edit the party here.
-          </Notice>
-        ) : null}
-        {size === 0 && roomParty.unleveled.length === 0 ? <Help>This room has no characters yet. Edit the party to budget for one.</Help> : null}
-        <Button size="sm" onClick={() => props.onChange(roomParty.groups.length > 0 ? roomParty.groups : [{ count: Math.max(1, roomParty.unleveled.length), level: 1 }])}>
-          Edit the party
-        </Button>
-      </>
-    );
-  }
-  return (
-    <>
-      {party.map((g, i) => (
-        <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-          <Stepper label="Characters" value={g.count} step={1} min={1} max={LIMITS.charactersPerRoom} onChange={(count) => props.onChange(setGroup(party, i, { ...g, count }, LIMITS.charactersPerRoom))} />
-          <div style={{ flex: "1 1 120px", display: "flex" }}>
-            <Select
-              aria-label="Their level"
-              value={String(g.level)}
-              onChange={(e) => props.onChange(setGroup(party, i, { ...g, level: Number(e.target.value) }, LIMITS.charactersPerRoom))}
-              style={{ flex: 1, maxWidth: "100%" }}
-            >
-              {LEVEL_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <Button variant="danger" size="sm" aria-label="Remove this level" title="Remove this level" onClick={() => props.onChange(party.filter((_, j) => j !== i))}>
-            Remove
-          </Button>
-        </div>
-      ))}
-      {party.length === 0 ? <Help>No characters: add a level for the budget.</Help> : null}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        <Button size="sm" onClick={() => props.onChange(addGroup(party))} disabled={party.length >= MAX_PARTY_GROUPS}>
-          Add a level
-        </Button>
-        <Button size="sm" onClick={() => props.onChange(null)}>
-          Use the room's characters
-        </Button>
-      </div>
-    </>
-  );
-}
-
-/** "4 at level 3, 1 at level 4". */
-function groupsText(groups: readonly PartyGroup[]): string {
-  return groups.map((g) => `${g.count} at level ${g.level}`).join(", ");
-}
-
-/** "Thorn", "Thorn and Vex", "Ash, Thorn and Vex". */
-function listText(names: readonly string[]): string {
-  if (names.length <= 1) return names.join("");
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
