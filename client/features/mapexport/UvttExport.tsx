@@ -186,8 +186,8 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   const loss = lossLine({ otherFloors: every !== null && !everyFloor, short: short || (status.kind === "made" && status.short) });
   return (
     <Section label={EXPORT_LABEL}>
-      {/* No box of its own, so the row stays an item of the section. */}
-      <div ref={props.inside} style={{ display: "contents" }}>
+      {/* A box of its own, one item of the section, so the section label's spacing is read to the first row. */}
+      <div ref={props.inside}>
         <SettingRow name={`Pixels per ${words.cell}`} help={sizeLine} wide>
           <Segmented<number>
             label={`Pixels per ${words.cell}`}
