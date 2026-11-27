@@ -59,6 +59,7 @@ const { JournalEditor } = await import("../journal/JournalEditor.tsx");
 const { default: JournalPanel } = await import("../journal/JournalPanel.tsx");
 const { ChipMenuBody, useChipEnv, useChipHost, useDmMenuView } = await import("../../pages/ChipMenus.tsx");
 const { dmMenuSections, youMenuSections } = await import("../../pages/chipMenus.ts");
+const { useModule } = await import("./Gate.tsx");
 const { CHIP_WORDS } = await import("../../pages/chipWords.ts");
 const { default: ThisDevice } = await import("../device/ThisDevice.tsx");
 const { Popover } = await import("../../components/Popover.tsx");
@@ -429,10 +430,10 @@ function inMenu(body: ReactElement): ReactElement {
   return createElement(Popover, { handle: OPEN_MENU as never, side: "below", bound: () => ({ left: 0, top: 0, right: 1440, bottom: 900 }), children: body });
 }
 
-/** The DM menu as the DM chip draws it open (ChipMenus.tsx DmMenuBody). */
+/** The DM menu as the DM chip draws it open (ChipMenus.tsx DmMenuBody), its Time item there while Date and time shows, as Room passes it (D-261127-631). */
 function DmMenu() {
   const host = useChipHost(OPEN_MENU as never);
-  const view = useDmMenuView(true, true, null, true);
+  const view = useDmMenuView(useModule("time"), true, null, true);
   const env = useChipEnv(() => null);
   return createElement(ChipMenuBody, { host, env, label: CHIP_WORDS.dmMenuName, sections: dmMenuSections(view), mark: "dm" });
 }

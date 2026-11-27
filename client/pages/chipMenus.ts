@@ -1,5 +1,6 @@
 import type { Character, Handout, HandoutDoc, Member, RoomState, Scene } from "#shared/model.ts";
 import type { OpRefusal, RoomActions, Toast } from "../state/types.ts";
+import type { ModuleId } from "../features/modules/registry.ts";
 import { focusEvent, type Focus } from "../features/dm/camera.ts";
 import { showHandoutOp } from "../features/handouts/handouts.ts";
 import { offerable, reshowInput, type RecentHandout, type RecentRoom, type RecentShow } from "../features/handouts/recent.ts";
@@ -93,6 +94,8 @@ export type ChipItem = {
   disabled?: boolean;
   busy?: boolean;
   under?: ChipUnder;
+  /** The part hidden on this device that takes the item with it, marked on the drawn item for the parts markup test (D-261127-631). */
+  part?: ModuleId;
   run: ChipRun;
 };
 
@@ -367,7 +370,7 @@ export function dmMenuSections(view: DmMenuView): ChipSection[] {
   );
 
   // What gave way from the bar: only while its chip is off the bar.
-  if (view.time) section("time", [{ id: "time", kind: "time", title: view.time.text, role: "action", description: view.time.name, run: openRun({ t: "time" }) }]);
+  if (view.time) section("time", [{ id: "time", kind: "time", title: view.time.text, role: "action", description: view.time.name, part: "time", run: openRun({ t: "time" }) }]);
   if (view.nowPlaying) section("nowPlaying", [{ id: "nowPlaying", kind: "nowPlaying", title: DM_MENU_HEADINGS.nowPlaying, role: "action", run: openRun({ t: "nowPlaying" }) }]);
   return sections;
 }

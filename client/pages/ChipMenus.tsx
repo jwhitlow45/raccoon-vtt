@@ -55,6 +55,7 @@ import {
   type ChipShow,
   type DmMenuView,
 } from "./chipMenus.ts";
+import { partMark } from "../features/modules/gate.ts";
 import { useHiddenHere } from "../features/modules/Gate.tsx";
 import { useShowSaid } from "../features/modules/ShowFocus.tsx";
 import { CHIP_WORDS, youChipName } from "./chipWords.ts";
@@ -536,7 +537,7 @@ export function menuItemOf(item: ChipItem): MenuItem {
     ...(item.description !== undefined ? { description: item.description } : {}),
     ...(item.disabled ? { disabled: true } : {}),
     ...(item.busy ? { busy: true } : {}),
-    data: { "data-chip-item": item.id },
+    data: { "data-chip-item": item.id, ...(item.part ? partMark(item.part) : {}) },
   };
   if (!item.under) return base;
   return {

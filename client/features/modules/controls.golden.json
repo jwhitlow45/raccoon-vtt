@@ -1357,7 +1357,7 @@
     "div[role=menuitem] \"Bring everyone here\"": "core",
     "div[role=menuitem] \"View as Pat\"": "core",
     "div[role=menuitem] \"View as Sam\"": "core",
-    "div[role=menuitem] \"Day 1, 12:00 AM Time: Day 1, 12:00 AM, Night\"": "core",
+    "div[role=menuitem] \"Day 1, 12:00 AM Time: Day 1, 12:00 AM, Night\"": "time",
     "div[role=menuitem] \"Now playing\"": "core"
   },
   "Chip menus / the You menu / player": {

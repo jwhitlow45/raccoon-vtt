@@ -119,7 +119,6 @@ const ADMITTED: readonly InnerOwner[] = [`button "Collapse Bree's turn"`, `butto
  * land (the scans' pending lists do the same, D-261127-458).
  */
 const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B"; why: string }[] = [
-  { surface: "Chip menus", part: "time", lane: "FT-B", why: "the DM menu's Time item hides through Room.tsx's timeGaveWay and carries no data-part, so no drawing here holds the part" },
   { surface: "Chip menus", part: "isometric", lane: "FT-B", why: "the chip menus hold no View rows, only the menu home's Show items, so no drawing here holds the part" },
 ];
 
