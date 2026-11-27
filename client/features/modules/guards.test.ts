@@ -192,6 +192,15 @@ describe("ending a hidden part's work", () => {
     assert.equal(b.local().tool, "area");
   });
 
+  test("a borrowed tool ends at Select once its lender, Traps, hides, with Areas hidden or shown (D-261127-659)", () => {
+    for (const choices of [withChoice(withChoice(NO_CHOICES, "dm", "areas", false), "dm", "traps", false), withChoice(NO_CHOICES, "dm", "traps", false)]) {
+      const a = room({ tool: "area", toolBorrowed: true });
+      a.end(choices, true);
+      assert.equal(a.local().tool, "select");
+      assert.equal(a.local().toolBorrowed, undefined, "the borrow is over");
+    }
+  });
+
   test("the builder leaves Add a wing for its first mode, its wing picks dropped", () => {
     const a = room({ tool: "build" });
     const builder = a.scope.get(builderSlot).store;

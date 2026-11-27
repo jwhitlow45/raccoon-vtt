@@ -120,7 +120,8 @@ export type HiddenGuardRoom = {
 
 /**
  * Ends what a hidden part was doing on this page (design section 5, Effect,
- * and 8, D-261127-130, 302, 393): an active tool of a hidden part goes back
+ * and 8, D-261127-130, 302, 393): an active tool of a hidden part, or a
+ * borrowed tool whose lender hides, goes back
  * to Select, where the canvas's activation effect then cancels its gesture
  * and runs its `deactivate`, the builder leaves Add a wing for its first
  * mode, an Areas group save moves to Dice whole, and an open panel of a
@@ -130,7 +131,9 @@ export type HiddenGuardRoom = {
 export function endHidden(room: HiddenGuardRoom, role: Role, choices: FeatureChoices, wide: boolean): void {
   const { ui, scope } = room;
   const start = room.local();
-  if (!toolShown(start.tool, role, choices, start.toolBorrowed === true)) ui.setTool("select");
+  // A borrowed tool serves the Trap tool's draft (D-261127-303), so the borrow ends once Traps hides too, or its Save would go on sending to a hidden part (D-261127-659).
+  const lent = start.toolBorrowed === true && toolShown("trap", role, choices);
+  if (!toolShown(start.tool, role, choices, lent) || (start.toolBorrowed === true && !lent)) ui.setTool("select");
   if (!moduleShown("dungeon", role, choices) && scope.get(builderSlot).store.getState().mode === "wing") pickBuildMode(scope, BUILD_MODES[0]!.value, choices);
   const shown = (id: string) => claimShown("panel", id, role, choices);
   // Closing an open group save would lose a game-affecting page, so it moves to Dice where Areas stood, with its page, requests, answers and draft.

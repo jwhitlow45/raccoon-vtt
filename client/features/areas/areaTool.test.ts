@@ -15,6 +15,9 @@ import { draftTemplate, handlePoint, newDraft, yawToward } from "./placement.ts"
 import { areaSlot, HANDLE_GAP_PX } from "./store.ts";
 
 const { aimTrapArea, areaTool } = await import("./AreaTool.tsx");
+const { endTrapAim } = await import("./AreaOptions.tsx");
+const { trapSlot } = await import("../traps/store.ts");
+const { resetAllFeatures, setModuleShown } = await import("../modules/store.ts");
 
 const CAM: Camera = { x: 400, y: 300, scale: 40 };
 /** The platform's top in cells: 20 ft at 5 ft a cell. */
@@ -113,4 +116,22 @@ test("a trap's Place the area borrows the Area tool, so it opens for the trap's 
   const draft = newDraft("a1", "sphere", "#ff0000");
   aimTrapArea(new RoomScope(), { setTool: (id, opts) => void asked.push({ id, ...(opts ? { opts } : {}) }) }, "t1", draft);
   assert.deepEqual(asked, [{ id: "area", opts: { borrow: true } }]);
+});
+
+test("the trap's aim ends its borrow on Save or Cancel: back to the Trap tool and its pane, or to Select where Traps hid meanwhile (D-261127-659)", () => {
+  try {
+    const asked: string[] = [];
+    const ui = { setTool: (id: string) => void asked.push(id) };
+    const shown = new RoomScope();
+    endTrapAim(shown, ui, "t1", "dm");
+    assert.deepEqual(asked, ["trap"]);
+    assert.equal(shown.get(trapSlot).store.getState().paneId, "t1", "the trap's pane opens again");
+    setModuleShown("traps", "dm", false);
+    const hidden = new RoomScope();
+    endTrapAim(hidden, ui, "t1", "dm");
+    assert.deepEqual(asked, ["trap", "select"], "Select, which the store never refuses, so the borrowed Area tool ends");
+    assert.equal(hidden.get(trapSlot).store.getState().paneId ?? null, null, "no pane of a hidden part");
+  } finally {
+    resetAllFeatures();
+  }
 });

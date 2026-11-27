@@ -11,9 +11,10 @@ import { Popover, usePopover } from "../../components/Popover.tsx";
 import { dismissedBy } from "../../components/popoverRules.ts";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import { trapAreaOf } from "../traps/rules.ts";
 import { trapSlot } from "../traps/store.ts";
+import { toolShown } from "../modules/gate.ts";
 import {
   ChoiceTiles,
   OptButton,
@@ -613,6 +614,18 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
 }
 
 /**
+ * The aim's Save or Cancel: back to the trap's pane with the Trap tool,
+ * which ends the borrow. Where Traps hid meanwhile the store refuses the
+ * Trap tool, so the borrow ends at Select instead, and no Save is left to
+ * send to a hidden part (D-261127-659).
+ */
+export function endTrapAim(scope: RoomScope, ui: { setTool(id: string): void }, trapId: string, role: "dm" | "player"): void {
+  if (!toolShown("trap", role)) return ui.setTool("select");
+  ui.setTool("trap");
+  scope.get(trapSlot).store.setState({ paneId: trapId });
+}
+
+/**
  * Aiming the area a trap hits (docs/design/design-v1-traps.md 4.1): the area's
  * shapes, size and handles, then Save puts the shape into the trap and
  * goes back to its pane, as Cancel does without saving. No caster, owner,
@@ -625,10 +638,7 @@ function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDr
   const t = currentTemplate(env, d);
   const set = (patch: Partial<AreaDraft>) => setDraft(env, { ...d, ...patch });
   const trapName = env.view.traps[trapId]?.name ?? "The trap";
-  const back = () => {
-    ui.setTool("trap");
-    scope.get(trapSlot).store.setState({ paneId: trapId });
-  };
+  const back = () => endTrapAim(scope, ui, trapId, env.role);
   const save = () => {
     if (!t) return;
     if (env.actions.dispatch({ t: "trap.update", trapId, patch: { rig: { hits: { area: trapAreaOf(t) } } } }) !== null) back();
