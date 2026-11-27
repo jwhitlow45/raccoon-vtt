@@ -622,6 +622,7 @@ Everyone, the DM and every player, picks how their own device shows the map.
 - **Suggested view**, in the Size and view group of a scene's settings after Starting view, is the DM's: "Top-down" or "Isometric", with the help "Devices that follow the scene show this view." A device that follows the scene switches once a drag, a pinch or a held ruler in progress ends, so the map never moves under a finger.
 - Everything works in Isometric as in Top-down: select, drag (a creature climbs a platform and steps down into a pit under the finger), measure, ping, aim areas, open doors, read heights. A tap again on the selected standee picks the one behind it, and the arrow keys move tokens by the screen: Up goes toward the map's edge that faces up and to the right.
 - An animated map shows its still in Isometric.
+- A creature whose picture carries a 3D model stands as that model (see 3D models, under Images and art).
 - Four tools show Top-down while in use, and say so: the map builder, Fog, Line up grid and Trap ("The map builder works top-down. Isometric comes back when you switch tools."). Isometric comes back when another tool is picked.
 - Areas stand as their real shapes: a sphere as a sphere, a cone aimed up or down as stored, a cylinder, a cube, a line, an emanation round its creature, each see-through with an outline, down into a pit, so a flier inside one shows inside it, its caught ring round its feet.
   - On a player's device an area stands only where every bit of the ground under it is revealed and in their sight right now (or, without party vision, revealed to them), and lies flat as in Top-down anywhere else.
@@ -882,6 +883,34 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - A monster's default image: set it once, and every token of that monster placed afterwards starts with it. "Apply to N tokens on this scene" puts it on the ones already there.
 - Every SRD monster comes with a default token: a game-icons.net icon on a disk colored by its creature type (a wolf's head on brown for a beast, a skeleton on black for the undead), and dragons in their own color. It applies in existing rooms too, and nothing is stored until the DM changes it. A monster's page shows the default with its credit. "Change image" sets the room's own image for that monster, and "Use the default icon" goes back to it.
 - Every piece of art that ships with the app, the starter packs included, is openly licensed and credited on the About page and in CREDITS.md. Each starter pack was checked for signs of AI generation: its page and its dates, and every work in it by eye.
+
+### 3D models ([design](docs/design/design-v1-token-models.md))
+
+A picture can carry a 3D model, which its creature stands as in Isometric.
+
+- **3D model**, after Crop beside a picture, opens the 3D model sheet: a sheet from the bottom on an upright phone, a dialog elsewhere. It sits beside every picture that can change: a token's Image group, a character's page and card, a companion's block, the group edit sheet, and a monster's page beside Change image.
+  - The DM adds one to any of them, and a player to the tokens and characters they own.
+- **Choose a file** reads an STL, OBJ or GLB on this device ("Stands in Isometric in place of the picture. STL, OBJ or GLB."), showing "Reading the file…" and then "Drawing its 8 views…" with **Cancel**, which stops at once.
+  - The file stays on the device. The room keeps one image of the model's 8 views, which is all any other device downloads.
+- The preview stands the model on its ring over four squares of floor, as Isometric draws it. **Turn left** and **Turn right** turn it 45 degrees a press, and Left and Right do the same with the preview focused. A screen reader hears the view, such as "The model, seen from the front left".
+- Each option draws the views again: **Color** (Stone, Bronze, Bone, Iron, and "Picture's color" where every wearer has a picture), **Stand it up** ("Lying down or upside down? Tap until it stands."), **Turn its front** ("Which way it faces at Facing 0°: away up the map.") and **Size**, from 50% in 10% steps ("100% fills its square. Its base, if it has one, fills it exactly.").
+  - Color shows for an STL, an OBJ and a GLB with a part that has no material. A GLB otherwise keeps its own colors, textures, vertex colors, cutouts and see-through parts, drawn matte.
+  - Size stops where the model would draw soft, and says so, such as "This model stops at 160% to stay sharp."
+- **Save** ("Saving…") puts the model on the picture and closes the sheet. A wearer with no picture also takes the model's front view as its picture, so Top-down shows the figure.
+  - **Cancel** asks "Discard this model?" once a file was read.
+- "Or use one from this room" lists the front view of each model on a picture the viewer can see, and a tap takes that model with no file. A wearer with no picture takes the picture the model came on.
+- With a model, the sheet shows its stored views, "To change its color, size or which way is up, choose the file again.", **Choose another file** and **Remove model**.
+  - Remove model takes a second tap ("Tap again to remove", "Click again to remove" with a mouse) for everyone, since a player has no Undo for it. The DM's Undo setup brings the model back.
+- Every change of picture keeps the model: Change image, Crop, an icon, a pasted picture, a placed monster, Duplicate and "Apply to N tokens on this scene". Remove on a picture with a model asks "Remove both?", with "Removes the picture and its 3D model." under it.
+- A model rides on its picture, so each of a token's other images keeps its own, and wearing one, as for Wild Shape, swaps the model with it. A disguise's true face and its model reach only the DM and the token's owners.
+- In the group edit sheet, 3D model goes on each token's own picture, Change image keeps each token's own model, and Remove model takes each one off after the same two taps. Picture's color draws one set of views per different picture, each token in its own picture's color, up to 6 ("Picture's color works for up to 6 different pictures at once.").
+- In Isometric a creature stands as its model where its standee would stand, with the same ring, shadow, facing tick, selection and fog. A view turn or a press of Facing shows the view that angle needs, and the model grows and shrinks with the creature's size, so Enlarge needs no new file. A tap on a clear corner of a model reaches the creature behind it.
+- A dying, dead or stable creature stands as its picture with Top-down's marks, and so does one whose views have not arrived yet. Top-down, Initiative, the party bar and the panels keep the picture.
+- A hidden creature's model never reaches a player, and neither may a player's device fetch its views.
+- The DM's Library lists the models' views under **3D models**, by their front view, with In use or Not in use and Delete for one not in use. Cleanup's "Delete N not in use" takes them too.
+- STL reads up to 512 MB and OBJ up to 256 MB. A GLB reads up to 64 MB on a phone or tablet and 256 MB on a computer, and draws up to 500,000 triangles on a phone or tablet and 1,000,000 on a computer. A `.gltf` file reads "Save it as GLB (one file) and pick that."
+- Adding a model needs Chrome, Edge, Firefox 105 or later, or Safari 17 or later. Any browser shows the models others added.
+- Layout: The preview is 240 px square, and 200 px under 360 px wide or at a larger Interface size. It and its turn buttons stand at the sheet's left edge.
 
 ## Conditions and statuses
 
@@ -2312,6 +2341,14 @@ Choose an image, the stamp picker, New scene's Map image, Show a handout, and a 
 | Key | Does | Who |
 | --- | --- | --- |
 | Ctrl+V (Cmd+V on a Mac) | Paste a copied image there. Choose an image also takes an https link | everyone |
+
+### 3D model preview
+
+The preview in a picture's 3D model sheet, which the 3D model button beside the picture opens.
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Left, Right | Turn the model a view left or right, 45 degrees | everyone, with the preview focused |
 
 ### Setup history
 

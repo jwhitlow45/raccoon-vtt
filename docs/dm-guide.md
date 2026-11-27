@@ -711,6 +711,22 @@ The isometric view tilts the map so that the ground runs away from you at an ang
 
 The table display has the same View choice in its own menu, kept apart from anyone's choice in the same browser. With **Follow the DM** on, a display follows the part of the map your device shows in either view.
 
+### 3D models
+
+In Isometric a creature can stand as a 3D model rather than a picture on a stand: the figure you printed for your table, one you built in a character maker, or any STL, OBJ or GLB file. Your device reads the file and draws the model from the 8 directions Isometric can show it from, and only those 8 views go to the room, so the file stays with you and nobody else downloads it.
+
+To add one, open the creature's **Image** group in the Token panel and press **3D model**, beside **Crop**. The same button sits beside every picture you can change: a character's page, a companion's block, the group edit sheet and a monster's page, where the model goes on every one of that monster placed from then on, and **Apply to N tokens on this scene** puts it on those already there. Press **Choose a file** and pick the file. The sheet says "Reading the file…" and then "Drawing its 8 views…", which takes a second or two, a little longer on a phone, and **Cancel** stops it at once.
+
+The preview shows the model on its ring as it will stand on the map. **Turn left** and **Turn right** turn it a view at a time, as do Left and Right once the preview has focus. If the model comes in lying on its back or upside down, press **Stand it up** until it stands, and **Turn its front** turns it a quarter so it faces away up the map at Facing 0°. **Size** makes it larger or smaller than its square, for a dragon whose wings should spread past its space, say. An STL or OBJ has no color of its own, so **Color** paints it **Stone**, like an unpainted miniature, **Bronze**, **Bone**, **Iron** or **Picture's color**. A GLB keeps its own colors and textures. Press **Save** to put the model on the picture. A creature with no picture also takes the model's front view as its picture, so Top-down shows the figure too.
+
+![Three knights in Isometric on the DM's screen, each a 3D model of a figure on a round base: a Medium one in Stone, another in Bronze facing east, and a Large one in Iron, standing beside a goblin that keeps its pink icon.](dm-guide/models-isometric.webp)
+
+Once a model is in the room, **Or use one from this room**, under Choose a file, reuses it with one tap and no file to find. The room keeps only the views, so to change a model's color, size or which way is up, choose its file again. **Remove model** asks for a second tap, and **Undo setup** brings it back. Your players can add models to their own characters, and a player can't undo removing one, which is why the second tap is there for everyone.
+
+A model belongs to its picture. Changing the picture, cropping it, picking an icon or pasting a new one keeps the model, and **Remove** asks "Remove both?" before it takes the picture and its model together. Each of a creature's other images keeps its own model, so a druid's Wild Shape image can carry the beast's figure, and wearing it swaps both. A disguise's true face and its model reach only you and the creature's players. In the group edit sheet, **3D model** puts a model on every selected token's own picture, and **Picture's color** paints each one in its own picture's color, for up to 6 different pictures at once.
+
+On the map the model stands where its standee would, with the same ring, facing tick, selection and fog, and it grows and shrinks with the creature's size, so Enlarge needs no new file. Turning the view or pressing **Facing** shows the side the creature would show you. A tap on the empty corner beside a model reaches the creature behind it. A creature that is dying, dead or stable stands as its picture with its marks, so its state reads the same in both views. Top-down, Initiative and the panels keep the picture, and the Library lists the models' views under **3D models**, so you can delete one nothing uses.
+
 ## Difficult ground
 
 Some ground is slow going: rubble, thick undergrowth, a slope of loose scree, the furniture of a crowded tavern. Every foot of movement through difficult terrain costs 1 extra foot, and the app counts it for you whenever a token is dragged or moved with the arrow keys, as the walking ruler does (see [Measuring and movement](#measuring-and-movement)).

@@ -997,6 +997,7 @@ export const SURFACES = [
   "Label, pin and light panes",
   "Dialogs",
   "Images",
+  "3D model preview",
   "Setup history",
 ] as const;
 
@@ -1524,6 +1525,9 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Images",
   },
 
+  // The 3D model sheet's preview: features/models/ModelPreview.tsx onKey (docs/design/design-v1-token-models.md 7, D-261127-386).
+  { id: "modelPreviewTurn", input: "Left, Right", does: "Turn the model a view left or right, 45 degrees", roles: EVERYONE, when: "with the preview focused", device: "keys", surface: "3D model preview" },
+
   // The room search: features/search/SearchSheet.tsx, its field's own keys (docs/design/design-v1-qol.md 5, Keys). Its field keeps Home, End, Left and Right.
   { id: "searchMove", input: "Up, Down", does: "Move through the results", roles: EVERYONE, device: "keys", surface: "Search" },
   { id: "searchGo", input: "Enter", does: "Go there, or do it", roles: EVERYONE, device: "keys", surface: "Search" },
@@ -1567,6 +1571,7 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
   "Images":
     "Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.",
+  "3D model preview": "The preview in a picture's 3D model sheet, which the 3D model button beside the picture opens.",
 };
 
 /** What the sheet writes for a row whose default key another row's change took (keyBindings.ts UNBOUND). */
