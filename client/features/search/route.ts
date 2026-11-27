@@ -4,6 +4,8 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   DM_PANEL_SECTIONS,
   dmPanelFoldsSlot,
+  FEATURES_SECTIONS,
+  featuresFoldsSlot,
   SCENES_SECTIONS,
   scenesFoldsSlot,
   SOUND_SECTIONS,
@@ -11,6 +13,7 @@ import {
   THIS_DEVICE_SECTIONS,
   thisDeviceFoldsSlot,
   type DmPanelSection,
+  type FeaturesSection,
   type ScenesSection,
   type SoundSection,
   type ThisDeviceSection,
@@ -111,8 +114,8 @@ export function recordId(kind: string, page: string | undefined): string | null 
   return page !== undefined && page.startsWith(head) && page.length > head.length ? page.slice(head.length) : null;
 }
 
-/** Menu's subpages (panels/MenuPanel.tsx), each its own subpage's header id. Room settings is a DM's alone. */
-export const MENU_PAGES = ["members", "settings", "about", "device"] as const;
+/** Menu's subpages (panels/MenuPanel.tsx), each its own subpage's header id. Room settings is a DM's alone. Features is This device's own subpage (docs/design/design-v1-features.md 5). */
+export const MENU_PAGES = ["members", "settings", "about", "device", "features"] as const;
 export type MenuPage = (typeof MENU_PAGES)[number];
 
 /**
@@ -167,7 +170,7 @@ const NO_FOLDS: readonly string[] = [];
 
 /**
  * The folds a route may open on its way to a panel's page: lib/folds.ts's
- * surfaces (the DM panel, Scenes, Sound and This device in Menu), the
+ * surfaces (the DM panel, Scenes, Sound, and This device and its Features in Menu), the
  * token panel's and a character's page's (panelFolds.ts), and the Dice
  * panel's (diceFolds.ts DICE_ROUTE_SECTIONS). A route's
  * `section` names one of these, which the search's catalog test holds it
@@ -182,7 +185,7 @@ export function routeFolds(panel: string, page?: string): readonly string[] {
     case SOUND_PANEL:
       return SOUND_SECTIONS;
     case "menu":
-      return page === "device" ? THIS_DEVICE_SECTIONS : NO_FOLDS;
+      return page === "device" ? THIS_DEVICE_SECTIONS : page === "features" ? FEATURES_SECTIONS : NO_FOLDS;
     case "token":
       return TOKEN_FOLDS;
     case "characters":
@@ -212,7 +215,8 @@ function revealOnRoute(scope: RoomScope, panel: string, page: string | undefined
       scope.get(soundFoldsSlot).reveal(section as SoundSection);
       return;
     case "menu":
-      scope.get(thisDeviceFoldsSlot).reveal(section as ThisDeviceSection);
+      if (page === "features") scope.get(featuresFoldsSlot).reveal(section as FeaturesSection);
+      else scope.get(thisDeviceFoldsSlot).reveal(section as ThisDeviceSection);
       return;
     case "dice": {
       const folds = scope.get(diceFoldsSlot);

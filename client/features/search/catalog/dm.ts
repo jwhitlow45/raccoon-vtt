@@ -11,6 +11,7 @@ import { SCENES_ENTRIES } from "../../scenes/search.ts";
 import { ROOM_SETTINGS_ENTRIES } from "../../settings/search.ts";
 import { SOUND_ENTRIES } from "../../sound/search.ts";
 import { DM_CHARACTERS_ENTRIES, DM_TOKEN_FIELDS } from "../../tokens/dmSearch.ts";
+import { showEntries } from "../../modules/search.ts";
 import type { SearchRoute } from "../entry.ts";
 import { recordPage, SUGGEST } from "../index.ts";
 import type { Catalog, CatalogEntry } from "./types.ts";
@@ -20,7 +21,8 @@ import { onOff } from "./write.ts";
  * The DM's part of the search (docs/design/design-v1-qol.md 5, Loading and Players): the DM
  * panel, Room settings, the DM's part of Members, Scenes, Time, Sound,
  * Initiative, Characters' party rest, the token panel's DM fields, the DM's
- * panels' words and the adapter from the DM menu's items with their twins.
+ * panels' words, the adapter from the DM menu's items with their twins, and
+ * the "Show" results of the DM's own parts hidden on this device.
  * Only dmCatalog.ts loads it, by a dynamic import behind a strict role
  * check, so it is a chunk of its own that a player's device never asks
  * for. A static import anywhere else would fold it into the room's chunk,
@@ -37,7 +39,7 @@ import { onOff } from "./write.ts";
 export type SearchedItemKind = Exclude<DmItemKind, "time" | "nowPlaying" | "volume">;
 
 export function searchedKind(kind: ChipItem["kind"]): kind is SearchedItemKind {
-  return kind !== "time" && kind !== "nowPlaying" && kind !== "volume" && kind !== "cancel" && kind !== "sheet" && kind !== "xcard";
+  return kind !== "time" && kind !== "nowPlaying" && kind !== "volume" && kind !== "cancel" && kind !== "sheet" && kind !== "xcard" && kind !== "show";
 }
 
 const screens = (anchor: string): SearchRoute => ({ panel: "dm", section: "screens", anchor });
@@ -154,5 +156,6 @@ export const DM_CATALOG: Catalog = {
   entries: [...DM_PANEL_ENTRIES, ...ROOM_SETTINGS_ENTRIES, ...DM_MEMBERS_ENTRIES, ...SCENES_ENTRIES, ...TIME_ENTRIES, ...SOUND_ENTRIES, ...TRACKER_ENTRIES, ...DM_CHARACTERS_ENTRIES],
   fields: DM_TOKEN_FIELDS,
   panels: { dm: { names: ["dm tools"] }, monsters: { names: ["creatures", "bestiary"] }, scenes: { names: ["maps"] } },
-  items: (ctx) => (ctx.role === "dm" && ctx.state.view ? dmMenuEntries(ctx.dmMenu ?? dmMenuViewOf(ctx.state)) : []),
+  // The DM menu's items, and the "Show" results of the DM's own parts that this device hides (modules/search.ts).
+  items: (ctx) => (ctx.role === "dm" && ctx.state.view ? [...dmMenuEntries(ctx.dmMenu ?? dmMenuViewOf(ctx.state)), ...showEntries(ctx, "dm")] : []),
 };

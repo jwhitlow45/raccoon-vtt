@@ -70,8 +70,9 @@ describe("This device's Theme section", async () => {
  */
 test("the Menu's This device row names theme after the interface size, with or without full screen", async () => {
   const { deviceDetail } = await import("./ThisDevice.tsx");
-  assert.equal(deviceDetail(true), "Interface size, theme, full screen, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
-  assert.equal(deviceDetail(false), "Interface size, theme, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
+  // The parts you use lead, as Features leads the page (docs/design/design-v1-features.md 5).
+  assert.equal(deviceDetail(true), "The parts you use, interface size, theme, full screen, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
+  assert.equal(deviceDetail(false), "The parts you use, interface size, theme, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
 });
 
 /*

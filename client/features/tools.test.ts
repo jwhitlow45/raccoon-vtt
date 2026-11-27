@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { SETUP_BUTTON, SETUP_TOOLS, setupDivider, TOOL_ORDER, toolbarButtons } from "./toolbarOrder.ts";
+import { HIDDEN_TOOLS_BUTTON, SETUP_BUTTON, SETUP_TOOLS, setupDivider, TOOL_ORDER, toolbarButtons } from "./toolbarOrder.ts";
 
 /** A role's toolbar as toolsFor sorts it, from the order table (features/tools.ts cannot load under node --test: its tools are .tsx). */
 function toolbar(ids: readonly (keyof typeof TOOL_ORDER)[]) {
@@ -48,5 +48,25 @@ describe("the buttons a toolbar draws (docs/design/design-v1-tool-options.md 5.1
 
   test("a player's toolbar is the same on every layout", () => {
     for (const wide of [false, true]) assert.deepEqual(toolbarButtons(player, wide), { ids: ["select", "ruler", "area", "draw", "ping"], divider: null });
+  });
+});
+
+describe("Hidden tools, the way back to the tools of parts hidden on this device (docs/design/design-v1-features.md 6, D-261127-312)", () => {
+  const dm = toolbar(["select", "add-token", "area", "draw", "ping", "fog", "build", "grid"]);
+  const player = toolbar(["select", "area", "draw", "ping"]);
+
+  test("from 900 px up one button after the last tool, for play and setup tools alike", () => {
+    assert.deepEqual(toolbarButtons(dm, true, { play: 1, setup: 0 }).ids.at(-1), HIDDEN_TOOLS_BUTTON);
+    assert.deepEqual(toolbarButtons(dm, true, { play: 0, setup: 2 }), { ids: [...dm.map((t) => t.id), HIDDEN_TOOLS_BUTTON], divider: 5 });
+  });
+
+  test("on a phone after the play tools for a play tool, and none for a setup tool, whose Show stands at the foot of Setup's menu", () => {
+    assert.deepEqual(toolbarButtons(dm, false, { play: 1, setup: 2 }), { ids: ["select", "area", "fog", "draw", "ping", HIDDEN_TOOLS_BUTTON, SETUP_BUTTON], divider: 6 });
+    assert.deepEqual(toolbarButtons(dm, false, { play: 0, setup: 2 }), toolbarButtons(dm, false), "Traps and Pins hidden: no Hidden tools button");
+    assert.deepEqual(toolbarButtons(player, false, { play: 1, setup: 0 }), { ids: ["select", "area", "draw", "ping", HIDDEN_TOOLS_BUTTON], divider: null });
+  });
+
+  test("with nothing hidden it is never drawn", () => {
+    for (const wide of [false, true]) for (const tools of [dm, player]) assert.ok(!toolbarButtons(tools, wide, { play: 0, setup: 0 }).ids.includes(HIDDEN_TOOLS_BUTTON));
   });
 });

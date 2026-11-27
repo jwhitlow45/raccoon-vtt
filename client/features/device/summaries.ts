@@ -23,13 +23,18 @@ export type DeviceValues = {
   /** The Animated maps choice, or null while the server offers no animated maps and the row is hidden. */
   animatedMaps: AnimatedMapsChoice | null;
   weather: WeatherMode;
+  /** Weather shows on this device (docs/design/design-v1-features.md 3): hidden, the section holds its way back alone. */
+  weatherShown: boolean;
   /** A reason keeps the weather still though Moving is chosen (weather/store.ts weatherStillReason). */
   weatherHeld: boolean;
   /** A reason keeps every animated map still though Moving is chosen (AnimMapController.tsx useDeviceStillReason). */
   animatedHeld: boolean;
   /** This device's Volume and whether it is muted (sound/engine/store.ts useDeviceVolume). */
   volume: { readonly muted: boolean; readonly volume: number };
-  rollAnimation: boolean;
+  /** Sound shows on this device: hidden, the section holds Turn sound and Ping sound alone, which no volume speaks for. */
+  soundShown: boolean;
+  /** Roll animation's switch, which is the role's Dice animation on this device (D-261127-301). */
+  diceAnimation: boolean;
   handle: GrabberId;
   /** How many panels This device's Tab row keeps out of the side panel's row, for the viewer's role. */
   tabsLeftOut: number;
@@ -38,7 +43,7 @@ export type DeviceValues = {
 const join = (parts: readonly (string | null)[]): string => parts.filter((p) => p !== null).join(" · ");
 const onOff = (name: string, on: boolean): string => `${name} ${on ? "on" : "off"}`;
 
-/** Every group's summary, or undefined for Shortcuts, which holds no setting. */
+/** Every group's summary, or undefined for Shortcuts, which holds no setting, and for Sounds while Sound hides. */
 export function deviceSummaries(v: DeviceValues): Readonly<Record<ThisDeviceSection, string | undefined>> {
   return {
     size: uiScaleLabel(v.scale),
@@ -48,9 +53,9 @@ export function deviceSummaries(v: DeviceValues): Readonly<Record<ThisDeviceSect
     // The value the cards show: Low power loads the phone size whatever is chosen.
     mapDetail: join([MAP_IMAGE_WORDS[v.lowPower ? "mobile" : v.variant], v.animatedMaps ? ANIMATED_MAPS_WORDS[v.animatedMaps] : null, v.animatedMaps === "moving" && v.animatedHeld ? "Held still" : null]),
     // Held still only says something while Moving is chosen: Still and Off are still already.
-    weather: join([WEATHER_MODE_WORDS[v.weather], v.weather === "moving" && v.weatherHeld ? "Held still" : null]),
-    sounds: v.volume.muted ? MUTED : `Volume ${v.volume.volume}%`,
-    rolls: onOff("Roll animation", v.rollAnimation),
+    weather: v.weatherShown ? join([WEATHER_MODE_WORDS[v.weather], v.weather === "moving" && v.weatherHeld ? "Held still" : null]) : "Hidden",
+    sounds: v.soundShown ? (v.volume.muted ? MUTED : `Volume ${v.volume.volume}%`) : undefined,
+    rolls: onOff("Roll animation", v.diceAnimation),
     shortcuts: undefined,
     handle: grabberDesign(v.handle).name,
     tabRow: v.tabsLeftOut === 0 ? "Every panel" : `${v.tabsLeftOut} only in More`,

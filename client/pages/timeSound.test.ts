@@ -80,6 +80,9 @@ describe("clock lines as toasts (docs/design/design-v1-calendar.md 4.7)", () => 
 test("Room reads both rules, with its own wide and its own open panels", () => {
   const source = readFileSync(new URL("./Room.tsx", import.meta.url), "utf8");
   const body = source.slice(source.indexOf("function RoomPage() {"));
-  assert.ok(body.includes("const panels = panelsFor(role, wide, playerWaits({ clock: hasClock, sound: hasSound }, (id) => panelIsOpen({ panel, tab, below }, id, wide)));"));
+  // One value for the list and the search, which also carries this device's parts choices (docs/design/design-v1-features.md 8).
+  assert.ok(body.includes("const open = (id: string) => panelIsOpen({ panel, tab, below }, id, wide);"));
+  assert.ok(body.includes("return { ...playerWaits({ clock: hasClock, sound: hasSound }, open), choices: featureChoices, open };"));
+  assert.ok(body.includes("const panels = panelsFor(role, wide, panelOptions);"));
   assert.ok(body.includes("useClockToasts(clockLinesShown(wide ? sideShows : (id) => sheet?.id === id));"));
 });

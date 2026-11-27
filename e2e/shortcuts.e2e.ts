@@ -242,6 +242,16 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     menu = await openThisDevice();
     assert.deepEqual((await groupsOf(menu)).filter((g) => g.open === "true").map((g) => g.name), ["Rolls"], "Rolls stays open through a reload, and only Rolls");
+    // Roll animation's switch is this role's Dice animation (docs/design/design-v1-features.md 3, D-261127-301): off, the part hides in Features, the old key is never written, and on again it shows.
+    type Store = { localStorage: { getItem(k: string): string | null } };
+    const stored = () => player.evaluate(() => ["rvtt.features", "rvtt.rollAnimation"].map((k) => (globalThis as unknown as Store).localStorage.getItem(k)));
+    const animation = menu.getByRole("switch", { name: "Roll animation" });
+    await animation.click();
+    await waitFor("Dice animation hidden for the player", async () => ((await stored())[0] === JSON.stringify({ v: 1, dm: {}, player: { diceAnimation: false } }) ? true : null));
+    assert.equal((await stored())[1], null, "the old key is never written");
+    assert.equal(await menu.getByRole("button", { name: /^Features/ }).innerText().then((t) => t.includes("1 hidden")), true);
+    await animation.click();
+    await waitFor("Dice animation shown again", async () => ((await stored())[0] === JSON.stringify({ v: 1, dm: {}, player: {} }) ? true : null));
     await menu.getByRole("button", { name: "Rolls", exact: true }).click();
     await player.keyboard.press("Escape");
   });

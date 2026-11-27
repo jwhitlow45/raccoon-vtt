@@ -17,6 +17,9 @@ import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog, CatalogEntry, SearchContext } from "./catalog/types.ts";
 import { isSearchId, type SearchEntry, type SearchRoute } from "./entry.ts";
 import { buildIndex, searchRole, VIEW_ANCHORS } from "./index.ts";
+import { modulesFor } from "../modules/registry.ts";
+import { showEntries } from "../modules/search.ts";
+import type { FeatureChoices } from "../modules/store.ts";
 import { MENU_PAGES, recordId, routeFolds } from "./route.ts";
 import { DM_VIEW, keysOf, PAT_VIEW, seededRoom, towerRoom, towerView, viewOf } from "./search.testutil.ts";
 
@@ -97,10 +100,15 @@ const UNSEARCHED: readonly string[] = ["time", "nowPlaying", "volume"];
 
 const dmCtx = ctxOf(DM_VIEW(), { dmMenu: AT_PLAY });
 const patCtx = ctxOf(PAT_VIEW());
+/** Every part hidden for both roles, so the catalogs' "Show" results for the Features page all stand (features/modules/search.ts). */
+const ALL_HIDDEN: FeatureChoices = Object.fromEntries((["dm", "player"] as const).map((role) => [role, Object.fromEntries(modulesFor(role).map((m) => [m.id, false]))])) as unknown as FeatureChoices;
 const ALL: { where: string; entry: CatalogEntry }[] = [
   ...entriesOf(EVERYONE, patCtx).map((entry) => ({ where: "everyone's", entry })),
   ...entriesOf(DM_CATALOG, dmCtx).map((entry) => ({ where: "the DM's", entry })),
   ...dmMenuEntries(IN_BLACKOUT).map((entry) => ({ where: "the DM's", entry })),
+  ...showEntries({ role: "player" }, "everyone", ALL_HIDDEN).map((entry) => ({ where: "everyone's", entry })),
+  ...showEntries({ role: "dm" }, "everyone", ALL_HIDDEN).map((entry) => ({ where: "everyone's", entry })),
+  ...showEntries({ role: "dm" }, "dm", ALL_HIDDEN).map((entry) => ({ where: "the DM's", entry })),
 ];
 
 describe("the catalogs' entries (design-v1-qol.md 5, What keeps it current)", () => {

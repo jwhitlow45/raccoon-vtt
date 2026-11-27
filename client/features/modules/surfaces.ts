@@ -157,15 +157,15 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/pages/ChipMenus.tsx", sites: 29, ...CHIP_MENUS },
   // This device
   { file: "client/features/device/DiceSetPicker.tsx", sites: 1, ...THIS_DEVICE },
-  { file: "client/features/device/ThisDevice.tsx", sites: 27, ...THIS_DEVICE },
+  { file: "client/features/device/ThisDevice.tsx", sites: 29, ...THIS_DEVICE },
   { file: "client/features/sound/device/DeviceSound.tsx", sites: 5, ...THIS_DEVICE },
   // ft-2: the toolbar, top bar, Panels list, More and Hidden tools menu
-  { file: "client/pages/Room.tsx", sites: 78, ...ROOM_CHROME },
+  { file: "client/pages/Room.tsx", sites: 80, ...ROOM_CHROME },
   { file: "client/pages/RoomChrome.tsx", sites: 16, ...ROOM_CHROME },
   // ft-2: the side tab row and its More menu
   { file: "client/pages/SideTabs.tsx", sites: 6, ...SIDE_TABS },
   // ft-2: Menu's View row
-  { file: "client/panels/MenuPanel.tsx", sites: 18, ...MENU_VIEW },
+  { file: "client/panels/MenuPanel.tsx", sites: 19, ...MENU_VIEW },
   // ft-2: the top bar's view chip and its menu
   { file: "client/features/view/ViewMenu.tsx", sites: 5, ...VIEW_MENU },
   // ft-2: the top bar's now playing chip
@@ -437,6 +437,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/guide/GuideContents.tsx", sites: 10, ...CHROME },
   { file: "client/features/guide/GuideDocument.tsx", sites: 16, ...CHROME },
   { file: "client/features/guide/GuideLink.tsx", sites: 3, ...CHROME },
+  { file: "client/features/modules/FeaturesPage.tsx", sites: 9, ...CHROME },
   { file: "client/features/modules/Gate.tsx", sites: 1, ...CHROME },
   { file: "client/features/search/SearchSheet.tsx", sites: 17, ...CHROME },
   { file: "client/pages/DmGuide.tsx", sites: 11, ...CHROME },
@@ -891,6 +892,10 @@ export const PRIMITIVES: readonly string[] = [
   "client/features/measure/controls.tsx#PopoverSwatches",
   "client/features/measure/controls.tsx#Stepper",
   "client/features/measure/controls.tsx#ValueChip",
+  "client/features/modules/FeaturesPage.tsx#FeaturesPage",
+  "client/features/modules/FeaturesPage.tsx#FeaturesRow",
+  "client/features/modules/FeaturesPage.tsx#PartSwitch",
+  "client/features/modules/FeaturesPage.tsx#ResetAll",
   "client/features/modules/Gate.tsx#HiddenHere",
   "client/features/monsters/AbilityGrid.tsx#AbilityGrid",
   "client/features/monsters/AbilityGrid.tsx#RollingBox",

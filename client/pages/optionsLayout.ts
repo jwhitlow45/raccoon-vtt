@@ -1,6 +1,6 @@
 import type { Rect } from "../components/popoverPlace.ts";
 import { SHORT_LANDSCAPE_MAX } from "../features/encounter/band.ts";
-import { toolbarButtons } from "../features/toolbarOrder.ts";
+import { toolbarButtons, type HiddenToolCounts } from "../features/toolbarOrder.ts";
 import { theme } from "../lib/theme.ts";
 
 /*
@@ -63,10 +63,11 @@ export type ToolbarShape = { buttons: number; divider: boolean };
  * The role's whole toolbar on a layout (5.1): a computer keeps every tool
  * with the divider before the setup tools, and the phone layout puts the
  * setup tools behind one Setup button after the divider. A player has no
- * setup tools.
+ * setup tools. Hidden tools counts as a button wherever it stands
+ * (docs/design/design-v1-features.md 6), so the options row's fit stays right.
  */
-export function toolbarShape(tools: readonly { id: string }[], wide: boolean): ToolbarShape {
-  const { ids, divider } = toolbarButtons(tools, wide);
+export function toolbarShape(tools: readonly { id: string }[], wide: boolean, hidden?: HiddenToolCounts): ToolbarShape {
+  const { ids, divider } = toolbarButtons(tools, wide, hidden);
   return { buttons: ids.length, divider: divider !== null };
 }
 

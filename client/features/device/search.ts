@@ -7,7 +7,8 @@ import { inside, onOff, section, setting, type Place } from "../search/catalog/w
 import type { CatalogEntry } from "../search/catalog/types.ts";
 import { serverSound } from "../sound/engine/store.ts";
 import { volumeNote } from "../sound/panel/words.ts";
-import { lowPower, rollAnimation, roomSoundChoice, roomSoundOnFor, soundMix, themeChoice, THEME_CHOICE_WORDS, uiScale, uiScaleLabel } from "./settings.ts";
+import { moduleShown } from "../modules/gate.ts";
+import { lowPower, roomSoundChoice, roomSoundOnFor, soundMix, themeChoice, THEME_CHOICE_WORDS, uiScale, uiScaleLabel } from "./settings.ts";
 
 /*
  * This device's part of the room search (docs/design/design-v1-qol.md 5, What
@@ -64,7 +65,8 @@ export const DEVICE_ENTRIES: readonly CatalogEntry[] = [
   setting(SOUNDS, "menu.this-device.sounds.ping", "Ping sound", { valueNow: () => onOff(soundEnabled()) }),
   section(at(ROLLS), "menu.this-device.rolls", "Rolls"),
   setting(ROLLS, "menu.this-device.rolls.toasts", "Show others' rolls as they happen", { names: ["roll notes"] }),
-  setting(ROLLS, "menu.this-device.rolls.animation", "Roll animation", { names: ["3d dice", "dice animation"], valueNow: () => onOff(rollAnimation()) }),
+  // Roll animation's switch is the searching role's Dice animation (D-261127-301).
+  setting(ROLLS, "menu.this-device.rolls.animation", "Roll animation", { names: ["3d dice", "dice animation"], valueNow: (ctx) => onOff(moduleShown("diceAnimation", ctx.role)) }),
   setting(ROLLS, "menu.this-device.rolls.dice-set", "Dice set", { names: ["dice color", "dice look"] }),
   section(at(SHORTCUTS), "menu.this-device.shortcuts", "Shortcuts", { names: ["keys", "keyboard"] }),
   section(at(HANDLE), "menu.this-device.handle", "Sheet handle"),

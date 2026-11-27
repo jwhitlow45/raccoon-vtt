@@ -36,6 +36,14 @@ export function setupDivider(tools: readonly { id: string }[]): number | null {
 /** Setup in the toolbar, which stands for the setup tools on a phone (docs/design/design-v1-tool-options.md 5.1). */
 export const SETUP_BUTTON = "setup";
 
+/** Hidden tools in the toolbar, which stands for the tools of parts hidden on this device (docs/design/design-v1-features.md 6). */
+export const HIDDEN_TOOLS_BUTTON = "hidden-tools";
+
+/** How many tools of parts hidden on this device the toolbar's way back serves: play tools and setup tools (SETUP_TOOLS). */
+export type HiddenToolCounts = { readonly play: number; readonly setup: number };
+
+export const NO_HIDDEN_TOOLS: HiddenToolCounts = { play: 0, setup: 0 };
+
 /**
  * The buttons a toolbar draws for a role's tools, in order, and where its
  * divider stands. On the phone layout a DM's setup tools stand behind one
@@ -43,10 +51,19 @@ export const SETUP_BUTTON = "setup";
  * phone. From 900 px up every tool shows, as a computer has the room and a
  * DM preparing a scene switches between them often. A player has no setup
  * tools, so nothing changes for them.
+ *
+ * Hidden tools holds the way back to the tools of parts hidden on this
+ * device (D-261127-312): from 900 px up one button after the last tool for
+ * all of them, and below it one after the play tools for the play tools
+ * alone, a setup tool's way back standing at the foot of Setup's menu. It
+ * stands only while it lists a tool, so it never adds to a row more than
+ * it took away.
  */
-export function toolbarButtons(tools: readonly { id: string }[], wide: boolean): { ids: string[]; divider: number | null } {
+export function toolbarButtons(tools: readonly { id: string }[], wide: boolean, hidden: HiddenToolCounts = NO_HIDDEN_TOOLS): { ids: string[]; divider: number | null } {
   const setup = tools.filter((t) => SETUP_TOOLS.has(t.id));
   const play = tools.filter((t) => !SETUP_TOOLS.has(t.id));
-  if (wide || setup.length === 0 || play.length === 0) return { ids: tools.map((t) => t.id), divider: setupDivider(tools) };
-  return { ids: [...play.map((t) => t.id), SETUP_BUTTON], divider: play.length };
+  if (wide) return { ids: [...tools.map((t) => t.id), ...(hidden.play + hidden.setup > 0 ? [HIDDEN_TOOLS_BUTTON] : [])], divider: setupDivider(tools) };
+  const back = hidden.play > 0 ? [HIDDEN_TOOLS_BUTTON] : [];
+  if (setup.length === 0 || play.length === 0) return { ids: [...tools.map((t) => t.id), ...back], divider: setupDivider(tools) };
+  return { ids: [...play.map((t) => t.id), ...back, SETUP_BUTTON], divider: play.length + back.length };
 }

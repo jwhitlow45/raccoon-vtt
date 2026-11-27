@@ -10,6 +10,9 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { GUIDE_PATH } from "../features/guide/guide.ts";
 import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
+import FeaturesPage from "../features/modules/FeaturesPage.tsx";
+import { useModule } from "../features/modules/Gate.tsx";
+import { partMark } from "../features/modules/gate.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
 import { MENU_PAGES, pageAfter, useRouteRequest, type MenuPage } from "../features/search/route.ts";
@@ -32,11 +35,13 @@ import AboutPanel from "./AboutPanel.tsx";
 import MembersPanel from "./MembersPanel.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
 
-const PAGES: Record<MenuPage, { title: string; Component: (props: PanelProps) => ReactNode }> = {
+/** Each page, its title and the page its Back goes to: the Menu, or This device for Features, its own subpage (docs/design/design-v1-features.md 5). */
+const PAGES: Record<MenuPage, { title: string; back?: MenuPage; Component: (props: PanelProps) => ReactNode }> = {
   members: { title: "Members", Component: MembersPanel },
   settings: { title: "Room settings", Component: SettingsPanel },
   about: { title: "About", Component: AboutPanel },
   device: { title: "This device", Component: ThisDevice },
+  features: { title: "Features", back: "device", Component: FeaturesPage },
 };
 
 /** The pages a player's Menu holds. */
@@ -70,9 +75,11 @@ export default function MenuPanel(props: PanelProps) {
   useEffect(() => setCopied(false), [playerLink]);
   // The search's route turns the page (features/search/route.ts). Room settings is a DM's alone, so a player's route never reaches it.
   useRouteRequest("menu", (request) => setPage((shown) => pageAfter(request, role === "dm" ? MENU_PAGES : PLAYER_PAGES, shown)));
-  // The page's id is the route's name for it, which Room reads to land the route once the page shows.
-  usePanelHeader(page ? { title: PAGES[page].title, parent: "Menu", id: page, onBack: () => setPage(null) } : null);
+  // The page's id is the route's name for it, which Room reads to land the route once the page shows. Features' Back goes to This device, whose header it names.
+  const back = page ? PAGES[page].back : undefined;
+  usePanelHeader(page ? { title: PAGES[page].title, parent: back ? PAGES[back].title : "Menu", id: page, onBack: () => setPage(back ?? null) } : null);
 
+  if (page === "device") return <ThisDevice {...props} onFeatures={() => setPage("features")} />;
   if (page) {
     const { Component } = PAGES[page];
     return <Component {...props} />;
@@ -214,7 +221,9 @@ function menuFallback(place: HTMLElement | null): HTMLElement | null {
  * sheet can still be found from it once the row is gone.
  */
 function ViewRow() {
-  const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
+  // The row is Isometric view's: hidden on this device, the map stays top-down and there is nothing to pick (docs/design/design-v1-features.md 3).
+  const iso = useModule("isometric");
+  const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded) && iso;
   const choice = useRoomViewChoice();
   // I, which switches the view from anywhere in the room, as the top bar's View button names it where the row stands in for it.
   const key = useKeyHint("view");
@@ -232,7 +241,7 @@ function ViewRow() {
   return (
     <div ref={place} style={{ display: "contents" }}>
       {folded ? (
-        <>
+        <div {...partMark("isometric")} style={{ display: "contents" }}>
           <MenuItem
             icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
             title="View"
@@ -245,7 +254,7 @@ function ViewRow() {
             onClick={() => setOpen(true)}
           />
           {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
-        </>
+        </div>
       ) : null}
     </div>
   );

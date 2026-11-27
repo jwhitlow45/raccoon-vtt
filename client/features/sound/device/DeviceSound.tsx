@@ -4,6 +4,7 @@ import { IconButton } from "../../../components/IconButton.tsx";
 import { Help } from "../../../components/Panel.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
+import { partMark } from "../../modules/gate.ts";
 import { useKeyHint, withKey } from "../../../state/shortcuts.ts";
 import { useRoomRoleIfAny, useRoomView } from "../../../state/view.ts";
 import { SOUND_MIX_DEFAULT, setSoundMix, soundMix as soundMixNow, useSoundMix, type SoundMix } from "../../device/settings.ts";
@@ -91,9 +92,11 @@ export function takeOn(take: () => void) {
  * page while the server's switch is not on. `anchored` gives them This
  * device's search ids (features/device/search.ts), which one place alone
  * may carry. `keyHint={false}` drops U from the mute toggle under a modal
- * dialog, where every key stops.
+ * dialog, where every key stops. `mixer={false}` leaves Volume and the
+ * mix out, for This device while Sound is hidden there: Turn sound and
+ * Ping sound still play, and the rest is Sound's (docs/design/design-v1-features.md 3).
  */
-export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?: boolean }) {
+export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?: boolean; mixer?: boolean }) {
   const room = useRoomRoleIfAny();
   const volume = useDeviceVolume();
   const mix = useSoundMix();
@@ -116,6 +119,7 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
   const line = props.line ? deviceSoundLine({ player: room?.role === "player" && !room.display, dmOnly, here }) : null;
   const shown = volume.muted ? 0 : volume.volume;
   const anchor = (search: string) => (props.anchored ? search : undefined);
+  const mixer = props.mixer !== false;
   const onVolume = (value: number) => {
     const next = volumeStep(kept.current ?? soundMixNow().volume, value);
     if (next.volume !== soundMixNow().volume) setSoundMix({ ...soundMixNow(), volume: next.volume });
@@ -124,63 +128,69 @@ export function DeviceSound(props: { line: boolean; anchored?: boolean; keyHint?
   };
   return (
     <div data-device-sound="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      {line ? <Help tapWords>{line}</Help> : null}
-      {/* One grid for the four, so the names share a column and the sliders start and end together. */}
-      <div style={GRID}>
-        <IconButton
-          icon={volumeIcon(volume)}
-          label={MUTE}
-          title={withKey(volume.muted ? UNMUTE : MUTE, muteKey)}
-          aria-keyshortcuts={muteKey?.aria}
-          pressed={volume.muted}
-          data-volume-mute=""
-          onClick={() => setRoomSound(volume.muted)}
-          // The bar's icon color while it plays. Muted, the pressed look holds.
-          style={volume.muted ? { justifySelf: "start" } : { justifySelf: "start", color: theme.color.text }}
-        />
-        <input
-          id={`${id}-volume`}
-          data-search={anchor("menu.this-device.sounds.volume")}
-          aria-label={VOLUME}
-          aria-describedby={`${id}-help`}
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={shown}
-          aria-valuetext={volumeNote({ muted: volume.muted, volume: shown })}
-          {...takeOn(take)}
-          onChange={(e) => onVolume(Number(e.target.value))}
-          style={RANGE}
-        />
-        <span aria-hidden style={PERCENT}>
-          {shown}%
-        </span>
-        {mixShown(server).map((key) => (
-          <Fragment key={key}>
-            <label htmlFor={`${id}-${key}`} style={{ fontSize: theme.font.body14, color: theme.color.text }}>
-              {MIX_PARTS[key].label}
-            </label>
+      {mixer ? (
+        // Sound's part of This device, in a contents box so its pieces keep the column's own gaps.
+        <div {...partMark("sound")} style={{ display: "contents" }}>
+          {line ? <Help tapWords>{line}</Help> : null}
+          {/* One grid for the four, so the names share a column and the sliders start and end together. */}
+          <div style={GRID}>
+            <IconButton
+              icon={volumeIcon(volume)}
+              label={MUTE}
+              title={withKey(volume.muted ? UNMUTE : MUTE, muteKey)}
+              aria-keyshortcuts={muteKey?.aria}
+              pressed={volume.muted}
+              data-volume-mute=""
+              onClick={() => setRoomSound(volume.muted)}
+              // The bar's icon color while it plays. Muted, the pressed look holds.
+              style={volume.muted ? { justifySelf: "start" } : { justifySelf: "start", color: theme.color.text }}
+            />
             <input
-              id={`${id}-${key}`}
-              data-search={anchor(MIX_PARTS[key].search)}
+              id={`${id}-volume`}
+              data-search={anchor("menu.this-device.sounds.volume")}
+              aria-label={VOLUME}
+              aria-describedby={`${id}-help`}
               type="range"
               min={0}
               max={100}
               step={5}
-              value={mix[key]}
-              aria-valuetext={`${mix[key]}%`}
-              onChange={(e) => setSoundMix({ ...soundMixNow(), [key]: Number(e.target.value) })}
+              value={shown}
+              aria-valuetext={volumeNote({ muted: volume.muted, volume: shown })}
+              {...takeOn(take)}
+              onChange={(e) => onVolume(Number(e.target.value))}
               style={RANGE}
             />
             <span aria-hidden style={PERCENT}>
-              {mix[key]}%
+              {shown}%
             </span>
-          </Fragment>
-        ))}
-      </div>
-      <Help id={`${id}-help`}>{deviceHelp(player, mixShown(server).includes("music"))}</Help>
-      <div style={{ display: "grid", gap: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(2) }}>
+            {mixShown(server).map((key) => (
+              <Fragment key={key}>
+                <label htmlFor={`${id}-${key}`} style={{ fontSize: theme.font.body14, color: theme.color.text }}>
+                  {MIX_PARTS[key].label}
+                </label>
+                <input
+                  id={`${id}-${key}`}
+                  data-search={anchor(MIX_PARTS[key].search)}
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={mix[key]}
+                  aria-valuetext={`${mix[key]}%`}
+                  onChange={(e) => setSoundMix({ ...soundMixNow(), [key]: Number(e.target.value) })}
+                  style={RANGE}
+                />
+                <span aria-hidden style={PERCENT}>
+                  {mix[key]}%
+                </span>
+              </Fragment>
+            ))}
+          </div>
+          <Help id={`${id}-help`}>{deviceHelp(player, mixShown(server).includes("music"))}</Help>
+        </div>
+      ) : null}
+      {/* Alone, the two switches need no line over them. */}
+      <div style={{ display: "grid", gap: theme.space(2), ...(mixer ? { borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(2) } : null) }}>
         <Switch label={TURN_SOUND} search={anchor("menu.this-device.sounds.turn")} help={TURN_SOUND_HELP} checked={turnSound} onChange={setSoundOn} />
         <Switch label={PING_SOUND} search={anchor("menu.this-device.sounds.ping")} help={PING_SOUND_HELP} checked={pingSound} onChange={setSoundEnabled} />
       </div>

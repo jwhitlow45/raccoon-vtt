@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { dmPanelFoldsSlot, scenesFoldsSlot, soundFoldsSlot, thisDeviceFoldsSlot, type FoldRoom } from "../../lib/folds.ts";
+import { dmPanelFoldsSlot, featuresFoldsSlot, scenesFoldsSlot, soundFoldsSlot, thisDeviceFoldsSlot, type FoldRoom } from "../../lib/folds.ts";
 import { theme } from "../../lib/theme.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { PanelHow } from "../../state/types.ts";
@@ -182,6 +182,17 @@ describe("a section in a closed fold opens for now, never written (design-v1-qol
     dm.follow(true, ROOM);
     dm.follow(false, ROOM);
     assert.equal(dm.get(390, ROOM).check, false, "folded again once its panel closes");
+  });
+
+  test("Features in This device, whose Show results open a part's group (docs/design/design-v1-features.md 6)", () => {
+    const r = room();
+    const features = r.scope.get(featuresFoldsSlot);
+    assert.equal(features.get(390, ROOM).tools, false, "folded on a phone");
+    r.go({ panel: "menu", page: "features", section: "tools", anchor: "menu.this-device.features.ruler", press: true });
+    assert.equal(features.get(390, ROOM).tools, true);
+    assert.equal(features.get(390, ROOM).maps, false, "only what the route named");
+    assert.equal(r.scope.get(thisDeviceFoldsSlot).get(390, ROOM).rolls, false, "This device's own folds are its page's");
+    assert.deepEqual(writes, []);
   });
 
   test("the token panel's folds, the viewer's own and another creature's alike, and a character's page's", () => {

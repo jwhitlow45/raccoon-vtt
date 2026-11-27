@@ -19,6 +19,7 @@ import {
   moveWords,
   SCENE_GONE,
   XCARD_PREVIEW,
+  showSection,
   youMenuSections,
   type ChipEnv,
   type ChipItem,
@@ -585,5 +586,19 @@ describe("the DM menu on a floor (design-v1-floors.md 18.6, 7.3)", () => {
     assert.deepEqual(await refuse("upper"), { t: "refused", words: "Not shown: the players are on another floor now. The blackout stays on." });
     assert.deepEqual(await refuse("crypt"), { t: "refused", words: CHIP_WORDS.liftRefused });
     assert.deepEqual(moveWords({ t: "refused", step: "lift", refusal: undefined }), { t: "refused", words: CHIP_WORDS.liftRefused }, "no room to read: the older words");
+  });
+});
+
+describe("the menu home's ways back (docs/design/design-v1-features.md 6)", () => {
+  test("none hidden, no section; else Show items under the line's words, last, each running its part's Show", () => {
+    assert.deepEqual(showSection([]), []);
+    const shown: string[] = [];
+    const [section] = showSection([{ id: "isometric", label: "Show Isometric view", show: () => shown.push("isometric") }]);
+    assert.deepEqual(
+      { key: section?.key, heading: section?.heading, separator: section?.separator, items: section?.items.map((i) => [i.id, i.kind, i.title, i.role]) },
+      { key: "hidden", heading: "Hidden on this device", separator: true, items: [["show:isometric", "show", "Show Isometric view", "action"]] },
+    );
+    assert.deepEqual(section?.items[0]?.run({} as never), { t: "done" });
+    assert.deepEqual(shown, ["isometric"]);
   });
 });

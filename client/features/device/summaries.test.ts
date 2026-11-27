@@ -17,8 +17,10 @@ const NEW_DEVICE: DeviceValues = {
   weather: "moving",
   weatherHeld: false,
   animatedHeld: false,
+  weatherShown: true,
   volume: { muted: true, volume: 100 },
-  rollAnimation: true,
+  soundShown: true,
+  diceAnimation: true,
   handle: "tail",
   tabsLeftOut: 0,
 };
@@ -42,8 +44,14 @@ describe("This device's folded summaries", () => {
     });
   });
 
+  test("Weather says it is hidden while its part hides, and Sounds sums up nothing while Sound does (docs/design/design-v1-features.md 3)", () => {
+    assert.equal(deviceSummaries({ ...NEW_DEVICE, weatherShown: false }).weather, "Hidden");
+    assert.equal(deviceSummaries({ ...NEW_DEVICE, soundShown: false }).sounds, undefined);
+    assert.equal(deviceSummaries({ ...NEW_DEVICE, diceAnimation: false }).rolls, "Roll animation off", "Roll animation's switch is Dice animation");
+  });
+
   test("each setting's other values", () => {
-    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, volume: { muted: false, volume: 80 }, rollAnimation: false, handle: "pill", tabsLeftOut: 3 });
+    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, volume: { muted: false, volume: 80 }, diceAnimation: false, handle: "pill", tabsLeftOut: 3 });
     assert.equal(s.tabRow, "3 only in More");
     assert.equal(s.size, "130%");
     assert.equal(s.theme, "Auto");

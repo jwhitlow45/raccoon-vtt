@@ -66,6 +66,17 @@ describe("which tabs stand in the row", () => {
     assert.deepEqual(fit, { count: PLAYER.length, moreRoom: 0 });
   });
 
+  test("More stays where every tab fits while a part hidden on this device has a panel, since it holds the way back (docs/design/design-v1-features.md 6, D-261127-313)", () => {
+    const w = widths(MACOS, PLAYER, 600);
+    const fit = fitTabs({ ...w, keepMore: true });
+    assert.equal(fit?.count, PLAYER.length);
+    assert.equal(fit?.moreRoom, 600 - rowWidth(w.tabs, PLAYER.length) - 2);
+    // Too narrow for every tab and More, one goes into More as for any fit.
+    const tight = rowWidth(w.tabs, PLAYER.length) + 10;
+    assert.equal(fitTabs({ ...w, room: tight })?.count, PLAYER.length);
+    assert.ok((fitTabs({ ...w, room: tight, keepMore: true })?.count ?? 0) < PLAYER.length);
+  });
+
   test("otherwise a prefix with More after it", () => {
     assert.deepEqual(fitTabs(widths(MACOS, DM, 300))?.count, 3);
   });

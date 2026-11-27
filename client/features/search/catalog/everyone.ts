@@ -3,6 +3,7 @@ import { CHIP_WORDS } from "../../../pages/chipWords.ts";
 import { DEVICE_ENTRIES } from "../../device/search.ts";
 import { DICE_ENTRIES } from "../../dice/search.ts";
 import { LOG_ENTRIES } from "../../log/search.ts";
+import { FEATURES_ENTRIES, showEntries } from "../../modules/search.ts";
 import { CREATURE_FIELDS } from "../../tokens/search.ts";
 import { SUGGEST } from "../index.ts";
 import type { Catalog, CatalogEntry, SearchContext } from "./types.ts";
@@ -11,7 +12,7 @@ import { action, page, type Place } from "./write.ts";
 /**
  * What both roles' searches find beyond the panels, keys and the room's own
  * things (docs/design/design-v1-qol.md 5, What keeps it current): Menu's
- * pages and This device, your own color in Members, the Dice panel, the Log's
+ * pages, This device and its Features, your own color in Members, the Dice panel, the Log's
  * Chat, the fields and groups of a creature's panel and page, and a player's
  * You menu items. Initiative's rows are a DM's: a player's Initiative holds
  * their own creatures to add and This device's Turn sound, found in This
@@ -53,6 +54,7 @@ function youItems(ctx: SearchContext): CatalogEntry[] {
 export const EVERYONE: Catalog = {
   entries: [
     page(MENU("device", "device"), "menu.this-device", "This device", { names: ["device settings", "preferences"] }),
+    ...FEATURES_ENTRIES,
     ...DEVICE_ENTRIES,
     page(MENU("members", "group"), "menu.members", "Members", { names: ["who is here"] }),
     action(MEMBERS, "menu.members.color", "Change your color", { names: ["your color"] }),
@@ -66,5 +68,6 @@ export const EVERYONE: Catalog = {
     log: { names: ["chat"] },
     characters: { names: ["character sheets"] },
   },
-  items: youItems,
+  // A player's You menu, and the "Show" results of the parts both roles have that this device hides (modules/search.ts).
+  items: (ctx) => [...youItems(ctx), ...showEntries(ctx, "everyone")],
 };

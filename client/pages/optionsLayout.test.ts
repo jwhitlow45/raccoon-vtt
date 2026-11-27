@@ -177,6 +177,13 @@ describe("where the options stand (4.1, 4.3)", () => {
     assert.deepEqual(toolbarShape(PLAYER, true), { buttons: 5, divider: false });
   });
 
+  test("Hidden tools counts as a button wherever it stands, so the options row's fit stays right (docs/design/design-v1-features.md 6)", () => {
+    assert.deepEqual(toolbarShape(DM, true, { play: 1, setup: 1 }), { buttons: 11, divider: true });
+    assert.deepEqual(toolbarShape(DM, false, { play: 1, setup: 0 }), { buttons: 8, divider: true });
+    assert.deepEqual(toolbarShape(DM, false, { play: 0, setup: 3 }), { buttons: 7, divider: true }, "a setup tool's Show stands in Setup's menu");
+    assert.deepEqual(toolbarShape(PLAYER, false, { play: 1, setup: 0 }), { buttons: 6, divider: false });
+  });
+
   test("a player without Draw has one button fewer, 60 px more room, and can merge where five tools could not", () => {
     const five = optionsArrangement(at(844, 390, 1.3, 47, PLAYER));
     const four = optionsArrangement(at(844, 390, 1.3, 47, PLAYER_NO_DRAW));

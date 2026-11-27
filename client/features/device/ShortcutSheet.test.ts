@@ -42,6 +42,47 @@ describe("the sheet's question for a taken key", () => {
   });
 });
 
+describe("a part hidden on this device in the sheet (docs/design/design-v1-features.md 7)", () => {
+  test("a hidden row keeps its key, and the question names it hidden", async () => {
+    const { rowName } = await import("./ShortcutSheet.tsx");
+    const { NO_CHOICES, withChoice } = await import("../modules/store.ts");
+    const hidden = withChoice(NO_CHOICES, "dm", "ruler", false);
+    assert.equal(rowName("tool:ruler", "dm", NO_CHOICES), "Ruler");
+    assert.equal(rowName("tool:ruler", "dm", hidden), "Ruler, hidden on this device");
+    assert.equal(takenWords({}, { id: "tool:fog", key: "r", by: "tool:ruler" }, (id) => rowName(id, "dm", hidden)).line, "Already Ruler, hidden on this device.");
+    // Another role's row is hidden by that role's choices.
+    assert.equal(rowName("tool:fog", "player", withChoice(NO_CHOICES, "player", "ruler", false)), "Fog, a DM key");
+  });
+
+  test("its rows leave the Keys section, which then ends with the muted line", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createStore } = await import("zustand/vanilla");
+    const { RoomProvider } = await import("../../state/view.ts");
+    const { ShortcutList, KEYS_LEFT_OUT } = await import("./ShortcutSheet.tsx");
+    const { resetAllFeatures, setModuleShown } = await import("../modules/store.ts");
+    const draw = () => {
+      const store = createStore(() => ({ roomId: "K7QH2MXA", you: { memberId: "m1", role: "dm" }, view: null, local: {} }));
+      return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(ShortcutList, { role: "dm" }) }));
+    };
+    const priorWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 1440, innerHeight: 900 } });
+    try {
+      resetAllFeatures();
+      assert.ok(draw().includes(">Ruler<"));
+      assert.ok(!draw().includes(KEYS_LEFT_OUT));
+      setModuleShown("ruler", "dm", false);
+      assert.ok(!draw().includes(">Ruler<"));
+      assert.ok(draw().includes(KEYS_LEFT_OUT));
+      assert.equal(KEYS_LEFT_OUT, "Keys of parts hidden on this device are left out.");
+    } finally {
+      resetAllFeatures();
+      if (priorWindow) Object.defineProperty(globalThis, "window", priorWindow);
+      else delete (globalThis as { window?: unknown }).window;
+    }
+  });
+});
+
 test("FU40-B: narrow rebinding rows give their controls both table columns and retain their key header", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");

@@ -7,8 +7,8 @@ import { useRoomView } from "../state/view.ts";
 import { theme } from "./theme.ts";
 
 /*
- * The folding sections of four surfaces, Sound, the DM panel, Scenes and
- * This device (docs/design/design-v1-panel-groups.md 6.1,
+ * The folding sections of five surfaces, Sound, the DM panel, Scenes,
+ * This device and its Features (docs/design/design-v1-panel-groups.md 6.1,
  * docs/design/design-v1-sound-layout.md 4.3): which sections show
  * open, as this device last left them, with the scene settings' rule
  * (features/scenes/settingsFolds.ts) made general. One store per surface, in
@@ -272,6 +272,21 @@ export const THIS_DEVICE_FOLDS: FoldSurface<ThisDeviceSection> = {
   },
 };
 export const thisDeviceFoldsSlot = foldsSlot(THIS_DEVICE_FOLDS);
+
+/** Menu, This device, Features (docs/design/design-v1-features.md 5): the five groups of parts, in the registry's order, then Always shown. */
+export const FEATURES_SECTIONS = ["characters", "tools", "maps", "panels", "visuals", "core"] as const;
+export type FeaturesSection = (typeof FEATURES_SECTIONS)[number];
+
+/** The parts' groups fold as This device's do, all of them setup. Always shown, a list to read rather than change, starts folded everywhere. */
+export const FEATURES_FOLDS: FoldSurface<FeaturesSection> = {
+  key: "rvtt.featureFolds",
+  sections: FEATURES_SECTIONS,
+  starts: (width) => {
+    const wide = wideAt(width);
+    return { characters: wide, tools: wide, maps: wide, panels: wide, visuals: wide, core: false };
+  },
+};
+export const featuresFoldsSlot = foldsSlot(FEATURES_FOLDS);
 
 /** What the starts read of a view: a DM's holds the clock whole and every scene. */
 export function foldRoomOf(view: RoomView["view"]): FoldRoom {

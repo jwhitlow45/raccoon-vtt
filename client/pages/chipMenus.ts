@@ -81,7 +81,8 @@ export type ChipUnder = { text: string; tone: "warning" | "danger" | "busy" | "n
 
 export type ChipItem = {
   id: string;
-  kind: DmItemKind | YouItemKind | "cancel";
+  /** "show" is a way back to a part hidden on this device (showSection), which the search reaches as its own result instead (features/modules/search.ts). */
+  kind: DmItemKind | YouItemKind | "cancel" | "show";
   title: string;
   /** As Menu's item kinds: a plain action, a switch of its own, or one of a choice. */
   role: "action" | "checkbox" | "radio";
@@ -95,7 +96,42 @@ export type ChipItem = {
   run: ChipRun;
 };
 
-export type ChipSection = { key: DmMenuSection | "blackout" | "you"; heading?: string; separator?: boolean; items: ChipItem[] };
+export type ChipSection = { key: DmMenuSection | "blackout" | "you" | "hidden"; heading?: string; separator?: boolean; items: ChipItem[] };
+
+/** The heading over a menu's ways back: the Hidden on this device line's own words. */
+const HIDDEN_HERE = "Hidden on this device";
+
+/** A way back as a chip menu's item: its part's id, its words ("Show Isometric view") and its Show. */
+export type ChipShow = { id: string; label: string; show(): void };
+
+/**
+ * The end of the DM menu and the You menu (docs/design/design-v1-features.md
+ * 6, the menu home): the ways back to the parts hidden on this device that
+ * live there, under the Hidden on this device line's own words. None, no
+ * section.
+ */
+export function showSection(parts: readonly ChipShow[]): ChipSection[] {
+  if (parts.length === 0) return [];
+  return [
+    {
+      key: "hidden",
+      heading: HIDDEN_HERE,
+      separator: true,
+      items: parts.map(
+        (p): ChipItem => ({
+          id: `show:${p.id}`,
+          kind: "show",
+          title: p.label,
+          role: "action",
+          run: () => {
+            p.show();
+            return DONE;
+          },
+        }),
+      ),
+    },
+  ];
+}
 
 /** A refused move to a scene deleted meanwhile: the server's own words ("scene is not here") read as a fault. */
 export const SCENE_GONE = "That scene was deleted.";

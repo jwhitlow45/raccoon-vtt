@@ -7,7 +7,10 @@ import { hasKeyboard, sheetDevice } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { captureKey, changeKey, holder, keyLabel, keysInEffect, resetKey, swapKey, UNBOUND, type KeyChanges } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { DEFAULT_KEYS, setShortcutSheet, sheetSections, SHORTCUTS, shortcutSheetSlot, useShortcutKeys, type SheetRow } from "../../state/shortcuts.ts";
+import { DEFAULT_KEYS, rowsLeftOut, setShortcutSheet, sheetSections, SHORTCUTS, shortcutSheetSlot, useShortcutKeys, type SheetRow } from "../../state/shortcuts.ts";
+import { claimShown } from "../modules/gate.ts";
+import { useFeatureChoicesHere } from "../modules/Gate.tsx";
+import type { FeatureChoices } from "../modules/store.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
 import { keyChanges, setKeyChanges } from "./settings.ts";
 import { useLayoutSize } from "./layout.ts";
@@ -111,9 +114,30 @@ export function takenWords(changes: KeyChanges, taken: { id: string; key: string
 /** A row waiting for its key, refused one, or asked for one another row has. */
 type Editing = { id: string; step: "listening"; refused?: string } | { id: string; step: "taken"; key: string; by: string };
 
+/**
+ * A row as the sheet names it where another row asks for its key.
+ * Uniqueness covers the whole device, so a player's key may be taken by
+ * the DM's Fog, and by a row of a part hidden on this device, whose key
+ * stays its own (D-261127-119): "Already Ruler, hidden on this device."
+ */
+export function rowName(id: string, role: "dm" | "player", choices: FeatureChoices): string {
+  const s = SHORTCUTS.find((row) => row.id === id);
+  if (!s?.name) return id;
+  const own = s.roles.includes(role);
+  const named = own ? s.name : `${s.name}, ${s.roles.includes("dm") ? "a DM key" : "a player key"}`;
+  const hidden = !claimShown("shortcut", s.id, own ? role : role === "dm" ? "player" : "dm", choices);
+  return hidden ? `${named}, hidden on this device` : named;
+}
+
+/** The Keys section's last line while a part hidden on this device takes rows off the sheet (docs/design/design-v1-features.md 7). */
+export const KEYS_LEFT_OUT = "Keys of parts hidden on this device are left out.";
+
 export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; say?(text: string): void }) {
   const keys = useShortcutKeys();
-  const sections = sheetSections(props.role, sheetDevice(), keys);
+  // A part hidden on this device takes its rows and its surfaces' sections off, and its keys stay reserved (D-261127-119).
+  const choices = useFeatureChoicesHere();
+  const sections = sheetSections(props.role, sheetDevice(), keys, choices);
+  const leftOut = rowsLeftOut(props.role, choices);
   const rebind = props.rebind === true;
   // A third column needs about 280 px of the sheet: the widest keycap, the longest word of what it does, and Change with Reset.
   // At 390 px and 130% (300 px) the sheet holds 268, so Change and Reset go under the words there too.
@@ -133,15 +157,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
     (next === "swap" ? swapButton.current : changeButtons.current.get(next))?.focus();
   });
 
-  const nameOf = useCallback(
-    (id: string) => {
-      const s = SHORTCUTS.find((row) => row.id === id);
-      if (!s?.name) return id;
-      // Uniqueness covers the whole device, so a player's key may be taken by the DM's Fog.
-      return s.roles.includes(props.role) ? s.name : `${s.name}, ${s.roles.includes("dm") ? "a DM key" : "a player key"}`;
-    },
-    [props.role],
-  );
+  const nameOf = useCallback((id: string) => rowName(id, props.role, choices), [props.role, choices]);
 
   /*
    * While a row waits, the next press is its key, ahead of everything
@@ -259,6 +275,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
                 ))}
               </tbody>
             </table>
+            {section.title === "Keys" && leftOut ? <Help>{KEYS_LEFT_OUT}</Help> : null}
           </Section>
         );
       })}

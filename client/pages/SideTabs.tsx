@@ -15,6 +15,8 @@ import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { Badge } from "./RoomChrome.tsx";
 import { useTabRow } from "../features/device/settings.ts";
 import { useRoomView } from "../state/view.ts";
+import { useHiddenHere } from "../features/modules/Gate.tsx";
+import { useShowSaid } from "../features/modules/ShowFocus.tsx";
 import { fitTabs, GROUP_GAP, keptOrder, nameCut, TAB_GAP, headerNamesOpen, tabLook as pickLook, widthsFor, type TabFit, type TabLook, type TabWidths } from "./tabFit.ts";
 
 /**
@@ -70,6 +72,9 @@ const NAMED_ICON: CSSProperties = { marginRight: theme.space(0.5) };
 
 /** More's place among the row's stops for the tab keys. */
 const MORE = "\u0000more";
+
+/** A Show item's id in More's menu, before the part's id: no panel's id begins so. */
+const SHOW_ITEM = "show:";
 
 /** "Two panels" in More's menu, an id no panel has. */
 const SPLIT_ITEM = "\u0000split";
@@ -162,6 +167,10 @@ export function SideTabs(props: {
   const role = useRoomView((s) => s.you?.role ?? "player");
   const left = useTabRow()[role];
   const { ordered: tabs, kept } = keptOrder(props.tabs, new Set(left));
+  // The panels of parts hidden on this device, whose way back More holds, so More stays while any is hidden (docs/design/design-v1-features.md 6, D-261127-313).
+  const hiddenPanels = useHiddenHere("panels");
+  const keepMore = hiddenPanels.length > 0;
+  const said = useShowSaid();
   const listRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
@@ -169,8 +178,8 @@ export function SideTabs(props: {
   const belowDescribedId = useId();
   const below = props.split.below;
   const [layout, setLayout] = useState<Layout | null>(null);
-  const latest = useRef({ tabs, kept, zoom: props.zoom, grouped: props.grouped });
-  latest.current = { tabs, kept, zoom: props.zoom, grouped: props.grouped };
+  const latest = useRef({ tabs, kept, zoom: props.zoom, grouped: props.grouped, keepMore });
+  latest.current = { tabs, kept, zoom: props.zoom, grouped: props.grouped, keepMore };
   /** A focused tab went into More with the last fit, so focus moves to More once it is drawn. */
   const focusMore = useRef(false);
 
@@ -187,7 +196,7 @@ export function SideTabs(props: {
   const refit = useCallback(() => {
     const list = listRef.current;
     const row = measureRef.current;
-    const { tabs: panels, kept: keptNow, zoom, grouped } = latest.current;
+    const { tabs: panels, kept: keptNow, zoom, grouped, keepMore: moreStays } = latest.current;
     let next: Layout | null = null;
     if (list && row) {
       const width = (el: Element | null) => (el ? el.getBoundingClientRect().width / zoom : 0);
@@ -198,8 +207,8 @@ export function SideTabs(props: {
       const room = width(list);
       const tabsOf = (at: number[]) => panels.map((p, i) => ({ rest: at[i] ?? 0, more: more[i] ?? 0, group: tabGroup(p, grouped) }));
       // Each panel's icon before its name where the row then holds as many tabs as the names alone, else the icons alone (docs/design/design-v1-icons-2.md 3.1).
-      const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room, kept: keptNow };
-      const look = pickLook({ tabs: tabsOf(rest), moreRest, room, kept: keptNow }, withNames);
+      const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room, kept: keptNow, keepMore: moreStays };
+      const look = pickLook({ tabs: tabsOf(rest), moreRest, room, kept: keptNow, keepMore: moreStays }, withNames);
       const widths = look ? widthsFor(look, withNames) : withNames;
       const fit = look ? fitTabs(widths) : null;
       next = fit && look ? { fit, widths, look } : null;
@@ -214,7 +223,7 @@ export function SideTabs(props: {
   }, []);
 
   // Before the first paint, as the side panel shows and when the role's panels change: until then it draws no tabs.
-  const panelsKey = `${tabs.map((p) => p.id).join(" ")}|${kept}`;
+  const panelsKey = `${tabs.map((p) => p.id).join(" ")}|${kept}|${keepMore}`;
   useLayoutEffect(refit, [refit, props.hidden, panelsKey, props.zoom]);
 
   // A resize, a rotation that changes the safe area, a new interface size, or a font that changes size. Committed at once, so no frame paints the old fit.
@@ -233,7 +242,8 @@ export function SideTabs(props: {
   // More's menu lists its panels in the registry's order under its groups, the ones left out among them.
   const held = fit ? props.tabs.filter((p) => !row.includes(p)) : [];
   const chosenHeld = held.find((p) => p.id === tab);
-  const stops = [...row.map((p) => p.id), ...(held.length > 0 ? [MORE] : [])];
+  const moreShown = held.length > 0 || keepMore;
+  const stops = [...row.map((p) => p.id), ...(moreShown ? [MORE] : [])];
   const stop = chosenHeld ? MORE : row.some((p) => p.id === tab) ? tab : stops[0];
 
   // The menu closes when the row has no fit, as the side panel hides. A new fit leaves it open: a badge landing or a late font refits the row under a viewer who has just opened More, and closing then took the item they were about to press. The popover follows More as it moves, and a fit that leaves More out takes it with its anchor.
@@ -337,8 +347,19 @@ export function SideTabs(props: {
         };
       }),
     })),
+    // The ways back last, under the line's own words, each turning its part on with what it needs.
+    ...(keepMore ? [{ key: "hidden", heading: "Hidden on this device", separator: true, items: hiddenPanels.map((p): MenuItem => ({ id: `${SHOW_ITEM}${p.id}`, title: p.label, kind: "action" })) }] : []),
   ];
-  const pick = (id: string) => (id === SPLIT_ITEM ? split.onToggle() : props.onTab(id));
+  const pick = (id: string) => {
+    const part = hiddenPanels.find((p) => `${SHOW_ITEM}${p.id}` === id);
+    if (part) {
+      part.show();
+      said(part.name);
+      return;
+    }
+    if (id === SPLIT_ITEM) split.onToggle();
+    else props.onTab(id);
+  };
   const chosenIndex = tabs.findIndex((p) => p.id === tab);
   // More draws a held panel's icon alone where its name would be cut.
   const moreCut = layout !== null && chosenHeld !== undefined && nameCut(layout.fit, layout.widths, chosenIndex);
@@ -390,7 +411,7 @@ export function SideTabs(props: {
               </PanelTab>
             );
           })}
-          {fit && held.length > 0 ? (
+          {fit && moreShown ? (
             <button
               ref={moreRefs}
               // While it names the open panel it labels the tab panel, as that panel's tab would.

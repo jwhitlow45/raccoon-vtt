@@ -7631,8 +7631,8 @@ const SCENE_ROWS_BY_DESIGN = {
   },
 };
 
-/** The fold stores of the four surfaces that fold (client/lib/folds.ts), cleared so each size starts as a device that never tapped one. */
-const FOLD_KEYS = ["rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.thisDeviceFolds", "rvtt.sceneSettingsFolds"];
+/** The fold stores of the five surfaces that fold (client/lib/folds.ts), cleared so each size starts as a device that never tapped one. */
+const FOLD_KEYS = ["rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.thisDeviceFolds", "rvtt.sceneSettingsFolds", "rvtt.featureFolds"];
 
 async function forgetFolds(page: Page): Promise<void> {
   if (!page.url().startsWith(server.origin)) return;
@@ -7784,7 +7784,7 @@ export function panelGroupTests(): void {
     withinSnapshotBudget("pg-a");
   });
 
-  test(`pg-b. the DM panel with a join request over its folded groups and every group open, and This device folded and open, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`pg-b. the DM panel with a join request over its folded groups and every group open, This device folded and open, its Features page folded and open and its Weather section holding its way back, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await newDmSession();
     const lines: string[] = [];
     const headers = { Origin: server.origin };
@@ -7828,6 +7828,19 @@ export function panelGroupTests(): void {
           await setFolds(menu, true);
           await menu.locator("[data-dice-set]").first().waitFor();
           await groups(sweep, page, "pg-device-open", menu);
+          // ft-1: This device's Features page (docs/design/design-v1-features.md 5), folded as a size starts and every group open, then Weather's section holding its way back.
+          await menu.getByRole("button", { name: /^Features/ }).click();
+          await menu.getByText("Find a part", { exact: true }).waitFor();
+          await groups(sweep, page, "pg-features-start", menu);
+          await setFolds(menu, true);
+          await groups(sweep, page, "pg-features-open", menu);
+          await shots.take(page, `alignment-${sweep.at}-pg-features-open`);
+          await menu.getByRole("switch", { name: "Weather", exact: true }).click();
+          await page.getByRole("button", { name: /^Back to This device/ }).click();
+          await menu.getByRole("group", { name: "Hidden on this device" }).getByRole("button", { name: "Show Weather" }).waitFor();
+          await groups(sweep, page, "pg-device-weather-hidden", menu);
+          await menu.getByRole("group", { name: "Hidden on this device" }).getByRole("button", { name: "Show Weather" }).click();
+          await menu.locator('[data-search="menu.this-device.weather.mode"]').waitFor();
           if (await visible(back)) await back.click();
         } finally {
           await forgetFolds(page);
@@ -7843,7 +7856,7 @@ export function panelGroupTests(): void {
       await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join-mode`, { headers, data: { mode: "password" } }).catch(() => {});
       if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
     }
-    assert.deepEqual(lines, [], "the DM panel or This device out of line");
+    assert.deepEqual(lines, [], "the DM panel, This device or its Features page out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     withinSnapshotBudget("pg-b");
   });

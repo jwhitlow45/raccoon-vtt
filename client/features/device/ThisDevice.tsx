@@ -16,7 +16,7 @@ import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomRoleIfAny } from "../../state/view.ts";
-import { panelsFor, type PanelDef } from "../panels.ts";
+import { panelsFor, type PanelDef, type PanelProps } from "../panels.ts";
 import { useLayoutSize } from "./layout.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
 import { useDeviceVolume } from "../sound/engine/store.ts";
@@ -27,12 +27,14 @@ import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
 import { useServerAnimatedMaps } from "../animmap/status.ts";
 import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_HELP, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS, deviceStillHelp, LOW_POWER_HELP, type AnimatedMapsChoice } from "../animmap/words.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
+import { FeaturesRow, useDiceAnimationSwitch } from "../modules/FeaturesPage.tsx";
+import { HiddenHere, Module, useModule } from "../modules/Gate.tsx";
+import { usePreview } from "../dm/previewContext.ts";
 import { MAP_IMAGE_WORDS, deviceSummaries } from "./summaries.ts";
 import {
   setAnimatedMaps,
   setLowPower,
   setMapDetail,
-  setRollAnimation,
   setRollToasts,
   setSheetHandle,
   setTabRow,
@@ -50,7 +52,6 @@ import {
   useAnimatedMaps,
   useLowPower,
   useMapVariant,
-  useRollAnimation,
   useRollToastsOn,
   useSheetHandle,
   useThemeChoice,
@@ -85,15 +86,22 @@ export function shortcutsHelp(keys: KeyMap): string {
 /**
  * Menu, This device (docs/design/design-v1-dm-tools.md 2.7): what belongs to this
  * device alone and is kept on it, never in the room. Each setting takes
- * effect at once, here and on the map behind the menu.
+ * effect at once, here and on the map behind the menu. Features comes
+ * first, opening its own subpage through `onFeatures`
+ * (docs/design/design-v1-features.md 5): a table display has none, and
+ * neither has "view as a player", whose parts all show (D-261127-126).
  */
-export default function ThisDevice() {
+export default function ThisDevice(props: PanelProps & { onFeatures?(): void }) {
   const scope = useRoomScope();
   const scale = useUiScale();
   const lowPower = useLowPower();
   const variant = useMapVariant();
   const rollToasts = useRollToastsOn();
-  const rollAnimation = useRollAnimation();
+  // Roll animation's switch is the role's Dice animation now (D-261127-301), and Weather and Sound hide their rows here with their parts.
+  const diceAnimation = useDiceAnimationSwitch();
+  const weatherShown = useModule("weather");
+  const soundShown = useModule("sound");
+  const preview = usePreview() !== null;
   const dice = useSyncExternalStore(diceLoader.subscribe, diceLoader.state, diceLoader.state);
   const fullscreen = useFullscreen();
   // The keys the help below names, as this device has them.
@@ -124,10 +132,12 @@ export default function ThisDevice() {
     variant,
     animatedMaps: animatedMapsOn ? animatedMaps : null,
     weather,
+    weatherShown,
     weatherHeld: weatherStill !== null,
     animatedHeld: animatedStill !== null,
     volume,
-    rollAnimation,
+    soundShown,
+    diceAnimation: diceAnimation.on,
     handle,
     tabsLeftOut: tabPanels.filter((p) => leftOut.includes(p.id)).length,
   });
@@ -138,8 +148,14 @@ export default function ThisDevice() {
    * picker's state lasts through a fold.
    */
   const group = (key: ThisDeviceSection) => ({ ...fold(key), keep: true, wholeSummary: true, summary: summary[key] });
+  const features = props.onFeatures && room && !room.display && !preview ? props.onFeatures : null;
   return (
     <div style={{ display: "grid" }}>
+      {features ? (
+        <div style={{ paddingBottom: theme.space(2) }}>
+          <FeaturesRow onOpen={features} />
+        </div>
+      ) : null}
       <Group label="Interface size" {...group("size")} divider={false} search="menu.this-device.size">
         <Help>The bars, panels and the names and marks on tokens. The map keeps its own zoom: pinch or use the wheel.</Help>
         <Segmented<UiScale> label="Interface size" search="menu.this-device.size.scale" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
@@ -202,21 +218,29 @@ export default function ThisDevice() {
         ) : null}
       </Group>
       <Group label="Weather" {...group("weather")} search="menu.this-device.weather">
-        {/* In a settings row's padding, as Map detail's cards stand. */}
-        <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioCards
-            legend="Weather on the map"
-            search="menu.this-device.weather.mode"
-            // Only while Moving is chosen: Still and Off already keep it still.
-            help={weather === "moving" && weatherStill ? weatherStill : undefined}
-            value={weather}
-            options={WEATHER_CARDS}
-            onChange={setWeatherMode}
-          />
-        </div>
+        {/* In a settings row's padding, as Map detail's cards stand. Hidden with its part, the section keeps its heading and holds the way back (docs/design/design-v1-features.md 6). */}
+        {weatherShown ? (
+          <Module id="weather">
+            <div style={{ padding: `${theme.space(2)}px 0` }}>
+              <RadioCards
+                legend="Weather on the map"
+                search="menu.this-device.weather.mode"
+                // Only while Moving is chosen: Still and Off already keep it still.
+                help={weather === "moving" && weatherStill ? weatherStill : undefined}
+                value={weather}
+                options={WEATHER_CARDS}
+                onChange={setWeatherMode}
+              />
+            </div>
+          </Module>
+        ) : (
+          <div style={{ padding: `${theme.space(2)}px 0` }}>
+            <HiddenHere home="thisDevice" />
+          </div>
+        )}
       </Group>
       <Group label="Sounds" {...group("sounds")} search="menu.this-device.sounds">
-        <DeviceSound line anchored />
+        <DeviceSound line anchored mixer={soundShown} />
       </Group>
       <Group label="Rolls" {...group("rolls")} search="menu.this-device.rolls">
         <Switch label="Show others' rolls as they happen" search="menu.this-device.rolls.toasts" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
@@ -230,8 +254,8 @@ export default function ThisDevice() {
                 ? "Low power shows each result at once, without dice."
                 : pointerWords("Your own rolls in the Dice panel and from stat blocks throw dice that land on the result in about a second. A tap or a key shows it at once.")
           }
-          checked={rollAnimation}
-          onChange={setRollAnimation}
+          checked={diceAnimation.on}
+          onChange={diceAnimation.set}
         />
         <DiceSetPicker />
       </Group>
@@ -302,7 +326,7 @@ function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; l
  * never wraps onto a line alone.
  */
 export function deviceDetail(fullscreen: boolean): string {
-  return `Interface size, theme, ${fullscreen ? "full screen, " : ""}low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle.`;
+  return `The parts you use, interface size, theme, ${fullscreen ? "full screen, " : ""}low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle.`;
 }
 
 /**

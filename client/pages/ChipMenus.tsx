@@ -44,6 +44,7 @@ import {
   cancelId,
   dmMenuSections,
   itemsOf,
+  showSection,
   youMenuSections,
   type ChipAnswer,
   type ChipAsk,
@@ -51,8 +52,11 @@ import {
   type ChipItem,
   type ChipOpen,
   type ChipSection,
+  type ChipShow,
   type DmMenuView,
 } from "./chipMenus.ts";
+import { useHiddenHere } from "../features/modules/Gate.tsx";
+import { useShowSaid } from "../features/modules/ShowFocus.tsx";
 import { CHIP_WORDS, youChipName } from "./chipWords.ts";
 import { memberDotStyle } from "./onBoard.ts";
 
@@ -664,11 +668,27 @@ export function useImages(): [ReadonlySet<string> | null, (ids: string | null) =
   return [images, setIds];
 }
 
+/** The menu home's hidden parts as chip menu items, each saying it shows again as it is picked (features/modules/ShowFocus.tsx). */
+function useMenuShows(): ChipShow[] {
+  const parts = useHiddenHere("menu");
+  const said = useShowSaid();
+  return parts.map((p) => ({
+    id: p.id,
+    label: p.label,
+    show: () => {
+      p.show();
+      said(p.name);
+    },
+  }));
+}
+
 function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; timeGaveWay: boolean; nowPlayingGaveWay: boolean; volumeGaveWay: boolean; blackoutOnly: boolean }) {
   const [images, setImages] = useImages();
   const view = useDmMenuView(props.timeGaveWay, props.nowPlayingGaveWay, images, props.volumeGaveWay);
   const env = useChipEnv(props.anchor);
-  const sections: ChipSection[] = props.blackoutOnly ? [{ key: "blackout", items: blackoutItems(view) }] : dmMenuSections(view);
+  // The menu home's ways back end the DM menu (docs/design/design-v1-features.md 6), never the blackout's own menu.
+  const hidden = useMenuShows();
+  const sections: ChipSection[] = props.blackoutOnly ? [{ key: "blackout", items: blackoutItems(view) }] : [...dmMenuSections(view), ...showSection(hidden)];
   return (
     <>
       {!props.blackoutOnly && view.recent.some((e) => e.kind === "image") ? <LibraryProbe onImages={setImages} /> : null}
@@ -748,7 +768,8 @@ function YouMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; 
   const characters = useRoomView((s) => s.view?.characters);
   const preview = usePreview() !== null;
   const env = useChipEnv(props.anchor);
-  const sections = youMenuSections({ memberId, member, characters: characters ?? {}, preview, volume: props.volumeGaveWay ? volume : null });
+  const hidden = useMenuShows();
+  const sections = [...youMenuSections({ memberId, member, characters: characters ?? {}, preview, volume: props.volumeGaveWay ? volume : null }), ...showSection(hidden)];
   return <ChipMenuBody host={props.host} env={env} label={CHIP_WORDS.youMenuName} sections={sections} mark="you" />;
 }
 

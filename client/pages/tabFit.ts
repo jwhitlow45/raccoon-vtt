@@ -48,6 +48,12 @@ export type TabWidths = {
    * always in More, so More stays while any is left out.
    */
   kept?: number;
+  /**
+   * More stays even where every tab fits: it holds the way back to the
+   * panels of parts hidden on this device (docs/design/design-v1-features.md
+   * 6, D-261127-313).
+   */
+  keepMore?: boolean;
 };
 
 /** `count` tabs stand in the row. With fewer than all, More follows with `moreRoom`. */
@@ -76,6 +82,7 @@ export function moreReserve(w: TabWidths, count: number): number {
  * measures again as it shows. All tabs when they fit with their gaps and
  * none is left out, and no More. Otherwise the largest prefix of the kept
  * panels that leaves room for More's reserve after one gap, or More alone.
+ * Where More stays (`keepMore`), every panel and More are tried first.
  * More's room is what the row leaves it, never less than its reserve. A
  * wider room never fits fewer tabs, since every prefix that fits a room
  * fits a wider one.
@@ -84,9 +91,10 @@ export function fitTabs(w: TabWidths): TabFit | null {
   if (!(w.room > 0)) return null;
   const n = w.tabs.length;
   const kept = Math.max(0, Math.min(w.kept ?? n, n));
-  if (kept === n && rowWidth(w.tabs, n) <= w.room) return { count: n, moreRoom: 0 };
-  // Every panel kept and too wide for the row: all of them and More cannot fit either, so the count starts one lower.
-  for (let count = kept === n ? n - 1 : kept; count > 0; count--) {
+  const alone = kept === n && w.keepMore !== true;
+  if (alone && rowWidth(w.tabs, n) <= w.room) return { count: n, moreRoom: 0 };
+  // Every panel kept and too wide for the row: all of them and More cannot fit either, so the count starts one lower. Where More stays, every panel with it is tried first.
+  for (let count = alone ? n - 1 : kept; count > 0; count--) {
     const used = rowWidth(w.tabs, count) + TAB_GAP;
     const reserve = moreReserve(w, count);
     if (used + reserve <= w.room) return { count, moreRoom: w.room - used };

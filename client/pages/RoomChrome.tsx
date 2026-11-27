@@ -13,6 +13,9 @@ import { uiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { findRect, findTokenCamera, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
+import { claimShown } from "../features/modules/gate.ts";
+import { useFeaturesHere } from "../features/modules/Gate.tsx";
+import type { FeatureChoices } from "../features/modules/store.ts";
 import { VIEW_GROUP, VIEW_TIP, viewButtonLabel } from "../features/view/choice.ts";
 import { useWeatherVoice } from "../features/weather/WeatherVoice.ts";
 import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewSheetDialog, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
@@ -22,7 +25,7 @@ import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { accentVars, boardAccentVars, type Accent } from "../lib/accent.ts";
 import { escapeTarget, roomLetGo } from "../lib/escape.ts";
 import { toggleFullscreen, useFullscreen } from "../lib/fullscreen.ts";
-import { takeReopen } from "../lib/reopen.ts";
+import { takeReopen, type Reopen } from "../lib/reopen.ts";
 import { preloadLazies } from "../lib/retryableLazy.ts";
 import { BOARD_SCOPE, theme } from "../lib/theme.ts";
 import { APP_TITLE, roomTitle } from "../lib/title.ts";
@@ -167,6 +170,18 @@ export function useEscape(sheetOpen: boolean, closeSheets: () => void, tokenPane
   }, [store, ui]);
 }
 
+/**
+ * What a reload opens again of what it asked for: a tool or panel of a part
+ * hidden on this device is skipped, so a reload never brings it back
+ * (docs/design/design-v1-features.md 8). An unknown role skips nothing, as
+ * the store's own setters then decide.
+ */
+export function reopenShown(again: Reopen | null, role: "dm" | "player" | null, choices: FeatureChoices): Reopen {
+  if (!again) return {};
+  const shows = (kind: "tool" | "panel", id: string) => role === null || claimShown(kind, id, role, choices);
+  return { ...(again.tool && shows("tool", again.tool) ? { tool: again.tool } : null), ...(again.panel && shows("panel", again.panel) ? { panel: again.panel } : null) };
+}
+
 /** How long after the room connects its panels start loading in the background. */
 const PRELOAD_DELAY_MS = 2_000;
 
@@ -180,10 +195,15 @@ export function usePreloadAndReopen(role: "dm" | "player"): void {
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
   const connected = useRoomView((s) => s.connection === "open");
+  // Read as the reload's page mounts, often before the room says who you are: the role this device last had there stands in (features/modules/Gate.tsx).
+  const here = useFeaturesHere();
+  const parts = useRef(here);
+  parts.current = here;
   useEffect(() => {
-    const again = takeReopen(roomId);
-    if (again?.tool) ui.setTool(again.tool);
-    if (again?.panel) ui.openPanel(again.panel);
+    const { role: known, choices } = parts.current;
+    const again = reopenShown(takeReopen(roomId), known, choices);
+    if (again.tool) ui.setTool(again.tool);
+    if (again.panel) ui.openPanel(again.panel);
   }, [roomId, ui]);
   useEffect(() => {
     if (!connected) return;

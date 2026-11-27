@@ -67,3 +67,17 @@ describe("the pause screen", () => {
     assert.match(markup, /The DM has paused the game\./);
   });
 });
+
+describe("a reload's reopen (docs/design/design-v1-features.md 8)", () => {
+  test("a tool or panel of a part hidden on this device is skipped, the rest opens, and an unknown role skips nothing", async () => {
+    const { reopenShown } = await import("./RoomChrome.tsx");
+    const { NO_CHOICES, withChoice } = await import("../features/modules/store.ts");
+    const hidden = withChoice(withChoice(NO_CHOICES, "dm", "ruler", false), "dm", "journal", false);
+    assert.deepEqual(reopenShown({ tool: "ruler", panel: "journal" }, "dm", NO_CHOICES), { tool: "ruler", panel: "journal" });
+    assert.deepEqual(reopenShown({ tool: "ruler", panel: "journal" }, "dm", hidden), {});
+    assert.deepEqual(reopenShown({ tool: "fog", panel: "dice" }, "dm", hidden), { tool: "fog", panel: "dice" });
+    assert.deepEqual(reopenShown({ tool: "ruler" }, "player", hidden), { tool: "ruler" }, "the DM's choices hold for the DM alone");
+    assert.deepEqual(reopenShown({ tool: "ruler" }, null, hidden), { tool: "ruler" });
+    assert.deepEqual(reopenShown(null, "dm", hidden), {});
+  });
+});
