@@ -312,7 +312,23 @@ function touching(a: Box, b: Box): [Pt, Pt] | null {
   return null;
 }
 
-/** How much of the ground segment from p to q at height z, on screen, the stroked lines run along. */
+/** Whether a point on the ground lies on a box's edge or inside it. */
+function touchesAt(b: Box, p: Pt): boolean {
+  return p.x >= b[0] - 1e-9 && p.x <= b[2] + 1e-9 && p.y >= b[1] - 1e-9 && p.y <= b[3] + 1e-9;
+}
+
+/** A slab's length along its line. */
+const slabLength = (w: WallItem) => Math.hypot(w.slab!.b.x - w.slab!.a.x, w.slab!.b.y - w.slab!.a.y);
+
+/** The standing items of free walls, each `[a, b]`, on one chunk of a scene seen whole. */
+function freeWalls(walls: [[number, number], [number, number]][]): WallItem[] {
+  const chunks: Record<string, BuildChunk> = {
+    "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: walls.map(([a, b], i) => ({ id: `w${String(i).padStart(11, "x")}`, a, b, f: { kind: "wall" as const } })) },
+  };
+  return wallItems({ ground: () => 0, detail: true }, wallPieces(sceneWalls(SCENE, chunks), ALL));
+}
+
+/** How much of the ground segment from p to q at height z the stroked lines run along on screen, in cells of that segment. */
 function strokedAlong(lines: readonly (readonly Pt[])[], turn: Turn, p: Pt, q: Pt, z: number): number {
   const view = isometric(turn);
   const P = toView(view, p, z);
@@ -327,7 +343,8 @@ function strokedAlong(lines: readonly (readonly Pt[])[], turn: Turn, p: Pt, q: P
     const at = (v: Pt) => (v.x - P.x) * ux + (v.y - P.y) * uy;
     total += Math.max(0, Math.min(len, Math.max(at(s), at(t))) - Math.max(0, Math.min(at(s), at(t))));
   }
-  return round(total);
+  // In ground cells, so a caller compares it with a length on the ground.
+  return round((total / len) * Math.hypot(q.x - p.x, q.y - p.y));
 }
 
 const close = (a: Pt, b: Pt) => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
@@ -580,6 +597,161 @@ describe("wall slabs (5.6)", () => {
         }
       }
     });
+  });
+
+  test("where slabs meet, the lines that stay are drawn: the outer corner, the inside corner, and every top edge but the stretch another slab stands against (ISOWALL-S-1)", () => {
+    // Each: the walls, the corner or junction, the slab that runs on there and the side the other leaves it by, the stem's direction.
+    const cases: [string, Record<string, EdgeFeature>, Pt, Pt][] = [
+      ["L", { "5,5,n": WALL, "5,5,w": WALL }, { x: 5, y: 5 }, { x: 0, y: 1 }],
+      ["L", { "5,6,n": WALL, "6,5,w": WALL }, { x: 6, y: 6 }, { x: 0, y: -1 }],
+      ["T", { "3,4,n": WALL, "4,4,n": WALL, "4,4,w": WALL }, { x: 4, y: 4 }, { x: 0, y: 1 }],
+      ["T", { "3,4,n": WALL, "4,4,n": WALL, "4,3,w": WALL }, { x: 4, y: 4 }, { x: 0, y: -1 }],
+    ];
+    for (const [name, edges, at, stem] of cases) {
+      const items = wallsOf(edges);
+      const boxes = items.map(slabBox);
+      // The slabs along the x axis are the ones the stem meets; their union's edge on the stem's side.
+      const runs = boxes.filter((b) => b[3] - b[1] < 2 * H + 1e-9);
+      const x0 = Math.min(...runs.map((b) => b[0]));
+      const x1 = Math.max(...runs.map((b) => b[2]));
+      const sideY = round(at.y + H * stem.y);
+      const stems = boxes.filter((b) => b[3] - b[1] > 2 * H + 1e-9);
+      const st = stems[0]!;
+      for (const turn of TURNS) {
+        const r = recorder();
+        for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn));
+        const lines = r.strokes.flatMap((x) => x.lines);
+        const ups = uprights(lines);
+        // The top along the stem's side: all of it but the stem's width.
+        assert.equal(strokedAlong(lines, turn, { x: x0, y: sideY }, { x: x1, y: sideY }, 0.5), round(x1 - x0 - 2 * H), `${name} turn ${turn}: the top on the stem's side`);
+        // The stem's two side tops, whole.
+        for (const x of [st[0], st[2]]) assert.equal(strokedAlong(lines, turn, { x, y: st[1] }, { x, y: st[3] }, 0.5), round(st[3] - st[1]), `${name} turn ${turn}: the stem's side top at x ${x}`);
+        // Each inside corner keeps its upright wherever the stem's side there faces the viewer.
+        for (const sx of [-1, 1]) {
+          const crease = { x: at.x + sx * H, y: sideY };
+          const shows = depth(turn, sx, 0) > 1e-12;
+          const isCrease = name === "T" || sx > 0 === (at.x < x1 - 1);
+          if (!isCrease) continue;
+          assert.equal(ups.includes(uprightAt(turn, crease, 0.5)), shows, `${name} turn ${turn}: the inside corner at x ${crease.x}`);
+        }
+        // The top on the far side from the stem, whole.
+        const farY = round(at.y - H * stem.y);
+        assert.equal(strokedAlong(lines, turn, { x: x0, y: farY }, { x: x1, y: farY }, 0.5), round(x1 - x0), `${name} turn ${turn}: the top on the far side`);
+        if (name === "L") {
+          // The corner's outer upright, wherever one of its two faces faces the viewer.
+          const ox = at.x - H * (x1 > at.x + 1 ? 1 : -1);
+          const oy = at.y - H * stem.y;
+          const shows = depth(turn, ox - at.x, 0) > 1e-12 || depth(turn, 0, oy - at.y) > 1e-12;
+          assert.equal(ups.includes(uprightAt(turn, { x: ox, y: oy }, 0.5)), shows, `${name} turn ${turn}: the outer corner`);
+        }
+      }
+    }
+  });
+
+  test("a free wall's short piece at a corner leaves no line across the joined tops, its neighbor carrying the covered stretch (ISOWALL-SOL-1)", () => {
+    const items = freeWalls([
+      [
+        [3, 5],
+        [5.015625, 5],
+      ],
+      [
+        [5.015625, 5],
+        [5.015625, 7],
+      ],
+    ]);
+    const y = 5 + H;
+    for (const turn of TURNS) {
+      const r = recorder();
+      for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn));
+      const lines = r.strokes.flatMap((x) => x.lines);
+      assert.equal(strokedAlong(lines, turn, { x: 5.015625 - H, y }, { x: 5.015625 + H, y }, 0.5), 0, `turn ${turn}: a line across the joined tops`);
+      assert.equal(strokedAlong(lines, turn, { x: 3 - H, y }, { x: 5.015625 - H, y }, 0.5), round(2.015625), `turn ${turn}: the rest of the top on that side`);
+    }
+    for (const w of items) for (const s of [0, 1] as const) assert.ok(w.slab!.gap[0][s] + w.slab!.gap[1][s] <= slabLength(w) + 1e-9, `${w.id}: its gaps fit in it`);
+  });
+
+  test("property: random fractional free-wall Ls, Ts and crossings stroke no shared edge, never a line backward, and every outer top edge once (ISOWALL-SOL-1)", () => {
+    const random = rng(26127);
+    const lattice = (v: number) => Math.round(v * 64) / 64;
+    for (let n = 0; n < 300; n++) {
+      const at = { x: lattice(4 + random() * 2), y: lattice(4 + random() * 2) };
+      const arm = () => lattice(0.02 + random() * 1.5);
+      const kind = n % 3;
+      const flip = (w: [[number, number], [number, number]]) => (random() < 0.5 ? w : ([w[1], w[0]] as [[number, number], [number, number]]));
+      const horizontal: [[number, number], [number, number]] = [
+        [at.x - (kind === 0 ? 0 : arm()), at.y],
+        [at.x + arm(), at.y],
+      ];
+      const vertical: [[number, number], [number, number]] = [
+        [at.x, at.y - (kind === 2 ? arm() : 0)],
+        [at.x, at.y + arm()],
+      ];
+      const items = freeWalls([flip(horizontal), flip(vertical)]);
+      const label = `${["L", "T", "crossing"][kind]} at ${at.x},${at.y}: ${JSON.stringify([horizontal, vertical])}`;
+      const boxes = items.filter((w) => w.slab).map(slabBox);
+      for (const w of items) {
+        if (!w.slab) continue;
+        for (const s of [0, 1] as const) {
+          assert.ok(w.slab.gap[0][s] >= 0 && w.slab.gap[1][s] >= 0 && w.slab.gap[0][s] + w.slab.gap[1][s] <= slabLength(w) + 1e-9, `${label}: ${w.id} strokes backward`);
+        }
+      }
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!(overlapArea(boxes[i]!, boxes[j]!) > 1e-9), `${label}: two slabs overlap`);
+      for (const turn of TURNS) {
+        const r = recorder();
+        for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn));
+        const lines = r.strokes.flatMap((x) => x.lines);
+        for (const [i, b] of boxes.entries()) {
+          const edges: [Pt, Pt][] = [
+            [{ x: b[0], y: b[1] }, { x: b[2], y: b[1] }],
+            [{ x: b[0], y: b[3] }, { x: b[2], y: b[3] }],
+            [{ x: b[0], y: b[1] }, { x: b[0], y: b[3] }],
+            [{ x: b[2], y: b[1] }, { x: b[2], y: b[3] }],
+          ];
+          for (const [e0, e1] of edges) {
+            // Where another slab touches this edge, the edge lies inside the stone: no line. Elsewhere it is the outline: one line, whole.
+            const along = e0.y === e1.y ? "x" : "y";
+            const cuts = new Set<number>([e0[along], e1[along]]);
+            for (const [j, o] of boxes.entries()) {
+              if (j === i) continue;
+              const shared = touching(b, o);
+              if (shared && shared[0][along === "x" ? "y" : "x"] === e0[along === "x" ? "y" : "x"] && shared[0][along === "x" ? "y" : "x"] === shared[1][along === "x" ? "y" : "x"]) for (const p of shared) cuts.add(p[along]);
+            }
+            const stops = [...cuts].filter((v) => v >= e0[along] - 1e-9 && v <= e1[along] + 1e-9).sort((p, q) => p - q);
+            for (let k = 0; k + 1 < stops.length; k++) {
+              const lo = stops[k]!;
+              const hi = stops[k + 1]!;
+              if (hi - lo < 1e-6) continue;
+              const pa = along === "x" ? { x: lo, y: e0.y } : { x: e0.x, y: lo };
+              const pb = along === "x" ? { x: hi, y: e0.y } : { x: e0.x, y: hi };
+              const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+              const inside = boxes.some((o, j) => j !== i && touchesAt(o, mid));
+              const want = inside ? 0 : round(hi - lo);
+              assert.equal(strokedAlong(lines, turn, pa, pb, 0.5), want, `${label} turn ${turn}: the top edge from ${lo} to ${hi} (${along}) of slab ${i}`);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  test("a crossing that is not square keeps both walls running through it (D-261127-575)", () => {
+    const items = freeWalls([
+      [
+        [2, 2],
+        [6, 4],
+      ],
+      [
+        [2, 4],
+        [6, 2],
+      ],
+    ]);
+    const at = { x: 4, y: 3 };
+    const near = items.filter((w) => [w.piece.ax, w.piece.bx].some((x, i) => close({ x, y: i === 0 ? w.piece.ay : w.piece.by }, at)));
+    assert.equal(near.length, 4);
+    for (const w of near) {
+      const d = Math.min(Math.hypot(w.slab!.a.x - at.x, w.slab!.a.y - at.y), Math.hypot(w.slab!.b.x - at.x, w.slab!.b.y - at.y));
+      assert.ok(d < 1e-9, `${w.id}: runs to the crossing (${d})`);
+    }
   });
 
   test("a diagonal wall facing the viewer square takes one light along its whole length, however its pieces split (ISOWALL)", () => {

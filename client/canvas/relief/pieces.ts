@@ -637,12 +637,14 @@ export function wallItems(src: Pick<PieceSource, "ground" | "detail" | "painted"
   }
   if (!detail) return out;
   let ends: EndIndex | null = null;
+  let inside: Set<WallItem> | null = null;
   for (const w of out) {
     if (w.piece.kind !== "wall" || w.piece.hosts) continue;
     const slab = slabOf(w, (ends ??= endIndex(src, near)));
-    if (slab) w.slab = slab;
+    if (slab === INSIDE) (inside ??= new Set()).add(w);
+    else if (slab) w.slab = slab;
   }
-  return out;
+  return inside ? out.filter((w) => !inside.has(w)) : out;
 }
 
 /** Where a piece stands, from `base` up `rise` cells (wallItems), or null where an automatic wall has nothing left to show. */
@@ -692,6 +694,9 @@ function endIndex(src: Pick<PieceSource, "ground" | "painted">, near: readonly W
 
 const SLAB_HALF = WALL_THICK / 2;
 
+/** What slabOf answers for a piece that lies wholly inside the stone of walls it meets, and so draws nothing. */
+const INSIDE = Symbol("inside");
+
 /**
  * A wall piece's slab (5.6, D-261102-888, D-261127-136): each end by what
  * meets it there.
@@ -722,7 +727,7 @@ const SLAB_HALF = WALL_THICK / 2;
  * toward its own side of the slab it stops at (keyOf), so of two slabs
  * meeting at a corner the nearer draws last.
  */
-function slabOf(w: WallItem, ends: EndIndex): Slab | null {
+function slabOf(w: WallItem, ends: EndIndex): Slab | typeof INSIDE | null {
   const p = w.piece;
   const len = Math.hypot(p.bx - p.ax, p.by - p.ay);
   if (!(len > 1e-9)) return null;
@@ -734,12 +739,19 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
   // The long side a direction leaves this slab by: 0 toward the line's left normal (-uy, ux), 1 toward its right.
   const sideOf = (d: Point): 0 | 1 => (d.x * -uy + d.y * ux > 0 ? 0 : 1);
   const square = (d: Point) => Math.abs(d.x * ux + d.y * uy) < 1e-6;
-  type End = { shift: number; face: boolean; line: boolean; upright: [boolean, boolean]; gap: [number, number] };
-  const endOf = (at: Point, out: Point): End => {
+  /**
+   * How a piece of this wall ends at `at`, facing `out` along the line:
+   * `abut` says which long sides another slab of its height stands
+   * against there, square to the line (it then covers the line from half a
+   * thickness before `at` to half a thickness past it), and `next` is the
+   * piece of this wall that carries on along the line at the same height.
+   */
+  type End = { shift: number; face: boolean; line: boolean; upright: [boolean, boolean]; abut: [boolean, boolean]; next: EndEntry | null };
+  const endOf = (at: Point, out: Point, self: string): End => {
     const along: EndEntry[] = [];
     const across: EndEntry[] = [];
     for (const q of ends.get(endKey(at)) ?? []) {
-      if (q.id === p.id) continue;
+      if (q.id === self) continue;
       const qx = q.other.x - at.x;
       const qy = q.other.y - at.y;
       const ql = Math.hypot(qx, qy);
@@ -753,6 +765,7 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
       const l = Math.hypot(q.other.x - at.x, q.other.y - at.y);
       return { x: (q.other.x - at.x) / l, y: (q.other.y - at.y) / l };
     };
+    const plain = (q: EndEntry) => level(q) && square(dirOf(q));
     // Two of them going on from here in opposite directions along one line.
     let through: [EndEntry, EndEntry] | null = null;
     for (let i = 0; i < across.length && !through; i++) {
@@ -765,52 +778,95 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
         }
       }
     }
+    const none: [boolean, boolean] = [false, false];
     // Stopping at the side of a wall that runs on through this end: in its plane where the two stand alike, the inside corners keep their lines.
     const stop = (q: EndEntry, r: EndEntry): End =>
-      level(q) && level(r) && square(dirOf(q)) ? { shift: -1, face: false, line: false, upright: [true, true], gap: [0, 0] } : { shift: -1, face: true, line: true, upright: [true, true], gap: [0, 0] };
-    const next = along.find((q) => !q.framed && level(q));
+      plain(q) && plain(r) ? { shift: -1, face: false, line: false, upright: [true, true], abut: none, next: null } : { shift: -1, face: true, line: true, upright: [true, true], abut: none, next: null };
+    const next = along.find((q) => !q.framed && level(q)) ?? null;
     if (next) {
-      if (through) {
-        // A crossing: the higher wall, or the one whose first piece by id comes first, runs through.
-        const mine = { top, id: p.id < next.id ? p.id : next.id };
-        const theirs = { top: Math.max(through[0].top, through[1].top), id: through[0].id < through[1].id ? through[0].id : through[1].id };
-        const runs = mine.top > theirs.top + 1e-9 || (same(mine.top, theirs.top) && mine.id < theirs.id);
-        if (!runs) return stop(through[0], through[1]);
+      // A crossing of walls of one height, square: the one whose first piece by id comes first runs through and the other's arms stop at its sides. Any other crossing runs both through (D-261127-575).
+      if (through && plain(through[0]) && plain(through[1])) {
+        const mine = self < next.id ? self : next.id;
+        const theirs = through[0].id < through[1].id ? through[0].id : through[1].id;
+        if (theirs < mine) return stop(through[0], through[1]);
       }
-      const gap: [number, number] = [0, 0];
-      for (const q of across) if (level(q) && square(dirOf(q))) gap[sideOf(dirOf(q))] = SLAB_HALF;
-      return { shift: 0, face: false, line: false, upright: [false, false], gap };
+      // A next piece shorter than half a thickness can lie wholly inside a slab it stops at: this one then stops there in its place.
+      const d = Math.hypot(next.other.x - at.x, next.other.y - at.y);
+      if (d < SLAB_HALF) {
+        const far = endOf(next.other, out, next.id);
+        if (far.shift < 0 && -far.shift * SLAB_HALF > d + 1e-9) return { ...far, shift: (far.shift * SLAB_HALF + d) / SLAB_HALF, abut: none, next: null };
+      }
+      const abut: [boolean, boolean] = [false, false];
+      for (const q of across) if (plain(q)) abut[sideOf(dirOf(q))] = true;
+      return { shift: 0, face: false, line: false, upright: [false, false], abut, next };
     }
-    if (along.some((q) => q.framed)) return { shift: 0, face: false, line: true, upright: [true, true], gap: [0, 0] };
-    if (along.length > 0) return { shift: 0, face: true, line: true, upright: [true, true], gap: [0, 0] };
+    if (along.some((q) => q.framed)) return { shift: 0, face: false, line: true, upright: [true, true], abut: none, next: null };
+    if (along.length > 0) return { shift: 0, face: true, line: true, upright: [true, true], abut: none, next: null };
     if (through) return stop(through[0], through[1]);
     if (across.length === 1) {
       const q = across[0]!;
       const d = dirOf(q);
-      const covers = top > q.top + 1e-9 || (same(top, q.top) && p.id < q.id);
-      const plain = level(q) && square(d);
+      const covers = top > q.top + 1e-9 || (same(top, q.top) && self < q.id);
       if (covers) {
-        if (!plain) return { shift: 1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+        if (!plain(q)) return { shift: 1, face: true, line: true, upright: [true, true], abut: none, next: null };
         // The corner's end face lies in one plane with the other slab's outer side, and the cap and the side toward it meet the other's.
         const s = sideOf(d);
         const upright: [boolean, boolean] = [true, true];
-        const gap: [number, number] = [0, 0];
+        const abut: [boolean, boolean] = [false, false];
         upright[s] = false;
-        gap[s] = 2 * SLAB_HALF;
-        return { shift: 1, face: true, line: true, upright, gap };
+        abut[s] = true;
+        return { shift: 1, face: true, line: true, upright, abut, next: null };
       }
-      if (!plain) return { shift: -1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+      if (!plain(q)) return { shift: -1, face: true, line: true, upright: [true, true], abut: none, next: null };
       // This slab's side away from the other's run lies in one plane with the other's end face. The side toward it is the inside corner.
       const upright: [boolean, boolean] = [true, true];
       upright[sideOf({ x: -d.x, y: -d.y })] = false;
-      return { shift: -1, face: false, line: false, upright, gap: [0, 0] };
+      return { shift: -1, face: false, line: false, upright, abut: none, next: null };
     }
-    return { shift: 1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+    return { shift: 1, face: true, line: true, upright: [true, true], abut: none, next: null };
   };
-  const ea = endOf({ x: p.ax, y: p.ay }, { x: -ux, y: -uy });
-  const eb = endOf({ x: p.bx, y: p.by }, { x: ux, y: uy });
-  // A piece shorter than the two pulls back is a sliver inside the walls across it: it keeps its own line.
-  if (len + (ea.shift + eb.shift) * SLAB_HALF < 1e-6) return null;
+  const out = { x: ux, y: uy };
+  const back = { x: -ux, y: -uy };
+  const ea = endOf({ x: p.ax, y: p.ay }, back, p.id);
+  const eb = endOf({ x: p.bx, y: p.by }, out, p.id);
+  // A piece shorter than the two pulls back is a sliver inside the walls across it. Where both its ends meet stone of its own height it draws nothing, since any line of its own would cross that stone's top. Else it keeps its own line.
+  if (len + (ea.shift + eb.shift) * SLAB_HALF < 1e-6) return !ea.face && !eb.face ? INSIDE : null;
+  // The slab from t0 to t1 along its line, 0 at `a`. Each slab standing against a side covers that side from half a thickness before its joint to half past it, which can reach past a short piece into the next (ISOWALL-SOL-1): every joint within a thickness of this slab's ends counts, and what it covers is cut to this slab.
+  const t0 = -ea.shift * SLAB_HALF;
+  const t1 = len + eb.shift * SLAB_HALF;
+  const covered: [[number, number][], [number, number][]] = [[], []];
+  const cover = (t: number, abut: readonly [boolean, boolean]) => {
+    for (const s of [0, 1] as const) if (abut[s]) covered[s].push([Math.max(t0, t - SLAB_HALF), Math.min(t1, t + SLAB_HALF)]);
+  };
+  cover(0, ea.abut);
+  cover(len, eb.abut);
+  for (const [from, dir, sign, first] of [
+    [{ x: p.bx, y: p.by }, out, 1, eb],
+    [{ x: p.ax, y: p.ay }, back, -1, ea],
+  ] as const) {
+    let end: End = first;
+    while (end.next) {
+      const at = end.next.other;
+      const d = Math.hypot(at.x - from.x, at.y - from.y);
+      if (d >= 2 * SLAB_HALF) break;
+      end = endOf(at, dir, end.next.id);
+      cover(sign > 0 ? len + d : -d, end.abut);
+    }
+  }
+  // How far in from each end each side goes unstroked: the covered stretches that reach that end. A side covered end to end has nothing left to stroke.
+  const gapAt = (s: 0 | 1, atB: boolean) => {
+    let g = 0;
+    for (const [lo, hi] of covered[s]) {
+      if (!(hi - lo > 1e-12)) continue;
+      if (atB && hi >= t1 - 1e-9) g = Math.max(g, t1 - lo);
+      if (!atB && lo <= t0 + 1e-9) g = Math.max(g, hi - t0);
+    }
+    return g;
+  };
+  const gap = ([0, 1] as const).map((s) => {
+    const ga = gapAt(s, false);
+    return [ga, Math.min(gapAt(s, true), t1 - t0 - ga)] as const;
+  });
   const lean = { x: ((ea.shift < 0 ? 1 : 0) - (eb.shift < 0 ? 1 : 0)) * ux, y: ((ea.shift < 0 ? 1 : 0) - (eb.shift < 0 ? 1 : 0)) * uy };
   return {
     lean,
@@ -819,6 +875,9 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
     face: [ea.face, eb.face],
     line: [ea.line, eb.line],
     upright: [ea.upright, eb.upright],
-    gap: [ea.gap, eb.gap],
+    gap: [
+      [gap[0]![0], gap[1]![0]],
+      [gap[0]![1], gap[1]![1]],
+    ],
   };
 }
