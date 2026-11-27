@@ -602,13 +602,14 @@ describe("3D models on token pictures", { concurrency: false }, () => {
 
   test("md-5. Crop, an icon and a new picture from the library each keep the knight's model", async () => {
     const model = modelOf(dmSocket, run.knight)!;
+    const rev = tokenOf(dmSocket, run.knight)!.rev;
     const panel = await imageGroup(dm, { x: 5, y: 5 }, "Knight");
     await panel.getByRole("button", { name: "Crop", exact: true }).click();
     const crop = dm.getByRole("dialog", { name: "Crop the image" });
     await crop.waitFor();
     await crop.getByRole("button", { name: "Save", exact: true }).click();
     await crop.waitFor({ state: "detached" });
-    await waitFor("the crop saved", () => (tokenOf(dmSocket, run.knight)?.rev ?? 0) > 0 || null);
+    await waitFor("the crop saved", () => ((tokenOf(dmSocket, run.knight)?.rev ?? 0) > rev ? true : null));
     assert.deepEqual(modelOf(dmSocket, run.knight), model, "Crop kept the model");
     await panel.getByRole("button", { name: "Change image", exact: true }).click();
     const picker = dm.getByRole("dialog").filter({ has: dm.getByRole("tab", { name: "Icons" }) });
@@ -693,6 +694,18 @@ describe("3D models on token pictures", { concurrency: false }, () => {
     await monsters.getByRole("button", { name: /^Apply to 1 token on this scene$/ }).click();
     await waitFor("the goblin wearing the default", () => (modelOf(dmSocket, goblin)?.assetId === set.model!.assetId ? true : null));
     assert.deepEqual(tokenOf(dmSocket, goblin)!.image, changed, "Apply carried the picture with its model");
+    // A picture from the library, through the crop editor, keeps it too.
+    await monsters.getByRole("button", { name: "Change image", exact: true }).click();
+    await picker.getByRole("tab", { name: "Library", exact: true }).click();
+    await picker.locator(`img[src*="${run.face}"]`).first().click();
+    const crop = dm.getByRole("dialog", { name: "Crop the image" });
+    await crop.waitFor();
+    await crop.getByRole("button", { name: "Save", exact: true }).click();
+    const cropped = await waitFor("the Goblin's new picture", () => {
+      const image = dmSocket.state?.srdImages["goblin-warrior"]?.image;
+      return image && "assetId" in image ? image : null;
+    });
+    assert.deepEqual(cropped.model, set.model, "a picture cropped on the page kept the model");
     await ops.send({ t: "token.delete", tokenId: goblin });
   });
 
