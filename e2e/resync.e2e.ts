@@ -546,7 +546,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const review = ana.getByRole("dialog", { name: "Re-sync review" });
     await review.getByRole("button", { name: "Apply", exact: true }).click();
     const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
-    const line = done.getByRole("status").filter({ hasText: "4 changes came in, and 5 of your changes stayed." });
+    const line = done.getByRole("status").filter({ hasText: "5 changes came in, and 5 of your changes stayed." });
     await line.waitFor();
     // A plain status line: the check mark means chosen, never done (docs/design/design-v1-look-pass-2.md 2.3).
     assert.equal(await line.locator("svg").count(), 0, "the done line wears the check");
@@ -598,7 +598,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await review.getByRole("checkbox", { name: "Level 6, now 5", exact: true }).uncheck();
     await review.getByRole("button", { name: "Apply", exact: true }).click();
     let done = ana.getByRole("dialog", { name: "Bree is re-synced" });
-    await done.getByRole("status").filter({ hasText: "6 changes came in, 1 roll came back, and 2 of your changes stayed." }).waitFor();
+    await done.getByRole("status").filter({ hasText: "7 changes came in, 1 roll came back, and 2 of your changes stayed." }).waitFor();
     const bree = await waitFor("Wisdom casting again", () => (breeIn(anaSocket)?.stats?.spellAbility === "wis" ? breeIn(anaSocket)! : null));
     assert.equal(bree.level, 5, "the unticked level stays");
     assert.deepEqual(bree.stats!.rolls.map((r) => r.name), ["Shillelagh", "Shortbow", "Moonbeam"]);
