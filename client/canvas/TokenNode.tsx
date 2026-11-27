@@ -43,7 +43,8 @@ export type TokenInteraction = {
   select(tokenId: string, add: boolean): void;
   menu(tokenId: string): void;
   dragStart(node: Konva.Node, token: ViewToken): void;
-  dragMove(node: Konva.Node, token: ViewToken): void;
+  /** A drag reads the token as its start found it, never this node's later props, which another device may have moved (LP55-DRAG-1). */
+  dragMove(node: Konva.Node): void;
   dragEnd(node: Konva.Node, token: ViewToken): void;
 };
 
@@ -182,7 +183,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
           interaction?.menu(token.id);
         }}
         onDragStart={(e) => interaction?.dragStart(e.target, token)}
-        onDragMove={(e) => interaction?.dragMove(e.target, token)}
+        onDragMove={(e) => interaction?.dragMove(e.target)}
         onDragEnd={(e) => interaction?.dragEnd(e.target, token)}
       >
         {iso ? (
