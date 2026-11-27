@@ -19,6 +19,8 @@ export const NOTHING_TO_LIST = "Count Rage, Channel Divinity, Lay on Hands and t
 
 /** Add a class resource's box, where focus goes when the sheet's opener went with what it saved. */
 const ADD_BOX = "[data-uses-add]";
+/** The Classes line's box, whose control takes focus when the Classes sheet's opener went with what it saved. */
+const CLASSES_BOX = "[data-uses-classes]";
 
 /**
  * Combat's Uses section on the token panel and a character's page
@@ -37,6 +39,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   const [sheet, setSheet] = useState<SheetMode | null>(null);
   const [classesOpen, setClassesOpen] = useState(false);
   const classesOpener = useRef<HTMLElement | null>(null);
+  const classesBox = useRef<HTMLElement | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const box = useRef<HTMLElement | null>(null);
   /*
@@ -50,6 +53,12 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   useEffect(() => {
     if (sheet === null) handFocusNow(box.current, opener.current, [`${ADD_BOX} button`, "button"]);
   }, [sheet]);
+  // The Classes sheet's Save can take its opener too: the first class swaps Add your classes for Edit classes, the last
+  // swaps them back, and a level that now matches takes the mismatch line's Edit classes. Focus goes to the Classes
+  // line's control then (SLOTS-ASTRA-03).
+  useEffect(() => {
+    if (!classesOpen) handFocusNow(classesBox.current, classesOpener.current, [`${CLASSES_BOX} button`, "button"]);
+  }, [classesOpen]);
   if (!character && presence === "no") return null;
   const open = (mode: SheetMode, from: HTMLElement | null) => {
     opener.current = from;
@@ -58,6 +67,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   };
   const openClasses = (from: HTMLElement | null) => {
     classesOpener.current = from;
+    classesBox.current = from?.closest("section") ?? null;
     setClassesOpen(true);
   };
   const resources = character?.resources ?? [];
