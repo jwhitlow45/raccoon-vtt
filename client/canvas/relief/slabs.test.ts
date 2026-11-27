@@ -4,13 +4,13 @@ import type { BuildChunk, EdgeFeature, TerrainId } from "#shared/model.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { rng } from "#shared/testutil.ts";
-import { depth, isometric, toView, type Turn } from "../../lib/view.ts";
+import { depth, isometric, K, toView, type Turn } from "../../lib/view.ts";
 import { theme } from "../../lib/theme.ts";
 import { groupWalls, ReliefIndex } from "./buckets.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { tintedPatternOf } from "./looks.ts";
-import { boundsOf, cellPieces, facesOf, keyOf, slabCorners, WALL_THICK, wallItems, type CellPiece, type PieceSource, type WallItem } from "./pieces.ts";
+import { boundsOf, cellPieces, facesOf, keyOf, slabCorners, WALL_RISE, WALL_THICK, wallItems, type CellPiece, type PieceSource, type WallItem } from "./pieces.ts";
 import { wallPieces, type WallPiece } from "./runs.ts";
 
 /*
@@ -67,7 +67,8 @@ function withCanvas<T>(f: () => T): T {
   }
 }
 
-type Paint = { style: string; lines: Pt[][]; pattern?: FakePattern };
+/** A fill or stroke: its style, the lines of its path, and the pattern with its transform as it was at the fill (a pattern is shared and set again for each face). */
+type Paint = { style: string; lines: Pt[][]; pattern?: FakePattern; m?: unknown };
 
 /** A 2D context that records each fill and stroke with the lines of its path, closed lines ending where they began. */
 function recorder(): { g: CanvasRenderingContext2D; fills: Paint[]; strokes: Paint[] } {
@@ -98,7 +99,7 @@ function recorder(): { g: CanvasRenderingContext2D; fills: Paint[]; strokes: Pai
             if (cur) cur.push(cur[0]!);
             cur = null;
           };
-        if (name === "fill") return () => fills.push({ style: fill, lines: lines.map((l) => [...l]), ...(pattern ? { pattern } : {}) });
+        if (name === "fill") return () => fills.push({ style: fill, lines: lines.map((l) => [...l]), ...(pattern ? { pattern, m: pattern.m } : {}) });
         if (name === "stroke") return () => strokes.push({ style: stroke, lines: lines.map((l) => [...l]) });
         if (name === "createPattern")
           return (src: unknown): FakePattern => ({
@@ -294,6 +295,41 @@ function slabBox(w: WallItem): [number, number, number, number] {
   return [Math.min(...c.map((p) => p.x)), Math.min(...c.map((p) => p.y)), Math.max(...c.map((p) => p.x)), Math.max(...c.map((p) => p.y))].map(round) as [number, number, number, number];
 }
 
+type Box = [number, number, number, number];
+
+/** The area two ground boxes share. */
+function overlapArea(a: Box, b: Box): number {
+  return Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+}
+
+/** The edge two ground boxes share where they touch side to side, of some length, or null. */
+function touching(a: Box, b: Box): [Pt, Pt] | null {
+  const eq = (p: number, q: number) => Math.abs(p - q) < 1e-9;
+  const lo = (i: 0 | 1) => Math.max(a[i], b[i]);
+  const hi = (i: 0 | 1) => Math.min(a[i + 2]!, b[i + 2]!);
+  for (const x of [a[2], a[0]]) if ((eq(x, b[0]) || eq(x, b[2])) && hi(1) - lo(1) > 1e-9) return [{ x, y: lo(1) }, { x, y: hi(1) }];
+  for (const y of [a[3], a[1]]) if ((eq(y, b[1]) || eq(y, b[3])) && hi(0) - lo(0) > 1e-9) return [{ x: lo(0), y }, { x: hi(0), y }];
+  return null;
+}
+
+/** How much of the ground segment from p to q at height z, on screen, the stroked lines run along. */
+function strokedAlong(lines: readonly (readonly Pt[])[], turn: Turn, p: Pt, q: Pt, z: number): number {
+  const view = isometric(turn);
+  const P = toView(view, p, z);
+  const Q = toView(view, q, z);
+  const len = Math.hypot(Q.x - P.x, Q.y - P.y);
+  const ux = (Q.x - P.x) / len;
+  const uy = (Q.y - P.y) / len;
+  let total = 0;
+  for (const [s, t] of segments(lines)) {
+    const off = (v: Pt) => (v.x - P.x) * uy - (v.y - P.y) * ux;
+    if (Math.abs(off(s)) > 1e-9 || Math.abs(off(t)) > 1e-9) continue;
+    const at = (v: Pt) => (v.x - P.x) * ux + (v.y - P.y) * uy;
+    total += Math.max(0, Math.min(len, Math.max(at(s), at(t))) - Math.max(0, Math.min(at(s), at(t))));
+  }
+  return round(total);
+}
+
 const close = (a: Pt, b: Pt) => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
 
 describe("wall slabs (5.6)", () => {
@@ -390,19 +426,22 @@ describe("wall slabs (5.6)", () => {
     assert.ok(close(joined[0]!.slab!.b, { x: 2, y: 4 }));
   });
 
-  test("a slab draws its long sides in stone with the tint baked in and its light, its narrow end and cap one flat fill each, and one stroke", () => {
+  test("a slab draws every face toward the viewer in stone with the tint baked in and its light, its narrow end too, its cap in lighter baked stone, and one stroke", () => {
     withCanvas(() => {
       const stone = image();
       const items = wallsOf({ "1,4,n": WALL });
       for (const turn of TURNS) {
         const r = recorder();
         drawRun(r.g, items, dc(turn, { stone }));
-        // One long side and one end face the viewer, then the cap.
+        // One long side and one end face the viewer, each in stone and light, then the cap.
         assert.deepEqual(
           r.fills.map((f) => (f.style === "baked" || f.style === "pattern" ? f.style : f.style === theme.relief.lit || f.style === theme.relief.shaded ? "light" : "flat")).sort(),
-          ["baked", "flat", "flat", "light"],
+          ["baked", "baked", "baked", "light", "light"],
           `turn ${turn}`,
         );
+        // The cap lies on the ground plane: its texture's rows run along the ground, not straight down the screen as a side's do.
+        const cap = r.fills.at(-1)!;
+        assert.notEqual((cap.m as { m: number[] }).m[2], 0, `turn ${turn}: the cap's texture lies flat`);
         assert.equal(r.strokes.length, 1);
       }
       // Two collinear slabs show their texture as one: at the joint both patterns place the same texel.
@@ -410,13 +449,174 @@ describe("wall slabs (5.6)", () => {
       const origins = two.map((w) => {
         const r = recorder();
         drawRun(r.g, [w], dc(0, { stone }));
-        const m = (r.fills.find((f) => f.style === "baked")!.pattern!.m as { m: number[] }).m;
+        const m = (r.fills.find((f) => f.style === "baked")!.m as { m: number[] }).m;
         // Where the texture's column 0 lies along the line, in view units from the joint at x = 2.
         const joint = toView(isometric(0), { x: 2, y: 4 + H }, 0.5);
         return round(((joint.x - m[4]!) / m[0]!) % 256);
       });
       assert.equal(origins[0], origins[1]);
     });
+  });
+
+  test("an L, a T and a crossing of slabs of one height meet with no gap and no overlap, and no line where their caps and sides touch (ISOWALL)", () => {
+    const cases: [string, Record<string, EdgeFeature>, Pt][] = [
+      ["L", { "5,5,n": WALL, "5,5,w": WALL }, { x: 5, y: 5 }],
+      ["L", { "5,6,n": WALL, "6,5,w": WALL }, { x: 6, y: 6 }],
+      ["T", { "3,4,n": WALL, "4,4,n": WALL, "4,4,w": WALL }, { x: 4, y: 4 }],
+      ["T", { "3,4,n": WALL, "4,4,n": WALL, "4,3,w": WALL }, { x: 4, y: 4 }],
+      ["crossing", { "3,4,n": WALL, "4,4,n": WALL, "4,3,w": WALL, "4,4,w": WALL }, { x: 4, y: 4 }],
+    ];
+    for (const [name, edges, at] of cases) {
+      const items = wallsOf(edges);
+      const boxes = items.map(slabBox);
+      // No two slabs stand inside each other, and together they cover the square where the walls meet.
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!(overlapArea(boxes[i]!, boxes[j]!) > 1e-9), `${name}: ${items[i]!.id} and ${items[j]!.id} overlap`);
+      const square: Box = [at.x - H, at.y - H, at.x + H, at.y + H].map(round) as Box;
+      assert.ok(Math.abs(boxes.reduce((sum, b) => sum + overlapArea(b, square), 0) - (2 * H) ** 2) < 1e-9, `${name}: the meeting square covered once`);
+      if (name === "crossing") {
+        // One wall runs through: its two pieces end at the crossing, and the other's stop half a thickness short.
+        const ends = items.map((w) => Math.min(Math.hypot(w.slab!.a.x - at.x, w.slab!.a.y - at.y), Math.hypot(w.slab!.b.x - at.x, w.slab!.b.y - at.y)));
+        assert.deepEqual(ends.map(round).sort(), [0, 0, round(H), round(H)], name);
+      }
+      for (const turn of TURNS) {
+        const r = recorder();
+        for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn));
+        const lines = r.strokes.flatMap((st) => st.lines);
+        for (let i = 0; i < boxes.length; i++) {
+          for (let j = i + 1; j < boxes.length; j++) {
+            const shared = touching(boxes[i]!, boxes[j]!);
+            if (!shared) continue;
+            assert.equal(strokedAlong(lines, turn, shared[0], shared[1], 0.5), 0, `${name} turn ${turn}: a line across the caps where ${items[i]!.id} meets ${items[j]!.id}`);
+          }
+        }
+      }
+    }
+  });
+
+  test("at an L the corner's end face lies in one plane with the other slab's outer side: no upright line between them, and one texture laid across both from one origin (ISOWALL)", () => {
+    withCanvas(() => {
+      const stone = image();
+      let seen = 0;
+      // A free wall runs from the end it was drawn from, so an L of free walls can wind either way round its corner.
+      const free = (a: [number, number], b: [number, number], c: [number, number]) => {
+        const chunks: Record<string, BuildChunk> = {
+          "s1:0,0": {
+            sceneId: "s1",
+            cx: 0,
+            cy: 0,
+            rev: 1,
+            cells: {},
+            edges: {},
+            walls: [
+              { id: "w1xxxxxxxxxx", a, b, f: { kind: "wall" } },
+              { id: "w2xxxxxxxxxx", a: b, b: c, f: { kind: "wall" } },
+            ],
+          },
+        };
+        return wallItems({ ground: () => 0, detail: true }, wallPieces(sceneWalls(SCENE, chunks), ALL));
+      };
+      for (const [k1, k2, items] of [
+        ["5,5,n", "5,5,w", wallsOf({ "5,5,n": WALL, "5,5,w": WALL })],
+        ["5,5,n", "6,5,w", wallsOf({ "5,5,n": WALL, "6,5,w": WALL })],
+        ["5,6,n", "6,5,w", wallsOf({ "5,6,n": WALL, "6,5,w": WALL })],
+        ["5,6,n", "5,5,w", wallsOf({ "5,6,n": WALL, "5,5,w": WALL })],
+        ["free", "clockwise", free([3, 5], [5, 5], [5, 7])],
+        ["free", "back", free([5, 7], [5, 5], [3, 5])],
+        ["free", "up", free([5, 3], [5, 5], [3, 5])],
+      ] as const) {
+        // The two pieces that meet at the corner, a free wall being cut into a piece a cell.
+        const corner = k1 === "free" ? { x: 5, y: 5 } : null;
+        const pair = corner ? items.filter((w) => close({ x: w.piece.ax, y: w.piece.ay }, corner) || close({ x: w.piece.bx, y: w.piece.by }, corner)) : items;
+        assert.equal(pair.length, 2, `${k1} ${k2}`);
+        const boxes = pair.map(slabBox);
+        const all: Box = [Math.min(boxes[0]![0], boxes[1]![0]), Math.min(boxes[0]![1], boxes[1]![1]), Math.max(boxes[0]![2], boxes[1]![2]), Math.max(boxes[0]![3], boxes[1]![3])];
+        const shared = touching(boxes[0]!, boxes[1]!)!;
+        // Of the shared edge's two ends, the one on the corner's outside is where the end face meets the other's side.
+        const seam = shared.find((p) => [all[0], all[2]].some((v) => Math.abs(p.x - v) < 1e-9) || [all[1], all[3]].some((v) => Math.abs(p.y - v) < 1e-9))!;
+        for (const turn of TURNS) {
+          const r = recorder();
+          for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn, { stone }));
+          assert.ok(!uprights(r.strokes.flatMap((st) => st.lines)).includes(uprightAt(turn, seam, 0.5)), `${k1} ${k2} turn ${turn}: no line up the seam`);
+          // Sides whose tops run on along one line on screen lie in one plane: where two meet, their textures match.
+          const sides = r.fills.filter((f) => f.style === "baked" && (f.m as { m: number[] }).m[2] === 0);
+          for (let i = 0; i < sides.length; i++) {
+            for (let j = i + 1; j < sides.length; j++) {
+              const [a1, b1] = [sides[i]!.lines[0]![0]!, sides[i]!.lines[0]![1]!];
+              const [a2, b2] = [sides[j]!.lines[0]![0]!, sides[j]!.lines[0]![1]!];
+              const cross = (p: Pt) => (b1.x - a1.x) * (p.y - a1.y) - (b1.y - a1.y) * (p.x - a1.x);
+              if (Math.abs(cross(a2)) > 1e-9 || Math.abs(cross(b2)) > 1e-9 || ![a2, b2].some((p) => close(p, a1) || close(p, b1))) continue;
+              seen++;
+              const m1 = (sides[i]!.m as { m: number[] }).m.map(round);
+              const m2 = (sides[j]!.m as { m: number[] }).m.map(round);
+              assert.deepEqual(m1, m2, `${k1} ${k2} turn ${turn}: one texture across the corner`);
+            }
+          }
+        }
+      }
+      assert.ok(seen >= 7, `the corner's end face and the other's side both showing at some turn of each L: ${seen}`);
+    });
+  });
+
+  test("a free end and the end of an L's corner draw their end face in the stone, never a flat tone (ISOWALL)", () => {
+    withCanvas(() => {
+      const stone = image();
+      const cases: Record<string, EdgeFeature>[] = [{ "1,4,n": WALL }, { "5,5,n": WALL, "5,5,w": WALL }, { "3,4,n": WALL, "4,4,n": WALL, "4,4,w": WALL }];
+      for (const edges of cases) {
+        const items = wallsOf(edges);
+        for (const turn of TURNS) {
+          const r = recorder();
+          for (const w of [...items].sort((p, q) => keyOf(p, turn) - keyOf(q, turn))) drawRun(r.g, [w], dc(turn, { stone }));
+          const flat = r.fills.filter((f) => f.style !== "baked" && f.style !== theme.relief.lit && f.style !== theme.relief.shaded);
+          assert.deepEqual(flat, [], `${Object.keys(edges).join(" ")} turn ${turn}`);
+          // Every end face toward the viewer draws: one baked fill a face facing the viewer, and the caps.
+          const ends = items.flatMap((w) => [0, 1].filter((e) => w.slab!.face[e]).map((e) => ({ w, e })));
+          const facing = ends.filter(({ w, e }) => {
+            const s = w.slab!;
+            const out = e === 0 ? { x: s.a.x - s.b.x, y: s.a.y - s.b.y } : { x: s.b.x - s.a.x, y: s.b.y - s.a.y };
+            return depth(turn, out.x, out.y) > 1e-12;
+          });
+          const longs = items.length; // one long side of each slab faces the viewer on squares
+          assert.equal(r.fills.filter((f) => f.style === "baked").length, longs + facing.length + items.length, `${Object.keys(edges).join(" ")} turn ${turn}: sides, end faces and caps`);
+        }
+      }
+    });
+  });
+
+  test("a diagonal wall facing the viewer square takes one light along its whole length, however its pieces split (ISOWALL)", () => {
+    // Two free walls crossing, each cut into pieces at the crossing and at sub-cell lines.
+    const chunks: Record<string, BuildChunk> = {
+      "s1:0,0": {
+        sceneId: "s1",
+        cx: 0,
+        cy: 0,
+        rev: 1,
+        cells: {},
+        edges: {},
+        walls: [
+          { id: "w1xxxxxxxxxx", a: [2, 6], b: [6, 2], f: { kind: "wall" } },
+          { id: "w2xxxxxxxxxx", a: [2, 2], b: [6, 6], f: { kind: "wall" } },
+        ],
+      },
+    };
+    const items = wallItems({ ground: () => 0, detail: true }, wallPieces(sceneWalls(SCENE, chunks), ALL));
+    let square = 0;
+    for (const turn of TURNS) {
+      for (const id of ["w1", "w2"]) {
+        const lights = new Set<string>();
+        for (const w of items.filter((i) => i.piece.id.includes(id) && i.slab)) {
+          const r = recorder();
+          drawRun(r.g, [w], dc(turn));
+          // The long side square to the viewer: a face (its second edge upright, the wall's height) whose top runs level across the screen. Untextured, its tone holds its light.
+          for (const f of r.fills) {
+            const [a, b, c] = f.lines[0] ?? [];
+            if (a && b && c && Math.abs(b.x - c.x) < 1e-9 && Math.abs(c.y - b.y - K * WALL_RISE) < 1e-9 && Math.abs(a.y - b.y) < 1e-9 && Math.abs(a.x - b.x) > 0.2) lights.add(f.style);
+          }
+        }
+        assert.ok(lights.size <= 1, `${id} turn ${turn}: ${[...lights].join(" | ")}`);
+        square += lights.size;
+      }
+    }
+    assert.ok(square >= 4, "each wall square to the viewer at two turns");
   });
 
   test("property: every vertex a slab draws lies inside its bounds, which do not change with the detail, at every turn", () => {

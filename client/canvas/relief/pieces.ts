@@ -91,12 +91,26 @@ export type WallItem = { kind: "wall"; id: string; piece: WallPiece; base: numbe
  * (docs/design/design-v1-iso-depth.md 5.6): from `a` to `b` on the ground,
  * its line's ends moved along it as its neighbors say (slabOf), WALL_THICK
  * across and centered on its line. `face` says whether each end may show
- * its end face, and `line` whether the end's corners are stroked: neither
- * where the next slab of the wall carries on along the line. `lean` points
- * into the slab from the ends that stop at another slab's side, which
- * breaks its tie in depth with that slab (keyOf).
+ * its end face, and `line` whether the end's own edges are stroked: the
+ * cap's edge across it and its end face's top and foot. `upright` says, at
+ * each end, whether the upright edge at each long side's corner is
+ * stroked, and `gap` how far in from each end each long side's top and
+ * foot go unstroked, where a slab of the same height stands against that
+ * side: there the two read as one mass of stone. A long side's index is 0
+ * on the line's left, from `a` to `b` (the normal a quarter turn from the
+ * line, as slabCorners takes it), and 1 on its right. `lean` points into
+ * the slab from the ends that stop at another slab's side, which breaks
+ * its tie in depth with that slab (keyOf).
  */
-export type Slab = { a: Point; b: Point; face: readonly [boolean, boolean]; line: readonly [boolean, boolean]; lean: Point };
+export type Slab = {
+  a: Point;
+  b: Point;
+  face: readonly [boolean, boolean];
+  line: readonly [boolean, boolean];
+  upright: readonly [readonly [boolean, boolean], readonly [boolean, boolean]];
+  gap: readonly [readonly [number, number], readonly [number, number]];
+  lean: Point;
+};
 
 export type StaticPiece = CellPiece | WallItem;
 
@@ -679,18 +693,30 @@ function endIndex(src: Pick<PieceSource, "ground" | "painted">, near: readonly W
 const SLAB_HALF = WALL_THICK / 2;
 
 /**
- * A wall piece's slab (5.6, D-261102-888): each end by what meets it there.
+ * A wall piece's slab (5.6, D-261102-888, D-261127-136): each end by what
+ * meets it there.
  *
  * - The next slab of the wall along the line, with the same base and top:
- *   the two meet with no end face and no line between them.
+ *   the two meet with no end face and no line between them. A slab of the
+ *   same height standing against this one's side at the joint (a T's stem)
+ *   leaves that side's top and foot unstroked where it stands.
+ * - A crossing: the wall with the higher top, or the first by id, runs
+ *   through, and the other's two arms stop at its sides, as a T's stem does,
+ *   so no two slabs stand inside each other.
  * - A frame along the line: the slab stops at the post, which covers its end.
  * - A slab along the line of another height: it stops there, its end face showing.
  * - Two slabs through the end across it (a wall ending on another): it
  *   stops at their side, half a thickness short.
- * - One slab across it (a corner): the taller, or the first by id, carries
- *   on half a thickness over the corner and the other stops at its side, so
+ * - One slab across it (an L): the taller, or the first by id, carries on
+ *   half a thickness over the corner and the other stops at its side, so
  *   the corner shows no notch and neither slab stands inside the other.
  * - Nothing: it carries on half a thickness, so a free end looks square.
+ *
+ * Where two slabs of the same height meet square, the faces that lie in
+ * one plane (the corner slab's end and the other's outer side) and the
+ * caps that touch show no line between them, so an L, a T and a crossing
+ * read as one mass of stone. The upright in the inside corner keeps its
+ * line, as raised ground's does (5.1).
  *
  * Each slab sorts by its line's middle, a slab that stops short leaning
  * toward its own side of the slab it stops at (keyOf), so of two slabs
@@ -704,7 +730,12 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
   const uy = (p.by - p.ay) / len;
   const top = w.base + w.rise;
   const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
-  const endOf = (at: Point, out: Point): { shift: number; face: boolean; line: boolean } => {
+  const level = (q: EndEntry) => same(q.base, w.base) && same(q.top, top);
+  // The long side a direction leaves this slab by: 0 toward the line's left normal (-uy, ux), 1 toward its right.
+  const sideOf = (d: Point): 0 | 1 => (d.x * -uy + d.y * ux > 0 ? 0 : 1);
+  const square = (d: Point) => Math.abs(d.x * ux + d.y * uy) < 1e-6;
+  type End = { shift: number; face: boolean; line: boolean; upright: [boolean, boolean]; gap: [number, number] };
+  const endOf = (at: Point, out: Point): End => {
     const along: EndEntry[] = [];
     const across: EndEntry[] = [];
     for (const q of ends.get(endKey(at)) ?? []) {
@@ -718,29 +749,63 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
         if (qx * out.x + qy * out.y > 0) along.push(q);
       } else if (!q.framed) across.push(q);
     }
-    if (along.some((q) => !q.framed && same(q.base, w.base) && same(q.top, top))) return { shift: 0, face: false, line: false };
-    if (along.some((q) => q.framed)) return { shift: 0, face: false, line: true };
-    if (along.length > 0) return { shift: 0, face: true, line: true };
     const dirOf = (q: EndEntry) => {
       const l = Math.hypot(q.other.x - at.x, q.other.y - at.y);
       return { x: (q.other.x - at.x) / l, y: (q.other.y - at.y) / l };
     };
     // Two of them going on from here in opposite directions along one line.
-    const through = across.some((q, i) =>
-      across.some((r, j) => {
-        if (j <= i) return false;
-        const d = dirOf(q);
-        const e = dirOf(r);
-        return Math.abs(d.x * e.y - d.y * e.x) < 1e-6 && d.x * e.x + d.y * e.y < 0;
-      }),
-    );
-    if (through) return { shift: -1, face: true, line: true };
+    let through: [EndEntry, EndEntry] | null = null;
+    for (let i = 0; i < across.length && !through; i++) {
+      for (let j = i + 1; j < across.length; j++) {
+        const d = dirOf(across[i]!);
+        const e = dirOf(across[j]!);
+        if (Math.abs(d.x * e.y - d.y * e.x) < 1e-6 && d.x * e.x + d.y * e.y < 0) {
+          through = [across[i]!, across[j]!];
+          break;
+        }
+      }
+    }
+    // Stopping at the side of a wall that runs on through this end: in its plane where the two stand alike, the inside corners keep their lines.
+    const stop = (q: EndEntry, r: EndEntry): End =>
+      level(q) && level(r) && square(dirOf(q)) ? { shift: -1, face: false, line: false, upright: [true, true], gap: [0, 0] } : { shift: -1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+    const next = along.find((q) => !q.framed && level(q));
+    if (next) {
+      if (through) {
+        // A crossing: the higher wall, or the one whose first piece by id comes first, runs through.
+        const mine = { top, id: p.id < next.id ? p.id : next.id };
+        const theirs = { top: Math.max(through[0].top, through[1].top), id: through[0].id < through[1].id ? through[0].id : through[1].id };
+        const runs = mine.top > theirs.top + 1e-9 || (same(mine.top, theirs.top) && mine.id < theirs.id);
+        if (!runs) return stop(through[0], through[1]);
+      }
+      const gap: [number, number] = [0, 0];
+      for (const q of across) if (level(q) && square(dirOf(q))) gap[sideOf(dirOf(q))] = SLAB_HALF;
+      return { shift: 0, face: false, line: false, upright: [false, false], gap };
+    }
+    if (along.some((q) => q.framed)) return { shift: 0, face: false, line: true, upright: [true, true], gap: [0, 0] };
+    if (along.length > 0) return { shift: 0, face: true, line: true, upright: [true, true], gap: [0, 0] };
+    if (through) return stop(through[0], through[1]);
     if (across.length === 1) {
       const q = across[0]!;
+      const d = dirOf(q);
       const covers = top > q.top + 1e-9 || (same(top, q.top) && p.id < q.id);
-      return { shift: covers ? 1 : -1, face: true, line: true };
+      const plain = level(q) && square(d);
+      if (covers) {
+        if (!plain) return { shift: 1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+        // The corner's end face lies in one plane with the other slab's outer side, and the cap and the side toward it meet the other's.
+        const s = sideOf(d);
+        const upright: [boolean, boolean] = [true, true];
+        const gap: [number, number] = [0, 0];
+        upright[s] = false;
+        gap[s] = 2 * SLAB_HALF;
+        return { shift: 1, face: true, line: true, upright, gap };
+      }
+      if (!plain) return { shift: -1, face: true, line: true, upright: [true, true], gap: [0, 0] };
+      // This slab's side away from the other's run lies in one plane with the other's end face. The side toward it is the inside corner.
+      const upright: [boolean, boolean] = [true, true];
+      upright[sideOf({ x: -d.x, y: -d.y })] = false;
+      return { shift: -1, face: false, line: false, upright, gap: [0, 0] };
     }
-    return { shift: 1, face: true, line: true };
+    return { shift: 1, face: true, line: true, upright: [true, true], gap: [0, 0] };
   };
   const ea = endOf({ x: p.ax, y: p.ay }, { x: -ux, y: -uy });
   const eb = endOf({ x: p.bx, y: p.by }, { x: ux, y: uy });
@@ -753,5 +818,7 @@ function slabOf(w: WallItem, ends: EndIndex): Slab | null {
     b: { x: p.bx + ux * eb.shift * SLAB_HALF, y: p.by + uy * eb.shift * SLAB_HALF },
     face: [ea.face, eb.face],
     line: [ea.line, eb.line],
+    upright: [ea.upright, eb.upright],
+    gap: [ea.gap, eb.gap],
   };
 }

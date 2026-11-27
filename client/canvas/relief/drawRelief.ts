@@ -1006,7 +1006,7 @@ function strokeFaces(g: CanvasRenderingContext2D, faces: readonly SideShape[], p
 /** A pillar's radius in cells, as the builder draws its disc (builder/draw.ts pillarPaths). */
 const PILLAR_RADIUS = 0.36;
 
-/** A standing pillar: a stone drum on its cell, its side lit from the left, its top in the pillar's swatch. */
+/** A standing pillar: a stone drum on its cell, its side lit from the left, its top capped as a wall's is. */
 function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   const view = isometric(dc.turn);
   const center = { x: w.piece.ax + 0.5, y: w.piece.ay + 0.5 };
@@ -1044,7 +1044,8 @@ function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): 
   g.stroke();
   g.beginPath();
   g.ellipse(top.x, top.y, rx, ry, 0, 0, Math.PI * 2);
-  g.fillStyle = TERRAIN_SWATCHES.pillar;
+  // Its top in the walls' lighter stone, so a pillar meets the walls beside it as one stonework (D-261127-139).
+  capStyle(g, w.base + w.rise, dc);
   g.fill();
   g.stroke();
 }
@@ -1076,17 +1077,30 @@ function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext)
   fillSide(g, a, b, h, door ? WOOD : STONE, a.x < b.x === a.y > b.y, dc, door ? theme.relief.doorStain : w.piece.kind === "wall" ? theme.relief.wallTint : null);
 }
 
-/** A slab as it draws at a turn: its faces toward the viewer, which of them are its narrow ends, its cap, and its outline. */
-type SlabShape = { faces: readonly { face: SideShape; end: boolean }[]; cap: readonly Pt[]; capPath: Path2D | null; lines: readonly (readonly Pt[])[]; outline: Path2D | null };
+/** A slab as it draws at a turn: its faces toward the viewer, its cap, and its outline. */
+type SlabShape = { faces: readonly SideShape[]; cap: readonly Pt[]; capPath: Path2D | null; lines: readonly (readonly Pt[])[]; outline: Path2D | null };
 
 const slabShapes = new WeakMap<WallItem, (SlabShape | undefined)[]>();
+
+/**
+ * Whether a box's face, facing out along `nx, ny` on the ground, takes the
+ * light from the left. A face turned square to the viewer, as a diagonal
+ * wall's can be, takes it too: deciding it by its middle's place would
+ * light the pieces of one wall by rounding, some lit and some shaded.
+ */
+function litFrom(turn: Turn, nx: number, ny: number): boolean {
+  const { c, s } = turnAxes(turn);
+  return c * nx - s * ny < 1e-9;
+}
 
 /**
  * A wall slab's drawing at a turn (docs/design/design-v1-iso-depth.md 5.6),
  * kept with the item as a cell's shape is: its two long sides and two ends,
  * of which those facing the viewer draw, never overlapping one another on
- * screen, then its cap. An end where the wall carries on along its line
- * shows no face and no line (pieces.ts slabOf).
+ * screen, then its cap. Its outline follows pieces.ts slabOf: an end where
+ * the wall carries on along its line shows no face and no line, and where
+ * another slab of its height stands against it the edges they share go
+ * unstroked, so the two read as one mass.
  */
 function slabShapeOf(w: WallItem, turn: Turn): SlabShape {
   let byTurn = slabShapes.get(w);
@@ -1096,61 +1110,96 @@ function slabShapeOf(w: WallItem, turn: Turn): SlabShape {
   const slab = w.slab!;
   const view = isometric(turn);
   const paths = typeof Path2D === "function";
-  const { c, s } = turnAxes(turn);
   const z0 = w.base;
   const z1 = w.base + w.rise;
-  // Round the slab from its `a` end's first corner: a long side, the `b` end, the other long side, the `a` end.
+  // Round the slab from its `a` end's first corner: the left long side, the `b` end, the right long side, the `a` end.
   const corners = slabCorners(slab.a, slab.b, WALL_THICK / 2, 0);
-  const endAt = [0, 1, 1, 0] as const;
+  const len = Math.hypot(slab.b.x - slab.a.x, slab.b.y - slab.a.y) || 1;
+  const ux = (slab.b.x - slab.a.x) / len;
+  const uy = (slab.b.y - slab.a.y) / len;
   const mid = { x: (slab.a.x + slab.b.x) / 2, y: (slab.a.y + slab.b.y) / 2 };
-  const midU = c * mid.x - s * mid.y;
-  const faces: { face: SideShape; end: boolean }[] = [];
+  const faces: SideShape[] = [];
   const lines: Pt[][] = [];
+  // Each long side's top and foot, with the stretch at each end a slab of the same height stands against left out: its ring from corner to corner, and which of its edges are stroked.
+  const [c0, c1, c2, c3] = corners as [Pt, Pt, Pt, Pt];
+  const step = (p: Pt, d: number): Pt => ({ x: p.x + ux * d, y: p.y + uy * d });
+  const left = [c0, step(c0, slab.gap[0][0]), step(c1, -slab.gap[1][0]), c1];
+  const right = [c2, step(c2, -slab.gap[1][1]), step(c3, slab.gap[0][1]), c3];
+  const kept3 = (g0: number, g1: number) => [!(g0 > 0), true, !(g1 > 0)];
   for (let i = 0; i < 4; i++) {
     const a = corners[i]!;
     const b = corners[(i + 1) % 4]!;
     const end = i % 2 === 1;
-    if (end && !slab.face[endAt[i]!]) continue;
+    const at = i === 1 ? 1 : 0;
+    if (end && !slab.face[at]) continue;
     // Outward from the slab's middle, so the corners' winding does not matter.
     if (depth(turn, (a.x + b.x) / 2 - mid.x, (a.y + b.y) / 2 - mid.y) <= 1e-12) continue;
-    const face = sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0, z1, left: c * ((a.x + b.x) / 2) - s * ((a.y + b.y) / 2) < midU, side: -1 }, paths);
-    faces.push({ face, end });
-    lines.push(...faceLines(face, slab.line[endAt[i]!], slab.line[endAt[(i + 1) % 4]!]));
+    // Every slab winds the same way round, so sides in one plane run the same way and lay their texture from one origin (fillSide `along`).
+    faces.push(sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0, z1, left: litFrom(turn, (a.x + b.x) / 2 - mid.x, (a.y + b.y) / 2 - mid.y), side: -1 }, paths));
+    // The face's top runs with the cap's ring below. Here its foot, back the other way, and the uprights at its ends.
+    const top = (pt: Pt) => toView(view, pt, z1);
+    const foot = (pt: Pt) => toView(view, pt, z0);
+    if (end) {
+      const up = slab.upright[at];
+      // The `b` end runs from the left side's corner to the right's, the `a` end from the right's to the left's.
+      const [ua, ub] = at === 1 ? [up[0], up[1]] : [up[1], up[0]];
+      lines.push(...ringLines([top(a), top(b), foot(b), foot(a)], [false, ub, slab.line[at], ua]));
+      continue;
+    }
+    const side = i === 0 ? left : right;
+    const [g0, g1] = i === 0 ? [slab.gap[0][0], slab.gap[1][0]] : [slab.gap[1][1], slab.gap[0][1]];
+    const [ua, ub] = i === 0 ? [slab.upright[0][0], slab.upright[1][0]] : [slab.upright[1][1], slab.upright[0][1]];
+    const ring = [...side.map(top), ...[...side].reverse().map(foot)];
+    lines.push(...ringLines(ring, [false, false, false, ub, ...kept3(g1, g0), ua]));
   }
   const cap = lifted(turn, corners, z1);
-  lines.push(...ringLines(cap, [true, slab.line[1], true, slab.line[0]]));
+  const ring = lifted(turn, [...left, ...right], z1);
+  lines.push(...ringLines(ring, [...kept3(slab.gap[0][0], slab.gap[1][0]), slab.line[1], ...kept3(slab.gap[1][1], slab.gap[0][1]), slab.line[0]]));
   const shape = { faces, cap, capPath: paths ? polyPath(new Path2D(), cap) : null, lines, outline: paths ? linesPath(new Path2D(), lines) : null };
   byTurn[turn] = shape;
   return shape;
 }
 
 /**
- * A wall slab (5.6): its long sides in stone with the wall's tint baked in
- * and the light from the left, its narrow ends in one flat lit or shaded
- * tone a face, since 0.14 cell of stone shows no texture, its cap lighter,
- * and its outline in one stroke.
+ * A cap's fill (D-261127-137): the stone laid flat on the ground plane from
+ * the world's origin at the cap's height, so caps that meet show one
+ * texture with no seam, baked lighter than the sides so a wall's top reads
+ * against the floor or map behind it, else its flat tone.
+ */
+function fillCap(g: CanvasRenderingContext2D, pts: readonly Pt[], path: Path2D | null, z: number, dc: DrawContext): void {
+  capStyle(g, z, dc);
+  if (!path) {
+    g.beginPath();
+    addPoly(g, pts);
+  }
+  fillWith(g, path);
+}
+
+/** Sets the fill to a cap's lighter stone at height `z` (fillCap). */
+function capStyle(g: CanvasRenderingContext2D, z: number, dc: DrawContext): void {
+  const img = dc.textures.stone;
+  const baked = img && img.naturalWidth > 0 ? tintedPatternOf(g, img, theme.relief.wallCap) : null;
+  if (!baked || !img) {
+    g.fillStyle = blended(TERRAIN_COLORS.stone, theme.relief.wallCap) ?? TERRAIN_COLORS.stone;
+    return;
+  }
+  const { c, s } = turnAxes(dc.turn);
+  const k = TEXTURE_CELLS / img.naturalWidth;
+  // Texture pixels to the ground plane, then to view units, as toView takes a world point at height z.
+  baked.setTransform(new DOMMatrix([c * k, (s * k) / 2, -s * k, (c * k) / 2, 0, -K * z]));
+  g.fillStyle = baked;
+}
+
+/**
+ * A wall slab (5.6): every face toward the viewer in stone with the wall's
+ * tint baked in and the light from its direction, its narrow ends as its
+ * long sides (D-261127-136), its cap in lighter stone (fillCap), and its
+ * outline in one stroke.
  */
 function drawSlab(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   const shape = slabShapeOf(w, dc.turn);
-  const stone = blended(TERRAIN_COLORS.stone, theme.relief.wallTint) ?? TERRAIN_COLORS.stone;
-  for (const { face: f, end } of shape.faces) {
-    if (!end) {
-      fillSide(g, f.a, f.b, f.h, STONE, f.left, dc, theme.relief.wallTint, false, f.path, f.along);
-      continue;
-    }
-    g.fillStyle = blended(stone, f.left ? theme.relief.lit : theme.relief.shaded) ?? stone;
-    if (!f.path) {
-      g.beginPath();
-      addSide(g, f.a, f.b, f.h);
-    }
-    fillWith(g, f.path);
-  }
-  g.fillStyle = blended(stone, theme.relief.lit) ?? stone;
-  if (!shape.capPath) {
-    g.beginPath();
-    addPoly(g, shape.cap);
-  }
-  fillWith(g, shape.capPath);
+  for (const f of shape.faces) fillSide(g, f.a, f.b, f.h, STONE, f.left, dc, theme.relief.wallTint, false, f.path, f.along);
+  fillCap(g, shape.cap, shape.capPath, w.base + w.rise, dc);
   if (!shape.outline) {
     g.beginPath();
     linesPath(g, shape.lines);
@@ -1159,7 +1208,7 @@ function drawSlab(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): vo
 }
 
 /** One box of a door's frame as it draws at a turn: its faces toward the viewer, its cap, and their outline as one path. */
-type PartShape = { look: FramePart["look"]; faces: readonly SideShape[]; cap: readonly Pt[] | null; capPath: Path2D | null; outline: Path2D | null };
+type PartShape = { look: FramePart["look"]; z1: number; faces: readonly SideShape[]; cap: readonly Pt[] | null; capPath: Path2D | null; outline: Path2D | null };
 
 const frameShapes = new WeakMap<WallItem, (readonly PartShape[] | undefined)[]>();
 
@@ -1176,7 +1225,6 @@ function frameShapeOf(w: WallItem, turn: Turn): readonly PartShape[] {
   if (kept) return kept;
   const view = isometric(turn);
   const paths = typeof Path2D === "function";
-  const { c, s } = turnAxes(turn);
   const parts = frameParts(w).map((q) => {
     const corners = partCorners(q);
     const mid = { x: corners.reduce((m, p) => m + p.x, 0) / 4, y: corners.reduce((m, p) => m + p.y, 0) / 4 };
@@ -1184,12 +1232,11 @@ function frameShapeOf(w: WallItem, turn: Turn): readonly PartShape[] {
   });
   parts.sort((p, r) => sortKey(turn, p.mid.x, p.mid.y) - sortKey(turn, r.mid.x, r.mid.y));
   const shapes = parts.map(({ q, corners, mid }): PartShape => {
-    const midU = c * mid.x - s * mid.y;
-    const faceOf = (a: Pt, b: Pt): SideShape => sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0: q.z0, z1: q.z1, left: c * ((a.x + b.x) / 2) - s * ((a.y + b.y) / 2) < midU, side: -1 }, paths);
+    const faceOf = (a: Pt, b: Pt): SideShape => sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0: q.z0, z1: q.z1, left: litFrom(turn, (a.x + b.x) / 2 - mid.x, (a.y + b.y) / 2 - mid.y), side: -1 }, paths);
     if (q.thick === 0) {
       const face = faceOf(q.a, q.b);
       // A pane facing the viewer's left reads lighter, as a wall plane does.
-      return { look: q.look, faces: [{ ...face, left: face.a.x < face.b.x === face.a.y > face.b.y }], cap: null, capPath: null, outline: face.path };
+      return { look: q.look, z1: q.z1, faces: [{ ...face, left: face.a.x < face.b.x === face.a.y > face.b.y }], cap: null, capPath: null, outline: face.path };
     }
     const faces: SideShape[] = [];
     for (let i = 0; i < 4; i++) {
@@ -1205,7 +1252,7 @@ function frameShapeOf(w: WallItem, turn: Turn): readonly PartShape[] {
       for (const f of faces) sidePath(outline, f.a, f.b, f.h);
       polyPath(outline, cap);
     }
-    return { look: q.look, faces, cap, capPath: paths ? polyPath(new Path2D(), cap) : null, outline };
+    return { look: q.look, z1: q.z1, faces, cap, capPath: paths ? polyPath(new Path2D(), cap) : null, outline };
   });
   byTurn[turn] = shapes;
   return shapes;
@@ -1215,32 +1262,23 @@ const STONE: SideLook = { texture: "stone", color: TERRAIN_COLORS.stone };
 const WOOD: SideLook = { texture: "wood", color: TERRAIN_COLORS.wood };
 
 /**
- * A door's or window's share of its frame (5.5): stone posts in one flat
- * tone a face, since a post 0.15 cell wide shows no texture, a closed or
- * open leaf in stained wood, the stain baked into the wood's pattern
- * (D-261102-922), a window's half-clear pane, each box's caps lit, and
- * every box outlined at once.
+ * A door's or window's share of its frame (5.5): stone posts in the walls'
+ * own stone, tint and light, capped as a wall is (D-261127-138), a closed
+ * or open leaf in stained wood, the stain baked into the wood's pattern
+ * (D-261102-922), a window's half-clear pane, a leaf's cap lit, and every
+ * box outlined at once.
  */
 function drawFrame(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   const unit = 1 / (dc.camera.scale * dc.pixelRatio);
-  const stone = blended(TERRAIN_COLORS.stone, theme.relief.wallTint) ?? TERRAIN_COLORS.stone;
   const stained = blended(TERRAIN_COLORS.wood, theme.relief.doorStain) ?? TERRAIN_COLORS.wood;
   for (const part of frameShapeOf(w, dc.turn)) {
     for (const f of part.faces) {
-      if (part.look === "post") {
-        g.fillStyle = blended(stone, f.left ? theme.relief.lit : theme.relief.shaded) ?? stone;
-        if (!f.path) {
-          g.beginPath();
-          addSide(g, f.a, f.b, f.h);
-        }
-        fillWith(g, f.path);
-      } else {
-        fillSide(g, f.a, f.b, f.h, part.look === "leaf" ? WOOD : { texture: null, color: theme.relief.pane }, part.look === "leaf" ? f.left : null, dc, part.look === "leaf" ? theme.relief.doorStain : null, false, f.path, f.along);
-      }
+      if (part.look === "post") fillSide(g, f.a, f.b, f.h, STONE, f.left, dc, theme.relief.wallTint, false, f.path, f.along);
+      else fillSide(g, f.a, f.b, f.h, part.look === "leaf" ? WOOD : { texture: null, color: theme.relief.pane }, part.look === "leaf" ? f.left : null, dc, part.look === "leaf" ? theme.relief.doorStain : null, false, f.path, f.along);
     }
-    if (part.cap) {
-      const base = part.look === "post" ? stone : stained;
-      g.fillStyle = blended(base, theme.relief.lit) ?? base;
+    if (part.cap && part.look === "post") fillCap(g, part.cap, part.capPath, part.z1, dc);
+    else if (part.cap) {
+      g.fillStyle = blended(stained, theme.relief.lit) ?? stained;
       if (!part.capPath) {
         g.beginPath();
         addPoly(g, part.cap);

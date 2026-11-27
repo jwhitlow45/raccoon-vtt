@@ -519,6 +519,8 @@ export const theme = {
     /** A wall's stone, pulled toward the builder's wall color, and a pillar's toward its swatch. */
     wallTint: "rgba(21, 18, 15, 0.35)",
     pillarTint: "rgba(143, 137, 126, 0.3)",
+    /** A wall's and a frame's top: the same stone, lighter, so it reads against the floor or map behind it. */
+    wallCap: "rgba(225, 218, 205, 0.3)",
     /** A window's pane, half opaque. */
     pane: "rgba(160, 210, 245, 0.5)",
     /** A door leaf's stain over its wood, so a door reads against a wood floor. */
