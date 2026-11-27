@@ -61,23 +61,26 @@ export function PartyEditor(props: { party: PartyGroup[] | null; roomParty: Retu
       {party.map((g, i) => (
         <div key={i} ref={i === 0 ? rows : undefined} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
           <Stepper label="Characters" value={g.count} step={1} min={1} max={LIMITS.charactersPerRoom} onChange={(count) => props.onChange(setGroup(party, i, { ...g, count }, LIMITS.charactersPerRoom))} />
-          <div style={{ flex: "1 1 120px", display: "flex" }}>
-            <Select
-              aria-label="Their level"
-              value={String(g.level)}
-              onChange={(e) => props.onChange(setGroup(party, i, { ...g, level: Number(e.target.value) }, LIMITS.charactersPerRoom))}
-              style={{ flex: 1, maxWidth: "100%" }}
-            >
-              {LEVEL_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
+          {/* The level and its Remove wrap together, so on a narrow column Remove never stands alone under them. */}
+          <div style={{ flex: "1 1 208px", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
+            <div style={{ flex: "1 1 120px", display: "flex", minWidth: 0 }}>
+              <Select
+                aria-label="Their level"
+                value={String(g.level)}
+                onChange={(e) => props.onChange(setGroup(party, i, { ...g, level: Number(e.target.value) }, LIMITS.charactersPerRoom))}
+                style={{ flex: 1, maxWidth: "100%" }}
+              >
+                {LEVEL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Button variant="danger" size="sm" aria-label="Remove this level" title="Remove this level" onClick={() => props.onChange(party.filter((_, j) => j !== i))}>
+              Remove
+            </Button>
           </div>
-          <Button variant="danger" size="sm" aria-label="Remove this level" title="Remove this level" onClick={() => props.onChange(party.filter((_, j) => j !== i))}>
-            Remove
-          </Button>
         </div>
       ))}
       {party.length === 0 ? <Help>No characters: add a level for the budget.</Help> : null}
