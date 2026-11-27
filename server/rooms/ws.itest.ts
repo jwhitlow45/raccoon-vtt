@@ -228,8 +228,7 @@ describe("websocket: hello, ops and acks", () => {
       (await t.pool.query<{ fresh: boolean }>("select last_seen_at > now() - interval '1 minute' as fresh from sessions where token_hash = $1", [hash])).rows[0]?.fresh;
     assert.equal(await fresh(), false);
     s.close();
-    for (let i = 0; i < 100 && !(await fresh()); i++) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(await fresh(), true, "last seen is the moment the socket closed");
+    await until(async () => (await fresh()) === true, "last seen stamped at the moment the socket closed");
     assert.equal((await devices())[0]?.online, false);
   });
 
@@ -837,8 +836,7 @@ describe("websocket: refusals kept for a snapshot (RESYNC-REFUSAL-LOST)", () => 
 
   /** Until the client's watermark is stored at `n`, as the commit of the batch that settles `n` stores it. */
   async function committed(e: Engine, roomId: string, clientId: string, n: number): Promise<void> {
-    for (let i = 0; i < 500 && (await storedAt(e, roomId, clientId)) < n; i++) await new Promise((r) => setTimeout(r, 10));
-    assert.ok((await storedAt(e, roomId, clientId)) >= n, `client ${clientId} stored ${n}`);
+    await until(async () => (await storedAt(e, roomId, clientId)) >= n, `client ${clientId} stored at ${n}`);
   }
 
   /** The frames just ahead of the socket's newest snapshot, and that snapshot. */
