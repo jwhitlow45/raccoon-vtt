@@ -40,13 +40,16 @@ export function PartyEditor(props: { party: PartyGroup[] | null; roomParty: Retu
     const size = partySize(roomParty.groups);
     return (
       <>
-        <Help>The room's characters{size > 0 ? `: ${groupsText(roomParty.groups)}` : ""}.</Help>
-        {roomParty.unleveled.length > 0 ? (
-          <Notice>
-            The budget leaves out {listText(roomParty.unleveled)}, who {roomParty.unleveled.length === 1 ? "has" : "have"} no level yet. Set one on {roomParty.unleveled.length === 1 ? "the" : "each"} character's card, or edit the party here.
-          </Notice>
-        ) : null}
-        {size === 0 && roomParty.unleveled.length === 0 ? <Help>This room has no characters yet. Edit the party to budget for one.</Help> : null}
+        {/* The lines are one block above Edit the party, so the notice is the only painted row among them and its fill, not its words, meets the column's edge. */}
+        <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
+          <Help>The room's characters{size > 0 ? `: ${groupsText(roomParty.groups)}` : ""}.</Help>
+          {roomParty.unleveled.length > 0 ? (
+            <Notice>
+              The budget leaves out {listText(roomParty.unleveled)}, who {roomParty.unleveled.length === 1 ? "has" : "have"} no level yet. Set one on {roomParty.unleveled.length === 1 ? "the" : "each"} character's card, or edit the party here.
+            </Notice>
+          ) : null}
+          {size === 0 && roomParty.unleveled.length === 0 ? <Help>This room has no characters yet. Edit the party to budget for one.</Help> : null}
+        </div>
         <Button size="sm" onClick={() => props.onChange(roomParty.groups.length > 0 ? roomParty.groups : [{ count: Math.max(1, roomParty.unleveled.length), level: 1 }])}>
           Edit the party
         </Button>
