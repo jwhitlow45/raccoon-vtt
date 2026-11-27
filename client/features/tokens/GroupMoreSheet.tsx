@@ -10,7 +10,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ImageField } from "../images/ImageField.tsx";
 import { MoveToFloorList, useOffersMoveToFloor } from "./MoveToFloor.tsx";
-import { ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
+import { imageOps, ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
 import { resizeGroup } from "./resize.ts";
 import { growthsSlot } from "./resizeMemory.ts";
 import { SheetDialog } from "./SheetDialog.tsx";
@@ -38,8 +38,9 @@ const HP_VISIBILITY: { value: HpVisibility; label: string }[] = [
  * The group action bar's More (docs/design/design-v1-dm-tools.md 3.5), the DM's:
  * what makes sense to set alike on every selected token. Each control
  * shows the value all of them share, or that they differ, and a change is
- * one `token.updateMany` for all of them, one undo step, but for the size,
- * one resize patch each in one gesture. Names, notes,
+ * one `token.updateMany` for all of them, one undo step, but for the size
+ * and the image, one patch each in one gesture, so each keeps its own
+ * middle, picture and 3D model where the change keeps them. Names, notes,
  * numbers and places stay per creature, in each token's own panel.
  */
 export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): void; opener: RefObject<HTMLElement | null> }) {
@@ -76,6 +77,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
   const size = shared(tokens, (t) => t.size);
   const layer = shared(tokens, (t) => t.layer);
   const { same: sameImages, image } = sharedImage(tokens);
+  const images = useMemo(() => tokens.map((t) => t.image), [tokens]);
   const roster = useMemo(
     () => Object.values(members ?? {}).sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "player" ? -1 : 1)),
     [members],
@@ -119,7 +121,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
           />
         </FieldRow>
         <FieldRow label="Image" hint={sameImages ? undefined : "They differ. A new one goes on all of them."}>
-          <ImageField value={image} onChange={(next) => patch({ image: next })} shape="circle" aspect={1} canEdit />
+          <ImageField value={image} onChange={() => {}} group={{ images, onEach: (change) => send(imageOps(tokens, change)) }} shape="circle" aspect={1} canEdit />
         </FieldRow>
       </Section>
       <Section title="Player view">

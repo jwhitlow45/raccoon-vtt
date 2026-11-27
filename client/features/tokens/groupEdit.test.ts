@@ -1,12 +1,15 @@
 import "../../lib/testing/touchDevice.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState } from "#shared/model.ts";
+import { keepModel, withoutModel } from "#shared/imageRef.ts";
+import type { ImageRef, ModelRef, RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, character, DM, entry, env, P1, room, token } from "#shared/testutil.ts";
+import { dispatchGesture } from "../../state/actions.ts";
+import { wearing } from "../models/session.ts";
 import {
   conditionLit,
   conditionOps,
@@ -19,6 +22,7 @@ import {
   flagPatch,
   groupCreatures,
   groupOffers,
+  imageOps,
   ownerOps,
   ownersLit,
   sharedElevation,
@@ -234,5 +238,59 @@ describe("the group's other edits", () => {
     assert.deepEqual(sharedImage([{ image: icon }, { image: { ...icon } }]), { same: true, image: icon });
     assert.deepEqual(sharedImage([{ image: icon }, {}]), { same: false, image: undefined });
     assert.deepEqual(sharedImage([{ image: icon }, { image: { ...icon, color: "#3e8ef7" } }]), { same: false, image: undefined });
+  });
+});
+
+describe("a group's image changes with 3D models (docs/design/design-v1-token-models.md 3.4)", () => {
+  const model = (assetId: string): ModelRef => ({ assetId, side: 1.4, anchorY: 0.8, boxes: Array.from({ length: 8 }, (): [number, number, number, number] => [20, 10, 80, 95]) });
+  const face = (assetId: string, sheet?: string): ImageRef => ({ assetId, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, ...(sheet ? { model: model(sheet) } : {}) });
+  function group(): RoomState {
+    return room({
+      tokens: {
+        a: token("a", { name: "Goblin", image: face("goblin", "goblin-sheet") }),
+        b: token("b", { name: "Wolf", image: { icon: "lorc/wolf-head", color: "#336699", model: model("wolf-sheet") } }),
+        c: token("c", { name: "Orc", image: face("orc") }),
+        d: token("d", { name: "Bat" }),
+      },
+    });
+  }
+  const tokens = (state: RoomState) => ["a", "b", "c", "d"].map((id) => state.tokens[id]!);
+
+  test("3D model goes on each token's own picture, a token with none taking the front view, one token.update each in one undo step", () => {
+    const state = group();
+    const front = face("front");
+    const ops = imageOps(tokens(state), (current) => wearing(current, model("new-sheet"), front));
+    assert.deepEqual(ops.map((op) => (op.t === "token.update" ? op.tokenId : op.t)), ["a", "b", "c", "d"]);
+    const sent: { op: ClientOp; group?: string }[] = [];
+    let ids = 0;
+    dispatchGesture({ dispatch: (op, opts) => (sent.push({ op, ...(opts?.group ? { group: opts.group } : {}) }), sent.length), newId: () => `g${++ids}` }, ops);
+    assert.deepEqual(new Set(sent.map((s) => s.group)), new Set(["g1"]), "one gesture, one undo step");
+    const after = applyAll(state, ops);
+    assert.deepEqual(after.tokens.a!.image, face("goblin", "new-sheet"));
+    assert.deepEqual(after.tokens.b!.image, { icon: "lorc/wolf-head", color: "#336699", model: model("new-sheet") });
+    assert.deepEqual(after.tokens.c!.image, face("orc", "new-sheet"));
+    assert.deepEqual(after.tokens.d!.image, face("front", "new-sheet"));
+  });
+
+  test("Change image keeps each token's own model, and one already wearing the result is left alone", () => {
+    const state = group();
+    const next = face("hooded");
+    const after = applyAll(state, imageOps(tokens(state), (current) => keepModel(next, current)));
+    assert.deepEqual(after.tokens.a!.image, face("hooded", "goblin-sheet"));
+    assert.deepEqual(after.tokens.b!.image, face("hooded", "wolf-sheet"));
+    assert.deepEqual(after.tokens.c!.image, face("hooded"));
+    assert.deepEqual(after.tokens.d!.image, face("hooded"));
+    assert.deepEqual(imageOps(tokens(after), (current) => keepModel(next, current)), [], "nothing changes a second time");
+  });
+
+  test("Remove model takes each one's off and keeps each picture, and Remove takes both off every token with an image", () => {
+    const state = group();
+    const ops = imageOps(tokens(state), (current) => (current ? withoutModel(current) : null));
+    assert.deepEqual(ops.map((op) => (op.t === "token.update" ? op.tokenId : op.t)), ["a", "b"], "only those with a model change");
+    const after = applyAll(state, ops);
+    assert.deepEqual([after.tokens.a!.image, after.tokens.b!.image, after.tokens.c!.image], [face("goblin"), { icon: "lorc/wolf-head", color: "#336699" }, face("orc")]);
+    const removed = applyAll(state, imageOps(tokens(state), () => null));
+    assert.deepEqual(["a", "b", "c", "d"].map((id) => removed.tokens[id]!.image), [undefined, undefined, undefined, undefined]);
+    assert.equal(imageOps(tokens(state), () => null).length, 3, "the token with no image sends nothing");
   });
 });

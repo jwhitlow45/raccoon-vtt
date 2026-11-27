@@ -150,6 +150,23 @@ export function shownRowOps(fight: FightRows | null | undefined, tokenIds: reado
     .map((entry): ClientOp => ({ t: "encounter.update", entryId: entry.id, patch: { hidden: false } }));
 }
 
+/**
+ * An image change in the group edit sheet (docs/design/design-v1-token-models.md
+ * 3.4, D-261127-417): one `token.update` per token whose image it changes,
+ * each worked out from that token's own image, so each keeps its own
+ * picture or 3D model where the change keeps them, which one patch for
+ * all could not. The caller sends them as one gesture, one undo step.
+ */
+export function imageOps(tokens: readonly Pick<Token, "id" | "image">[], change: (current: ImageRef | undefined) => ImageRef | null): ClientOp[] {
+  const ops: ClientOp[] = [];
+  for (const t of tokens) {
+    const image = change(t.image);
+    if (image === null ? t.image === undefined : sameImage(image, t.image)) continue;
+    ops.push({ t: "token.update", tokenId: t.id, patch: { image } });
+  }
+  return ops;
+}
+
 /** One patch for every token: one `token.updateMany` per 100. */
 export function updateManyOps(tokenIds: readonly string[], patch: TokenGroupPatch): ClientOp[] {
   return chunks(tokenIds, LIMITS.tokensPerManyOp).map((part): ClientOp => ({ t: "token.updateMany", tokenIds: part, patch }));
