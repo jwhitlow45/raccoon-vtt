@@ -371,3 +371,25 @@ describe("a planned wing passes the server's checks on its base", () => {
     assert.equal(checked, 144);
   });
 });
+
+test("DSTOCK: a stocked wing on a group near 500 tokens stocks within what is left less its stones, and lands", async () => {
+  const { loadMonsters } = await import("#shared/srd/monsters.ts");
+  const { stockPool } = await import("./stockPools.ts");
+  const pool = stockPool(await loadMonsters(), "dungeon", { srdImages: {} });
+  for (const base of [squareWingBase(), hexWingBase().base]) {
+    for (const tokensLeft of [500, 6, 3]) {
+      const stock = { choices: { monsters: 100, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool, tokensLeft };
+      const preview = wingPreviewOf({ ...WING_SETTINGS, theme: "dungeon" }, SEED, base, { feetPerCell: 5 }, keyFor(base), null, stock);
+      assert.ok(preview.ok, `${tokensLeft} left`);
+      const placed = preview.plan.monsters ?? [];
+      const capacity = Math.min(40, tokensLeft - preview.plan.stones.length);
+      const claims = preview.facts.filter((f) => f.monsters?.on).length;
+      if (claims <= capacity) assert.ok(placed.length <= capacity, `${placed.length} creatures within ${capacity}`);
+      assert.ok(placed.length > 0, "the wing is stocked");
+      const own = new Set(Object.keys(base.state.tokens));
+      const landed = Object.values(preview.room.tokens).filter((t) => t && !own.has(t.id) && t.kind === "monster");
+      assert.equal(landed.length, placed.length);
+      assert.ok(landed.every((t) => t!.visibility === "dm"));
+    }
+  }
+});

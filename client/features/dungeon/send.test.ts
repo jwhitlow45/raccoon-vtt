@@ -517,3 +517,28 @@ describe("a dungeon floor's key after its create", () => {
     assert.equal(sentAtOnce, m.ops.length);
   });
 });
+
+test("DSTOCK: a stocked creature the DM dragged or showed while the check waits still matches, and one gone or another does not", async () => {
+  const { loadMonsters } = await import("#shared/srd/monsters.ts");
+  const { stockPool } = await import("./stockPools.ts");
+  const stock = { choices: { monsters: 50, difficulty: "moderate" as const }, party: [{ count: 4, level: 3 }], pool: stockPool(await loadMonsters(), "dungeon", { srdImages: {} }), tokensLeft: 500 };
+  const preview = previewOf(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()), DEFAULT_CONTEXT, handKey(), undefined, null, stock);
+  assert.ok(preview.ok && (preview.plan.monsters?.length ?? 0) > 0);
+  let id = 0;
+  const fresh = withIds(preview.ops, () => `fresh-${++id}`);
+  const stored = landAll(scratchRoom(), fresh.ops);
+  assert.ok(stored.ok);
+  const scratchId = Object.keys(preview.room.scenes)[0]!;
+  const ours = sceneContents(preview.room, scratchId, madeIds(fresh.ids));
+  assert.equal(sceneContents(stored.room, fresh.sceneId), ours);
+  const creature = Object.values(stored.room.tokens).find((t) => t.kind === "monster")!;
+  const dragged = structuredClone(stored.room);
+  dragged.tokens[creature.id] = { ...creature, x: creature.x + 3, y: creature.y + 1, visibility: "all" };
+  assert.equal(sceneContents(dragged, fresh.sceneId), ours, "dragged and shown, it is still the creature Make made");
+  const gone = structuredClone(stored.room);
+  delete gone.tokens[creature.id];
+  assert.notEqual(sceneContents(gone, fresh.sceneId), ours, "a creature gone");
+  const renamed = structuredClone(stored.room);
+  renamed.tokens[creature.id] = { ...creature, name: "Someone else" };
+  assert.notEqual(sceneContents(renamed, fresh.sceneId), ours, "another creature");
+});

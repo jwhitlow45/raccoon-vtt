@@ -77,7 +77,7 @@ type Contents = Pick<RoomState, "buildChunks"> & {
   traps: Of<Pick<Trap, "sceneId" | "zone" | "state" | "rig">>;
   stamps?: Of<Pick<Stamp, "sceneId" | "art" | "x" | "y" | "w" | "h" | "rotation">>;
   lights?: Of<Pick<Light, "sceneId" | "x" | "y" | "bright" | "dim">>;
-  tokens?: Of<Pick<Token, "id" | "sceneId" | "kind" | "name" | "x" | "y" | "visibility">>;
+  tokens?: Of<Pick<Token, "id" | "sceneId" | "kind" | "name" | "x" | "y" | "visibility"> & Partial<Pick<Token, "actor">>>;
   pins?: Of<Pick<Pin, "sceneId" | "x" | "y" | "label" | "pageId" | "visibility">>;
   journal?: Of<Pick<JournalPage, "title" | "folder" | "access" | "blocks">>;
 };
@@ -154,8 +154,15 @@ function contentsOf(state: Contents, sceneId: string, idOf: IdOf, only: { chunks
   const traps = sorted(on(state.traps).map((t) => ({ zone: zoneNamed(t.zone, idOf), state: t.state, rig: named(t.rig) })));
   const stamps = sorted(on(state.stamps).map((s) => ({ art: s.art, x: s.x, y: s.y, w: s.w, h: s.h, rotation: s.rotation })));
   const lights = sorted(on(state.lights).map((l) => ({ x: l.x, y: l.y, bright: l.bright, dim: l.dim })));
-  // A wing's stones are compared without their place, since one may have rolled since (3.5: moved tokens never count).
-  const tokens = sorted(on(state.tokens).map((t) => ({ id: idOf(t.id), kind: t.kind, name: t.name, visibility: t.visibility, ...(only ? {} : { x: t.x, y: t.y }) })));
+  // A wing's stones are compared without their place, since one may have rolled since (3.5: moved tokens never count). A stocked
+  // creature, a token with an SRD block, is compared without its place or visibility, since the DM may drag or show one while a
+  // dropped connection's check waits (docs/design/design-v1-dungeon-stock.md 4, D-261127-070).
+  const tokens = sorted(
+    on(state.tokens).map((t) => {
+      const stocked = t.actor !== undefined && "inline" in t.actor && t.actor.inline.srdId !== undefined;
+      return { id: idOf(t.id), kind: t.kind, name: t.name, ...(stocked ? {} : { visibility: t.visibility }), ...(only || stocked ? {} : { x: t.x, y: t.y }) };
+    }),
+  );
   const pins = on(state.pins);
   const pages = sorted(
     [...new Set(pins.flatMap((p) => (p.pageId !== undefined ? [p.pageId] : [])))].map((id) => {
