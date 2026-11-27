@@ -177,10 +177,12 @@ function launched(file: string): boolean {
  * an event of the run (the postmaster launched, its postmaster.pid written),
  * never at a fixed time from the test's start, which a loaded machine can pass
  * before pg_ctl has even been started. Should the event never come, the abort
- * comes at the deadline so the test fails on its own words, not by hanging.
+ * comes at 10 s, inside the tests' timeouts, so the test fails on its own
+ * words, not by hanging.
  */
 function abortWhen(abort: AbortController, what: string, ready: () => boolean, afterMs = 0): void {
-  until(what, ready).then(
+  // Under the tests' 15 s timeouts, so a run that never comes ends on this test's words.
+  until(what, ready, 10_000).then(
     () => setTimeout(() => abort.abort(), afterMs),
     () => abort.abort(),
   );
@@ -389,9 +391,9 @@ describe("a start", { skip: posixOnly }, () => {
       for (const key of ["RVTT_FAKE_PID", ...Object.keys(vars)]) delete process.env[key];
     }
     const ms = Date.now() - began;
-    for (const file of Object.values(vars).filter((v) => v.startsWith(dir) && existsSync(v))) strays.push(Number((await readFile(file, "utf8")).trim()));
+    for (const file of Object.values(vars).filter((v) => v.startsWith(dir) && launched(v))) strays.push(Number((await readFile(file, "utf8")).trim()));
     return { ms, error, pid: async (file) => {
-      await until(`${file} to be written`, () => launched(file));
+      await until(`${file} to be written`, () => launched(file), 10_000);
       return Number((await readFile(file, "utf8")).trim());
     } };
   }
@@ -451,8 +453,21 @@ describe("a start", { skip: posixOnly }, () => {
     await mkdir(join(dir, "postgres"));
     const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, startLimitMs: 4_000 });
     // It fails at 3.2 s, and the pipe it leaves open makes the drain run past 4 s. The seconds are long so a loaded machine's slow start of pg_ctl still lets it exit before the limit.
-    const { error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_HOLD: join(dir, "holder.pid"), RVTT_FAKE_LATE: "3.2" });
+    // The limit ends a run by killing it, which an exit before the limit must have cancelled, so no kill may be sent while the drain runs past the limit.
+    const kill = ChildProcess.prototype.kill;
+    let kills = 0;
+    ChildProcess.prototype.kill = function (this: ChildProcess, ...args: Parameters<ChildProcess["kill"]>): boolean {
+      kills++;
+      return kill.apply(this, args);
+    };
+    let error: unknown;
+    try {
+      ({ error } = await startWith(dir, c, { RVTT_FAKE_PID: DEAD, RVTT_FAKE_HOLD: join(dir, "holder.pid"), RVTT_FAKE_LATE: "3.2" }));
+    } finally {
+      ChildProcess.prototype.kill = kill;
+    }
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl: could not start server", String(error));
+    assert.equal(kills, 0, "the limit, passed during the drain, killed nothing");
   });
 
   test("a pg_ctl start that never exits and launched nothing is ended at its limit, and waited for until it exits", { timeout: 15_000 }, async () => {
@@ -538,7 +553,7 @@ describe("a start", { skip: posixOnly }, () => {
       const c = new Cluster({ ...cluster(dir, bin, lookup(), { platform: "darwin" }).opts, unconfirmed: (on) => unconfirmed.push(on) });
       const abort = new AbortController();
       // A number is ms after the launch, "pidfile" the moment the postmaster has written postmaster.pid.
-      if (abortMs === "pidfile") abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+      if (abortMs === "pidfile") abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
       else abortWhen(abort, "the postmaster's launch", () => launched(postmaster), abortMs);
       const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, ...vars }, abort.signal);
       assert.deepEqual(unconfirmed, [], "the pg_ctl start the cancel waits on is no doubt about the end");
@@ -663,7 +678,7 @@ describe("a start", { skip: posixOnly }, () => {
     // The listing as it is, so the stand-in reads `/bin/sh <bin>/postgres ...`, as a postmaster the exact form misses would.
     const c = cluster(dir, bin, { ...lookup(), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+    abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
     const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "15" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.ok(ms < 10_000, `the start answered after ${ms} ms, not when the postmaster ended on its own`);
@@ -679,7 +694,7 @@ describe("a start", { skip: posixOnly }, () => {
     // leftover() reads a start the listing's row does not have, as for a pid reused between the two.
     const c = cluster(dir, bin, { ...lookup({ stamp: async () => 1 }), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+    abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
@@ -695,7 +710,7 @@ describe("a start", { skip: posixOnly }, () => {
     const replaced: ProcessLookup["facts"] = async (pid) => ({ exe: "/opt/other/postgres/bin/postgres", cwd: null, uid: 501, start: Date.now() + 1_000, stamp: ((await processStamp(pid)) ?? 0) + 1_000 });
     const c = cluster(dir, bin, { ...lookup({ facts: replaced }), list: () => listProcesses() }, { platform: "darwin" });
     const abort = new AbortController();
-    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+    abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_LIFE: "3" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(await ended(await pid(postmaster)), true, "it ended on its own");
@@ -1151,7 +1166,7 @@ describe("a start", { skip: posixOnly }, () => {
     const listing = counted();
     const c = cluster(dir, bin, { ...lookup(), list: listing.list }, { platform: "darwin" });
     const abort = new AbortController();
-    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
+    abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
     let alive: boolean | null = null;
     // Once the fast stop and the immediate one have failed, the file goes, and after two passes more the test ends the postmaster itself.
     const watching = (async () => {
@@ -1214,16 +1229,21 @@ describe("a start", { skip: posixOnly }, () => {
     const abort = new AbortController();
     abortWhen(abort, "the postmaster's launch", () => launched(postmaster), 100);
     let alive: boolean | null = null;
-    setTimeout(() => {
-      void readFile(postmaster, "utf8").then((text) => {
-        alive = isAlive(Number(text.trim()));
-        return rmdir(file);
-      });
-    }, 2_000);
-    const { ms, error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "10" }, abort.signal);
+    let releasedAt = 0;
+    // The file is let go once the postmaster has launched and the cancel has said it can't confirm the end, both events of the run.
+    const released = (async () => {
+      await until("the postmaster's launch", () => launched(postmaster), 10_000);
+      await until("the cancel to be unsure of the end", () => unconfirmed.length > 0, 10_000);
+      alive = isAlive(Number((await readFile(postmaster, "utf8")).trim()));
+      releasedAt = Date.now();
+      await rmdir(file);
+    })();
+    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "10" }, abort.signal);
+    await released;
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(alive, true, "not killed while postmaster.pid could not be read");
-    assert.ok(ms >= 2_000 && ms < 8_000, `answered after ${ms} ms`);
+    const ms = Date.now() - releasedAt;
+    assert.ok(ms < 8_000, `answered ${ms} ms after the file was let go, not when the postmaster would write it`);
     assert.equal(await ended(await pid(postmaster)), true, "killed once the file was surely absent");
     assert.deepEqual(await calls(), KILLED);
     assert.deepEqual(unconfirmed, [true, false]);
@@ -1250,23 +1270,26 @@ describe("a start", { skip: posixOnly }, () => {
     const { bin } = await programs(dir);
     await mkdir(join(dir, "postgres"));
     const postmaster = join(dir, "postmaster.child");
-    let failing = true;
-    let failed = 0;
+    // The listing fails until FAILURES of its answers were seen, so a late launch still meets them all.
+    const FAILURES = 4;
+    const failedAt: number[] = [];
     const proc: ProcessLookup = {
       ...lookup(),
       list: async () => {
-        if (!failing) return asStarted();
-        failed++;
+        if (failedAt.length >= FAILURES) return asStarted();
+        failedAt.push(Date.now());
         throw new Error("Get-CimInstance failed");
       },
     };
     const c = new Cluster({ ...cluster(dir, bin, proc, { platform: "darwin" }).opts, listRetryMs: 1_000 });
     const abort = new AbortController();
-    abortWhen(abort, "the postmaster's postmaster.pid", () => existsSync(join(dir, "postgres", "postmaster.pid")));
-    setTimeout(() => (failing = false), 2_600);
+    abortWhen(abort, "the postmaster's postmaster.pid", () => launched(join(dir, "postgres", "postmaster.pid")));
     const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait" }, abort.signal);
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
-    assert.ok(failed <= 4, `${failed} listings in 2.5 s while they failed`);
+    assert.equal(failedAt.length, FAILURES, "the listing failed as often as it was told to");
+    // Two passes can list at once (the cancel's and the proof's), each once per retry, so at most two failures per retry's length (less a margin) of the span they were seen in.
+    const span = failedAt[FAILURES - 1]! - failedAt[0]!;
+    assert.ok(FAILURES <= 2 * (Math.floor(span / 900) + 1), `${FAILURES} listings failed within ${span} ms, closer than a retry of 1000 ms`);
     assert.equal(await ended(await pid(postmaster)), true);
   });
 });
