@@ -287,8 +287,8 @@ describe("raccoon-vtt: spell slots and Hit Point Dice", { timeout: 900_000 }, ()
     await sheet.waitFor({ state: "detached" });
     await uses.getByText("Classes: Wizard 3, Cleric 1", { exact: true }).waitFor();
     // Save took Add your classes with it, so focus goes to the Classes line's Edit classes, never the page.
-    const edit = await uses.getByRole("button", { name: "Edit classes" }).elementHandle();
-    await kim.waitForFunction((el) => document.activeElement === el, edit, { timeout: 5000 });
+    const edit = uses.getByRole("button", { name: "Edit classes" });
+    await waitFor("focus on Edit classes", async () => ((await edit.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement)) ? true : null), 5000);
     const saved = await waitFor("Bree's classes in the DM's copy", () => bree()?.classes);
     assert.deepEqual(saved, [{ id: "wizard", level: 3 }, { id: "cleric", level: 1 }]);
     assert.equal(bree()?.level, 4);
