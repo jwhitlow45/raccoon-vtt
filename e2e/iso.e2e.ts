@@ -2427,7 +2427,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
      * kept picture's count of whole repaints when its scrolls ended, which
      * must hold until the read, so the picture read is the scrolled one.
      */
-    const compare = async (page: Page, what: string, whole: number) => {
+    /** The relief canvas right after its last whole repaint, and the stage's camera then: the reference a move's raster noise is read against. */
+    type Reference = { png: string; cam: { x: number; y: number } };
+    const compare = async (page: Page, what: string, whole: number, ref: Reference) => {
       await nextFrames(page, 4);
       const before = await kept(page);
       assert.equal(before!.whole, whole, `${what}: no whole repaint between the scrolls and the read`);
@@ -2435,11 +2437,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
       await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { repaint(): void } }).__rvttIsoHook.repaint());
       await nextFrames(page, 3);
       const b = await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pixels(): string | null } }).__rvttIsoHook.pixels());
+      const cam = await isoCamera(page);
       const after = await kept(page);
       assert.ok(a && b, `${what}: the relief canvas reads back`);
       assert.ok(after!.whole > before!.whole, `${what}: the hook's repaint drew whole`);
       const decode = async (url: string) => (await sharp(Buffer.from(url.split(",")[1]!, "base64")).raw().toBuffer({ resolveWithObject: true }));
-      const [x, y] = await Promise.all([decode(a), decode(b)]);
+      const [x, y, z] = await Promise.all([decode(a), decode(b), decode(ref.png)]);
       assert.equal(x.info.width, y.info.width);
       let worst = 0;
       let over = 0;
@@ -2494,7 +2497,32 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         await sharp(y.data, { raw: y.info }).png().toFile(path.join(SHOT_DIR, `hxperf2-${name}-whole.png`));
       }
       const line = Math.max(Math.max(...cols) / h, Math.max(...rows) / w);
-      maxDiffs.push(`${what}: ${worst}/255 at most, ${over} channel values past 2/255, at most ${densest} pixels in a 9 by 9 window, ${(100 * line).toFixed(1)}% of a column or row`);
+      /*
+       * The raster's own noise over this move: the whole repaint now against
+       * the whole repaint the kept picture started from, moved by the camera
+       * since, over the part both cover, scaled to the canvas. A copy by whole
+       * device pixels is exact, but a fresh draw is not: Chrome's stroker
+       * and its clip at the canvas's edge put long lines and outlines on a
+       * few other pixels after a move, more the farther it is (docs/design/
+       * design-v1-relief-pan.md 11.4: on the software canvas a whole repaint
+       * after a 128 px move differed from the one before it, moved, on 2,983
+       * channel values, and the kept picture on 3,029).
+       */
+      const ratio = w / (await stageSize(page)).width;
+      const sx = Math.round((cam.x - ref.cam.x) * ratio);
+      const sy = Math.round((cam.y - ref.cam.y) * ratio);
+      let noise = 0;
+      let shared = 0;
+      for (let py = Math.max(0, sy); py < Math.min(h, h + sy); py++) {
+        for (let px = Math.max(0, sx); px < Math.min(w, w + sx); px++) {
+          shared++;
+          const i = (py * w + px) * ch;
+          const j = ((py - sy) * w + (px - sx)) * ch;
+          for (let c = 0; c < ch; c++) if (Math.abs(shown(y.data, i + c) - shown(z.data, j + c)) > 2) noise++;
+        }
+      }
+      const noiseAll = shared > 0 ? (noise * w * h) / shared : 0;
+      maxDiffs.push(`${what}: ${worst}/255 at most, ${over} channel values past 2/255 against the raster's own ${Math.round(noiseAll)} over a move of ${sx}, ${sy}, at most ${densest} pixels in a 9 by 9 window, ${(100 * line).toFixed(1)}% of a column or row`);
       /*
        * A raster is not exactly the same after a move by whole device
        * pixels: a coordinate rounds a little differently, and where an edge
@@ -2509,16 +2537,41 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
        * in a window where several edges meet. The Mac's GPU, where the
        * software canvas matched exactly, drew one top's edge a pixel wider
        * in the kept picture than in a whole repaint, 67/255 apart where the
-       * edge's two sides lie 110/255 apart. So 2.5 values in a thousand may
-       * differ past 2/255, by 128/255 at most, and at most 48 pixels in a
-       * window: a stale patch the size of a window fills it, and a strip
-       * left clear differs in alpha by 255. A seam a pixel wide fills
-       * neither a window nor the count, so no column or row may differ in
-       * a quarter of its pixels. The software canvas reached 3.4%.
+       * edge's two sides lie 110/255 apart. So values may differ past 2/255
+       * as many as the raster's own noise allows (below), by 128/255 at
+       * most, and at most 48 pixels in a window: a stale patch the size of
+       * a window fills it, and a strip left clear differs in alpha by 255.
+       * A seam a pixel wide fills neither a window nor the count, so no
+       * column or row may differ in a quarter of its pixels. The software
+       * canvas reached 3.4%.
        */
-      assert.ok(over <= x.data.length * 2.5e-3 && worst <= 128 && densest <= 48 && line <= 0.25, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values within ${JSON.stringify(box)} of ${w}x${h}, at most ${densest} pixels in a 9 by 9 window, ${(100 * line).toFixed(1)}% of a column or row`);
+      /*
+       * The count is held to the raster's own noise over the same move,
+       * measured in this run on this canvas (D-261127-585), in place of a
+       * fixed share that held only while a cull step repainted whole every
+       * 128 px. KEPT_NOISE_FACTOR: the kept picture is a mosaic of strips
+       * drawn at cameras along the way, each clipped to its strip, and an
+       * edge cut by a clip lands on other pixels as one cut by the canvas's
+       * edge does, so on the software canvas the kept picture differed on
+       * up to 5.2 times the noise of the whole move (hex columns, a pan at
+       * turn 1, moving out: 9,680 against 1,879), and on the Mac's GPU up
+       * to 3.2 times. KEPT_NOISE_MARGIN covers a move too short for its
+       * noise to show: a few hundred values of antialiased edges. KEPT_MOST
+       * caps it all, since a repaint whole after the move also redraws what
+       * depends on where a cell stands on the screen (the tones by the
+       * screen's top, 5.3) and over deep ground that alone reached 5% of the
+       * canvas: no correct compare here came near one value in a hundred
+       * (0.33% at most), while a picture a device pixel off differs on every
+       * edge and a stale patch fills its 9 by 9 windows.
+       */
+      const bound = Math.min(KEPT_NOISE_FACTOR * noiseAll + KEPT_NOISE_MARGIN * x.data.length, KEPT_MOST * x.data.length);
+      assert.ok(over <= bound && worst <= 128 && densest <= 48 && line <= 0.25, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values (at most ${Math.round(bound)}: the raster's own ${Math.round(noiseAll)} over a move of ${sx}, ${sy} device px) within ${JSON.stringify(box)} of ${w}x${h}, at most ${densest} pixels in a 9 by 9 window, ${(100 * line).toFixed(1)}% of a column or row`);
     };
     const maxDiffs: string[] = [];
+    /** How far past the raster's own noise over a move the kept picture may differ from a whole repaint: see `compare`. */
+    const KEPT_NOISE_FACTOR = 6;
+    const KEPT_NOISE_MARGIN = 2e-4;
+    const KEPT_MOST = 1e-2;
     /**
      * A pan of 30 small moves one way and back, each in a frame of its own,
      * with `midway` between the halves. At the end of each half, the
@@ -2578,6 +2631,18 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         assert.ok(left < 100, `${what}: the nudge left the next cull step ${left} px away`);
         return { key: cullOf(await isoCamera(page), await stageSize(page)).key, commits: (await kept(page))!.boardCommits };
       })() : null;
+      // The reference starts at a whole repaint here, and moves to each whole repaint the pan, its midway step or a compare makes.
+      let ref: Reference & { whole: number } = { png: "", cam: { x: 0, y: 0 }, whole: -1 };
+      const follow = async () => {
+        if ((await kept(page))!.whole === ref.whole) return;
+        // A repaint of its own at the camera now, read with that camera and no input between, so the picture and its camera agree.
+        await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { repaint(): void } }).__rvttIsoHook.repaint());
+        await nextFrames(page, 2);
+        const png = await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pixels(): string | null } }).__rvttIsoHook.pixels());
+        assert.ok(png, `${what}: the relief canvas reads back`);
+        ref = { png, cam: await isoCamera(page), whole: (await kept(page))!.whole };
+      };
+      await follow();
       await press(start);
       let i = 0;
       let moves = 0;
@@ -2588,6 +2653,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...p, id: 0 }] });
         else await page.mouse.move(p.x, p.y);
         await nextFrames(page, 1);
+        await follow();
       };
       const held = async (half: string, dir: 1 | -1) => {
         const why: Record<string, number> = {};
@@ -2599,7 +2665,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
           for (const [k, v] of Object.entries(after.why)) why[k] = (why[k] ?? 0) + v - (before.why[k] ?? 0);
           if (after.whole !== before.whole || after.scrolls - before.scrolls < 3) continue;
           opts.check?.(before, after);
-          await compare(page, `${what}, ${half}`, after.whole);
+          await compare(page, `${what}, ${half}`, after.whole, ref);
+          // The compare's own repaint is a whole repaint at the camera now.
+          await follow();
           return;
         }
         assert.fail(`${what}, ${half}: no three moves in a row scrolled without a whole repaint, its repaints ${JSON.stringify(why)}`);
@@ -2611,7 +2679,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         assert.notEqual(cullOf(await isoCamera(page), await stageSize(page)).key, crossing.key, `${what}: the pan crossed a ${CULL_STEP_PX} px cull step`);
         assert.ok((await kept(page))!.boardCommits > crossing.commits, `${what}: the board laid out again at the cull step, while the gesture held`);
       }
-      if (opts.midway) await opts.midway();
+      if (opts.midway) {
+        await opts.midway();
+        await follow();
+      }
       for (let k = i - 1; k >= 10; k--) await move(k);
       await held("moving back", -1);
       await lift();
@@ -2669,7 +2740,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
       await pat.bringToFront();
       await pan(pat, "touch", `${shape}, a height edit mid-pan`, {
         midway: async () => {
-          await ops.send({ t: "build.height", sceneId, cells: ["14,13", "15,13"], height: 20 });
+          // Cells in view at this camera on all three grids, so a kept picture that missed the edit shows it (a probe of the earlier 14,13 and 15,13 found them all but hidden on hex rows and squares).
+          await ops.send({ t: "build.height", sceneId, cells: ["10,13", "14,17"], height: 20 });
           await nextFrames(pat, 4);
         },
       });
