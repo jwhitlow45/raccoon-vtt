@@ -23,10 +23,11 @@ const KINDS: { value: Kind; label: string }[] = [
 
 /**
  * Short and long rests (features section 15, shared/rules/rest.ts), for the
- * DM and the creature's owner. Rolling dice is the player's, so a short
- * rest asks for the HP the Hit Point Dice gave, and the app keeps no count
- * of those dice. Each rest is one tap more after choosing it, so a stray
- * tap never resets a creature.
+ * DM and the creature's owner. For a creature without classes, rolling the
+ * Hit Point Dice is the player's, so a short rest asks for the HP they gave
+ * and the app keeps no count of them. A character with classes spends its
+ * dice on the card's own rows instead (below). Each rest is one tap more
+ * after choosing it, so a stray tap never resets a creature.
  *
  * Rolling Initiative stops a rest (SRD 5.2.1 "Short Rest", "Long Rest"),
  * but a table may still want one mid-fight, after a skip ahead or for a

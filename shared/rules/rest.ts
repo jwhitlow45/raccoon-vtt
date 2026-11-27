@@ -8,9 +8,12 @@ import { effectEvent, hpLabel, withNewPool, type ActorEvent, type HpResult } fro
  *
  * - Either rest needs at least 1 Hit Point to start.
  * - Short Rest: the creature may spend Hit Point Dice, rolling each and
- *   adding its Constitution modifier, at least 1 HP a die. The app rolls no
- *   dice and tracks no Hit Point Dice, so the player rolls and the rest
- *   takes the total they got (`heal`).
+ *   adding its Constitution modifier, at least 1 HP a die. A character with
+ *   classes spends them one at a time before the rest ends (docs/design/design-v1-slots.md
+ *   3.3): a die rolled on the server (`actor.hitDieRoll`) or a typed roll
+ *   (`actor.use` of a `hitDie`), each healing at once. For a creature
+ *   without classes the app counts no dice, so the player rolls and the
+ *   rest takes the total they got (`heal`).
  * - Long Rest: all lost HP back. Temporary HP last only until a Long Rest
  *   ends, so they go. Exhaustion drops one level, and the condition ends
  *   at 0. "X/Day" uses come back after a Long Rest, so Legendary Resistance
