@@ -1,5 +1,5 @@
 import type { TexturedTerrain } from "../../features/builder/geometry.ts";
-import { TERRAIN_COLORS, TERRAIN_SWATCHES, TEXTURE_CELLS } from "../../features/builder/textures.ts";
+import { TERRAIN_COLORS, TEXTURE_CELLS } from "../../features/builder/textures.ts";
 import type { Camera } from "../../lib/camera.ts";
 import { MAT_BACKGROUND } from "../../features/scenes/create.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
@@ -652,8 +652,8 @@ export function blended(base: string, over: string): string | null {
  * SideShape), so faces side by side on one line show no seam in it. A tint
  * is baked into the texture's pattern with the light (looks.ts
  * tintedPatternOf), one fill, else each is laid over it. A plain tone, its
- * tint and its light fill once, mixed. Its
- * outline follows unless the caller strokes it with others (`stroke` false).
+ * tint and its light fill once, mixed. Its outline follows unless the
+ * caller strokes it with others (`stroke` false).
  */
 function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null, stroke = true, path: Path2D | null = null, along = 0): void {
   if (!path) {
@@ -1195,8 +1195,8 @@ function capStyle(g: CanvasRenderingContext2D, z: number, dc: DrawContext): void
 /**
  * A wall slab (5.6): every face toward the viewer in stone with the wall's
  * tint and the light from its direction baked in, one fill a face, its
- * narrow ends as its long sides (D-261127-136), its cap in lighter stone (fillCap), and its
- * outline in one stroke.
+ * narrow ends as its long sides (D-261127-136), its cap in lighter stone
+ * (fillCap), and its outline in one stroke.
  */
 function drawSlab(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   const shape = slabShapeOf(w, dc.turn);
