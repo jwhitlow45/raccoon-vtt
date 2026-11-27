@@ -43,6 +43,7 @@ describe("OBJ", () => {
     assert.equal(mesh.axes, "zUp");
     assert.equal(mesh.triangles, 12);
     assert.deepEqual(vertexSet(mesh.parts[0]!.positions), vertexSet(new Float32Array(cube)));
+    assert.ok(mesh.parts[0]!.material.plain && mesh.parts[0]!.material.doubleSided, "an OBJ draws from both sides");
   });
 
   test("reads corners with texture and normal indices, negative indices, quads fanned, comments and other lines skipped", async () => {

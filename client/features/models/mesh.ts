@@ -58,6 +58,14 @@ export type ModelMesh = {
 
 export const PLAIN: PartMaterial = { plain: true, color: [1, 1, 1, 1], texture: -1, wrapS: 10497, wrapT: 10497, alpha: "opaque", alphaCutoff: 0.5, doubleSided: false };
 
+/**
+ * STL's and OBJ's one part: plain, and drawn from both sides
+ * (D-261127-549). Those files say nothing of sides, and many wind a few
+ * faces inward or leave a hole, which one-sided drawing shows as a gap.
+ * A GLB keeps the sides its materials give.
+ */
+export const PRINTED: PartMaterial = { ...PLAIN, doubleSided: true };
+
 /** A file refused, with the sentence the sheet shows. Anything else thrown in the worker is a crash. */
 export class ModelRefusal extends Error {}
 

@@ -90,6 +90,7 @@ describe("binary STL", () => {
     for (let i = 0; i < part.normals.length; i += 3) assert.ok(Math.abs(Math.hypot(part.normals[i]!, part.normals[i + 1]!, part.normals[i + 2]!) - 1) < 1e-6);
     assert.deepEqual(vertexSet(part.positions), vertexSet(new Float32Array(cube)));
     assert.ok(mesh.colorable);
+    assert.ok(part.material.plain && part.material.doubleSided, "an STL draws from both sides");
   });
 
   test("keeps each triangle's winding, so its faces still face out", async () => {

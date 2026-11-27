@@ -1,5 +1,5 @@
 import { clusterMesh, CLUSTER_LIMITS, type Bounds, type ClusterLimits, type TriangleSink, type TriangleSource } from "./cluster.ts";
-import { eachLine, eachSlice, finite, ModelRefusal, MODEL_WORDS, numberAt, PLAIN, skipSpace, wordAt, type ModelMesh } from "./mesh.ts";
+import { eachLine, eachSlice, finite, ModelRefusal, MODEL_WORDS, numberAt, PRINTED, skipSpace, wordAt, type ModelMesh } from "./mesh.ts";
 
 /**
  * STL, binary and ASCII (docs/design/design-v1-token-models.md 5). The file
@@ -115,7 +115,7 @@ export async function readStl(file: Blob, binary: boolean, limits: ClusterLimits
   const mesh = await clusterMesh(source, bounds, triangles, limits);
   return {
     axes: "zUp",
-    parts: [{ positions: mesh.positions, normals: mesh.normals, index: mesh.index, uvs: null, colors: null, material: PLAIN }],
+    parts: [{ positions: mesh.positions, normals: mesh.normals, index: mesh.index, uvs: null, colors: null, material: PRINTED }],
     textures: [],
     colorable: true,
     notes: [],

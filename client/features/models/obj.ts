@@ -1,6 +1,6 @@
 import { MODEL_LIMITS } from "#shared/limits.ts";
 import { clusterMesh, CLUSTER_LIMITS, type Bounds, type ClusterLimits, type TriangleSource } from "./cluster.ts";
-import { eachLine, finite, ModelRefusal, MODEL_WORDS, numberAt, PLAIN, skipSpace, type ModelMesh } from "./mesh.ts";
+import { eachLine, finite, ModelRefusal, MODEL_WORDS, numberAt, PRINTED, skipSpace, type ModelMesh } from "./mesh.ts";
 
 /**
  * OBJ, geometry only (docs/design/design-v1-token-models.md 5, D-261127-372):
@@ -133,7 +133,7 @@ export async function readObj(file: Blob, limits: ObjLimits = OBJ_LIMITS): Promi
   const mesh = await clusterMesh(source, bounds, triangles, limits);
   return {
     axes: "zUp",
-    parts: [{ positions: mesh.positions, normals: mesh.normals, index: mesh.index, uvs: null, colors: null, material: PLAIN }],
+    parts: [{ positions: mesh.positions, normals: mesh.normals, index: mesh.index, uvs: null, colors: null, material: PRINTED }],
     textures: [],
     colorable: true,
     notes: [],

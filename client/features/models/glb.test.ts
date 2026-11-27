@@ -76,6 +76,7 @@ describe("the GLB reader's output", () => {
     assert.equal(mesh.triangles, 12);
     assert.equal(mesh.parts.length, 1);
     assert.ok(mesh.parts[0]!.material.plain && mesh.colorable);
+    assert.equal(mesh.parts[0]!.material.doubleSided, false, "a GLB part keeps glTF's one side");
     assert.deepEqual(corners(mesh.parts[0]!).flat(), cube);
     assert.ok(normalsOut(mesh.parts[0]!, [0, 0.5, 0]));
   });
