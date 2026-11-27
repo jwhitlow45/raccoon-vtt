@@ -1087,12 +1087,14 @@ describe("roster reads as of their moment", () => {
       await holder.query("lock table grants in access exclusive mode");
       const other = new pg.Client({ connectionString: TEST_DATABASE_URL, application_name: otherName });
       let otherRead: Promise<unknown> = Promise.resolve();
+      let otherConnected = false;
       let sent: number;
       let upgrade: Promise<string>;
       let released: number;
       try {
         // Another run on the shared database reads grants first. Its wait must not let the lock go before the upgrade's.
         await other.connect();
+        otherConnected = true;
         otherRead = other.query("select count(*) from grants").catch(() => undefined);
         await until(() => waitsOnGrants(otherName), "another run's read to wait on the lock");
         assert.equal(await waitsOnGrants(appName), false, "another run's wait is none of this run's");
@@ -1108,7 +1110,8 @@ describe("roster reads as of their moment", () => {
         await holder.query("rollback");
         holder.release();
         await otherRead;
-        await other.end();
+        // A client that never connected is not ended, so its connect's own error is the one the test fails with.
+        if (otherConnected) await other.end();
       }
       const verdict = await upgrade;
       assert.equal(t.manager.get(roomId), actor, "the room kept the actor whose roster the test gave");
