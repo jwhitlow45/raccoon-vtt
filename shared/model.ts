@@ -3205,13 +3205,15 @@ export type LogEvent =
   /**
    * A creature used one of its limited abilities, or had one given back
    * (docs/design/design-v1-combat-controls.md 8): a legendary action, Legendary
-   * Resistance, an ability of its block, or a class resource. `name` is the
-   * ability's or the resource's, absent for Resistance and for a plain
-   * legendary action spent by hand. The private parts are `cost` (a
-   * legendary action's cost above 1, or a pool's amount), `left` and `max`,
-   * which reach only those who may read them when written. `back` is a give
-   * back, and `hidden` a use after a secret roll: both reach only the DM and
-   * the creature's owners.
+   * Resistance, an ability of its block, a class resource, or a character's
+   * spell slot, Pact Magic slot or Hit Point Die (docs/design/design-v1-slots.md
+   * 7). `name` is the ability's or the resource's, absent for Resistance, for
+   * a plain legendary action spent by hand and for a slot or die. The private
+   * parts are `cost` (a legendary action's cost above 1, or a pool's amount),
+   * `left` and `max`, which reach only those who may read them when written.
+   * `back` is a give back. `hidden` marks a use after a secret roll, and every
+   * slot, Pact Magic and Hit Point Die line, which are the character's own:
+   * both `back` and `hidden` reach only the DM and the creature's owners.
    */
   | (AboutCreature & {
       type: "use";

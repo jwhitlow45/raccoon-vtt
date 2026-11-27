@@ -619,15 +619,6 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
 }
 
 /**
- * A creature's use of a limited ability, or one it regains
- * (docs/design/design-v1-combat-controls.md 8), with the counts the reader's line
- * kept: "Adult Red Dragon used Fiery Rays (Legendary Action, 2 of 3 left)."
- * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a Legendary
- * Action." for other players, and "Young Red Dragon: Fire Breath is ready
- * again." for a recharge, and "Adult Red Dragon regains a Legendary Resistance
- * (2 of 3 left)." for a use restored.
- */
-/**
  * A character's spell slot, Pact Magic slot or Hit Point Die line
  * (docs/design/design-v1-slots.md 7), which only the DM and the character's
  * owners read: "Bree used a level 3 spell slot (2 of 3 left).", "Bree: a
@@ -642,6 +633,15 @@ function slotText(data: Extract<LogEvent, { type: "use" }>, who: string): string
   return data.what === "hitDie" ? `${who} spent ${thing}${after}.` : `${who} used ${thing}${after}.`;
 }
 
+/**
+ * A creature's use of a limited ability, or one it regains
+ * (docs/design/design-v1-combat-controls.md 8), with the counts the reader's line
+ * kept: "Adult Red Dragon used Fiery Rays (Legendary Action, 2 of 3 left)."
+ * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a Legendary
+ * Action." for other players, and "Young Red Dragon: Fire Breath is ready
+ * again." for a recharge, and "Adult Red Dragon regains a Legendary Resistance
+ * (2 of 3 left)." for a use restored.
+ */
 export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): string {
   const counts = data.left !== undefined && data.max !== undefined ? `${data.left} of ${data.max} left` : undefined;
   const after = counts ? ` (${counts})` : "";
