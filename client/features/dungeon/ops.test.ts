@@ -5,9 +5,9 @@ import { clientOpSchema, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol
 import { trapPreset } from "#shared/srd/traps.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import { builderScene } from "../scenes/create.ts";
-import { dialogScene, dressedRooms, hexWingBase, hundredOps, hundredPlan, twoRooms, widestDoors, WING_SETTINGS } from "./handPlans.ts";
+import { dialogScene, dressedRooms, hand140Ops, handPlan140, HAND_POOL, hexWingBase, hundredOps, hundredPlan, twoRooms, widestDoors, WING_SETTINGS } from "./handPlans.ts";
 import { wallPlaceholder } from "./hexWalls.ts";
-import { buildOps, dressOps, MAX_OPS, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, WALLS_PER_OP, WING_OP_BYTES, wingIds, withIds } from "./ops.ts";
+import { buildOps, dressOps, MAX_OPS, MAX_PLAN_OPS, monsterOps, monsterPlaceholder, PAGE_PLACEHOLDER, SCENE_PLACEHOLDER, stonePlaceholder, trapInputOf, trapOps, trapPlaceholder, WALLS_PER_OP, WING_OP_BYTES, wingIds, withIds } from "./ops.ts";
 import { planFitted, type DungeonPlan } from "./plan.ts";
 import { landAll, landDungeon, scratchRoom, summarize, wingPreviewOf } from "./scratch.ts";
 import { versionChar } from "./seed.ts";
@@ -141,9 +141,9 @@ function hundred(): ClientOp[] {
   return hundredOps({ ...dialogScene(plan), id: SCENE_PLACEHOLDER });
 }
 
-test("DG2B: the 100-op hand plan lands exactly MAX_OPS ops through the scratch room, each a valid op within its bytes", () => {
+test("DG2B: the 100-op hand plan lands exactly MAX_PLAN_OPS ops through the scratch room, each a valid op within its bytes", () => {
   const ops = hundred();
-  assert.equal(ops.length, MAX_OPS);
+  assert.equal(ops.length, MAX_PLAN_OPS);
   const landed = landAll(scratchRoom(), ops);
   assert.ok(landed.ok, landed.ok ? "" : landed.why);
   for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, `${op.t} parses`);
@@ -395,4 +395,44 @@ test("DG3: a hex wing's join goes first, the wall it stood as removed beside its
   assert.throws(() => wingIds([{ t: "scene.create", scene: base.scene }, ...preview.ops], base.scene.id, base.scene.id, () => "x"), /makes no scene/);
   assert.throws(() => wingIds(preview.ops, "other-scene", base.scene.id, () => "x"), /another scene/);
   assert.throws(() => withIds([{ t: "scene.create", scene: { id: "s", name: "S", bounds: { w: 10, h: 10 } } }, { ...again, sceneId: "s" }], () => "y"), /removes no wall/);
+});
+
+test("DSTOCK: the 140-op hand plan lands exactly MAX_OPS ops, its 40 creatures hidden after the traps and before the key", () => {
+  const plan = handPlan140();
+  const ops = hand140Ops({ ...dialogScene(plan), id: SCENE_PLACEHOLDER });
+  assert.equal(ops.length, MAX_OPS);
+  assert.equal(MAX_OPS, 140);
+  const landed = landAll(scratchRoom(), ops);
+  assert.ok(landed.ok, landed.ok ? "" : landed.why);
+  for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, `${op.t} parses`);
+  for (const op of ops) assert.ok(serializedBytes(op) <= OP_BYTES, `${op.t} within an op's bytes`);
+  const kinds = ops.map((op) => (op.t === "token.create" ? `token:${op.token.kind}` : op.t));
+  const monsters = kinds.flatMap((k, i) => (k === "token:monster" ? [i] : []));
+  assert.equal(monsters.length, 40);
+  assert.ok(monsters[0]! > kinds.lastIndexOf("trap.create") && monsters.at(-1)! < kinds.indexOf("journal.create"), "build, dress, traps, monsters, key");
+  for (const op of ops) {
+    if (op.t !== "token.create" || op.token.kind !== "monster") continue;
+    assert.equal(op.token.visibility, "dm");
+    assert.equal(op.token.disposition, "hostile");
+    assert.ok("inline" in op.token.actor && op.token.actor.inline.srdId !== undefined && op.token.actor.inline.inLair === undefined);
+  }
+});
+
+test("DSTOCK: a creature stands on its room's ground and wears its pool block's image", () => {
+  const plan = handPlan140();
+  // Room 1 is raised 5 ft in the hand plan: a creature in it stands 5 ft up.
+  const scene = { ...dialogScene(plan), id: SCENE_PLACEHOLDER };
+  const landed = landAll(scratchRoom(), hundredOps(scene).filter((op) => op.t !== "journal.create" && op.t !== "pin.put"));
+  assert.ok(landed.ok);
+  const image = { icon: "lorc/test-icon", color: "#123456" };
+  const pool = HAND_POOL.map((m) => ({ ...m, image }));
+  const ops = monsterOps(plan, pool, landed.room.buildChunks, SCENE_PLACEHOLDER);
+  const first = ops[1]!;
+  assert.ok(first.t === "token.create");
+  assert.equal(first.token.id, monsterPlaceholder(1));
+  assert.equal(first.token.elevation, plan.rooms[1]!.ground);
+  assert.deepEqual(first.token.image, image);
+  const flat = ops[0]!;
+  assert.ok(flat.t === "token.create" && flat.token.elevation === undefined);
+  assert.throws(() => monsterOps(plan, [], landed.room.buildChunks, SCENE_PLACEHOLDER), /no pool block/);
 });

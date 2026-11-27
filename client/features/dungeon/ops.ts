@@ -9,12 +9,15 @@ import { newWallId } from "../builder/hexBuild.ts";
 import { DEFAULT_ICON_COLOR } from "../images/iconColors.ts";
 import { newBlockId } from "../journal/draft.ts";
 import type { SceneInput } from "../scenes/create.ts";
-import { blankActor, blankToken } from "../tokens/factory.ts";
+import { placeOnGround } from "../movement/ground.ts";
+import { blankActor, blankToken, monsterToken } from "../tokens/factory.ts";
 import { newTrapInput } from "../traps/rules.ts";
 import { batchByBytes, OP_BYTES } from "../uvtt/batch.ts";
 import { PLACED_LIGHTS } from "../vision/presets.ts";
 import { wallPlaceholder } from "./hexWalls.ts";
 import type { DungeonPlan, PlanTrap } from "./plan.ts";
+import { MAX_MONSTERS } from "./settings.ts";
+import type { StockMonster } from "./stockPools.ts";
 
 /*
  * A plan as the ops Make sends (docs/design/design-v1-dungeon-generator.md
@@ -25,8 +28,10 @@ import type { DungeonPlan, PlanTrap } from "./plan.ts";
  * the seed's stream and a second Make never resends one.
  */
 
-/** Ops one Make sends at most (phase 2, section 6): past the server's burst of 60, paced by the store's busy retry. */
-export const MAX_OPS = 100;
+/** Ops a dungeon sends at most besides its creatures (phase 2, section 6): past the server's burst of 60, paced by the store's busy retry. */
+export const MAX_PLAN_OPS = 100;
+/** Ops one Make sends at most: the plan's and a `token.create` for each stocked creature (docs/design/design-v1-dungeon-stock.md 5, D-261127-059). */
+export const MAX_OPS = MAX_PLAN_OPS + MAX_MONSTERS;
 
 /** The scene's id while the dungeon is only a preview. */
 export const SCENE_PLACEHOLDER = "dungeon-scene";
@@ -44,6 +49,11 @@ export function stampPlaceholder(i: number): string {
 
 export function lightPlaceholder(i: number): string {
   return `dungeon-light-${i}`;
+}
+
+/** A stocked creature's token, by its place in the plan's `monsters`. */
+export function monsterPlaceholder(i: number): string {
+  return `dungeon-monster-${i}`;
 }
 
 /** A Rolling Stone's token, by its place in the plan's `stones`. */
@@ -209,6 +219,24 @@ export function dressOps(plan: DungeonPlan, sceneId: string, bytes: number = OP_
   for (const put of batchByBytes(lights, LIMITS.lightsPerOp, OP_BYTES, lightOp)) ops.push(lightOp(put));
   for (const [i, at] of plan.stones.entries()) ops.push({ t: "token.create", token: stoneToken(stonePlaceholder(i), sceneId, at) });
   return ops;
+}
+
+/**
+ * One hidden `token.create` per stocked creature (docs/design/design-v1-dungeon-stock.md
+ * 4), as the encounter drop builds its tokens: out of its lair, at its
+ * block's average hit points, wearing the image the pool carries, and on
+ * the ground the built chunks hold, so a dais raises it. The worker reads
+ * no stat block text, and an SRD token keeps none.
+ */
+export function monsterOps(plan: DungeonPlan, pool: readonly StockMonster[], chunks: Readonly<Record<string, BuildChunk>>, sceneId: string): ClientOp[] {
+  const blocks = new Map(pool.map((m) => [m.srdId, m]));
+  return (plan.monsters ?? []).map((placed, i): ClientOp => {
+    const found = blocks.get(placed.srdId);
+    if (!found) throw new Error(`no pool block ${placed.srdId}`);
+    const { image, ...m } = found;
+    const token = monsterToken({ ...m, statBlock: "" }, { hp: null, hidden: true, inLair: false }, { id: monsterPlaceholder(i), sceneId, at: { x: placed.x, y: placed.y }, ...(image ? { image } : {}) });
+    return { t: "token.create", token: placeOnGround(chunks, token) };
+  });
 }
 
 /** The sentence the Fire-Casting Statue's preset opens its note with (shared/srd/traps.ts). */

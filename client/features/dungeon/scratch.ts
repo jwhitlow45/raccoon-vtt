@@ -1,6 +1,6 @@
 import { createInitialState } from "#shared/initial.ts";
 import { checkLimits } from "#shared/limits.ts";
-import type { Member, RoomState, Viewer } from "#shared/model.ts";
+import type { Member, RoomState, Token, Viewer } from "#shared/model.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
 import type { WingClear } from "#shared/rules/wingClear.ts";
 import { clientOpSchema, type ClientOp, type Op } from "#shared/protocol.ts";
@@ -12,13 +12,15 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
-import { keyOps, type KeyInput } from "./keyPage.ts";
+import { keyOps, type KeyInput, type KeyStock } from "./keyPage.ts";
 import { editLayout, type DungeonEdits } from "./edits.ts";
 import { NO_SPACE } from "./hexWalls.ts";
-import { buildOps, dressOps, MAX_OPS, SCENE_PLACEHOLDER, trapOps, WING_OP_BYTES, wingMapOps } from "./ops.ts";
+import { buildOps, dressOps, MAX_OPS, MAX_PLAN_OPS, monsterOps, SCENE_PLACEHOLDER, trapOps, WING_OP_BYTES, wingMapOps } from "./ops.ts";
 import { planFitted, type DungeonPlan, type Fitted, type Planned, type WingBase } from "./plan.ts";
 import type { Seed } from "./seed.ts";
 import { clampSettings, isHexGrid, MIN_ROOMS, type DungeonSettings, type GridKind, type PlanContext } from "./settings.ts";
+import { stockPlan } from "./stock.ts";
+import type { StockMonster } from "./stockPools.ts";
 import { wingSetup } from "./wing.ts";
 import type { StockRequest } from "./worker.ts";
 
@@ -114,6 +116,20 @@ export function landAll(room: RoomState, ops: readonly ClientOp[], firstSeq = 1)
 
 export type Landed = { ok: true; ops: ClientOp[]; room: RoomState } | { ok: false; why: string };
 
+/** What a stocked landing needs besides the plan: the pool its creatures' blocks come from, and what the key says of them. */
+export type StockLanding = { pool: readonly StockMonster[]; key: KeyStock };
+
+/**
+ * Why a dungeon's ops are past Make's caps, or null: MAX_OPS in all, and
+ * MAX_PLAN_OPS besides the creatures, so stocking never makes room for a
+ * plan the caps held before (docs/design/design-v1-dungeon-stock.md 5).
+ */
+function overCap(ops: readonly ClientOp[]): string | null {
+  if (ops.length > MAX_OPS) return `${ops.length} ops, past ${MAX_OPS}`;
+  const plan = ops.filter((op) => !(op.t === "token.create" && op.token.kind === "monster")).length;
+  return plan > MAX_PLAN_OPS ? `${plan} ops besides the creatures, past ${MAX_PLAN_OPS}` : null;
+}
+
 /**
  * The whole dungeon through the scratch room, in the order the ops apply
  * (phase 2, section 6): the ground, the stamps, the lights and the stones,
@@ -125,13 +141,14 @@ export type Landed = { ok: true; ops: ClientOp[]; room: RoomState } | { ok: fals
  * at. Anything refused here, or past MAX_OPS, is a generator bug, which the
  * preview shows as its error with Make off.
  */
-export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null): Landed {
+export function landDungeon(plan: DungeonPlan, scene: SceneInput, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null, stock: StockLanding | null = null): Landed {
   const build = [...buildOps(plan, scene), ...dressOps(plan, scene.id)];
   const built = landAll(scratchRoom(), build);
   if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
-  const rest = [...trapOps(plan, built.room.buildChunks, band, scene.id), ...(key ? keyOps(plan, key.settings, key.input, scene.id) : [])];
+  const rest = [...trapOps(plan, built.room.buildChunks, band, scene.id), ...(stock ? monsterOps(plan, stock.pool, built.room.buildChunks, scene.id) : []), ...(key ? keyOps(plan, key.settings, key.input, scene.id, stock?.key) : [])];
   const ops = [...build, ...rest];
-  if (ops.length > MAX_OPS) return { ok: false, why: `${ops.length} ops, past ${MAX_OPS}` };
+  const over = overCap(ops);
+  if (over) return { ok: false, why: over };
   const landed = landAll(built.room, rest, build.length + 1);
   if (!landed.ok) return { ok: false, why: `op ${build.length + landed.at}: ${landed.why}` };
   return { ok: true, ops, room: landed.room };
@@ -200,7 +217,20 @@ export function summarize(plan: Pick<DungeonPlan, "rooms" | "asked" | "doors" | 
 }
 
 /** What a preview reads of a plan's working, and the layout an edit on it freezes where the planner says (`planFitted`). */
-type Made = Pick<Planned, "plan" | "facts" | "fitted" | "overBudget" | "leaves"> & { layout?: DungeonEdits["layout"] };
+type Made = Pick<Planned, "plan" | "facts" | "fitted" | "overBudget" | "leaves"> & Partial<Pick<Planned, "board" | "kept" | "entrance" | "lattice" | "standable">> & { layout?: DungeonEdits["layout"] };
+
+/**
+ * The plan stocked when the request carries a stock and the planner's
+ * working is at hand (a plan a test hands in whole has none), with what
+ * the landing needs for its creatures and key, else the plan as made.
+ */
+function stocked(planned: Made, seed: Seed, stock: StockRequest | null, edits: DungeonEdits | null, taken: Parameters<typeof stockPlan>[5] = []): { planned: Made; landing: StockLanding | null } {
+  const { board, kept, entrance, lattice, standable } = planned;
+  if (!stock || !board || !kept || entrance === undefined || !lattice || !standable) return { planned, landing: null };
+  const held = edits && planned.layout && edits.layout.settings === planned.layout.settings && edits.layout.seed === planned.layout.seed && edits.layout.base === planned.layout.base ? edits.rooms : null;
+  const done = stockPlan({ plan: planned.plan, board, kept, entrance, lattice, standable, facts: planned.facts }, seed, planned.plan.theme, stock, held, taken);
+  return { planned: { ...planned, plan: done.plan, facts: done.facts }, landing: { pool: stock.pool, key: { choices: stock.choices, party: stock.party } } };
+}
 
 /**
  * Why a plan cannot be shown, as the preview says it: under two rooms,
@@ -240,13 +270,15 @@ export function previewOf(
   key: KeyInput | null,
   make: (settings: DungeonSettings, seed: Seed, context: PlanContext, edits: DungeonEdits | null) => Made | DungeonPlan = (s, sd, c, e) => planFitted(s, sd, c, e ? { edits: e } : {}),
   edits: DungeonEdits | null = null,
-  _stock: StockRequest | null = null,
+  stock: StockRequest | null = null,
 ): Preview {
   let planned: Made;
+  let landing: StockLanding | null = null;
   try {
     const made = make(settings, seed, context, edits);
     // A plan alone, as a test hands one, has no room panel and asked for its rooms.
     planned = "plan" in made ? made : { plan: made, facts: [], fitted: made.asked, overBudget: null, leaves: [] };
+    if (fitFailure(planned) === null) ({ planned, landing } = stocked(planned, seed, stock, edits));
   } catch (err) {
     console.error("raccoon: the dungeon generator failed", err);
     return { ok: false, error: "bug" };
@@ -256,7 +288,7 @@ export function previewOf(
   const plan = planned.plan;
   let landed: Landed;
   try {
-    landed = landDungeon(plan, previewScene(scene, plan), settings.band, key && { input: key, settings });
+    landed = landDungeon(plan, previewScene(scene, plan), settings.band, key && { input: key, settings }, landing);
   } catch (err) {
     console.error("raccoon: a generated dungeon could not be landed", err);
     return { ok: false, error: "bug" };
@@ -293,14 +325,15 @@ function wingScratch(base: WingBase): RoomState {
  * scene's own counts with the wing's, so a wing the scene has no room for
  * is refused here, as the server would refuse it.
  */
-export function landWing(plan: DungeonPlan, base: WingBase, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null): Landed {
+export function landWing(plan: DungeonPlan, base: WingBase, band: LevelBand, key: { input: KeyInput; settings: DungeonSettings } | null, stock: StockLanding | null = null): Landed {
   const sceneId = base.scene.id;
   const build = [...wingMapOps(plan, sceneId), ...dressOps(plan, sceneId, WING_OP_BYTES)];
   const built = landAll(wingScratch(base), build);
   if (!built.ok) return { ok: false, why: `op ${built.at}: ${built.why}` };
-  const rest = [...trapOps(plan, built.room.buildChunks, band, sceneId), ...(key ? keyOps(plan, key.settings, key.input, sceneId) : [])];
+  const rest = [...trapOps(plan, built.room.buildChunks, band, sceneId), ...(stock ? monsterOps(plan, stock.pool, built.room.buildChunks, sceneId) : []), ...(key ? keyOps(plan, key.settings, key.input, sceneId, stock?.key) : [])];
   const ops = [...build, ...rest];
-  if (ops.length > MAX_OPS) return { ok: false, why: `${ops.length} ops, past ${MAX_OPS}` };
+  const over = overCap(ops);
+  if (over) return { ok: false, why: over };
   const landed = landAll(built.room, rest, build.length + 1);
   if (!landed.ok) return { ok: false, why: `op ${build.length + landed.at}: ${landed.why}` };
   return { ok: true, ops, room: landed.room };
@@ -356,10 +389,16 @@ export function wingClearOf(planned: Planned, base: WingBase, settings: DungeonS
  * panel's facts, and what its asks carry. A wing that cannot be planned
  * is the "fit" error with the planner's problem.
  */
-export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null, _stock: StockRequest | null = null): Preview {
+export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingBase, context: PlanContext, key: KeyInput | null, edits: DungeonEdits | null = null, stock: StockRequest | null = null): Preview {
   let planned: Fitted;
+  let landing: StockLanding | null = null;
   try {
     planned = planFitted(settings, seed, context, { wing: base, ...(edits ? { edits } : {}) });
+    if (!planned.wing?.problem && fitFailure(planned) === null) {
+      const done = stocked(planned, seed, stock, edits, Object.values(base.state.tokens).filter((t) => t?.sceneId === base.scene.id) as Token[]);
+      planned = { ...planned, plan: done.planned.plan, facts: done.planned.facts };
+      landing = done.landing;
+    }
   } catch (err) {
     console.error("raccoon: the wing planner failed", err);
     return { ok: false, error: "bug" };
@@ -373,7 +412,7 @@ export function wingPreviewOf(settings: DungeonSettings, seed: Seed, base: WingB
   if (!clear) return { ok: false, error: "bug" };
   let landed: Landed;
   try {
-    landed = landWing(plan, base, settings.band, key && { input: key, settings });
+    landed = landWing(plan, base, settings.band, key && { input: key, settings }, landing);
   } catch (err) {
     console.error("raccoon: a planned wing could not be landed", err);
     return { ok: false, error: "bug" };

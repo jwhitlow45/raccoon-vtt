@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { groundAt } from "#shared/rules/heights.ts";
 import { markIn } from "#shared/rules/heights.ts";
 import { builderScene } from "../scenes/create.ts";
-import { dialogScene, dressedRooms, HAND_SETTINGS, handKey, hexWingBase, hundredPlan, squareWingBase, twoRooms, WING_SETTINGS } from "./handPlans.ts";
+import { dialogScene, dressedRooms, HAND_SETTINGS, HAND_STOCK, handKey, handPlan140, hexWingBase, hundredPlan, squareWingBase, twoRooms, WING_SETTINGS } from "./handPlans.ts";
 import { NO_SPACE } from "./hexWalls.ts";
 import { latticeFor } from "./lattice.ts";
 import { buildOps, MAX_OPS, SCENE_PLACEHOLDER } from "./ops.ts";
@@ -160,7 +160,12 @@ test("DG2B: a dungeon past MAX_OPS is refused as a bug, never sent past the cap"
   assert.ok(landDungeon(plan, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS }).ok);
   const over = { ...plan, traps: [...plan.traps, { preset: "hidden-pit", zone: { cells: [{ x: 4, y: 4, w: 1, h: 1 }] } }] };
   const refused = landDungeon(over, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS });
-  assert.deepEqual(refused, { ok: false, why: `${MAX_OPS + 1} ops, past ${MAX_OPS}` });
+  assert.deepEqual(refused, { ok: false, why: "101 ops besides the creatures, past 100" });
+  // The 140-op hand plan with one more trap is past Make's whole cap.
+  const stocked = handPlan140();
+  assert.ok(landDungeon(stocked, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS }, HAND_STOCK).ok);
+  const past = { ...stocked, traps: [...stocked.traps, { preset: "hidden-pit", zone: { cells: [{ x: 4, y: 4, w: 1, h: 1 }] } }] };
+  assert.deepEqual(landDungeon(past, scene, HAND_SETTINGS.band, { input: handKey(), settings: HAND_SETTINGS }, HAND_STOCK), { ok: false, why: `141 ops, past ${MAX_OPS}` });
 });
 
 test("DG2B: the preview plans the DM's Secret doors as chosen, and the key says so", () => {

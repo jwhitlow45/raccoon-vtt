@@ -1,4 +1,4 @@
-import type { Pin } from "#shared/model.ts";
+import type { PartyGroup, Pin } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { TRINKETS } from "#shared/srd/trinkets.ts";
 import { BAND_NAMES } from "../traps/rules.ts";
@@ -6,7 +6,8 @@ import { DAIS_RISE } from "./heights.ts";
 import { latticeFor } from "./lattice.ts";
 import { blockPlaceholder, PAGE_PLACEHOLDER, pinPlaceholder } from "./ops.ts";
 import type { DungeonPlan, KeyCorridorTrap, KeyDoor, KeyRoom } from "./plan.ts";
-import { CHOICE_NAMES, HEIGHT_PRESETS, LIT_PRESETS, SECRET_PRESETS, SIZE_SIDES, TRAP_PRESETS, type DungeonSettings } from "./settings.ts";
+import { DIFFICULTY_LABEL } from "../encounters/budget.ts";
+import { CHOICE_NAMES, HEIGHT_PRESETS, LIT_PRESETS, MONSTER_PRESETS, SECRET_PRESETS, SIZE_SIDES, TRAP_PRESETS, type DungeonSettings, type StockChoices } from "./settings.ts";
 import { THEME_SPECS } from "./themes.ts";
 import { sizeLine } from "./words.ts";
 
@@ -26,6 +27,9 @@ import { sizeLine } from "./words.ts";
  */
 export type KeyInput = { name: string; color: string; feetPerCell: number; wing?: WingKey };
 export type WingKey = { from: number; titles: readonly string[]; pins: number };
+
+/** What the key says of a stocked dungeon (docs/design/design-v1-dungeon-stock.md 1): the Monsters choices and the party the fights were drawn for. */
+export type KeyStock = { choices: StockChoices; party: readonly PartyGroup[] };
 
 /** The folder the key's page is filed in. */
 export const KEY_FOLDER = "Dungeon keys";
@@ -102,7 +106,7 @@ function sizeName(w: number, h: number): string {
  * rooms Few, Dressing Some, 5 ft squares.", every choice that shapes the
  * dungeon but the seed, so the DM can make another like it.
  */
-export function madeWith(s: DungeonSettings, feetPerCell: number): string {
+export function madeWith(s: DungeonSettings, feetPerCell: number, stock: KeyStock | null = null): string {
   const traps = onMarks(TRAP_PRESETS, s.traps, twelfths);
   const parts = [
     CHOICE_NAMES.theme[s.theme],
@@ -118,9 +122,17 @@ export function madeWith(s: DungeonSettings, feetPerCell: number): string {
     `Secret doors ${THEME_SPECS[s.theme].doors ? onMarks(SECRET_PRESETS, s.secrets, twelfths) : "None"}`,
     `Lit rooms ${onMarks(LIT_PRESETS, s.lit, percent)}`,
     `Dressing ${CHOICE_NAMES.dressing[s.dressing]}`,
+    // At None the line says nothing of monsters, so every key made before reads as it did (D-261127-073).
+    ...(stock && stock.choices.monsters > 0 ? [`Monsters ${onMarks(MONSTER_PRESETS, stock.choices.monsters, percent)} at ${DIFFICULTY_LABEL[stock.choices.difficulty]} for ${partyWords(stock.party)}`] : []),
     `${feetPerCell} ft squares`,
   ];
   return `Made with: ${parts.join(", ")}.`;
+}
+
+/** "4 at level 3", or "4 at level 3 and 1 at level 4": the party a fight was drawn for, without the commas the Made with line splits on. */
+export function partyWords(groups: readonly PartyGroup[]): string {
+  const parts = groups.map((g) => `${g.count} at level ${g.level}`);
+  return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)!}`;
 }
 
 /** How a room is named in the key and on its pin: its number, and on a wing W and its number from the scene's highest W pin. */
@@ -136,7 +148,7 @@ function hexSize(plan: DungeonPlan, feetPerCell: number): string {
 }
 
 /** The page's first block: what the dungeon is, how to read the key, how secret doors work when it has any, and the choices it was made with. */
-export function keyIntro(plan: DungeonPlan, settings: DungeonSettings, feetPerCell: number, wing?: WingKey): string {
+export function keyIntro(plan: DungeonPlan, settings: DungeonSettings, feetPerCell: number, wing?: WingKey, stock: KeyStock | null = null): string {
   const n = plan.key?.length ?? plan.rooms.length;
   const rooms = `${n} ${n === 1 ? "room" : "rooms"}`;
   const theme = CHOICE_NAMES.theme[plan.theme];
@@ -148,7 +160,10 @@ export function keyIntro(plan: DungeonPlan, settings: DungeonSettings, feetPerCe
   if (plan.doors.some((d) => d.state === "secret")) {
     paragraphs.push("Players see a secret door as plain wall until you mark it found: tap it with the Select tool. The Search action finds one with a DC 15 (Medium) Wisdom (Perception) check.");
   }
-  paragraphs.push(madeWith(settings, feetPerCell));
+  if (plan.key?.some((k) => k.monsters)) {
+    paragraphs.push("Each room's monsters stand hidden from players. To show them, select them with the Select tool, a box drag takes a room's at once, and turn off Hidden. Start a fight from the same selection.");
+  }
+  paragraphs.push(madeWith(settings, feetPerCell, stock));
   return paragraphs.join("\n\n");
 }
 
@@ -171,7 +186,7 @@ function withArticle(label: string): string {
  * starts "The way in," and a secret room "A secret room,". A cave's
  * doorways are openings. A part with nothing to say is left out.
  */
-export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number, wing?: WingKey): string {
+export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number, wing?: WingKey, stock: KeyStock | null = null): string {
   const room = plan.rooms[k.room];
   if (!room) throw new Error(`the key names room ${k.room}, which the plan does not hold`);
   const lead = room.entrance ? (wing ? "Joined to the scene, " : "The way in, ") : k.secret ? "A secret room, " : "";
@@ -190,9 +205,20 @@ export function roomLine(plan: DungeonPlan, k: KeyRoom, feetPerCell: number, win
   if (k.cistern) parts.push("A cistern.");
   if (k.light) parts.push(`Lit by ${withArticle(k.light)}.`);
   if (k.traps.length > 0) parts.push(`${k.traps.length === 1 ? "Trap" : "Traps"}: ${k.traps.join(", ")}.`);
+  if (k.monsters && stock) parts.push(`Monsters (${DIFFICULTY_LABEL[stock.choices.difficulty]}, ${xpNumber(k.monsters.xp)} of ${xpNumber(k.monsters.budget)} XP): ${fightWords(k.monsters.lines)}.`);
   const trinket = TRINKETS[k.trinket];
   if (trinket !== undefined) parts.push(`Trinket: ${trinket}.`);
   return parts.join(" ");
+}
+
+/** "1,250": a number of XP as the SRD prints it. */
+function xpNumber(xp: number): string {
+  return xp.toLocaleString("en-US");
+}
+
+/** "Goblin Boss, Goblin Warrior × 3": each kind by its SRD name, a count past one as sizes write it, so no plural is made. */
+export function fightWords(lines: readonly (readonly [string, number])[]): string {
+  return lines.map(([name, n]) => (n > 1 ? `${name} × ${n}` : name)).join(", ");
 }
 
 /**
@@ -218,12 +244,12 @@ export function corridorLine(plan: DungeonPlan, wing?: WingKey): string | null {
  * the middle of its room's pin square in the DM's color, labeled with the
  * room's number and linked to the page.
  */
-export function keyOps(plan: DungeonPlan, settings: DungeonSettings, key: KeyInput, sceneId: string): ClientOp[] {
+export function keyOps(plan: DungeonPlan, settings: DungeonSettings, key: KeyInput, sceneId: string, stock: KeyStock | null = null): ClientOp[] {
   if (!settings.key || plan.key === null) return [];
   const rooms = plan.key;
   const wing = key.wing;
   const closing = corridorLine(plan, wing);
-  const blocks = [keyIntro(plan, settings, key.feetPerCell, wing), ...rooms.map((k) => roomLine(plan, k, key.feetPerCell, wing)), ...(closing ? [closing] : [])].map((text, i) => ({ id: blockPlaceholder(i), text }));
+  const blocks = [keyIntro(plan, settings, key.feetPerCell, wing, stock), ...rooms.map((k) => roomLine(plan, k, key.feetPerCell, wing, stock)), ...(closing ? [closing] : [])].map((text, i) => ({ id: blockPlaceholder(i), text }));
   const page: ClientOp = { t: "journal.create", page: { id: PAGE_PLACEHOLDER, title: wing ? wingKeyTitle(key.name, wing.titles) : keyTitle(key.name), folder: KEY_FOLDER, access: "dm", blocks } };
   // On hexes a pin stands on its hex's center (phase 3, 2.4), and a wing's stop at the pins its scene has room for.
   const L = latticeFor(plan.grid ?? "squares", { w: plan.w, h: plan.h });

@@ -7,8 +7,9 @@ import type { KeyInput } from "./keyPage.ts";
 import { endsKey, hexSide, hexWalls, NO_SPACE } from "./hexWalls.ts";
 import { latticeFor } from "./lattice.ts";
 import type { DungeonPlan, PlanRoom, WingBase } from "./plan.ts";
-import { landAll, landDungeon, scratchRoom } from "./scratch.ts";
+import { landAll, landDungeon, scratchRoom, type StockLanding } from "./scratch.ts";
 import { clampSettings, DEFAULT_SETTINGS, GENERATOR_VERSION, type DungeonSettings } from "./settings.ts";
+import type { StockMonster } from "./stockPools.ts";
 
 /*
  * Plans written by hand for the landing tests, so the ops, the scratch room
@@ -224,6 +225,43 @@ export function hundredPlan(): DungeonPlan {
     entrance: { x: 3, y: 3, w: 8, h: 8 },
     key,
   };
+}
+
+/**
+ * Four SRD blocks of each footprint, Small, Medium, Large and Huge, without
+ * their text, as a pool carries them: what the 140-op hand plan stocks.
+ */
+export const HAND_POOL: readonly StockMonster[] = [
+  { srdId: "goblin-warrior", name: "Goblin Warrior", size: "small", type: "Fey (Goblinoid)", alignment: "Chaotic Neutral", ac: 15, hp: { average: 10, formula: "3d6" }, speeds: { walk: 30 }, initiative: { bonus: 2, score: 12 }, passivePerception: 9, senses: "Darkvision 60 ft.", languages: "Common, Goblin", cr: "1/4", xp: 50 },
+  { srdId: "hobgoblin-warrior", name: "Hobgoblin Warrior", size: "medium", type: "Fey (Goblinoid)", alignment: "Lawful Evil", ac: 18, hp: { average: 11, formula: "2d8 + 2" }, speeds: { walk: 30 }, initiative: { bonus: 3, score: 13 }, passivePerception: 10, senses: "Darkvision 60 ft.", languages: "Common, Goblin", cr: "1/2", xp: 100 },
+  { srdId: "ogre", name: "Ogre", size: "large", type: "Giant", alignment: "Chaotic Evil", ac: 11, hp: { average: 68, formula: "8d10 + 24" }, speeds: { walk: 40 }, initiative: { bonus: -1, score: 9 }, passivePerception: 8, senses: "Darkvision 60 ft.", languages: "Common, Giant", cr: "2", xp: 450 },
+  { srdId: "hill-giant", name: "Hill Giant", size: "huge", type: "Giant", alignment: "Chaotic Evil", ac: 13, hp: { average: 105, formula: "10d12 + 40" }, speeds: { walk: 40 }, initiative: { bonus: 2, score: 12 }, passivePerception: 12, senses: "", languages: "Giant", cr: "5", xp: 1800 },
+];
+
+/** The stock the 140-op hand plan was "made" with: All at High for 8 at level 20, the key's longest Made with line. */
+export const HAND_STOCK: StockLanding = { pool: HAND_POOL, key: { choices: { monsters: 100, difficulty: "high" }, party: [{ count: 8, level: 20 }] } };
+
+/**
+ * The 140-op hand plan (docs/design/design-v1-dungeon-stock.md 5): the
+ * 100-op hand plan with one creature in each of its 40 rooms, the four
+ * footprints in turn, each in the room's free north-east corner and named
+ * in the key, so Make sends exactly MAX_OPS.
+ */
+export function handPlan140(): DungeonPlan {
+  const plan = hundredPlan();
+  plan.monsters = plan.rooms.map((r, i) => ({ srdId: HAND_POOL[i % 4]!.srdId, room: i, x: r.x + 5, y: r.y }));
+  plan.key = plan.key!.map((k, i) => {
+    const m = HAND_POOL[i % 4]!;
+    return { ...k, monsters: { lines: [[m.name, 1]], xp: m.xp, budget: 8 * 22_000 } };
+  });
+  return plan;
+}
+
+/** The 140-op hand plan's ops as Make sends them, landed through the scratch room. */
+export function hand140Ops(scene: SceneInput): ClientOp[] {
+  const landed = landDungeon(handPlan140(), scene, HAND_SETTINGS.band, { input: handKey(scene.name), settings: HAND_SETTINGS }, HAND_STOCK);
+  if (!landed.ok) throw new Error(landed.why);
+  return landed.ops;
 }
 
 /** The choices the hand plans were "made" with: the largest, with the key, at levels 11 to 16 so a Rolling Stone stands. */

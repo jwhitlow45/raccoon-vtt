@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { TRINKETS } from "#shared/srd/trinkets.ts";
-import { dressedRooms, handKey, HAND_SETTINGS, hundredPlan, twoRooms } from "./handPlans.ts";
-import { corridorLine, KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, roomLine } from "./keyPage.ts";
+import { dressedRooms, handKey, handPlan140, HAND_SETTINGS, HAND_STOCK, hundredPlan, twoRooms } from "./handPlans.ts";
+import { corridorLine, fightWords, KEY_FOLDER, keyIntro, keyOps, keyTitle, madeWith, partyWords, roomLine, type KeyStock } from "./keyPage.ts";
 import { PAGE_PLACEHOLDER, SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, KeyRoom } from "./plan.ts";
 import { DEFAULT_SETTINGS, type DungeonSettings } from "./settings.ts";
@@ -174,4 +174,40 @@ test("LP33-B-KEY-1: a closing part lists the traps in the corridors by the rooms
   delete plan.corridorTraps;
   const bare = keyOps(plan, { ...HAND_SETTINGS }, { name: "Crypt", color: "#fff", feetPerCell: 5 }, SCENE_PLACEHOLDER)[0] as typeof page;
   assert.equal(bare.page.blocks.length, 1 + plan.key!.length);
+});
+
+const STOCK: KeyStock = { choices: { monsters: 50, difficulty: "moderate" }, party: [{ count: 4, level: 3 }] };
+
+test("DSTOCK-K: a stocked room's line names its fight after its traps, by SRD name with counts, and its XP of the budget", () => {
+  const plan = dressedRooms();
+  const room: KeyRoom = { ...plan.key![1]!, traps: ["Spiked Pit"], monsters: { lines: [["Goblin Boss", 1], ["Goblin Warrior", 3]], xp: 350, budget: 900 } };
+  const line = roomLine(plan, room, 5, undefined, STOCK);
+  assert.match(line, /Trap: Spiked Pit\. Monsters \(Moderate, 350 of 900 XP\): Goblin Boss, Goblin Warrior × 3\. Trinket:/);
+  assert.equal(fightWords([["Ogre", 1]]), "Ogre");
+  assert.match(roomLine(plan, { ...room, monsters: { lines: [["Hill Giant", 1]], xp: 1800, budget: 13200 } }, 5, undefined, { ...STOCK, choices: { monsters: 100, difficulty: "high" } }), /Monsters \(High, 1,800 of 13,200 XP\): Hill Giant\./);
+  assert.ok(!roomLine(plan, plan.key![1]!, 5, undefined, STOCK).includes("Monsters"), "a room with no fight says nothing of one");
+});
+
+test("DSTOCK-K: Made with names Monsters by its mark or percent with the difficulty and party, and nothing at None", () => {
+  assert.match(madeWith(DEFAULT_SETTINGS, 5, STOCK), /Dressing Some, Monsters Half at Moderate for 4 at level 3, 5 ft squares\.$/);
+  assert.match(madeWith(DEFAULT_SETTINGS, 5, { ...STOCK, choices: { monsters: 35, difficulty: "low" }, party: [{ count: 3, level: 3 }, { count: 1, level: 4 }] }), /Monsters 35% at Low for 3 at level 3 and 1 at level 4,/);
+  assert.equal(partyWords([{ count: 1, level: 1 }, { count: 2, level: 2 }, { count: 3, level: 3 }]), "1 at level 1, 2 at level 2 and 3 at level 3");
+  assert.equal(madeWith(DEFAULT_SETTINGS, 5, { ...STOCK, choices: { monsters: 0, difficulty: "high" } }), madeWith(DEFAULT_SETTINGS, 5));
+});
+
+test("DSTOCK-K: the intro tells the DM how to show the hidden creatures only when a room is stocked", () => {
+  const plan = dressedRooms();
+  const words = "Each room's monsters stand hidden from players. To show them, select them with the Select tool, a box drag takes a room's at once, and turn off Hidden. Start a fight from the same selection.";
+  assert.ok(!keyIntro(plan, DEFAULT_SETTINGS, 5, undefined, STOCK).includes(words));
+  const stocked: DungeonPlan = { ...plan, key: plan.key!.map((k, i) => (i === 1 ? { ...k, monsters: { lines: [["Ogre", 1]], xp: 450, budget: 900 } } : k)) };
+  const intro = keyIntro(stocked, DEFAULT_SETTINGS, 5, undefined, STOCK);
+  assert.ok(intro.includes(`${words}\n\nMade with:`));
+});
+
+test("DSTOCK-K: the 140-op hand plan's key, every room's fight in it at the longest Made with, stays within a page's 32 KiB", () => {
+  const ops = keyOps(handPlan140(), HAND_SETTINGS, handKey("x".repeat(80)), SCENE_PLACEHOLDER, HAND_STOCK.key);
+  const page = ops[0]!;
+  assert.ok(page.t === "journal.create");
+  assert.equal(page.page.blocks.filter((b) => b.text.includes("Monsters (High,")).length, 40);
+  assert.ok(serializedBytes(page) <= LIMITS.journalPageBytes, `${serializedBytes(page)} bytes`);
 });
