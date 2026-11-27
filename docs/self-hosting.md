@@ -681,14 +681,14 @@ newest first.
 
 - **3D models on token pictures** ([design](design/design-v1-token-models.md)):
   change format 69, room format 52. Back up the database just before the
-  update, and reload DM pages first, then every other open page, since an
-  old page cannot add a model or show one in Isometric. Model sheets are
-  assets of a new kind, `model`, which the update adds to the database as it
-  starts. After a clean stop an older build refuses any room this version
-  saved a snapshot of, and after a crash or a forced stop any room with
-  changes at format 69 after its last snapshot, so going back needs the
-  backup taken just before the update for those rooms. A room only opened
-  and left untouched needs nothing.
+  update, and reload DM pages first, then every other open page, since the
+  change format rises and a page from before works by the older one until
+  it reloads. Model sheets are assets of a new kind, `model`, which the
+  update adds to the database as it starts. After a clean stop an older
+  build refuses any room this version saved a snapshot of, and after a crash
+  or a forced stop any room with changes at format 69 after its last
+  snapshot, so going back needs the backup taken just before the update for
+  those rooms. A room only opened and left untouched needs nothing.
 - **Spell slots and Hit Point Dice** ([design](design/design-v1-slots.md)):
   change format 68, room format 51. Back up the database just before the
   update, and reload DM pages first, then every other open page, since an

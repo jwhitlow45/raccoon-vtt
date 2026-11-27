@@ -1,6 +1,6 @@
 # raccoon-vtt: a 3D model for a token, shown in Isometric
 
-Status: in build. The reader and renderer (lane B) were built on 2026-11-27, and the other lanes follow. Draft 7, after seven rounds of design review, which the "Design review" section at the end sums up. Read on main at a6ed9ce2 (OP_VERSION 67, SNAPSHOT_VERSION 50, deployed). Decisions D-261127-166 to 190, 373 to 389, 410 to 419, 470 to 479, 510 to 519 and 521 to 526, with the coordinator's 370 to 372, 429 and 520. The build's own are in "As built". Prototype and measurements: Appendix A.
+Status: in build. The reader and renderer (lane B) and the contracts, format step and server (lane A) were built on 2026-11-27, and the board and the sheet (lanes C and D) follow. Draft 7, after seven rounds of design review, which the "Design review" section at the end sums up. Read on main at a6ed9ce2 (OP_VERSION 67, SNAPSHOT_VERSION 50, deployed). Decisions D-261127-166 to 190, 373 to 389, 410 to 419, 470 to 479, 510 to 519 and 521 to 526, with the coordinator's 370 to 372, 429 and 520. The build's own are in "As built". Prototype and measurements: Appendix A.
 
 ## 1. Feasibility first
 
@@ -115,7 +115,7 @@ Facing 0 faces north, as the ring's tick shows. The frame is exact for every fac
 
 ### 4.5 Privacy
 
-- `visibleAssetIds` (shared/project.ts:5712) adds each image's model id through the same `addImage`, so a player may fetch a sheet only while their copy holds an image naming it: a hidden token's, a not-yet-found creature's and a disguise's true face's are never theirs. The monster, SRD image and companion block defaults (project.ts:5738 to 5741) go through the same `addImage`. `referencedAssetIds` and `entityAssetRefs` (shared/referencedAssets.ts) count model ids as in use, so cleanup never deletes a sheet a picture names.
+- `visibleAssetIds` (shared/project.ts:5712) adds each image's model id through the same `addImage`, so a player may fetch a sheet only while their copy holds an image naming it, or when they uploaded it themselves (`uploadedAssetIds`, as for a token picture): a hidden token's, a not-yet-found creature's and a disguise's true face's are never theirs unless the sheet is their own upload. The monster, SRD image and companion block defaults (project.ts:5738 to 5741) go through the same `addImage`. `referencedAssetIds` and `entityAssetRefs` (shared/referencedAssets.ts) count model ids as in use, so cleanup never deletes a sheet a picture names.
 - No new field reaches anyone who does not already receive the image it rides on. The sheet shows only what any viewer of that creature in Isometric sees.
 
 ### 4.6 Export and import
@@ -308,7 +308,7 @@ C's first commit is `frames.ts`, which D imports. B and D meet only at client.ts
 
 ## 13. As built
 
-The reader and renderer (lane B) are built. The other lanes add their parts here as they are built.
+The reader and renderer (lane B) and the contracts and server (lane A) are built. The other lanes add their parts here as they are built.
 
 **The page's side and the worker.**
 
