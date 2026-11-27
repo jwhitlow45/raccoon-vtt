@@ -183,6 +183,10 @@ async function createRoom(): Promise<void> {
   await ops.send({ t: "room.update", settings: { playersMoveAny: [run.patId], playersDraw: [run.patId] } });
   await ops.send({ t: "character.create", character: { id: run.bree, name: "Bree", size: "medium", ownerIds: [run.patId], actor: actor({ senses: "Darkvision 60 ft." }) } });
   await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [], actor: actor() } });
+  // Classes that give spell slots and Hit Point Dice, so each character's page has its Spell slots and Hit Point Dice to land on
+  // (docs/design/design-v1-slots.md 4): the search offers neither for a character whose classes give none.
+  await ops.send({ t: "character.update", characterId: run.bree, patch: { classes: [{ id: "wizard", level: 3 }], level: 3 } });
+  await ops.send({ t: "character.update", characterId: run.thorn, patch: { classes: [{ id: "paladin", level: 2 }], level: 2 } });
   await ops.send({ t: "token.create", token: { id: run.goblin, sceneId: run.mat, name: "Goblin", kind: "monster", x: 6, y: 6, size: "medium", visibility: "all", ownerIds: [], actor: { inline: actor() } } });
   await ops.send({ t: "token.create", token: { id: run.tBree, sceneId: run.mat, name: "Bree", kind: "pc", x: 4, y: 4, size: "medium", visibility: "all", ownerIds: [run.patId], actor: { ref: run.bree } } });
   await addSound({ context: desk, origin: server.origin, roomId: run.roomId, ops, id: run.song, name: "Tavern song", use: "music", ms: 31_000 });
