@@ -14,8 +14,10 @@ import { ConsoleWatch, openSceneGroup, openSideTab, Shots, sideTabName, SocketWa
 /**
  * Make's send past the server's burst (dungeon generator phase 2, section
  * 6, D-261107-263, prefix DG2B), on the real server serving the production
- * build: the 100-op hand plan (client/features/dungeon/handPlans.ts
- * `hundredPlan`, its ops from the server's dungeon fixture, which
+ * build: the 140-op hand plan (client/features/dungeon/handPlans.ts
+ * `handPlan140`, the 100-op plan with a hidden creature in each of its 40
+ * rooms, docs/design/design-v1-dungeon-stock.md 5), its ops from the
+ * server's dungeon fixture, which
  * ops.fixture.test.ts writes) stands in for the worker's answer, so the
  * dialog's own Make sends it, and the main thread is measured under
  * Chrome's 4x CPU slowdown. The dispatch task, where every op is
@@ -23,7 +25,7 @@ import { ConsoleWatch, openSceneGroup, openSideTab, Shots, sideTabName, SocketWa
  * 60 and answers the rest busy, and the store resends them after its
  * backoff) are held to the design's 100 ms, scaled by a reference task on a
  * slower machine (D-261102-771). A DM who hides the dialog offline and
- * opens the scene while all 100 wait is measured too (DG-MIDSEND-PERF):
+ * opens the scene while all 140 wait is measured too (DG-MIDSEND-PERF):
  * the opening, which rebuilds the view over every waiting op and draws the
  * scene, is reported as the scene's first drawing is, and every task after
  * it is held to the limit. Over the budget, the remedy is a store-level
@@ -91,12 +93,12 @@ const consoles = { dm: new ConsoleWatch("dm") };
 const run = { roomId: "", roomName: `E2E dungeon send ${new Date().toISOString().slice(0, 19)}`, measured: [] as string[], seed: 0 };
 
 type Hand = { name: string; ops: Op[]; plan: unknown; summary: { rooms: number } };
-const HUNDRED = (JSON.parse(readFileSync(new URL("../server/rooms/dungeon.fixture.json", import.meta.url), "utf8")) as { dungeons: Hand[] }).dungeons.find((d) => d.name === "hundred")!;
-const OPS = HUNDRED.ops.length;
+const HAND140 = (JSON.parse(readFileSync(new URL("../server/rooms/dungeon.fixture.json", import.meta.url), "utf8")) as { dungeons: Hand[] }).dungeons.find((d) => d.name === "hand140")!;
+const OPS = HAND140.ops.length;
 
 /**
  * The preview the worker answers with in place of the generator's: the
- * hand plan, its 100 ops and the scratch room they make, landed by the
+ * hand plan, its 140 ops and the scratch room they make, landed by the
  * shared reducer as the worker's scratch room lands them, as the worker
  * would post it. The page's worker is the production build's, so its
  * answers are rewritten in the worker itself.
@@ -105,12 +107,13 @@ const PREVIEW = (() => {
   const dmMember: Member = { id: "scratch-dm", rev: 1, name: "DM", color: "#ffffff", kind: "dm", createdAt: "2026-01-01T00:00:00.000Z" };
   const fresh = createInitialState({ roomName: "Scratch", dm: dmMember, now: dmMember.createdAt });
   let room: RoomState = { ...fresh, meta: { ...fresh.meta, playerSceneId: null }, scenes: {}, playedScenes: {} };
-  for (const [i, raw] of HUNDRED.ops.entries()) {
+  for (const [i, raw] of HAND140.ops.entries()) {
     const r = applyOp(room, clientOpSchema.parse(raw) as Op, { memberId: dmMember.id, role: "dm" }, { seq: i + 1, at: dmMember.createdAt });
     if (!r.ok) throw new Error(`${raw.t} refused: ${r.message}`);
     room = r.state;
   }
-  return { ok: true, plan: HUNDRED.plan, ops: HUNDRED.ops, room, summary: HUNDRED.summary };
+  // No room facts: the hand plan has no room panel, and with none the creature limit's claims are none (stock.ts stockClaims).
+  return { ok: true, plan: HAND140.plan, ops: HAND140.ops, room, summary: HAND140.summary, facts: [] };
 })();
 
 /** Rewrites every preview the dungeon worker answers with into the hand plan's, its scene under the form's name, as the worker names it. */
@@ -268,7 +271,7 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
     await dm.locator(".konvajs-content").first().waitFor();
   });
 
-  test("DG2B-1. a 100-op Make at 4x: one dispatch task and every task of the paced send under the limit, and every op lands", async () => {
+  test("DG2B-1. a 140-op Make at 4x: one dispatch task and every task of the paced send under the limit, and every op lands", async () => {
     const dialog = await openHandDialog("Hundred");
     const sent = dmSocket.sent.length;
     const received = dmSocket.received.length;
@@ -296,7 +299,7 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
     const after = read.tasks.filter((t) => t.start >= read.closedAt!).map((t) => Math.round(t.duration));
     const { ops, busy } = sentSince(sent, received);
     run.measured.push(
-      `100-op Make at 4x: the dispatch task ${dispatchMs} ms (limit ${limitMs} ms, the reference task ${Math.round(referenceMs)} ms), the paced send ${sendMs} ms from the press to complete with ${busy} busy answers and ${ops.length} op frames, its long tasks ${JSON.stringify(paced)}, the new scene's opening ${JSON.stringify(after)}`,
+      `140-op Make at 4x: the dispatch task ${dispatchMs} ms (limit ${limitMs} ms, the reference task ${Math.round(referenceMs)} ms), the paced send ${sendMs} ms from the press to complete with ${busy} busy answers and ${ops.length} op frames, its long tasks ${JSON.stringify(paced)}, the new scene's opening ${JSON.stringify(after)}`,
     );
     const first = ops.filter((f) => f.op.t !== undefined);
     assert.equal(first[0]?.op.t, "scene.create");
@@ -307,14 +310,14 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
     await waitFor("the DM on the new scene", () => (dmSocket.you?.sceneId === sceneId ? true : null), 30_000);
     await waitFor("every op stored", () => {
       const s = stored(sceneId);
-      return s.stamps === 160 && s.lights === 40 && s.tokens === 2 && s.traps === 20 && s.pins === 40 && s.pages >= 1 ? true : null;
+      return s.stamps === 160 && s.lights === 40 && s.tokens === 42 && s.traps === 20 && s.pins === 40 && s.pages >= 1 ? true : null;
     }, 30_000);
-    await shots.take(dm, "DG2B-1-hundred");
+    await shots.take(dm, "DG2B-1-hand140");
     assert.ok(dispatchMs <= limitMs, `the dispatch task took ${dispatchMs} ms at 4x, over ${limitMs} ms here`);
     for (const ms of paced) assert.ok(ms <= limitMs, `a task of the paced send took ${ms} ms at 4x, over ${limitMs} ms here: ${JSON.stringify(paced)}`);
   });
 
-  test("DG2B-2. a DM who hides the dialog offline and opens the scene while 100 ops wait: the opening measured at 4x, and every task after it under the limit", async () => {
+  test("DG2B-2. a DM who hides the dialog offline and opens the scene while 140 ops wait: the opening measured at 4x, and every task after it under the limit", async () => {
     await dm.reload();
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
     const dialog = await openHandDialog("Hundred hidden");
@@ -334,7 +337,7 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
       await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       referenceMs = await referenceTaskMs(dm);
       await watchTasks(dm);
-      // scene.create is predicted, so the panel lists the scene while all 100 wait in the queue.
+      // scene.create is predicted, so the panel lists the scene while all 140 wait in the queue.
       await (await scenesPanel(dm)).getByRole("button", { name: /^Hundred hidden/ }).first().click();
       const start = Date.now();
       await dmContext.setOffline(false);
@@ -345,7 +348,7 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
       shownAt = await dm.evaluate(() => (globalThis as unknown as { performance: { now(): number } }).performance.now());
       await waitFor("every op stored", () => {
         const s = stored(sceneId);
-        return s.stamps === 160 && s.lights === 40 && s.tokens === 2 && s.traps === 20 && s.pins === 40 ? true : null;
+        return s.stamps === 160 && s.lights === 40 && s.tokens === 42 && s.traps === 20 && s.pins === 40 ? true : null;
       }, 120_000);
       sendMs = Date.now() - start;
       read = await readTasks(dm);
@@ -361,7 +364,7 @@ describe("dungeon send past the burst", { concurrency: false }, () => {
     const opening = read.tasks.filter((t) => t.start < shownAt).map((t) => Math.round(t.duration));
     const answers = read.tasks.filter((t) => t.start >= shownAt).map((t) => Math.round(t.duration));
     run.measured.push(
-      `Opening the scene with 100 ops waiting, at 4x: ${sendMs} ms from reconnecting to every op stored, ${busy} busy answers, ${ops.length} op frames, the opening's long tasks ${JSON.stringify(opening)}, the answers' after it ${JSON.stringify(answers)} (limit ${limitMs} ms, the reference task ${Math.round(referenceMs)} ms)`,
+      `Opening the scene with 140 ops waiting, at 4x: ${sendMs} ms from reconnecting to every op stored, ${busy} busy answers, ${ops.length} op frames, the opening's long tasks ${JSON.stringify(opening)}, the answers' after it ${JSON.stringify(answers)} (limit ${limitMs} ms, the reference task ${Math.round(referenceMs)} ms)`,
     );
     assert.ok(new Set(ops.map((f) => f.g)).size === 1, "one group, sent on reconnect");
     await shots.take(dm, "DG2B-2-hidden");
