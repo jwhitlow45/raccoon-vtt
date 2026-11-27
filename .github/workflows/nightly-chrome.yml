@@ -1,0 +1,122 @@
+# The whole e2e suite on the runner image's own Google Chrome stable, once a
+# night. CI runs a pinned Chrome for Testing (ci.yml, CHROME_VERSION), so a new
+# stable release shows up here first, before anyone bumps the pin, and a red
+# run here gates nothing: it is not a required check and no deploy waits on
+# it. A failure is the notice that the next bump needs a look.
+#
+# The shards are ci.yml's e2e job, 14 of them, without the Chrome download.
+# The harness launches the system Chrome when E2E_CHROME_PATH is unset, and
+# the log of each file names the version it ran on. The LAN file in WebKit
+# and the macOS job stay in ci.yml: WebKit does not depend on Chrome, and
+# e2e/macos-only.json holds no files.
+name: Nightly Chrome
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  # As in ci.yml.
+  NODE_VERSION: 24.21.0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    services:
+      # As in ci.yml's e2e job.
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: raccoon
+          POSTGRES_PASSWORD: raccoon
+          POSTGRES_DB: raccoon
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U raccoon -d raccoon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+      E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
+    steps:
+      - name: Deadline for the shard
+        run: echo "E2E_DEADLINE=$(( $(date +%s) + (45 - 5) * 60 ))" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      # The e2e job's step, word for word (scripts/ci-workflow.test.ts).
+      - name: Roboto as the system font
+        run: |
+          deb=fonts-roboto-unhinted_0~20170802-3_all.deb
+          pool=ubuntu/pool/universe/f/fonts-roboto
+          curl -fsS --max-time 5 -o "$RUNNER_TEMP/$deb" "http://azure.archive.ubuntu.com/$pool/$deb" || curl -fsS --retry 3 --max-time 60 -o "$RUNNER_TEMP/$deb" "http://archive.ubuntu.com/$pool/$deb"
+          echo "21852f3ef1a13ae4cb9cfabd89a3cd0b3979f189bd14801d3010e8a7da3bff0e  $RUNNER_TEMP/$deb" | sha256sum -c --quiet -
+          dpkg-deb -x "$RUNNER_TEMP/$deb" "$RUNNER_TEMP/roboto"
+          mkdir -p ~/.local/share/fonts ~/.config/fontconfig
+          cp -r "$RUNNER_TEMP/roboto/usr/share/fonts/truetype/roboto" ~/.local/share/fonts/
+          cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
+          fc-cache ~/.local/share/fonts
+          test "$(fc-match --format='%{family}' sans-serif)" = Roboto
+      # E2E_CHROME_PATH stays unset, so the harness launches the image's
+      # Google Chrome stable (channel "chrome").
+      - run: google-chrome --version
+      - name: e2e shard ${{ matrix.shard }}
+        id: shard
+        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }} --deadline "$E2E_DEADLINE"
+      - name: Keep logs and screenshots
+        if: ${{ always() && (steps.shard.outcome != 'success' || steps.shard.outputs.reran == 'true') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
