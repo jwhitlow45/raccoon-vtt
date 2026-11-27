@@ -1047,7 +1047,7 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     }
   });
 
-  test("ft-6. with every part hidden on the DM's device, a trap still brings its toast and its card with Save and damage and Dismiss, the Passive Perception hint its Mark found, and a fall its toast and card. With Areas alone hidden, Place the area lends the Area tool to the trap's draft and hands back the Trap tool (D-261127-303)", async () => {
+  test("ft-6. with every part hidden on the DM's device, a trap still brings its toast and its card with Save and damage and Dismiss, the Passive Perception hint its Mark found, and a fall its toast and card. With Areas alone hidden, Place the area lends the Area tool to the trap's draft and hands back the Trap tool, and Traps hiding meanwhile ends the borrow (D-261127-303, 659)", async () => {
     await setChoices(dm, { dm: DM_H });
     let trapId: string | null = null;
     try {
@@ -1107,7 +1107,19 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
       assert.equal(await toolbar(dm).locator('[data-tool="area"]').count(), 0, "the Area tool still hidden");
       await pane.getByRole("button", { name: "Done", exact: true }).click();
       await pane.waitFor({ state: "detached" });
-      await pickTool(dm, "Select");
+
+      // Traps hides too while the area is aimed, as from another window: the borrow ends at Select, so no Save is left to send to the hidden part (D-261127-659).
+      await tapCell(dm, BOUNDS, { x: 4, y: 10 });
+      await pane.waitFor();
+      if ((await targets.getAttribute("aria-expanded")) !== "true") await targets.click();
+      await pane.getByRole("button", { name: "Place the area", exact: true }).click();
+      await bar.waitFor();
+      const aimed = dmSocket.sent.length;
+      await setChoices(dm, { dm: { areas: false, traps: false } });
+      await waitFor("Select once Traps hides", async () => ((await toolbar(dm).locator('[data-tool="select"]').getAttribute("data-active")) === "true" ? true : null));
+      await bar.waitFor({ state: "detached" });
+      assert.equal(await pane.count(), 0, "no trap pane while Traps hides");
+      assert.deepEqual(opsSince(dmSocket, aimed).filter((f) => f.includes('"t":"trap.update"')), [], "no trap.update once the borrow ended");
       await ops!.send({ t: "trap.delete", trapId: dart });
       trapId = null;
 
@@ -1158,6 +1170,40 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     } finally {
       await ops!.send({ t: "clock.stop" });
       await setChoices(dm, null);
+    }
+  });
+
+  test("ftd-2. This device's dice sets draw their previews again once Roll animation goes off and back on (D-261127-710)", async (t) => {
+    const webgl = await player.evaluate(`document.createElement("canvas").getContext("webgl2", { failIfMajorPerformanceCaveat: true }) !== null`);
+    if (!webgl) {
+      assert.ok(!process.env.CI, "no WebGL2 on the CI runner, so the previews cannot be tested");
+      t.skip("this browser has no WebGL2 to draw the previews");
+      return;
+    }
+    // The first tile's canvas shows and holds a drawn pixel: a preview, not the flat die.
+    const painted = async () =>
+      (await player.evaluate(`(() => {
+        const canvas = document.querySelector("[data-dice-set] canvas");
+        if (!canvas || getComputedStyle(canvas).display === "none") return false;
+        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) return true;
+        return false;
+      })()`)) === true;
+    const menu = await openThisDevice(player, true);
+    try {
+      await openGroup(menu, "Rolls");
+      const tiles = menu.locator("[data-dice-set]");
+      await tiles.first().scrollIntoViewIfNeeded();
+      await waitFor("the previews drawn", async () => ((await painted()) ? true : null), 20_000);
+      const roll = menu.getByRole("switch", { name: "Roll animation", exact: true });
+      await roll.click();
+      await tiles.first().waitFor({ state: "detached" });
+      await roll.click();
+      await tiles.first().scrollIntoViewIfNeeded();
+      await waitFor("the previews drawn again", async () => ((await painted()) ? true : null), 20_000);
+    } finally {
+      await setChoices(player, null);
+      await closeSheets(player);
     }
   });
 
