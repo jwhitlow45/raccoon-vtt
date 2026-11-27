@@ -358,6 +358,16 @@ export class ModelSession {
     this.#deps.commit((current) => (current ? withoutModel(current) : null));
   }
 
+  /**
+   * Opens the sheet again after a close it did not ask for: React's strict
+   * mode in development unmounts a component once and mounts it again,
+   * which runs the unmount's close. A close drops everything that ran, so
+   * the session starts again from what its state holds.
+   */
+  open(): void {
+    if (this.#state.closed) this.#set({ closed: false });
+  }
+
   /** Closes the sheet: whatever runs is dropped, nothing more is sent, and the worker ends. */
   close(): void {
     if (this.#state.closed) return;

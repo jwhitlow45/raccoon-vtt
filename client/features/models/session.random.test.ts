@@ -435,6 +435,23 @@ describe("the 3D model sheet's state", () => {
     assert.deepEqual([rig.session.state.stage, rig.session.state.file, rig.session.state.drawn], [null, null, null]);
   });
 
+  test("open after a close starts the sheet again, as strict mode's second mount does, and the close still ended the worker", async () => {
+    const rig = new Rig([icon("#336699")]);
+    rig.session.close();
+    rig.session.open();
+    assert.equal(rig.session.state.closed, false);
+    assert.equal(rig.ends, 1);
+    rig.session.pick(FILES[0]!);
+    await flush();
+    rig.answerDraw(true, false);
+    await flush();
+    rig.save++;
+    rig.session.save();
+    await play(rig, []);
+    check(rig);
+    assert.equal(rig.commits.length, 1);
+  });
+
   test("a failed upload clears Saving with its words, and Save then tries again once", async () => {
     const rig = new Rig([icon("#336699")]);
     rig.session.pick(FILES[0]!);

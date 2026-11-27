@@ -83,8 +83,11 @@ export function ModelSheet(props: {
   });
   const state = useSyncExternalStore(session.subscribe, () => session.state);
   useEffect(() => session.setWearers(props.wearers), [session, props.wearers]);
-  // Closing however it closes ends the worker and drops whatever runs.
-  useEffect(() => () => session.close(), [session]);
+  // Closing however it closes ends the worker and drops whatever runs. A mount opens it, so strict mode's second mount works.
+  useEffect(() => {
+    session.open();
+    return () => session.close();
+  }, [session]);
 
   const stored = sharedModel(props.wearers);
   const anyModel = props.wearers.some((w) => w?.model);
