@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
+import { LIMITS } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Op, OpOf, ServerMessage } from "#shared/protocol.ts";
@@ -32,6 +33,8 @@ type FixtureHexWing = FixtureDungeon & { baseOps: Op[]; area: Rect; join: Extrac
 const MEDIUM = FIXTURE.dungeons.find((d) => d.name === "medium")!;
 const WING = FIXTURE.dungeons.find((d) => d.name === "wing") as FixtureWing;
 const HEX_WING = FIXTURE.dungeons.find((d) => d.name === "hex-wing") as FixtureHexWing;
+/** The stocked dungeon's creatures (docs/design/design-v1-dungeon-stock.md 9), the blocks a stocked wing's tokens are written from. */
+const STOCKED_CREATURES = FIXTURE.dungeons.find((d) => d.name === "stocked")!.ops.filter((op): op is OpOf<"token.create"> => op.t === "token.create" && op.token.kind === "monster");
 
 const BLOCK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 const shortId = () => Array.from(randomBytes(12), (b) => BLOCK_CHARS[b % BLOCK_CHARS.length]).join("");
@@ -284,6 +287,91 @@ describe("a wing on the server", () => {
     assert.equal(joinChunk?.edges[join]?.kind, "door", "the join they see is the wing's door");
     const seen = JSON.stringify(afterView);
     for (const op of ops) if (op.t === "trap.create") assert.ok(!seen.includes(op.trap.id), "no wing trap reaches a player");
+    tb.dmSocket.close();
+  });
+});
+
+/**
+ * `n` stocked creatures for the wing, as Make writes them (ops.ts
+ * `monsterOps`): the stocked fixture's hidden tokens, each in turn in the
+ * middle of one of the wing's rooms. The wing fixture is unstocked, and this
+ * test imports no client module, so the tokens are written from those the
+ * generator made.
+ */
+function creatures(sceneId: string, n: number): Op[] {
+  return Array.from({ length: n }, (_, i) => {
+    const from = STOCKED_CREATURES[i % STOCKED_CREATURES.length]!.token;
+    const r = WING.rooms[i % WING.rooms.length]!;
+    return { t: "token.create", token: { ...from, id: uuidv7(), sceneId, x: r.x + 1 + (Math.floor(i / WING.rooms.length) % (r.w - 2)), y: r.y + Math.floor(r.h / 2) } } as Op;
+  });
+}
+
+/** `n` hidden tokens on `sceneId`, the scene's group filled near its cap. */
+function filler(sceneId: string, n: number): Op[] {
+  return Array.from({ length: n }, (_, i) => ({ t: "token.create", token: { id: uuidv7(), sceneId, kind: "object", name: `Crate ${i}`, size: "medium", x: i % 20, y: 48, visibility: "dm", actor: { inline: GOBLIN } } }) as Op);
+}
+
+describe("a stocked wing on the server (DSTOCK)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ rooms: { idleUnloadMs: 60_000, actor: { snapshotOps: 1_000, snapshotIdleMs: 60_000 } } });
+  });
+  after(() => t.close());
+
+  const monsters = (state: RoomState, sceneId: string) => Object.values(state.tokens).filter((x) => x.sceneId === sceneId && x.kind === "monster");
+
+  test("DSTOCK-W: a stocked wing lands its creatures hidden in its one Setup step, Undo setup takes them back and Redo setup brings them back", async () => {
+    const tb = await table(t, "Stocked wing undo");
+    const ops = fresh(WING, tb.sceneId);
+    const stocked = [...ops.filter((op) => op.t !== "journal.create" && op.t !== "pin.put"), ...creatures(tb.sceneId, 6), ...ops.filter((op) => op.t === "journal.create" || op.t === "pin.put")];
+    const g = uuidv7();
+    assert.deepEqual(await send(tb.dmSocket, asks(ops, tb.sceneId, WING.clear), g), [], "every part taken");
+    assert.deepEqual(await send(tb.dmSocket, stocked, g), [], "the stocked wing is taken");
+    const landed = monsters(t.manager.get(tb.roomId)!.committed.state, tb.sceneId);
+    assert.equal(landed.length, 6);
+    assert.ok(landed.every((x) => x.visibility === "dm"));
+    const seen = JSON.stringify(await playerView(t, tb, "stocked-wing"));
+    for (const x of landed) assert.ok(!seen.includes(x.id), "no creature reaches a player on the scene");
+    assert.equal((await tb.dmSocket.step("undo", "setup")).rejects, undefined);
+    assert.equal(monsters(t.manager.get(tb.roomId)!.committed.state, tb.sceneId).length, 0, "Undo setup takes the creatures with the wing");
+    assert.equal((await tb.dmSocket.step("redo", "setup")).rejects, undefined);
+    const back = monsters(t.manager.get(tb.roomId)!.committed.state, tb.sceneId);
+    assert.equal(back.length, 6, "Redo setup brings them back");
+    assert.ok(back.every((x) => x.visibility === "dm"));
+    tb.dmSocket.close();
+  });
+
+  test("DSTOCK-W: a stocked wing, its scene's group near 500 tokens over two floors, lands whole within what the group has left", async () => {
+    const tb = await table(t, "Stocked wing near the cap");
+    const upstairs = uuidv7();
+    assert.equal((await tb.dmSocket.apply({ t: "scene.create", scene: { id: upstairs, name: "Upstairs", bounds: { w: 20, h: 20 } }, floor: { beside: tb.sceneId, side: "above" } } as Op)).rejects, undefined);
+    const ops = fresh(WING, tb.sceneId);
+    const stones = ops.filter((op) => op.t === "token.create").length;
+    const n = 8;
+    const live0 = t.manager.get(tb.roomId)!.committed.state;
+    const standing = Object.values(live0.tokens).filter((x) => x.sceneId === tb.sceneId || x.sceneId === upstairs).length;
+    // Exactly the room the stocking counts (stockCapacity): the group's tokens left are the creatures and the stones.
+    const fill = LIMITS.tokensPerScene - standing - n - stones;
+    const half = Math.floor(fill / 2);
+    const sockets = await Promise.all(Array.from({ length: 6 }, async (_, i) => {
+      const s = await t.connect(tb.roomId, tb.dm);
+      await s.snapshot(`wing-filler-${i}`);
+      return s;
+    }));
+    const all = [...filler(tb.sceneId, half), ...filler(upstairs, fill - half)];
+    const per = Math.ceil(all.length / sockets.length);
+    const filled = await Promise.all(sockets.map((s, i) => send(s, all.slice(i * per, (i + 1) * per))));
+    for (const s of sockets) s.close();
+    assert.deepEqual(filled.flat(), [], "the filler lands");
+    const stocked = [...ops.filter((op) => op.t !== "journal.create" && op.t !== "pin.put"), ...creatures(tb.sceneId, n), ...ops.filter((op) => op.t === "journal.create" || op.t === "pin.put")];
+    const g = uuidv7();
+    assert.deepEqual(await send(tb.dmSocket, asks(ops, tb.sceneId, WING.clear), g), [], "every part taken");
+    assert.deepEqual(await send(tb.dmSocket, stocked, g), [], "nothing is refused");
+    const live = t.manager.get(tb.roomId)!.committed.state;
+    assert.equal(monsters(live, tb.sceneId).length, n, "every creature landed");
+    assert.equal(Object.values(live.tokens).filter((x) => x.sceneId === tb.sceneId || x.sceneId === upstairs).length, LIMITS.tokensPerScene, "the group is full, and not past it");
+    // Not vacuous: the group had room for these creatures and no more.
+    assert.equal((await send(tb.dmSocket, filler(upstairs, 1))).length, 1, "one more token is past the cap");
     tb.dmSocket.close();
   });
 });
