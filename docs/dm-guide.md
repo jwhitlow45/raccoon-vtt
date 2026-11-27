@@ -197,6 +197,16 @@ The most important rule at any table is that everyone has fun, you included. If 
 - **The walking ruler and difficult ground.** Dragging a token already counts the rubble you painted and, while **Walls and ledges block players' moves** is on, walks it around walls. Mark more difficult ground, or measure a walk before anyone moves, when your maps call for it.
 - **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Pick each up whenever you want, once the basics feel familiar.
 
+### Keeping the app simple
+
+The parts you leave out can leave your screen too. Open **Menu**, **This device**, **Features**, and turn off each part your table doesn't use: its tools, panels, keys and search results go from this device, and nothing changes for anyone else or for the game. If you hide Sound, your players still hear the music you start, and if a player hides Spell slots, their character keeps the slots you can see and spend.
+
+![The Features page on a phone: Find a part, the Characters group folded and reading All shown, and the Tools group open with a switch each for Ruler, Areas, Draw and Ping and laser.](dm-guide/features.webp)
+
+**Start from** gives you two quick choices. **Simple** keeps the map, tokens, monsters, fog, dice and turns, with Ruler, Areas, Draw and Ping, and on a player's phone it keeps their character's HP, conditions and rolls, turns, Ruler and Ping. Your players have the same page, so the one who finds a phone screen busy can trim it for themselves while the rest of the table keeps everything.
+
+A part you hide never goes far. Where it lived, a quiet line reads "Hidden on this device:" with a **Show** button, the toolbar's **Hidden** button lists the tools you hid, and the search finds "Show Spell slots" for any part you hid. A prompt that needs your answer still reaches you, such as a trap going off or a save request, and the parts every game needs, such as dice, Initiative and the X-card, always show: the page lists them under **Always shown**. **Reset all** brings everything back.
+
 # Making maps
 
 This part covers everything you do to get a map ready before the players see it: scenes and their floors, the starter art that comes with the app, the grid, the map builder, walls, heights, the isometric view, difficult ground, light, weather, fog and the dungeon generator. Read it while you prepare a session, and come back to a section when you want a map to do something new. Traps are part of preparing a map too, but they matter most once they go off, so they have their own section under [Running fights](#traps).

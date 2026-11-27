@@ -196,6 +196,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
   floor for the DM, stairs and ladders that players take themselves, floors
   made from Universal VTT files and generated dungeons, a walking ruler
   carried over stairs, and Move to floor in the search.
+- [design-v1-features.md](design-v1-features.md): Features in This device,
+  hiding the parts of the app a device does not use, with the ways back
+  where each part lived.
 
 ## The look
 

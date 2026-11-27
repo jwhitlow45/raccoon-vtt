@@ -87,6 +87,8 @@ export const PICTURES: Record<string, string> = {
   "stat-block-roll-header": "gp6-blockroll-header",
   "corridor-riders": "gp6-narrow",
   "held-group-save": "gp6-heldsave",
+  // Guide pass 7: Features on a phone (s160).
+  "features": "gp7-features",
 };
 
 /**
