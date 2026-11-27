@@ -275,7 +275,8 @@ describe("a fault in the room engine", () => {
       // What a closing socket sends is not read, as on a socket closed at once, so its device sends it again.
       unread = socket.op({ t: "log.chat", text: "sent while closing" });
       socket.send({ t: "ping", k: 7 });
-      await new Promise((r) => setTimeout(r, 100));
+      // The server has read both while the socket waits to close, before the commit can land and close it.
+      await socket.reached();
     } finally {
       failing.restore();
     }
