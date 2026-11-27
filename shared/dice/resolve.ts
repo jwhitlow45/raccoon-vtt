@@ -1,5 +1,5 @@
 import type { Actor, DiceResult, RoomState } from "../model.ts";
-import { dieRefusal } from "../reducer/uses.ts";
+import { dieRefusal, NO_SLOTS_HERE } from "../reducer/uses.ts";
 import type { ActorTarget, OpOf, RefusalCode } from "../protocol.ts";
 import { failingCondition } from "../rules/rollReminders.ts";
 import { creatureBonus, creatureNumbers, isSave, testOf, type D20Test, type SrdRolls } from "./bonus.ts";
@@ -70,7 +70,7 @@ function hitDieRoll(op: OpOf<"actor.hitDieRoll">, state: RoomState, deps: Resolv
   const token = "tokenId" in op.target ? ownEntry(state.tokens, op.target.tokenId) : undefined;
   const characterId = "characterId" in op.target ? op.target.characterId : token && "ref" in token.actor ? token.actor.ref : undefined;
   const character = characterId !== undefined ? ownEntry(state.characters, characterId) : undefined;
-  if (!character) return refuse("Only a character has spell slots and Hit Point Dice.");
+  if (!character) return refuse(NO_SLOTS_HERE);
   const refusal = dieRefusal(character, character.actor, op.die);
   if (refusal !== null) return refuse(refusal);
   const bare = character.stats === undefined && character.actor.srdId === undefined;

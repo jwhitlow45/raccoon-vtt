@@ -75,11 +75,6 @@ export function SlotRows(props: { characterId: CharacterId; form: SlotForm; labe
   );
 }
 
-/** How many rows a character's slots count toward `usesCount` (D-261127-266, 360): the slot group as 1 and Pact Magic as 1. */
-export function slotRowCount(character: Pick<Character, "classes"> | undefined): number {
-  return slotCount(character?.classes);
-}
-
 /** One use op at a time, busy and deaf to a second tap until its answer, a refusal said in the list's status line. */
 function useSlotSend(onStatus: (text: string | null) => void) {
   const actions = useRoomActions();

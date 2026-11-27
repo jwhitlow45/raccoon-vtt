@@ -1,6 +1,7 @@
 import type { Character, ClassLevel, HitDieSize, Spent } from "#shared/model.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { CLASS_IDS, CLASS_NAMES, presetById, type ClassId } from "#shared/rules/classResources.ts";
+import { hpFull, noDiceLeft, noSlotsLeft } from "#shared/reducer/uses.ts";
 import { dieKey, diceOf, levelOf, MAX_CLASSES, MAX_LEVEL, slotsOf, THIRD_CLASSES, THIRD_FROM, type Pact } from "#shared/rules/spellSlots.ts";
 
 /**
@@ -49,9 +50,8 @@ export function slotUseLabel(s: SlotLevel): string {
 export function slotBackLabel(level: number): string {
   return `Restore a level ${level} spell slot`;
 }
-export function slotEmptyText(level: number): string {
-  return `No level ${level} spell slots left.`;
-}
+/** The server's own refusals, so a button's reason and the refusal it would meet read the same. */
+export const slotEmptyText = noSlotsLeft;
 export function slotFullText(level: number): string {
   return `Every level ${level} spell slot is there.`;
 }
@@ -173,15 +173,11 @@ export function rollLabel(row: DieRow, con: number): string {
 export function dieBackLabel(die: HitDieSize): string {
   return `Restore a d${die} Hit Point Die`;
 }
-export function dieEmptyText(die: HitDieSize): string {
-  return `No d${die} Hit Point Dice left.`;
-}
+export const dieEmptyText = noDiceLeft;
 export function dieFullText(die: HitDieSize): string {
   return `Every d${die} Hit Point Die is there.`;
 }
-export function hpFullText(name: string): string {
-  return `${name}'s HP is full.`;
-}
+export const hpFullText = hpFull;
 /** The typed field's name: "HP from one d10, your roll plus Constitution". */
 export function typedLabel(die: HitDieSize): string {
   return `HP from one d${die}, your roll plus Constitution`;
