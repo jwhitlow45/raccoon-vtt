@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { MODULES, modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
+import { modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
 import { ConsoleWatch, openSideTab, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
@@ -16,11 +16,10 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * gone once hidden and back from the search (ft-2), keys and an active
  * tool (ft-3), no op as the switches and presets change (ft-4), Reset all
  * and a second window (ft-8), "view as a player" showing every part
- * (ft-9) and the search's Show results (ft-10). The surfaces lane B does
- * not gate (the creature homes, scene settings, the DM panel, the throw,
- * hold to ping) are its other lanes' to probe: PENDING below names their
- * anchors, which still show here while their part hides, and fails once
- * one is gated, so it is taken off.
+ * (ft-9) and the search's Show results (ft-10). The surfaces gated inside
+ * their own files (the creature homes, scene settings, the DM panel, the
+ * throw, hold to ping) are read by the parts markup test
+ * (client/features/modules/parts.markup.test.ts) and their own unit tests.
  *
  * It runs on its own port: E2E_PORT plus forty-one.
  */
@@ -157,15 +156,6 @@ async function ownerShot(page: Page, name: string): Promise<void> {
   for (let n = 2; existsSync(file); n++) file = path.join(dir, `${name}-${n}.png`);
   await page.screenshot({ path: file });
 }
-
-/**
- * Anchors the other lanes' gates take off while their part hides (FT-C:
- * the creature homes, scene settings, the DM panel and This device's dice
- * set). This file's probes skip them until those gates land, and each
- * still shows here while its part hides, so the probe fails once one is
- * gated and the anchor comes off this list.
- */
-const PENDING: ReadonlySet<string> = new Set(["character.companions", "scenes.walls.builder", "scenes.floors", "scenes.floors.add-above", "scenes.floors.add-below", "scenes.floors.map", "scenes.sound", "scenes.light.weather", "dm.display", "dm.display.show-view", "dm.display.add", "dm.display.open", "menu.this-device.rolls.dice-set"]);
 
 /** The DM's panels a part takes, by their side panel names. */
 const PANEL_TITLES: Readonly<Record<string, string>> = { areas: "Areas", sound: "Sound", time: "Time", journal: "Journal", encounters: "Encounters", outliner: "Outliner" };
@@ -369,7 +359,6 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     const everything = { tools: await toolbar(dm).locator("[data-part]").evaluateAll((els) => els.map((e) => (e as unknown as { getAttribute(n: string): string }).getAttribute("data-part"))) };
     for (const part of ["ruler", "areas", "draw", "ping", "pins", "traps", "builder"]) assert.ok(everything.tools.includes(part), `${part}'s tool under Everything`);
     const anchorsNow = () => menu.locator("[data-search]").evaluateAll((els) => els.map((e) => (e as unknown as { getAttribute(n: string): string }).getAttribute("data-search")));
-    const deviceAnchors = new Set(await anchorsNow());
     const tabsNow = async () => {
       const names = await dm.getByRole("tablist", { name: "Panels" }).getByRole("tab").allTextContents();
       const more = dm.getByRole("tablist", { name: "Panels" }).locator('[role="tab"][aria-haspopup="menu"]');
@@ -397,11 +386,10 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
       // Its top bar parts leave the bar.
       if (m.claims.some((c) => c.kind === "topBar" && c.id === "view")) assert.equal(await dm.locator("[data-rvtt-topbar]").getByRole("button", { name: /^View/ }).count(), 0);
       if (m.claims.some((c) => c.kind === "topBar" && c.id === "volume")) await waitFor("the speaker gone", async () => ((await dm.locator("[data-rvtt-topbar] [data-volume-button]").count()) === 0 ? true : null));
-      // This device's rows it claims leave, and the lane's pending ones are still there.
+      // This device's rows it claims leave.
       const anchors = new Set(await anchorsNow());
       for (const c of m.claims.filter((c) => c.kind === "anchor" && c.id.startsWith("menu.this-device."))) {
-        if (PENDING.has(c.id)) assert.ok(anchors.has(c.id) || !deviceAnchors.has(c.id), `${c.id} is gated now: take it off PENDING`);
-        else assert.ok(!anchors.has(c.id), `${c.id} still shows with ${m.name} hidden`);
+        assert.ok(!anchors.has(c.id), `${c.id} still shows with ${m.name} hidden`);
       }
       assert.equal(await menu.locator(`[data-part="${m.id}"]`).count(), 0, `${m.name}'s part mark in This device`);
       // The search's one result for it, which shows it again.
@@ -420,9 +408,6 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     }
     // Every tool is back.
     assert.deepEqual(await toolbar(dm).locator("[data-part]").evaluateAll((els) => els.map((e) => (e as unknown as { getAttribute(n: string): string }).getAttribute("data-part"))), everything.tools);
-    // The other lanes' anchors are still to probe, named here so none is forgotten.
-    const claimed = new Set(MODULES.flatMap((m) => m.claims.filter((c) => c.kind === "anchor").map((c) => c.id)));
-    for (const id of PENDING) assert.ok(claimed.has(id), `${id} is on PENDING but no part claims it`);
   });
 
   test("ft-3. a hidden part's key does nothing and stays reserved, the sheet leaves its row out and says so, and its active tool ends at Select", async () => {
