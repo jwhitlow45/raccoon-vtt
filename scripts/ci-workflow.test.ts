@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
+import { SHARDS } from "./ci-scope.ts";
 
 /*
  * .github/workflows/ci.yml's pull request rule and its CI passed job, the
@@ -229,5 +230,62 @@ describe("the lan-webkit job", () => {
     const block = jobBlock("lan-webkit");
     const limit = /\n {4}timeout-minutes: (\d+)\n/.exec(`\n${block}`)?.[1];
     assert.equal(stepIn("lan-webkit", "Deadline for the shard"), `echo "E2E_DEADLINE=$(( $(date +%s) + (${limit} - 5) * 60 ))" >> "$GITHUB_ENV"`);
+  });
+});
+
+describe("the browser the e2e jobs run", () => {
+  const nightly = readFileSync(new URL("../.github/workflows/nightly-chrome.yml", import.meta.url), "utf8");
+
+  /** The `run:` script of the step named `name` in a job of ci.yml. */
+  function stepRun(job: string, name: string): string {
+    const lines = jobBlock(job).split("\n");
+    const at = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+    assert.ok(at >= 0, `${job} has no step named "${name}"`);
+    const run = lines.findIndex((l, i) => i > at && /^ +run: \|$/.test(l));
+    const indent = lines[run + 1]!.length - lines[run + 1]!.trimStart().length;
+    const body: string[] = [];
+    for (const line of lines.slice(run + 1)) {
+      if (line.trim() !== "" && line.length - line.trimStart().length < indent) break;
+      body.push(line.slice(indent));
+    }
+    return body.join("\n");
+  }
+
+  test("pins one Chrome for Testing version with a checksum for each platform's zip", () => {
+    assert.match(workflow, /\n {2}CHROME_VERSION: \d+\.\d+\.\d+\.\d+\n/);
+    assert.match(workflow, /\n {2}CHROME_LINUX64_SHA256: [0-9a-f]{64}\n/);
+    assert.match(workflow, /\n {2}CHROME_MAC_ARM64_SHA256: [0-9a-f]{64}\n/);
+  });
+
+  test("every job that runs e2e files downloads the pin, checks it, and hands its path to the harness before the run", () => {
+    for (const job of jobs.filter((j) => jobBlock(j).includes("run: node scripts/e2e-shard.ts"))) {
+      const block = jobBlock(job);
+      const script = stepRun(job, "Chrome for Testing");
+      const mac = job === "e2e-macos";
+      assert.ok(script.includes(`/$CHROME_VERSION/${mac ? "mac-arm64" : "linux64"}/`), `${job} downloads the pinned version for its platform`);
+      assert.ok(script.includes(mac ? '"$CHROME_MAC_ARM64_SHA256  ' : '"$CHROME_LINUX64_SHA256  '), `${job} checks the zip against the pinned checksum`);
+      assert.match(script, /sha256sum -c|shasum -a 256 -c/);
+      assert.match(script, /E2E_CHROME_PATH=.* >> "\$GITHUB_ENV"/);
+      assert.ok(block.indexOf("- name: Chrome for Testing") < block.indexOf("run: node scripts/e2e-shard.ts"), `${job} sets the browser up before the run`);
+      assert.doesNotMatch(block, /google-chrome --version/, `${job} no longer reports the image's Chrome`);
+    }
+  });
+
+  test("the Linux jobs download the pin with the same step", () => {
+    assert.equal(stepRun("lan-webkit", "Chrome for Testing"), stepRun("e2e", "Chrome for Testing"));
+  });
+
+  test("the nightly run is the e2e shards on the image's Chrome, unpinned, and gates nothing", () => {
+    assert.match(nightly, /\non:\n {2}schedule:\n {4}- cron: "[^"]+"\n {2}workflow_dispatch:\n/);
+    assert.match(nightly, /\npermissions:\n {2}contents: read\n/);
+    const code = nightly.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+    assert.doesNotMatch(code, /E2E_CHROME_PATH|Chrome for Testing|CHROME_VERSION|secrets\./);
+    assert.ok(nightly.includes("- run: google-chrome --version\n"), "the nightly log names the image's Chrome");
+    const shards = /\n {8}shard: \[(.+)\]\n/.exec(nightly)?.[1]?.split(", ");
+    assert.deepEqual(shards, Array.from({ length: SHARDS }, (_, i) => String(i + 1)), "the same shards as ci.yml");
+    assert.ok(!jobBlock("ci-passed").includes("nightly"), "CI passed does not wait on the nightly run");
+    const fonts = (text: string) => /- name: Roboto as the system font\n {8}run: \|\n([\s\S]*?)\n {6}\S/.exec(text)?.[1];
+    assert.ok(fonts(nightly), "the nightly run sets the fonts");
+    assert.equal(fonts(nightly), fonts(workflow), "the fonts step of the e2e job, word for word");
   });
 });
