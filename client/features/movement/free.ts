@@ -1,4 +1,7 @@
+import type { Token } from "#shared/model.ts";
 import type { ClientOp, EphEvent } from "#shared/protocol.ts";
+import { ownEntry } from "#shared/records.ts";
+import { holderOf } from "#shared/rules/attach.ts";
 import { footprintSize, isSqueezed } from "#shared/rules/footprint.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { drawnSpot, freeDrawnAt } from "#shared/rules/nudge.ts";
@@ -99,6 +102,10 @@ export type NodeAt = { x(): number; y(): number; position(p: Point): void };
  * where each is drawn. Each node sits where its own token is drawn, its own
  * nudge off its stored spot, so reads and writes both go through the drawn
  * spots (6.3), and a held preview or a cancel puts each where it belongs.
+ * Both tokens are as they stood when the drag began, as the node moves
+ * from where the press found it: the pressed token as the room holds it
+ * now would shift the lead by however far another device moved it since
+ * (LP55-DRAG-1).
  */
 export function leadNode(node: NodeAt, pressed: DropToken, lead: DropToken): NodeAt {
   const from = drawnAt(null, pressed);
@@ -108,6 +115,26 @@ export function leadNode(node: NodeAt, pressed: DropToken, lead: DropToken): Nod
     y: () => node.y() - from.y + to.y,
     position: (p) => node.position({ x: p.x - to.x + from.x, y: p.y - to.y + from.y }),
   };
+}
+
+type Linked = Pick<Token, "id" | "sceneId" | "attached">;
+
+/**
+ * Whether the lead of a drag still carries the token the drag was pressed
+ * on, in `tokens` as the room holds them now: the pressed token itself, or
+ * a holder up its chain of links. A rider's drag moves its mount only while
+ * the mount carries the rider, so a drag whose rider another device takes
+ * off the mount ends as a cancel instead of sending the mount by an offset
+ * that no longer holds (LP55-DRAG-1).
+ */
+export function leadCarries(tokens: Readonly<Record<string, Linked | undefined>> | undefined, pressedId: string, leadId: string): boolean {
+  if (!tokens) return false;
+  const seen = new Set<string>();
+  for (let at = ownEntry(tokens, pressedId); at !== undefined && !seen.has(at.id); at = holderOf(tokens, at)) {
+    if (at.id === leadId) return true;
+    seen.add(at.id);
+  }
+  return false;
 }
 
 export type FreeInput = {

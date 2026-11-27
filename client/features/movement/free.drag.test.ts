@@ -6,7 +6,7 @@ import { WorkBudget } from "#shared/rules/walk.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { DropPlan } from "./drop.ts";
 import type { FreeDrop } from "./free.ts";
-import { leadNode, moveFrame } from "./free.ts";
+import { leadCarries, leadNode, moveFrame } from "./free.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { frameSpots } from "../areas/liveTokens.ts";
 import { dragAim, footprint, frameAim, snapPosition } from "../../lib/scene.ts";
@@ -149,6 +149,48 @@ describe("the drag boundary", () => {
     const lead = leadNode(finger, rider, mount);
     const { plan } = b.drop({ ...finger, x: lead.x, y: lead.y, position: lead.position }, mount, [mount], { free: false, inPlace: true });
     assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y]), [["mount", 3, 2]]);
+  });
+
+  /*
+   * LP55-DRAG-1: the DM drags Thorn, riding the warhorse at 8, 11, toward
+   * 9, 5, and a second device moves Thorn to 20, 13 mid-drag, which takes
+   * him off the horse. Read from Thorn as he stands now, the offset sent the
+   * horse to -3, 3, off the map.
+   */
+  test("a rider's drag moves its mount by the offset between them as the drag began, and once another device takes the rider off, the mount carries him no more (LP55-DRAG-1)", () => {
+    const horse = thorn({ id: "horse", kind: "npc", name: "Warhorse", size: "large", x: 8, y: 11 });
+    const rider = thorn({ x: 8, y: 11, attached: { to: "horse", kind: "ride", steer: true } });
+    const b = board(world({ tokens: [horse, rider] }));
+    const finger = nodeAt(9, 5);
+    b.stops.start(horse.id, rider);
+    const lead = leadNode(finger, rider, horse);
+    const { plan } = b.drop({ ...finger, x: lead.x, y: lead.y, position: lead.position }, horse, [horse], { free: false, inPlace: true });
+    assert.deepEqual(plan.moves.map((m) => [m.tokenId, m.x, m.y]), [["horse", 9, 5]], "the horse goes where Thorn's drag let go");
+    assert.equal(leadCarries({ horse, thorn: rider }, rider.id, horse.id), true, "mounted, the drag goes on");
+    const moved = { ...rider, x: 20, y: 13, attached: undefined };
+    const stale = leadNode(finger, moved, horse);
+    assert.deepEqual([stale.x(), stale.y()], [-3, 3], "read from Thorn as he stands now, the offset points off the map");
+    assert.equal(leadCarries({ horse, thorn: moved }, rider.id, horse.id), false, "moved off the horse, the drag ends as a cancel");
+  });
+
+  test("a drag's lead carries the pressed token up every link of its chain, and no longer once a link goes, moves to another holder or leaves the floor", () => {
+    const mule = thorn({ id: "mule", kind: "npc", size: "large" });
+    const lamp = thorn({ id: "lamp", kind: "object", size: "tiny", attached: { to: "mule", kind: "carry" } });
+    const gem = thorn({ id: "gem", kind: "object", size: "tiny", attached: { to: "lamp", kind: "carry" } });
+    const bree = thorn({ id: "bree" });
+    const tokens = { mule, lamp, gem, bree };
+    assert.equal(leadCarries(tokens, "gem", "mule"), true, "up two links");
+    assert.equal(leadCarries(tokens, "gem", "lamp"), true, "up one");
+    assert.equal(leadCarries(tokens, "mule", "mule"), true, "a drag pressed on its lead");
+    assert.equal(leadCarries(tokens, "lamp", "gem"), false, "a holder is carried by nothing it carries");
+    assert.equal(leadCarries({ ...tokens, lamp: { ...lamp, attached: undefined } }, "gem", "mule"), false, "the link between let go");
+    assert.equal(leadCarries({ ...tokens, gem: { ...gem, attached: { to: "bree", kind: "carry" } } }, "gem", "mule"), false, "handed to another holder");
+    assert.equal(leadCarries({ ...tokens, lamp: { ...lamp, sceneId: "s2" } }, "gem", "mule"), false, "a holder on another floor carries nothing here");
+    assert.equal(leadCarries({ mule, lamp, bree }, "gem", "mule"), false, "the pressed token gone");
+    assert.equal(leadCarries(undefined, "gem", "mule"), false, "no room held");
+    const loop = { a: thorn({ id: "a", attached: { to: "b", kind: "drag" } }), b: thorn({ id: "b", attached: { to: "a", kind: "drag" } }) };
+    assert.equal(leadCarries(loop, "a", "mule"), false, "a loop of links ends");
+    assert.equal(leadCarries(loop, "a", "b"), true);
   });
 
   /*
