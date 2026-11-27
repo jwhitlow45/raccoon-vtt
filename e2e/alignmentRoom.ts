@@ -10,6 +10,7 @@ import sharp from "sharp";
 import { build } from "vite";
 import { chromium, request as playwrightRequest, type APIRequestContext, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type Route, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
+import { binaryStl, figure, zUp } from "../client/features/models/fixtures.testutil.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { boardLabel, numberScope, previewNumbers } from "../shared/numbering.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
@@ -12198,5 +12199,101 @@ export function qolPanelTests(): void {
     }
     assert.deepEqual(lines, [], "Start a fight out of line");
     withinSnapshotBudget("qe-g");
+  });
+}
+
+/**
+ * The 3D model sheet (docs/design/design-v1-token-models.md 8), on Thorn's
+ * page in the DM's Characters panel: empty, reading a file, with its
+ * preview and options, and with a stored model and Remove model armed.
+ * The model worker's first message is held while the reading screen is
+ * measured, so the wait shows however fast the worker would answer.
+ */
+export function modelSheetTests(): void {
+  test(`md-a. the 3D model sheet empty, reading a file, with its preview and with Remove model armed, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await freshDm();
+    const was = dmSocket.state!.characters[run.ids.thornChar]!.defaultImage;
+    const stl = Buffer.from(binaryStl(zUp(figure(24))));
+    const put = async (kind: "token" | "model", data: Buffer) => {
+      const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=${kind}`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+      assert.ok(res.ok(), `the ${kind} upload answered ${res.status()}`);
+      return ((await res.json()) as { id: string }).id;
+    };
+    const blocks = Array.from({ length: 8 }, (_, f) => `<rect x="${(f % 4) * 512 + 174}" y="${Math.floor(f / 4) * 512 + 184}" width="164" height="256" fill="#8a8478"/>`).join("");
+    const sheetId = await put("model", await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1024">${blocks}</svg>`)).png().toBuffer());
+    const faceId = await put("token", await sharp({ create: { width: 128, height: 128, channels: 3, background: { r: 60, g: 120, b: 160 } } }).png().toBuffer());
+    const stored = { assetId: faceId, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, model: { assetId: sheetId, side: 1.4, anchorY: 0.85, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) } };
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`md-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(15_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await closeSheets(page);
+        await escapeAll(page);
+        await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: null } });
+        const sheet = page.getByRole("dialog", { name: "3D model", exact: true });
+        const open = async () => {
+          const panel = await thornsPage(page);
+          await openGroup(panel, "Image");
+          await panel.getByRole("button", { name: "3D model", exact: true }).click();
+          await sheet.waitFor();
+        };
+        await open();
+        await sheet.getByText("Stands in Isometric in place of the picture. STL, OBJ or GLB.").waitFor();
+        await sweep.measure(page, "md-sheet-empty", sheet);
+        // The worker's messages wait until the reading screen is measured.
+        await page.evaluate(() => {
+          type W = new (url: string | URL, options?: { name?: string; type?: string }) => { postMessage(m: unknown): void };
+          const g = globalThis as unknown as { Worker: W; __realWorker?: W; __heldModel: (() => void)[] | null };
+          const Real = (g.__realWorker ??= g.Worker);
+          g.__heldModel = [];
+          g.Worker = class extends (Real as unknown as new (url: string | URL, options?: { name?: string }) => { postMessage(m: unknown): void }) {
+            constructor(url: string | URL, options?: { name?: string }) {
+              super(url, options);
+              if (options?.name !== "model-draw") return;
+              const post = this.postMessage.bind(this);
+              this.postMessage = (m: unknown) => (g.__heldModel ? g.__heldModel.push(() => post(m)) : post(m));
+            }
+          } as unknown as W;
+        });
+        await sheet.locator('input[type="file"]').setInputFiles({ name: "knight.stl", mimeType: "application/octet-stream", buffer: stl });
+        await sheet.getByText("Reading the file…").waitFor();
+        await sweep.measure(page, "md-sheet-reading", sheet);
+        await page.evaluate(() => {
+          const g = globalThis as unknown as { Worker: unknown; __realWorker?: unknown; __heldModel: (() => void)[] | null };
+          const held = g.__heldModel ?? [];
+          g.__heldModel = null;
+          if (g.__realWorker) g.Worker = g.__realWorker;
+          for (const send of held) send();
+        });
+        await sheet.locator("[data-model-options]").waitFor({ timeout: 30_000 });
+        await sweep.measure(page, "md-sheet-preview", sheet);
+        await shots.take(page, `alignment-${sweep.at}-md-sheet-preview`);
+        // Cancel asks once a file was read, then closes.
+        await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+        await sheet.getByRole("button", { name: "Discard this model?", exact: true }).click();
+        await sheet.waitFor({ state: "detached" });
+        await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: stored } });
+        await waitFor("Thorn's stored model", () => (dmSocket.state?.characters[run.ids.thornChar]?.defaultImage?.model ? true : null));
+        await open();
+        await sheet.getByRole("button", { name: "Remove model", exact: true }).click();
+        await sheet.getByRole("button", { name: /^(Tap|Click) again to remove$/ }).waitFor();
+        await sweep.measure(page, "md-sheet-remove-armed", sheet);
+        await shots.take(page, `alignment-${sweep.at}-md-sheet-remove-armed`);
+        await page.keyboard.press("Escape");
+        await sheet.waitFor({ state: "detached" });
+        await closeSheets(page);
+        await escapeAll(page);
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: was ?? null } }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the 3D model sheet out of line");
+    withinSnapshotBudget("md-a");
   });
 }
