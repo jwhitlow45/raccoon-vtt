@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { isAssetImage } from "#shared/imageRef.ts";
+import { isAssetImage, keepModel } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -124,7 +124,7 @@ export function ImageField(props: {
             onClose={() => setStep(null)}
             onPick={(image) => setStep({ kind: "crop", assetId: image.id, initial: DEFAULT_CROP })}
             onPickIcon={(icon) => {
-              props.onChange(icon);
+              props.onChange(keepModel(icon, props.value));
               setStep(null);
             }}
           />
@@ -137,7 +137,7 @@ export function ImageField(props: {
             aspect={props.aspect}
             onCancel={() => setStep(null)}
             onSave={(crop) => {
-              props.onChange({ assetId: step.assetId, crop });
+              props.onChange(keepModel({ assetId: step.assetId, crop }, props.value));
               setStep(null);
             }}
           />

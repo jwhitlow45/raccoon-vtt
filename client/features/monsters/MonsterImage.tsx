@@ -14,7 +14,7 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
 import { iconCredit } from "../images/icons.ts";
 import { applyOps, optInCount, optInLabel, planApply, sameImage, type MonsterRef } from "./images.ts";
-import { isAssetImage } from "#shared/imageRef.ts";
+import { isAssetImage, keepModel } from "#shared/imageRef.ts";
 
 /**
  * A monster's default image (features section 15): the image every token
@@ -83,7 +83,7 @@ export function MonsterImageField(props: {
           onClose={() => setStep(null)}
           onPick={(image) => setStep({ kind: "crop", assetId: image.id, initial: DEFAULT_CROP })}
           onPickIcon={(icon) => {
-            props.onChange(icon);
+            props.onChange(keepModel(icon, props.value));
             setStep(null);
           }}
         />
@@ -96,7 +96,7 @@ export function MonsterImageField(props: {
           aspect={1}
           onCancel={() => setStep(null)}
           onSave={(crop) => {
-            props.onChange({ assetId: step.assetId, crop });
+            props.onChange(keepModel({ assetId: step.assetId, crop }, props.value));
             setStep(null);
           }}
         />

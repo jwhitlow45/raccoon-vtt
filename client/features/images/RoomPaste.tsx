@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
+import { keepModel } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -232,7 +233,8 @@ function TokenPicture(props: { tokenId: string; file: File; onDone(): void }) {
   const fp = footprint(token);
   const shape = token.kind === "object" ? "square" : "circle";
   const set = (image: ImageRef) => {
-    actions.dispatch({ t: "token.update", tokenId: token.id, patch: { image } });
+    // A pasted picture keeps the 3D model the old one carried (docs/design/design-v1-token-models.md 3.4).
+    actions.dispatch({ t: "token.update", tokenId: token.id, patch: { image: keepModel(image, token.image) } });
     onDone();
   };
   if (crop) return <CropEditor assetId={crop} initial={DEFAULT_CROP} shape={shape} aspect={fp.w / fp.h} onCancel={onDone} onSave={(c) => set({ assetId: crop, crop: c })} />;
