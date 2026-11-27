@@ -160,6 +160,18 @@ describe("texture headers", () => {
     assert.equal(imageHeader(real.slice(0, mdat + 5)), null);
   });
 
+  test("give null when an AVIF walk's budget runs out after the decoy, and never the decoy's size at any padding", async () => {
+    const real = await bytes(flat(32, 16).avif());
+    // With 990 empty boxes the budget runs out inside ipco, after the decoy is read and before the real extent.
+    const after = decoyAvif(real, HEADER_STEPS - 10);
+    assert.deepEqual(await sharp(after).metadata().then((m) => [m.width, m.height]), [32, 16]);
+    assert.equal(imageHeader(after), null);
+    for (let pad = HEADER_STEPS - 20; pad <= HEADER_STEPS; pad++) {
+      const size = imageHeader(decoyAvif(real, pad));
+      assert.ok(size === null || (size.width === 32 && size.height === 16), `${pad} empty boxes: ${JSON.stringify(size)}`);
+    }
+  });
+
   test("walk at most 1,000 JPEG segments to the size, and give null past them", async () => {
     const jpeg = await bytes(flat(8, 8).jpeg());
     // Comment segments put before the frame: each four bytes, a marker and a length of 2.
