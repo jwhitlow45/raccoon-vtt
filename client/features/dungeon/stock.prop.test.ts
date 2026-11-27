@@ -9,7 +9,7 @@ import { MAX_LEVEL } from "#shared/srd/xp-budget.ts";
 import { partyBudgets } from "../encounters/budget.ts";
 import type { RoomEdit } from "./edits.ts";
 import { hexGridOf } from "./lattice.ts";
-import { planFitted } from "./plan.ts";
+import { planDungeon, planFitted } from "./plan.ts";
 import { CROCKFORD, versionChar, type Seed } from "./seed.ts";
 import { clampSettings, DEFAULT_SETTINGS, isHexGrid, MAX_MONSTERS, THEMES, type GridKind } from "./settings.ts";
 import { roomClaim, stockClaims, stockPlan } from "./stock.ts";
@@ -114,4 +114,24 @@ test("DSTOCK-PROP: every creature stands in its room on free floor at one ground
     60,
   );
   assert.ok(stocked >= 20 && hexStocked >= 5, `not vacuous: ${stocked} runs stocked, ${hexStocked} on hexes`);
+});
+
+test("DSTOCK-PROP: with rooms dropped in routing, every key entry's fight is its own room's (STOCK-ASTRA-01)", () => {
+  let dropped = 0;
+  holds(
+    // A small search budget makes routing give up on links and drop the rooms beyond them, which a full budget seldom does.
+    fc.property(seedArb, fc.constantFrom(...THEMES), fc.integer({ min: 300, max: 6_000 }), (seed, theme, budget) => {
+      const s = clampSettings({ ...DEFAULT_SETTINGS, w: 50, h: 50, rooms: 16, density: "dense", corridors: "winding", theme, key: true }, "squares");
+      const planned = planDungeon(s, seed, { feetPerCell: 5 }, budget);
+      if (planned.kept.some((i, at) => i !== at)) dropped++;
+      const done = stockPlan(planned, seed, theme, { choices: { monsters: 100, difficulty: "high" }, party: [{ count: 4, level: 5 }], pool: POOLS[theme]!, tokensLeft: 500 }, null);
+      for (const k of done.plan.key ?? []) {
+        const fight = done.facts.find((f) => f.at === k.room)!.monsters;
+        if (fight?.on && fight.lines.length > 0) assert.deepEqual(k.monsters?.lines, fight.lines, `key room ${k.n}`);
+        else assert.equal(k.monsters, undefined, `key room ${k.n} holds no fight`);
+      }
+    }),
+    30,
+  );
+  assert.ok(dropped >= 5, `not vacuous: ${dropped} plans dropped rooms`);
 });

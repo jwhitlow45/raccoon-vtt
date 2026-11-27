@@ -251,6 +251,10 @@ export function stockPlan(input: StockInput, seed: Seed, theme: Theme, stock: St
     monsters: fights.get(f.room) ?? null,
     ...(spotless.has(f.room) ? { reports: [...f.reports, REPORTS.noMonsterSpot] } : {}),
   }));
-  const key = plan.key && plan.key.map((k) => (keyFights.has(k.room) ? { ...k, monsters: keyFights.get(k.room)! } : k));
+  // A key room names its place in `plan.rooms`, the kept rooms in order, and a fight its board index, which differ once routing drops a room.
+  const key = plan.key && plan.key.map((k) => {
+    const fight = keyFights.get(kept[k.room] ?? -1);
+    return fight ? { ...k, monsters: fight } : k;
+  });
   return { plan: { ...plan, key, monsters }, facts, capacity, perRoom, claims };
 }

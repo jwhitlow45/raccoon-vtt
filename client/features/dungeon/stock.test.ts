@@ -207,3 +207,23 @@ test("DSTOCK-S: each room draws its fight on its own lane, so rooms of one budge
   const lines = (draw: number) => stockPlan(medium, SEED, "dungeon", stock({ choices: { monsters: 100, difficulty: "moderate" } }), { [target]: { monstersDraw: draw } }).facts.find((f) => f.room === target)!.monsters;
   assert.deepEqual(lines(16), lines(0));
 });
+
+/** Each key entry's fight is its own room's, read through the room panel's facts, whose `at` is the key's room index. */
+function keyMatchesFacts(done: ReturnType<typeof stockPlan>): void {
+  for (const k of done.plan.key ?? []) {
+    const fact = done.facts.find((f) => f.at === k.room)!;
+    const fight = fact.monsters;
+    if (fight?.on && fight.lines.length > 0) assert.deepEqual(k.monsters?.lines, fight.lines, `key room ${k.n}`);
+    else assert.equal(k.monsters, undefined, `key room ${k.n} holds no fight`);
+  }
+}
+
+test("DSTOCK-S: with rooms dropped in routing, each key entry names its own room's fight (STOCK-ASTRA-01)", () => {
+  const s: DungeonSettings = { ...DEFAULT_SETTINGS, w: 50, h: 57, rooms: 24, wide: true, density: "dense", corridors: "winding", heights: 75 };
+  const planned = planFitted(s, "900000000000000Z", DEFAULT_CONTEXT);
+  assert.ok(planned.kept.length < planned.board.rooms.length, "routing dropped rooms");
+  assert.ok(planned.kept.some((i, at) => i !== at), "board indices and key indices differ");
+  const done = stockPlan(planned, "900000000000000Z", "dungeon", stock({ choices: { monsters: 100, difficulty: "moderate" } }), null);
+  assert.equal(done.plan.key!.find((k) => k.n === 1)!.monsters, undefined, "the entrance holds no fight");
+  keyMatchesFacts(done);
+});
