@@ -1301,7 +1301,11 @@ describe("dungeon generator", { concurrency: false }, () => {
     await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
     assert.equal(await monsters.isDisabled(), false, "a party with a level gives Monsters back");
     // STOCK-O-01: at None the edited party keeps its rows, focus on its first stepper, and closing it gives focus back to Edit the party.
-    const focused = () => dm.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "");
+    const focused = () => dm.evaluate(() => {
+      type El = { getAttribute(name: string): string | null; textContent: string | null };
+      const at = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+      return at?.getAttribute("aria-label") ?? at?.textContent?.trim() ?? "";
+    });
     await waitFor("focus on the party's first stepper", async () => ((await focused()).startsWith("Characters") ? true : null));
     await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
     await waitFor("focus back on Edit the party", async () => ((await focused()) === "Edit the party" ? true : null));
