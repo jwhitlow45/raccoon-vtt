@@ -8445,6 +8445,96 @@ export function sceneSettingsTests(): void {
   floorPillTests();
   floorMarkerTests();
   floorMarkerIsoTests();
+  hiddenHomesTests();
+}
+
+/** A computer and the two upright phones, each at 100% and 130% (docs/design/design-v1-features.md 12). */
+const HOMES_AT: { size: Size; scale: number }[] = ["1440x900", "390x844", "320x568"].flatMap((name) => SCALES.map((scale) => ({ size: SIZES.find((s) => s.name === name)!, scale })));
+
+/** The DM's parts whose ways back stand in the homes FT-C placed, hidden on this device. */
+const HOMES_HIDDEN = { floors: false, weather: false, builder: false, dungeon: false, tableDisplay: false, companions: false, ddb: false };
+
+/** This device's choices for a DM, written as another window writes them and heard by the page's storage event (features/modules/store.ts). Null shows every part. */
+async function setDmParts(page: Page, hidden: Record<string, boolean> | null): Promise<void> {
+  await page.evaluate((value) => {
+    if (value === null) localStorage.removeItem("rvtt.features");
+    else localStorage.setItem("rvtt.features", value);
+    const w = globalThis as unknown as { dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string | null }) => unknown };
+    w.dispatchEvent(new w.StorageEvent("storage", { key: "rvtt.features", newValue: value }));
+  }, hidden === null ? null : JSON.stringify({ v: 1, dm: hidden, player: {} }));
+}
+
+/**
+ * The homes FT-C placed (docs/design/design-v1-features.md 6, 12), each
+ * with its Hidden on this device line, as the DM sees them with the parts
+ * they hold hidden: the foot of the scene settings, the New scene form,
+ * the foot of the DM panel, and on Thorn's page the place of Companions
+ * and the stat block's row beside Edit. A sync record makes Thorn hold
+ * D&D Beyond, so its line names it.
+ */
+function hiddenHomesTests(): void {
+  test(`ftc-a. the homes with their Hidden on this device line: the scene settings, New scene, the DM panel, and Thorn's Companions and stat block, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design/design-v1-features.md 12)`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    let before: NonNullable<typeof dmSocket.state>["characters"][string] | null = null;
+    try {
+      for (const at of HOMES_AT) {
+        const sweep = new Sweep(`ftc-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        if (!before) {
+          // A stat block with a sync record, so its row holds Edit and the line where Re-sync stood.
+          before = dmSocket.state!.characters[run.ids.thornChar]!;
+          await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { ddbSync: { from: "12345678", base: {}, rolls: {} }, ...(before.stats ? {} : { stats: { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } } }) } });
+          await waitFor("Thorn's block and sync record", () => (dmSocket.state?.characters[run.ids.thornChar]?.ddbSync && dmSocket.state.characters[run.ids.thornChar]?.stats ? true : null));
+        }
+        const line = (scope: Locator, show: string) => scope.getByRole("group", { name: "Hidden on this device" }).filter({ has: page.getByRole("button", { name: show }) });
+        // Each home's line, measured where it stands, or a screen missing.
+        const measureLine = async (screen: string, found: Locator, root: Locator, why: string) => {
+          if (!(await shows(found))) return sweep.missing(page, screen, why);
+          await found.scrollIntoViewIfNeeded();
+          await sweep.measure(page, screen, root);
+        };
+        await setDmParts(page, HOMES_HIDDEN);
+        try {
+          const scenes = await openDmPanel(page, "Scenes");
+          const settings = line(scenes, "Show Floors");
+          await measureLine("ftc-scene-settings", settings, settings, "the scene settings held no line with Floors hidden");
+          await openGroup(scenes, "New scene");
+          const form = scenes.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+          await measureLine("ftc-new-scene", line(form, "Show Dungeon generator and Map builder"), form, "New scene held no line with Map builder and Dungeon generator hidden");
+          await closeSheets(page);
+          await escapeAll(page);
+          const dmPanel = await openDmPanel(page, "DM");
+          const display = line(dmPanel, "Show Table display");
+          await measureLine("ftc-dm-panel", display, display, "the DM panel held no line with Table display hidden");
+          await closeSheets(page);
+          await escapeAll(page);
+          const thorn = await thornsPage(page);
+          const companions = line(thorn, "Show Companions");
+          await measureLine("ftc-companions", companions, companions, "Thorn's page held no line in place of Companions");
+          await openGroup(thorn, "Stat block");
+          const ddb = line(thorn, "Show D&D Beyond");
+          // The row beside Edit, the line wrapping in it.
+          await measureLine("ftc-stat-block", ddb, ddb.locator("xpath=.."), "Thorn's stat block held no line in place of Re-sync");
+        } finally {
+          await setDmParts(page, null);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      const was = before as NonNullable<typeof dmSocket.state>["characters"][string] | null;
+      if (was) await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { ddbSync: null, ...(was.stats ? {} : { stats: null, actor: { initBonus: was.actor.initBonus, passivePerception: was.actor.passivePerception } }) } });
+    }
+    assert.deepEqual(lines, [], "a home's Hidden on this device line out of line, or missing");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("ftc-a");
+  });
 }
 
 /*
