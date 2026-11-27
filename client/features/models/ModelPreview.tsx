@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MODEL_LIMITS } from "#shared/limits.ts";
 import type { ModelRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -53,15 +53,18 @@ export function previewFit(model: Pick<ModelRef, "side" | "anchorY" | "boxes">, 
 
 type Drawable = { image: CanvasImageSource; width: number; height: number; close?: () => void };
 
-/** Decodes the sheet: a Blob into a bitmap, a stored sheet through its full copy, same-origin. */
+/**
+ * Decodes the sheet: a Blob into a bitmap, a stored sheet through its full
+ * copy, same-origin. A bitmap is closed only once a render no longer draws
+ * it, after the next one took its place or the preview went, since a
+ * closed bitmap throws in drawImage.
+ */
 function useSheet(sheet: PreviewSheet): Drawable | null | "failed" {
   const assets = useAssets();
-  const [drawable, setDrawable] = useState<Drawable | null | "failed">(null);
   const key = "blob" in sheet ? sheet.blob : sheet.assetId;
+  const [loaded, setLoaded] = useState<{ key: Blob | string; drawable: Drawable | "failed" } | null>(null);
   useEffect(() => {
     let live = true;
-    let made: Drawable | null = null;
-    setDrawable(null);
     const load = async (): Promise<Drawable> => {
       if ("blob" in sheet) {
         const bitmap = await createImageBitmap(sheet.blob);
@@ -73,22 +76,27 @@ function useSheet(sheet: PreviewSheet): Drawable | null | "failed" {
       return { image: img, width: img.naturalWidth, height: img.naturalHeight };
     };
     load().then(
-      (d) => {
-        made = d;
-        if (live) setDrawable(d);
-        else d.close?.();
+      (drawable) => {
+        if (live) setLoaded({ key, drawable });
+        else drawable.close?.();
       },
       () => {
-        if (live) setDrawable("failed");
+        if (live) setLoaded({ key, drawable: "failed" });
       },
     );
     return () => {
       live = false;
-      made?.close?.();
     };
     // The key stands for the sheet, so a new object naming the same one loads nothing again.
   }, [key, assets]);
-  return drawable;
+  useEffect(() => {
+    const drawable = loaded?.drawable;
+    return () => {
+      if (drawable && drawable !== "failed") drawable.close?.();
+    };
+  }, [loaded]);
+  // Until the new sheet decodes, the old one's views would stand at the new one's sizes, so the floor stands alone.
+  return loaded && loaded.key === key ? loaded.drawable : null;
 }
 
 export function ModelPreview(props: { sheet: PreviewSheet; model: Pick<ModelRef, "side" | "anchorY" | "boxes">; ring?: string; id?: string; autoFocus?: boolean }) {
@@ -99,6 +107,11 @@ export function ModelPreview(props: { sheet: PreviewSheet; model: Pick<ModelRef,
   const [frame, setFrame] = useState(0);
   const [said, setSaid] = useState("");
   const canvas = useRef<HTMLCanvasElement>(null);
+  // A canvas takes no autoFocus from React, which focuses only fields and buttons. Focused before the dialog opens, it keeps the first focus (lib/modalDialog.ts).
+  const { autoFocus } = props;
+  useLayoutEffect(() => {
+    if (autoFocus) canvas.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
   const sheet = useSheet(props.sheet);
   const ring = props.ring ?? theme.color.ally;
 
@@ -157,20 +170,20 @@ export function ModelPreview(props: { sheet: PreviewSheet; model: Pick<ModelRef,
   };
 
   return (
-    <div style={{ display: "grid", justifyItems: "center", gap: theme.space(2) }}>
+    // At the sheet's left edge, as the help and the buttons under it stand.
+    <div style={{ display: "grid", justifyItems: "start", gap: theme.space(2) }}>
       <canvas
         ref={canvas}
         id={props.id}
         role="img"
         tabIndex={0}
-        autoFocus={props.autoFocus}
         data-model-preview=""
         data-frame={frame}
         aria-label={sheet === "failed" ? "The model's views did not load" : viewLabel(frame)}
         onKeyDown={onKey}
         style={{ width: px, height: px, borderRadius: theme.radius.md, background: theme.color.stage, display: "block" }}
       />
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: theme.space(1) }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
         <Button size="sm" icon="turnLeft" onClick={() => turn(-1)}>
           Turn left
         </Button>
