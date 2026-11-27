@@ -18,10 +18,14 @@ import type { AssetSource } from "../../state/view.ts";
  * sheet for several creatures holds it once.
  *
  * A sheet that goes is freed only once every board has committed a render
- * that no longer draws it, so Konva never draws a closed bitmap. A sheet
- * that arrives late, after its board stopped asking, is freed at once and
- * never shown. A sheet that fails, such as one a viewer may no longer read,
- * stays a picture until no board asks for it, and a later ask tries again.
+ * that no longer draws it, so Konva never draws a closed bitmap, and it
+ * counts against the budget until then: the sheets that replace it start
+ * only once it is closed, so what is decoded never passes the budget, a
+ * change of copy or a board slow to commit included. A sheet that arrives
+ * late, after its board stopped asking, is freed at once and never shown.
+ * A sheet that fails, such as one a viewer may no longer read, stays a
+ * picture until no board asks for it, and a later ask tries again. It keeps
+ * its place in the order but weighs nothing, as it holds no bitmap.
  */
 
 /** A decoded sheet a canvas draws: a bitmap where the browser makes them, an image element elsewhere. */
@@ -55,8 +59,8 @@ export class SheetCache {
   readonly #io: SheetIo;
   readonly #entries = new Map<string, Entry>();
   readonly #layouts = new Map<object, Layout>();
-  /** Sheets gone from the snapshot since `at`, waiting for every board to commit a render of `at` or later. */
-  #retired: { image: SheetImage; at: number }[] = [];
+  /** Sheets gone from the snapshot since `at`, waiting for every board to commit a render of `at` or later, and weighing on the budget until then. */
+  #retired: { image: SheetImage; copy: SheetCopy; at: number }[] = [];
   #snapshot: SheetSnapshot = { version: 0, get: () => null };
   readonly #listeners = new Set<() => void>();
   /** News is scheduled and not yet told. */
@@ -91,6 +95,11 @@ export class SheetCache {
   /** The sheets admitted now, in order: what the boards' asks hold. For tests and the report. */
   admitted(): string[] {
     return [...this.#admission().admitted.keys()];
+  }
+
+  /** What weighs on the budget: the sheets loading or held, and those gone but not yet closed. For tests. */
+  weight(): { held: number; closing: number } {
+    return { held: this.#held(), closing: this.#closing() };
   }
 
   /** Every sheet loading or held, with its state. For tests. */
@@ -131,22 +140,30 @@ export class SheetCache {
     const admitted = new Map<string, SheetCopy>();
     let weight = 0;
     for (const [url, copy] of copies) {
-      weight += SHEET_WEIGHT[copy];
+      weight += this.#entries.get(url)?.state === "failed" ? 0 : SHEET_WEIGHT[copy];
       if (weight > SHEET_BUDGET) break;
       admitted.set(url, copy);
     }
     return { admitted, order };
   }
 
-  #used(): number {
+  /** The weight of the sheets loading or held. */
+  #held(): number {
     let w = 0;
     for (const e of this.#entries.values()) if (e.state !== "failed") w += SHEET_WEIGHT[e.copy];
     return w;
   }
 
+  /** The weight of the sheets gone from the snapshot and not yet closed. */
+  #closing(): number {
+    let w = 0;
+    for (const r of this.#retired) w += SHEET_WEIGHT[r.copy];
+    return w;
+  }
+
   #reconcile(): void {
+    this.#freeSettled();
     const { admitted, order } = this.#admission();
-    let changed = false;
     for (const [url, e] of [...this.#entries]) {
       // A load no board's admission holds stops, and a failure no board asks for is forgotten, so a later ask tries again.
       if ((e.state === "loading" && !admitted.has(url)) || (e.state === "failed" && !order.has(url))) {
@@ -154,20 +171,23 @@ export class SheetCache {
         this.#entries.delete(url);
       }
     }
-    for (const [url, copy] of admitted) {
-      if (this.#entries.has(url)) continue;
-      while (this.#used() + SHEET_WEIGHT[copy] > SHEET_BUDGET) {
-        const out = this.#evictable(admitted, order);
-        if (!out) break;
-        this.#entries.delete(out.url);
-        this.#retired.push({ image: out.image!, at: this.#snapshot.version + 1 });
-        changed = true;
-      }
-      if (this.#used() + SHEET_WEIGHT[copy] > SHEET_BUDGET) break;
-      this.#start(url, copy);
+    const missing = [...admitted].filter(([url]) => !this.#entries.has(url));
+    const need = missing.reduce((w, [, copy]) => w + SHEET_WEIGHT[copy], 0);
+    // Room for every admitted sheet once the sheets now going are closed.
+    let changed = false;
+    while (this.#held() + need > SHEET_BUDGET) {
+      const out = this.#evictable(admitted, order);
+      if (!out) break;
+      this.#entries.delete(out.url);
+      this.#retired.push({ image: out.image!, copy: out.copy, at: this.#snapshot.version + 1 });
+      changed = true;
     }
     if (changed) this.#publish();
-    this.#freeSettled();
+    // Nearest first, each only once the bitmaps it replaces are closed: a later commit's reconcile starts the rest.
+    for (const [url, copy] of missing) {
+      if (this.#held() + this.#closing() + SHEET_WEIGHT[copy] > SHEET_BUDGET) break;
+      this.#start(url, copy);
+    }
   }
 
   /** The held sheet to free for room: one no board asks for, else the one asked for last. Never an admitted one. */
@@ -224,7 +244,7 @@ export class SheetCache {
   #freeSettled(): void {
     let oldest = Infinity;
     for (const l of this.#layouts.values()) oldest = Math.min(oldest, l.settled);
-    const keep: { image: SheetImage; at: number }[] = [];
+    const keep: { image: SheetImage; copy: SheetCopy; at: number }[] = [];
     for (const r of this.#retired) {
       if (r.at <= oldest) this.#io.release(r.image);
       else keep.push(r);

@@ -37,5 +37,7 @@ export function harness() {
     }
     await new Promise((r) => setImmediate(r));
   };
-  return { cache, pending, released, news, finish, imageOf, decoded };
+  /** The images decoded and not yet freed: what the page's memory holds. */
+  const live = () => [...handed].filter((image) => !released.includes(image));
+  return { cache, pending, released, news, finish, imageOf, decoded, live };
 }

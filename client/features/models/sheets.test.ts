@@ -64,7 +64,66 @@ describe("the sheet cache", () => {
     const held = h.cache.states();
     assert.ok(!held.has("s0"), "the sheet no board asks for went");
     assert.ok(!held.has("s15"), "then the one asked for last");
-    for (const u of ["n0", "n1", ...urls(16).slice(1, 15)]) assert.ok(held.has(u), u);
+    for (const u of urls(16).slice(1, 15)) assert.ok(held.has(u), u);
+    // The new ones start once the board has committed a render without the two that went, and those are closed.
+    assert.ok(!held.has("n0") && !held.has("n1"));
+    h.cache.layout(board, "full", ["n0", "n1", ...urls(16).slice(1, 15)], h.cache.snapshot().version);
+    assert.deepEqual(h.released, [h.imageOf("s0"), h.imageOf("s15")]);
+    assert.deepEqual(h.pending.map((p) => p.url), ["n0", "n1"]);
+  });
+
+  /** The weight of what a cache's page holds decoded, a full copy 3 and a phone copy 2. */
+  const liveWeight = (h: ReturnType<typeof harness>) => h.live().reduce((w, image) => w + SHEET_WEIGHT[(image as unknown as { url: string }).url.startsWith("m") ? "mobile" : "full"], 0);
+
+  test("a change from 16 full copies to 24 phone copies never holds more than the budget decoded", async () => {
+    const h = harness();
+    const board = {};
+    h.cache.layout(board, "full", urls(16, "f"), 0);
+    await h.finish();
+    assert.equal(liveWeight(h), SHEET_BUDGET);
+    h.cache.layout(board, "mobile", urls(24, "m"), h.cache.snapshot().version);
+    assert.equal(h.pending.length, 0, "no phone copy starts while the full ones are still drawn");
+    assert.ok(liveWeight(h) <= SHEET_BUDGET);
+    // The board commits a render without the full copies: they close, and the phone copies come.
+    h.cache.layout(board, "mobile", urls(24, "m"), h.cache.snapshot().version);
+    assert.equal(h.released.length, 16);
+    assert.equal(h.pending.length, 24);
+    await h.finish();
+    assert.equal(liveWeight(h), SHEET_BUDGET);
+    assert.deepEqual(h.cache.weight(), { held: SHEET_BUDGET, closing: 0 });
+  });
+
+  test("a board slow to commit holds back the sheets that replace the ones it may still draw, never past the budget", async () => {
+    const h = harness();
+    const a = {};
+    const slow = {};
+    h.cache.layout(a, "full", urls(16, "a"), 0);
+    h.cache.layout(slow, "full", [], 0);
+    await h.finish();
+    for (const round of ["b", "c", "d"]) {
+      h.cache.layout(a, "full", urls(16, round), h.cache.snapshot().version);
+      await h.finish();
+      h.cache.layout(a, "full", urls(16, round), h.cache.snapshot().version);
+      await h.finish();
+      assert.ok(liveWeight(h) <= SHEET_BUDGET, `round ${round}: ${liveWeight(h)}`);
+      assert.ok(h.cache.weight().held + h.cache.weight().closing <= SHEET_BUDGET);
+    }
+    assert.equal(h.cache.states().size, 0, "nothing new decodes while the slow board may draw the old");
+    // Once it commits, the old close and the new come.
+    h.cache.layout(slow, "full", [], h.cache.snapshot().version);
+    assert.equal(h.released.length, 16);
+    assert.equal(h.pending.length, 16);
+  });
+
+  test("a failed sheet keeps its place but weighs nothing", async () => {
+    const h = harness();
+    const board = {};
+    h.cache.layout(board, "full", ["bad", ...urls(16)], 0);
+    assert.equal(h.cache.admitted().length, 16);
+    await h.finish((url) => url === "bad");
+    h.cache.layout(board, "full", ["bad", ...urls(16)], h.cache.snapshot().version);
+    assert.deepEqual(h.cache.admitted(), ["bad", ...urls(16)]);
+    assert.deepEqual(h.pending.map((p) => p.url), ["s15"]);
   });
 
   test("a sheet that goes is freed only once every board has committed a render without it", async () => {

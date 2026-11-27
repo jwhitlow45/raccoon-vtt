@@ -9,16 +9,18 @@ import { harness } from "./sheets.testutil.ts";
  * committing, hiding, and loads answering, failing and arriving late
  * (docs/design/design-v1-token-models.md 6). Named invariants:
  *
- * - BUDGET: the sheets loading or held never weigh more than the budget.
+ * - BUDGET: the sheets loading, held and gone but not yet closed never weigh
+ *   more than the budget, and neither do the images decoded and not freed.
  * - ADMISSION: the admitted sheets are the first of every board's asks taken
- *   rank by rank that fit, and every load running is one of them.
+ *   rank by rank that fit, a failed one in its place weighing nothing, and
+ *   every load running is one of them.
  * - NEVER-CLOSED: no board's last commit draws a freed sheet, and no
  *   snapshot holds one.
  * - ONCE: no sheet is freed twice.
  * - LATE: a sheet whose load stopped never shows.
  * - SETTLES: once every load has answered and every board has committed
- *   twice, every admitted sheet is held or failed, and a sheet no board
- *   draws is freed or still held.
+ *   until nothing more starts, every admitted sheet is held or failed, and
+ *   nothing gone waits to close.
  */
 
 type Board = { key: object; copy: SheetCopy; asks: string[]; drawn: Set<SheetImage>; live: boolean };
@@ -39,18 +41,24 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
       b.live = true;
       h.cache.layout(b.key, b.copy, b.asks, snap.version);
     };
+    const weighs = (url: string) => SHEET_WEIGHT[url.startsWith("full") ? "full" : "mobile"];
     const check = (step: string) => {
       let weight = 0;
-      for (const [url, state] of h.cache.states()) if (state !== "failed") weight += SHEET_WEIGHT[url.startsWith("full") ? "full" : "mobile"];
-      assert.ok(weight <= SHEET_BUDGET, `BUDGET, seed ${seed}, ${step}: ${weight}`);
+      for (const [url, state] of h.cache.states()) if (state !== "failed") weight += weighs(url);
+      const { held, closing } = h.cache.weight();
+      assert.equal(held, weight, `BUDGET, seed ${seed}, ${step}: the cache's own count`);
+      assert.ok(held + closing <= SHEET_BUDGET, `BUDGET, seed ${seed}, ${step}: ${held} held and ${closing} closing`);
+      const decoded = h.live().reduce((w, image) => w + weighs((image as unknown as { url: string }).url), 0);
+      assert.ok(decoded <= SHEET_BUDGET, `BUDGET, seed ${seed}, ${step}: ${decoded} decoded and not freed`);
       // ADMISSION, against the rule written out again.
       const live = order;
       const merged: string[] = [];
       for (let rank = 0; rank < 40; rank++) for (const b of live) if (b.asks[rank] !== undefined && !merged.includes(b.asks[rank]!)) merged.push(b.asks[rank]!);
       const expected: string[] = [];
       let w = 0;
+      const states = h.cache.states();
       for (const url of merged) {
-        w += SHEET_WEIGHT[url.startsWith("full") ? "full" : "mobile"];
+        w += states.get(url) === "failed" ? 0 : weighs(url);
         if (w > SHEET_BUDGET) break;
         expected.push(url);
       }
@@ -94,12 +102,13 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
       } else if (h.pending.length > 0 && roll < 0.95) {
         const i = Math.floor(random() * h.pending.length);
         const [load] = h.pending.splice(i, 1);
-        const image = h.decoded(load!.url);
-        if (random() < 0.15) load!.reject(new Error("404"));
-        else load!.resolve(image);
+        const fails = random() < 0.15;
+        const image = fails ? null : h.decoded(load!.url);
+        if (image) load!.resolve(image);
+        else load!.reject(new Error("404"));
         await new Promise((r) => setImmediate(r));
         // LATE: a sheet whose load had stopped is freed at once and never held.
-        if (load!.signal.aborted) assert.ok(h.released.includes(image) || h.cache.snapshot().get(load!.url) !== image, `LATE, seed ${seed}`);
+        if (image && load!.signal.aborted) assert.ok(h.released.includes(image) && h.cache.snapshot().get(load!.url) !== image, `LATE, seed ${seed}`);
         what = "answer";
       } else {
         h.news.splice(0).forEach((run) => run());
@@ -107,13 +116,17 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
       }
       check(`step ${step} (${what})`);
     }
-    // SETTLES: every load answers and every board commits twice.
-    while (h.pending.length > 0) await h.finish();
-    for (const b of boards) if (b.live) commit(b);
+    // SETTLES: every load answers and every board commits, until nothing more starts.
+    for (let round = 0; round < 10 && (round < 2 || h.pending.length > 0); round++) {
+      while (h.pending.length > 0) await h.finish();
+      for (const b of boards) if (b.live) commit(b);
+    }
     for (const b of boards) if (b.live) commit(b);
     check("settled");
+    assert.equal(h.pending.length, 0, `SETTLES, seed ${seed}: loads still waiting`);
     const states = h.cache.states();
     for (const url of h.cache.admitted()) assert.ok(states.get(url) === "ready" || states.get(url) === "failed", `SETTLES, seed ${seed}: ${url} is ${states.get(url)}`);
+    assert.equal(h.cache.weight().closing, 0, `SETTLES, seed ${seed}: sheets wait to close`);
     h.cache.dispose();
     assert.equal(new Set(h.released).size, h.released.length, `ONCE after dispose, seed ${seed}`);
   }
