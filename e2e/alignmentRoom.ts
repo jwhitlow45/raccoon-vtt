@@ -2840,7 +2840,7 @@ async function combatScreens(sweep: Sweep, page: Page, size: Size, scale: number
     await pat.goto("about:blank");
     await openAt(page, size, scale);
     await dmCombatScreens(sweep, page);
-    await page.goto("about:blank");
+    // The DM's page stays open, since its socket is the room's copy every wait below reads.
     await openAt(pat, size, scale);
     await slotScreens(sweep, pat);
     await pat.goto("about:blank");
