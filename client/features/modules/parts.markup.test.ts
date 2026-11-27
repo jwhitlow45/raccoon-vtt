@@ -579,4 +579,30 @@ describe("gates read off a surface's element tree", () => {
       disposeDrawn();
     }
   });
+
+  test("the board's view takes Top-down while Isometric view hides, and the pick stays stored", async () => {
+    const { useRoomViewChoice } = await import("../view/ViewMenu.tsx");
+    const { pickView } = await import("../view/store.ts");
+    const choice = async () => {
+      const state = (await treeOf(() => {
+        const { key, stored, wanted } = useRoomViewChoice();
+        return { key, pick: stored.pick, wanted };
+      })) as { key: string; pick: string | null; wanted: string };
+      return state;
+    };
+    const { key } = await choice();
+    try {
+      resetAllFeatures();
+      pickView(key, "isometric");
+      assert.deepEqual(await choice(), { key, pick: "isometric", wanted: "isometric" });
+      setModuleShown("isometric", "dm", false);
+      assert.deepEqual(await choice(), { key, pick: "topDown", wanted: "topDown" }, "drawn Top-down");
+      resetAllFeatures();
+      assert.equal((await choice()).pick, "isometric", "shown again, the pick it had");
+    } finally {
+      pickView(key, null);
+      resetAllFeatures();
+      disposeDrawn();
+    }
+  });
 });

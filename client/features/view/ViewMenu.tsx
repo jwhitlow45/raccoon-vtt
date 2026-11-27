@@ -40,7 +40,8 @@ import {
 } from "./choice.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { usePreview } from "../dm/previewContext.ts";
-import { FOLLOW_THE_SCENE, pickView, settledView, shownView, turnView, useStoredView, viewKey, withPick, withTurn, type StoredView, type ViewPick } from "./store.ts";
+import { useModule } from "../modules/Gate.tsx";
+import { FOLLOW_THE_SCENE, pickView, settledView, shownStored, shownView, turnView, useStoredView, viewKey, withPick, withTurn, type StoredView, type ViewPick } from "./store.ts";
 
 /*
  * The view choice's parts (docs/design/design-v1-isometric-view.md 7 and 8): the
@@ -72,8 +73,9 @@ const NO_MEMORY = createStore<StoredView>(() => FOLLOW_THE_SCENE);
 
 /**
  * A page's view from where its pick is kept: the pick, else the scene's
- * suggestion, at the scene's turn, Top-down while Isometric is not offered
- * or a tool shows Top-down (store.ts shownView). A change waits for a
+ * suggestion, at the scene's turn, Top-down while Isometric is not offered,
+ * while Isometric view hides on this device (store.ts shownStored) or while
+ * a tool shows Top-down (store.ts shownView). A change waits for a
  * gesture under way to end (settledView), so the map never turns under a
  * finger. `memory` keeps it in memory instead of this device's storage, as
  * "View as a player" does (choice.ts previewViewSlot).
@@ -88,8 +90,9 @@ export function useViewChoice(input: {
 }): ViewChoiceState {
   const saved = useStoredView(input.key);
   const kept = useStore(input.memory ?? NO_MEMORY);
+  const isoShown = useModule("isometric");
   const { memory, key, sceneId } = input;
-  const stored = memory ? kept : saved;
+  const stored = shownStored(memory ? kept : saved, isoShown);
   const forcedBy = topDownTool(input.tool);
   const target = shownView({ stored, sceneId: input.sceneId ?? "", suggested: input.suggested, forcedTopDown: forcedBy !== null, ready: isoOffered });
   const [showing, setShowing] = useState(target);
