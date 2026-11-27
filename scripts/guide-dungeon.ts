@@ -2,7 +2,8 @@
  * The DM guide's pictures of the dungeon generator (docs/dm-guide.md,
  * "Generating a dungeon", docs/design/design-v1-dungeon-generator.md): the
  * Generate a dungeon dialog on its default choices, the same dialog scrolled
- * to its last rows, Look closer, the scene Make the scene opens framed on the
+ * to its last rows, Monsters on Half for a party of four at level 3
+ * (docs/design/design-v1-dungeon-stock.md), Look closer, the scene Make the scene opens framed on the
  * entrance, and the DM key page in the Journal, taken from the real server on
  * the production build so they always show the app as it is.
  *
@@ -11,7 +12,7 @@
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes a
  * room, writes docs/dm-guide/dungeon-generator.webp, -rows, -closer, -made
- * and -journal at 1280 x 800, as the guide's other pictures are, and deletes
+ * and -journal, and dungeon-monsters.webp, at 1280 x 800, as the guide's other pictures are, and deletes
  * the room:
  *
  *   DATABASE_URL=postgres://... GUIDE_PORT=3197 node scripts/guide-dungeon.ts
@@ -95,6 +96,29 @@ try {
   // The rows from Secret doors to DM key, with the light line showing.
   await dialog.getByText("Secret doors", { exact: true }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
   await picture(dm, "dungeon-generator-rows");
+
+  // Monsters on Half for 4 characters at level 3. The guide's room has no characters, so Monsters is held until the party has a level, and the
+  // party's rows show while Monsters is above None.
+  await dialog.getByRole("button", { name: "Edit the party", exact: true }).click();
+  const marks = dialog.getByRole("group", { name: "Monsters marks", exact: true });
+  await marks.getByRole("button", { name: "Half", exact: true }).click();
+  const characters = dialog.getByLabel("Characters", { exact: true });
+  await characters.fill("4");
+  await characters.press("Tab");
+  await dialog.getByRole("combobox", { name: "Their level", exact: true }).selectOption("3");
+  await dialog.getByText("Moderate: 900 XP a room for 4 characters at level 3.", { exact: true }).waitFor();
+  let stocked = "";
+  await waitFor("the stocked status line", async () => {
+    const now = ((await status.innerText().catch(() => "")) || "").trim();
+    const still = now === stocked && / monsters? in \d+ rooms?\.$/.test(now);
+    stocked = now;
+    return still ? now : null;
+  });
+  console.log(`stocked: ${stocked}`);
+  await dialog.getByText("Monsters", { exact: true }).first().evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+  await picture(dm, "dungeon-monsters");
+  // The room's characters again: with none, Monsters is held at None, so the pictures after this one show the dungeon as before.
+  await dialog.getByRole("button", { name: "Use the room's characters", exact: true }).click();
 
   // Look closer opens the DM view in the viewer, where the secret doors, traps and room numbers show.
   await dialog.getByRole("button", { name: "Look closer", exact: true }).click();
