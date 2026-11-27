@@ -34,7 +34,7 @@ follows `PORT`.
 | `pnpm test` | unit tests (`*.test.ts`) |
 | `pnpm test:int` | integration tests against the dev postgres (`*.itest.ts`). Run `pnpm db:up` first |
 | `pnpm test:int:clock` | the same integration tests with rooms numbered by the real clock, as in production (`ITEST_NUMBER_CLOCK=real`). `pnpm test:int` gives them a clock that stands still, so numbers count by one |
-| `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres, one file at a time as a single shard of [continuous integration](#continuous-integration): the join limits' counts are cleared before each file, and a failing file runs once more. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
+| `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres, one file at a time as a single shard of [continuous integration](#continuous-integration): the join limits' counts are cleared before each file, and a failing file runs once more. Needs Google Chrome installed, or a Chrome for Testing build named in `E2E_CHROME_PATH`. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
 | `pnpm test:e2e:shard <index> <count>` | one shard of the browser tests, as [continuous integration](#continuous-integration) runs them. Run `pnpm build` first |
 | `pnpm coverage` | line coverage of the unit and integration tests, and with `--e2e <folder>` of the browser tests too, with no new dependency. See [Coverage](#coverage). Needs `DATABASE_URL` set to a database the integration tests may use |
 | `pnpm build` | the client into `dist/` |
@@ -238,7 +238,7 @@ These jobs run on Ubuntu:
   against a postgres service container like the one in `docker-compose.yml`.
 - **int-clock**: `pnpm test:int:clock`, on a postgres container of its own,
   once the build has said the push is not docs only.
-- **lan-webkit**: `e2e/local-lan.e2e.ts` in Chrome and Playwright's WebKit
+- **lan-webkit**: `e2e/local-lan.e2e.ts` in the pinned Chrome and Playwright's WebKit
   (`E2E_BROWSERS=chromium,webkit`), on a postgres container of its own, once
   the build has said the push is not docs only. It covers the desktop app's
   web side over plain HTTP, where WebKit differs from Chrome.
@@ -269,6 +269,19 @@ and cannot be made tolerant without losing what it guards, goes in
 `e2e/macos-only.json` with the reason. The Linux shards leave those files
 out, and an **e2e-macos** job runs them on a Mac. The list is empty, and
 the macOS job runs only when it is not.
+
+CI runs one exact Chrome for Testing build, not the Google Chrome on the
+runner image, so an image update cannot turn a run red overnight. Each e2e
+job downloads it from Google's store, checks the zip against a checksum
+written in `ci.yml`, and sets `E2E_CHROME_PATH` to it. The harness
+(`e2e/harness.ts`) then launches that executable wherever a file asks for
+the system Chrome, and each file's log names the version it ran on. With
+`E2E_CHROME_PATH` unset, as on a laptop, the system Chrome runs. To move to
+a new build, change `CHROME_VERSION` and the two checksums, one for
+`chrome-linux64.zip` and one for `chrome-mac-arm64.zip`, at the top of
+`ci.yml`. The **Nightly Chrome** workflow runs the 14 shards each night on
+the image's own Chrome stable, so a new release shows up there first. It is
+not a required check, and a red run only says the pin needs a look.
 
 A newer push to a `ci/` branch cancels that branch's run in progress. Every
 push to `main` runs to the end, so each commit there is tested. A failing
