@@ -17,7 +17,7 @@ import { sha256 } from "./auth/tokens.ts";
 import { applySchema } from "./db.ts";
 import { SNAPSHOT_WRITE_MS } from "./rooms/persistence.ts";
 import { randomIp, Socket, TestClient } from "./rooms/testing.ts";
-import { closeServer, shutDown, type StepFailure } from "./shutdown.ts";
+import { closeServer, SHUTDOWN_DEADLINE_MS, shutDown, type StepFailure } from "./shutdown.ts";
 
 /**
  * A deploy's shutdown with sockets open (design 15.4, LP5-OPS-3): every
@@ -27,6 +27,28 @@ import { closeServer, shutDown, type StepFailure } from "./shutdown.ts";
  * rows and cleans up. The last test stops `server/main.ts` in a process of
  * its own, as a deploy does, so its exit code and time are the real ones.
  */
+
+/**
+ * How long the stop's two short waits (the audit of what the rooms stored, and the
+ * sockets' last-sight writes) get here. Their product defaults are 2 s, which a
+ * loaded machine can pass with nothing wrong, and a test that names exactly what a
+ * stop lost then also names those. Waits that only fire on a real hang.
+ */
+const PATIENT_MS = 20_000;
+
+/**
+ * No snapshot marks, which write on a 10 s grid of the real clock. A test that names the rooms a stop
+ * lost needs each to be behind its last op until the stop, and on a loaded machine a mark can land
+ * between the setup and the stop and save the room it was to lose.
+ */
+const NO_MARKS = { snapshotEveryMs: Number.POSITIVE_INFINITY };
+
+/** Waits for `ready` on a deadline that only fires on a real hang, as a count of short sleeps is a bound that a loaded machine passes. */
+async function waitFor(what: string, ready: () => boolean | Promise<boolean>, ms = 20_000): Promise<void> {
+  for (const deadline = Date.now() + ms; !(await ready()); await new Promise((r) => setTimeout(r, 5))) {
+    if (Date.now() > deadline) assert.fail(`gave up waiting for ${what}`);
+  }
+}
 
 /** A pool whose queries go to `answer` first: one it answers, failed or held, never reaches the database. */
 function poolWith(answer: (text: string, values: unknown[] | undefined) => Promise<never> | null): pg.Pool {
@@ -96,7 +118,7 @@ before(async () => {
   check = new pg.Pool({ connectionString: config.DATABASE_URL, max: 2 });
   await applySchema(check);
   startedAt = (await check.query<{ now: Date }>("select now()")).rows[0]!.now;
-  app = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool: appPool, ws: { closeGraceMs: 300 } });
+  app = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool: appPool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await app.listen({ port: 0, host: "127.0.0.1" });
 });
 
@@ -210,8 +232,7 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
     [roomId],
   );
   logApp.logMigration.start();
-  for (let i = 0; i < 500 && !logApp.logMigration.ready; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(logApp.logMigration.ready);
+  await waitFor("the log migration to be ready", () => logApp.logMigration.ready);
   const page = await dm.get(`/api/rooms/${roomId}/log?limit=5`);
   assert.equal(page.statusCode, 200, page.body);
   await inBatch;
@@ -220,9 +241,10 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
 
   const started = Date.now();
   await closeServer(logApp, () => ownPool.end());
-  assert.ok(Date.now() - started < 5_000, "bounded");
+  // The cancel ends the held batch at once. Without it the stop waits out the rooms' 16 s close, so a bound under that tells them apart on a loaded machine too.
+  assert.ok(Date.now() - started < 12_000, "bounded");
   let left = { backends: 1, locks: 1 };
-  for (let i = 0; i < 100 && (left.backends > 0 || left.locks > 0); i++) {
+  for (const deadline = Date.now() + 20_000; left.backends > 0 || left.locks > 0; ) {
     const { rows } = await check.query<{ backends: number; locks: number }>(
       `select (select count(*)::int from pg_stat_activity where application_name = $1 and datname = current_database()) as backends,
               (select count(*)::int from pg_locks where locktype = 'advisory' and classid::bigint = $2
@@ -230,6 +252,7 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
       [tag, 0x52565455],
     );
     left = rows[0]!;
+    if (Date.now() > deadline) break;
     if (left.backends > 0 || left.locks > 0) await new Promise((r) => setTimeout(r, 20));
   }
   assert.deepEqual(left, { backends: 0, locks: 0 }, "no backend or room lock of the backfill outlives the shutdown");
@@ -240,14 +263,14 @@ test("a shutdown during a log backfill batch stops it: the backend is told to st
 test("a stop whose snapshot write fails for one room still saves the other, then fails naming the room it lost (LP44-OPS-1)", async () => {
   let failing = "";
   const pool = poolWith((text, values) => (snapshotOf(failing, text, values) ? Promise.reject(new Error("could not extend file: No space left on device")) : null));
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
   try {
     const [lost, kept] = ids;
     failing = lost;
     await losesOnly(
-      closeServer(own, () => pool.end()),
+      closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }),
       [{ roomId: lost, why: "snapshot behind" }],
     );
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
@@ -259,7 +282,7 @@ test("a stop whose snapshot write fails for one room still saves the other, then
 test("a stop whose snapshot write for one room never ends still saves the other, then fails at the rooms' deadline naming the room it lost (LP44-OPS-1)", async () => {
   let stuck = "";
   const pool = poolWith((text, values) => (snapshotOf(stuck, text, values) ? new Promise<never>(() => undefined) : null));
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { closeTimeoutMs: 500 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { closeTimeoutMs: 500, auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
   try {
@@ -267,11 +290,11 @@ test("a stop whose snapshot write for one room never ends still saves the other,
     stuck = lost;
     const started = Date.now();
     await losesOnly(
-      closeServer(own, () => pool.end()),
+      closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }),
       [{ roomId: lost, why: "timed out" }],
     );
     // The stuck write holds its connection until its own deadline, which the pool's end waits for.
-    assert.ok(Date.now() - started < SNAPSHOT_WRITE_MS + 2_000, "bounded by the rooms' deadline and the write's own");
+    assert.ok(Date.now() - started < SNAPSHOT_WRITE_MS + 8_000, "bounded by the rooms' deadline and the write's own, with room for a loaded machine");
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
   } finally {
     for (const socket of sockets) socket.ws.terminate();
@@ -280,7 +303,7 @@ test("a stop whose snapshot write for one room never ends still saves the other,
 
 test("a stop whose room's unload throws still saves the other room, then fails naming the room it lost (LP44-OPS-1)", async () => {
   const pool = poolWith(() => null);
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
   try {
@@ -288,7 +311,7 @@ test("a stop whose room's unload throws still saves the other room, then fails n
     const actor = await own.rooms.acquire(lost);
     actor.shutdown = () => Promise.reject(new Error("the room's state would not serialize"));
     await losesOnly(
-      closeServer(own, () => pool.end()),
+      closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }),
       [{ roomId: lost, why: "snapshot behind" }],
     );
     assert.equal(await snapshotSeq(kept), await lastSeq(kept), "the other room saved at its last op");
@@ -300,12 +323,12 @@ test("a stop whose room's unload throws still saves the other room, then fails n
 test("a stop whose sockets' last-sight writes fail saves both rooms, then fails naming the writes (LP44-OPS-1)", async () => {
   let failing = false;
   const pool = poolWith((text) => (failing && text.startsWith("update sessions set last_seen_at") ? Promise.reject(new Error("the sessions table is locked")) : null));
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { ids, sockets, lastSeq, snapshotSeq } = await twoRooms(own);
   try {
     failing = true;
-    await assert.rejects(closeServer(own, () => pool.end()), (err: { failures?: unknown }) => {
+    await assert.rejects(closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }), (err: { failures?: unknown }) => {
       assert.deepEqual(err.failures, [{ step: "socket writes", reason: "0 left running, 2 failed" }]);
       return true;
     });
@@ -329,7 +352,7 @@ test("a stop that begins while a periodic snapshot is being written leaves the r
     heldStarted();
     return gate.then(() => pool.query(text, values)) as Promise<never>;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { actor: { snapshotOps: 1 } } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: { snapshotOps: 1 } } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const dm = client(() => own);
   roomId = (await dm.createRoom("Periodic")).roomId;
@@ -345,8 +368,7 @@ test("a stop that begins while a periodic snapshot is being written leaves the r
     const codes: number[] = [];
     const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
     // Released only once the room is stopping, so its stop meets the write still in flight.
-    for (let i = 0; i < 500 && !actor.closed; i++) await new Promise((r) => setTimeout(r, 5));
-    assert.ok(actor.closed, "the room is stopping");
+    await waitFor("the room to be stopping", () => actor.closed);
     await new Promise((r) => setTimeout(r, 50));
     held!.release();
     await stopping;
@@ -388,7 +410,7 @@ test("a delete whose unload could not save its room and then fails while the ser
     held.resolve();
     return deleteAnswer.promise;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { roomId, dm, socket } = await roomWithChange(own, "Doomed");
   try {
@@ -403,7 +425,7 @@ test("a delete whose unload could not save its room and then fails while the ser
       roomsClosing.resolve();
       return closing;
     };
-    const stopping = closeServer(own, () => pool.end());
+    const stopping = closeServer(own, () => pool.end(), { writesMs: PATIENT_MS });
     await roomsClosing.promise;
     deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
     await losesOnly(stopping, [{ roomId, why: "snapshot behind" }]);
@@ -423,7 +445,7 @@ test("a delete that fails, tried again and failing again, the second time during
     failing.reached.resolve();
     return failing.answer.promise.then(() => Promise.reject(new Error("canceling statement due to statement timeout"))) as Promise<never>;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const lost = await roomWithChange(own, "Doomed");
   const kept = await roomWithChange(own, "Kept");
@@ -470,7 +492,7 @@ test("a delete whose unload could not save its room and that fails during the so
     held.resolve();
     return deleteAnswer.promise;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 1_000 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const lost = await roomWithChange(own, "Doomed");
   const kept = await roomWithChange(own, "Kept");
@@ -486,7 +508,7 @@ test("a delete whose unload could not save its room and that fails during the so
       roomsClosing = true;
       return close();
     };
-    const stopping = closeServer(own, () => pool.end());
+    const stopping = closeServer(own, () => pool.end(), { writesMs: PATIENT_MS });
     await new Promise((r) => setTimeout(r, 100));
     deleteAnswer.reject(new Error("canceling statement due to statement timeout"));
     await asked;
@@ -510,7 +532,7 @@ test("a delete of a room whose snapshot could not be written that lands as the r
     held.resolve();
     return go.promise.then(() => pool.query(text, [room])) as Promise<never>;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { roomId, dm, socket } = await roomWithChange(own, "Doomed");
   try {
@@ -539,7 +561,7 @@ test("a delete of a room whose snapshot could not be written that lands as the r
 
 test("a room whose replay failed is behind its last change by design, and the stop does not count it unsaved", async () => {
   const pool = poolWith(() => null);
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { roomId, socket } = await roomWithChange(own, "Unreadable");
   try {
@@ -547,7 +569,7 @@ test("a room whose replay failed is behind its last change by design, and the st
     await own.rooms.unload(roomId, undefined, false);
     await check.query("update room_ops set pub = null where room_id = $1 and seq = (select max(seq) from room_ops where room_id = $1)", [roomId]);
     assert.equal((await own.rooms.acquire(roomId)).replayFailed, true);
-    await closeServer(own, () => pool.end());
+    await closeServer(own, () => pool.end(), { writesMs: PATIENT_MS });
   } finally {
     socket.ws.terminate();
   }
@@ -555,7 +577,7 @@ test("a room whose replay failed is behind its last change by design, and the st
 
 test("a room this process only tried to delete is checked too: a delete that fails names a lag the room already had", async () => {
   const before = poolWith(() => null);
-  const first = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool: before, ws: { closeGraceMs: 300 } });
+  const first = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool: before, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await first.listen({ port: 0, host: "127.0.0.1" });
   const { roomId, socket } = await roomWithChange(first, "Lagging");
   socket.ws.terminate();
@@ -563,11 +585,11 @@ test("a room this process only tried to delete is checked too: a delete that fai
   await first.rooms.unload(roomId, undefined, false);
   await closeServer(first, () => before.end()).catch(() => undefined);
   const pool = poolWith((text, values) => (text.startsWith("delete from rooms where id = $1") && values?.[0] === roomId ? Promise.reject(new Error("canceling statement due to statement timeout")) : null));
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   await assert.rejects(own.gateway.deleteRoom(roomId), /statement timeout/);
   await losesOnly(
-    closeServer(own, () => pool.end()),
+    closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }),
     [{ roomId, why: "snapshot behind" }],
   );
 });
@@ -615,7 +637,7 @@ test("random snapshot and delete failures around a stop: it fails naming exactly
         return gate.fail ? Promise.reject(new Error("canceling statement due to statement timeout")) : pool.query(text, values);
       }) as Promise<never>;
     });
-    const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 400 } });
+    const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 400 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
     await own.listen({ port: 0, host: "127.0.0.1" });
     const rooms = await Promise.all(plans.map((_, i) => roomWithChange(own, `Random ${i}`)));
     const slow = await roomWithChange(own, "Slow");
@@ -654,7 +676,7 @@ test("random snapshot and delete failures around a stop: it fails naming exactly
         roomsClosing.resolve();
         return closing;
       };
-      const stopping = closeServer(own, () => pool.end()).then(
+      const stopping = closeServer(own, () => pool.end(), { writesMs: PATIENT_MS }).then(
         () => [] as readonly StepFailure[],
         (err: { failures?: readonly StepFailure[] }) => err.failures ?? [],
       );
@@ -696,7 +718,7 @@ test("a delete that lands while the server stops a room leaves it deleted, and t
     watched = "";
     return deleted.promise.then(() => pool.query(text, values)) as Promise<never>;
   });
-  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 } });
+  const own = await buildApp({ config: { ...config, ASSET_DIR: assetDir }, pool, ws: { closeGraceMs: 300 }, rooms: { auditTimeoutMs: PATIENT_MS, actor: NO_MARKS } });
   await own.listen({ port: 0, host: "127.0.0.1" });
   const { roomId, socket } = await roomWithChange(own, "Gone");
   try {
@@ -704,8 +726,7 @@ test("a delete that lands while the server stops a room leaves it deleted, and t
     watched = roomId;
     const codes: number[] = [];
     const stopping = shutDown(own, () => pool.end(), { exit: (code) => codes.push(code) });
-    for (let i = 0; i < 500 && !actor.closed; i++) await new Promise((r) => setTimeout(r, 5));
-    assert.ok(actor.closed, "the stop is unloading the room");
+    await waitFor("the stop to unload the room", () => actor.closed);
     // A delete request already past the server's close reaches the gateway now.
     assert.equal(await own.gateway.deleteRoom(roomId), true);
     deleted.resolve();
@@ -734,7 +755,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Off Windows only: Windows has no SIGTERM a process can catch, so kill("SIGTERM") ends the server at once there.
 // Deploys stop the server on Linux, and the desktop app stops it through its channel (server/local/local.itest.ts).
-test("a deploy's stop of the real server with a DM and a player on exits 0 within 5 s and saves the room at its last op (LP44-OPS-1)", { timeout: 60_000, skip: process.platform === "win32" ? "Windows has no catchable SIGTERM" : false }, async () => {
+test("a deploy's stop of the real server with a DM and a player on exits 0 inside its deadline, the slow client cut off, and saves the room at its last op (LP44-OPS-1)", { timeout: 60_000, skip: process.platform === "win32" ? "Windows has no catchable SIGTERM" : false }, async () => {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["server/main.ts"], {
@@ -876,17 +897,19 @@ test("a deploy's stop of the real server with a DM and a player on exits 0 withi
     });
     const steps = lines.map((line) => line.msg ?? "").filter((msg) => msg.startsWith("shut"));
     assert.equal(code, 0, `the stop's exit code, after ${took} ms: ${steps.join(", ")}`);
-    assert.ok(took < 5_000, `the stop took ${took} ms`);
+    // Exit 0 already means the deadline timer never fired. What a loaded machine must not hide is a stop that waits a socket out: the sockets step cuts the slow one off after its 2 s grace, so waiting out ws's 30 s close timeout would show here, not in a fixed 5 s for the whole stop.
+    const sockets0 = lines.find((line) => line.msg === "shutdown: sockets closed") as { tookMs?: number } | undefined;
+    assert.ok((sockets0?.tookMs ?? Infinity) < 10_000, `the sockets step took ${sockets0?.tookMs} ms, a slow client is cut off after its grace`);
+    assert.ok(took < SHUTDOWN_DEADLINE_MS, `the stop took ${took} ms`);
     assert.equal(await seqOf("select seq::int from room_snapshots where room_id = $1"), lastSeq, "the stop saved the room at its last op");
-    assert.deepEqual(steps, [
-      "shutting down",
-      "shutdown: sockets closed",
-      "shutdown: server closed",
-      "shutdown: rooms closed",
-      "shutdown: socket writes settled",
-      "shutdown: pool closed",
-      "shut down",
-    ]);
+    // The child's log reaches this pipe in the order its writes are flushed, which a loaded machine can swap for two lines.
+    // So the steps are the same set, and their order is read from the ms each one logs since the stop began.
+    assert.deepEqual(
+      [...steps].sort(),
+      ["shut down", "shutdown: pool closed", "shutdown: rooms closed", "shutdown: server closed", "shutdown: sockets closed", "shutdown: socket writes settled", "shutting down"].sort(),
+    );
+    const inOrder = ["shutdown: server closed", "shutdown: rooms closed", "shutdown: socket writes settled", "shutdown: pool closed", "shut down"].map((msg) => (lines.find((line) => line.msg === msg) as { ms?: number } | undefined)?.ms ?? Number.NaN);
+    assert.ok(inOrder.every((ms, i) => i === 0 || ms >= inOrder[i - 1]!), `the steps ran in order, by their ms: ${inOrder.join(", ")}`);
     const sockets = lines.find((line) => line.msg === "shutdown: sockets closed");
     assert.deepEqual({ sockets: sockets?.sockets, cutOff: sockets?.cutOff }, { sockets: 2, cutOff: 1 }, "both sockets closed, the slow phone's cut off");
     // What the stop met: the DM's page tried again while the player's phone held up the close and was refused, and the upload was cut off.
