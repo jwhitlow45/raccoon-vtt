@@ -1,6 +1,5 @@
 import { MAX_PHONE_FILE_BYTES } from "../uvtt/limits.ts";
-import { EVERY_FLOOR_PIXELS } from "./everyFloor.ts";
-import { exportSize, MAX_EXPORT_PIXELS, VTT_LIMITS } from "./size.ts";
+import { EVERY_FLOOR_PIXELS, exportSize, MAX_EXPORT_PIXELS, VTT_LIMITS } from "./size.ts";
 import type { ExportCheck } from "../uvtt/steps.ts";
 import type { UvttCounts } from "../uvtt/write.ts";
 import type { ExportContent, ExportView } from "./content.ts";

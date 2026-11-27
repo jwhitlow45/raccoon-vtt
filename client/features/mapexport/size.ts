@@ -26,6 +26,13 @@ export const DEFAULT_PX_PER_CELL = 70;
 export const MAX_EXPORT_PIXELS = 16_777_216;
 export const MAX_EXPORT_SIDE = 16_384;
 
+/**
+ * Every floor's file holds at most four of the largest pictures one floor
+ * may be, so the pictures waiting in memory for the zip stay within what a
+ * phone gives a page (everyFloor.ts).
+ */
+export const EVERY_FLOOR_PIXELS = 4 * MAX_EXPORT_PIXELS;
+
 export type ExportSize = {
   /** Image pixels per grid square, as drawn. */
   pxPerCell: number;

@@ -6,7 +6,7 @@ import { playersAt } from "../scenes/floorWords.ts";
 import type { ExportView } from "./content.ts";
 import { hasBuildOn } from "./content.ts";
 import { floorEntryName } from "./fileName.ts";
-import { exportSize, MAX_EXPORT_PIXELS, type ExportLimits } from "./size.ts";
+import { EVERY_FLOOR_PIXELS, exportSize, type ExportLimits } from "./size.ts";
 import { storedZip } from "./zipStore.ts";
 
 /*
@@ -26,12 +26,6 @@ export type FloorsChoice = "this" | "every";
 
 type View = Pick<RoomState, "scenes" | "tokens" | "meta" | "characters" | "openFloors">;
 
-/**
- * Every floor's file holds at most four of the largest pictures one floor
- * may be (size.ts MAX_EXPORT_PIXELS), so the pictures waiting in memory
- * for the zip stay within what a phone gives a page.
- */
-export const EVERY_FLOOR_PIXELS = 4 * MAX_EXPORT_PIXELS;
 
 /** The floors Every floor puts in the file, bottom first, and how many the scene has. */
 export function exportedFloors(view: View, sceneId: string, version: ExportView): { floors: Scene[]; total: number } {
