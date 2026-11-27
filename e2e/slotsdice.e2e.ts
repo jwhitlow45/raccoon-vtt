@@ -400,7 +400,17 @@ describe("raccoon-vtt: spell slots and Hit Point Dice", { timeout: 900_000 }, ()
     await rest.getByText("Hit Point Dice: 0 of 1 d8, 1 of 3 d6", { exact: true }).waitFor();
     await ops.send({ t: "actor.hp", target: { characterId: run.bree }, change: { kind: "damage", amount: 3 } });
     await rest.getByRole("radio", { name: "Short Rest" }).check();
-    assert.equal(await rest.getByRole("textbox", { name: "Constitution modifier" }).inputValue(), "1", "this device kept the modifier");
+    const con = rest.getByRole("textbox", { name: "Constitution modifier" });
+    assert.equal(await con.inputValue(), "1", "this device kept the modifier");
+    // A modifier out of range holds Roll and says the range on its own line, the field keeping its place in the row.
+    await con.fill("11");
+    await rest.getByText("Type a Constitution modifier from -5 to 10.", { exact: true }).waitFor();
+    assert.equal(await rest.getByRole("button", { name: /^Roll a d6 Hit Point Die/ }).getAttribute("aria-disabled"), "true", "Roll is held");
+    await measure(kim, rest, "the Short Rest card with its Constitution error at 390 x 844");
+    const field = await con.boundingBox();
+    const card = await rest.boundingBox();
+    assert.ok(field && card && field.x + field.width <= card.x + card.width + 1, `the field leaves the card: ${JSON.stringify({ field, card })}`);
+    await con.fill("1");
     await rest.getByRole("button", { name: "Cancel", exact: true }).tap();
     await rest.getByRole("radio", { name: "Long Rest" }).check();
     await rest.getByText("All HP back, every spent Hit Point Die back, every spell slot back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset.", { exact: true }).waitFor();

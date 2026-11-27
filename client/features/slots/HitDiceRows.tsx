@@ -80,6 +80,8 @@ export function HitDiceRows(props: { character: Character; actor: Pick<Actor, "h
   const source = conSource({ shaped, hasBlock: character.stats !== undefined, numbersCon: read.numbers?.abilities.con.mod, loading: read.loading, failed: read.failed });
   const [conText, setConText] = useState(() => readCon(character.id));
   const [status, setStatus] = useState<string | null>(null);
+  // Two cards of one character can stand open at once, a token panel's and a page's, so the error's id is the card's own.
+  const conErrorId = useId();
   // One guard for every row's Roll, typed Spend and Restore, so no die goes before the last one's answer.
   const [held, setHeld] = useState(false);
   const [guard] = useState(() => dieGuard(setHeld));
@@ -100,19 +102,20 @@ export function HitDiceRows(props: { character: Character; actor: Pick<Actor, "h
             placeholder="+0"
             value={conText}
             error={conError !== null}
-            aria-describedby={conError ? `${character.id}-con-error` : undefined}
+            aria-describedby={conError ? conErrorId : undefined}
             onChange={(e) => {
               setConText(e.target.value);
               writeCon(character.id, e.target.value);
             }}
             style={{ width: NUMBER_FIELD_WIDTH, textAlign: "right", fontVariantNumeric: "tabular-nums" }}
           />
-          {conError ? (
-            <p id={`${character.id}-con-error`} style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText }}>
-              {conError}
-            </p>
-          ) : null}
         </FieldRow>
+      ) : null}
+      {/* Its own line under the field's row, so the field keeps its place in the row at any width (SLOTS-O-11). */}
+      {conError ? (
+        <p id={conErrorId} style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText }}>
+          {conError}
+        </p>
       ) : null}
       <ul aria-label={`${character.name}'s Hit Point Dice`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {rows.map((row) => (
