@@ -129,3 +129,53 @@ test("each report stands under its row and is spoken once in the status region",
   const height = html.slice(html.indexOf(">Height<"), html.indexOf("West, to room 1"));
   assert.ok(height.includes("No room for its stairs"));
 });
+
+/*
+ * DSTOCK (docs/design/design-v1-dungeon-stock.md 1): the room's Monsters row
+ * shows only while Monsters is above None, reads On as the room's claim
+ * does, lists its fight, and Other monsters draws the room's next one.
+ */
+const { fightLine, OTHER_MONSTERS } = await import("./words.ts");
+
+function stockedDraw(facts: RoomFacts, edit: RoomEdit | undefined, onEdit: (next: RoomEdit | null) => void = nothing): string {
+  return renderToStaticMarkup(h(RoomPanel, { facts, edit, onEdit, onStep: nothing, onDone: nothing, cave: false, stocking: true, limit: h("p", null, "LIMIT-SLOT") }));
+}
+const FIGHT = { on: true, lines: [["Goblin Boss", 1], ["Goblin Warrior", 3]] as [string, number][], xp: 350 };
+/** The radio of the Monsters row's option, past its name. */
+function monsters(html: string, label: "Off" | "On") {
+  return radio(html.slice(html.indexOf(">Monsters<")), label);
+}
+
+test("DSTOCK-P: no Monsters row at None", () => {
+  assert.ok(!text(draw({ ...ROOM, share: true, monsters: FIGHT })).includes("Monsters"));
+});
+
+test("DSTOCK-P: a room the share picked is On with its fight, and one it did not, the entrance among them, is Off", () => {
+  const on = stockedDraw({ ...ROOM, share: true, monsters: FIGHT }, undefined);
+  assert.equal(monsters(on, "On").checked, true);
+  assert.ok(text(on).includes(fightLine(FIGHT.lines, FIGHT.xp)));
+  assert.ok(text(on).includes("LIMIT-SLOT"), "the creature limit's line stands under the row");
+  const off = stockedDraw({ ...ROOM, n: 1, share: false, monsters: { on: false, lines: [], xp: 0 } }, undefined);
+  assert.equal(monsters(off, "Off").checked, true);
+  const button = (html: string) => html.slice(html.lastIndexOf("<button", html.indexOf(OTHER_MONSTERS)), html.indexOf(OTHER_MONSTERS));
+  assert.match(button(off), /\sdisabled=""/, "Other monsters waits for On");
+  assert.doesNotMatch(button(on), /\sdisabled=""/);
+  // An edit wins over the share either way.
+  assert.equal(monsters(stockedDraw({ ...ROOM, share: false, monsters: null }, { monsters: true }), "On").checked, true);
+  assert.equal(monsters(stockedDraw({ ...ROOM, share: true, monsters: FIGHT }, { monsters: false }), "Off").checked, true);
+  assert.ok(!text(stockedDraw({ ...ROOM, share: true, monsters: FIGHT }, { monsters: false })).includes("Goblin Boss"), "an Off room lists no fight");
+});
+
+test("DSTOCK-P: a room with no spot reports it under Monsters", () => {
+  const html = stockedDraw({ ...ROOM, share: true, monsters: { on: false, lines: [], xp: 0 }, reports: [REPORTS.noMonsterSpot] }, undefined);
+  const row = html.slice(html.indexOf(">Monsters<"));
+  assert.ok(text(row).includes(REPORTS.noMonsterSpot));
+});
+
+test("DSTOCK-P: Other monsters pins the room On and draws its next fight, round its 16 streams", async () => {
+  const { otherMonsters } = await import("./RoomPanel.tsx");
+  assert.deepEqual(otherMonsters(undefined), { monstersDraw: 1, monsters: true });
+  assert.deepEqual(otherMonsters({ monstersDraw: 15, dressing: "full" }), { monstersDraw: 0, monsters: true });
+  const source = (await import("node:fs")).readFileSync(new URL("./RoomPanel.tsx", import.meta.url), "utf8");
+  assert.match(source, /onClick=\{\(\) => props\.onChange\(otherMonsters\(edit\)\)\}/);
+});

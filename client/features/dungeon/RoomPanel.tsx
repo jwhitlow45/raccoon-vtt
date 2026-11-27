@@ -8,7 +8,8 @@ import { theme } from "../../lib/theme.ts";
 import { Choice } from "./Choices.tsx";
 import { SECRET_OFF, type DoorFacts, type DoorPin, type RoomEdit, type RoomFacts } from "./edits.ts";
 import { CHOICE_NAMES, DRESSINGS, type Dressing } from "./settings.ts";
-import { doorName, ENTRANCE_FLAT, HEIGHT_HELP, NO_TRAP_FITS, reportsByRow, ROOM_GONE, roomTitle, WING_FLAT } from "./words.ts";
+import { roomClaim } from "./stock.ts";
+import { doorName, ENTRANCE_FLAT, fightLine, HEIGHT_HELP, NO_TRAP_FITS, OTHER_MONSTERS, reportsByRow, ROOM_GONE, roomTitle, WING_FLAT } from "./words.ts";
 
 /*
  * The room panel (docs/design: dungeon generator phase 3, 4.1, D-261110-097
@@ -51,6 +52,10 @@ export type RoomPanelProps = {
   more?: readonly string[];
   /** A wing's rooms, named W1 and on as its ghost numbers them (dungeon phase 3, 3.3). */
   wing?: boolean;
+  /** Monsters is above None, so the room's Monsters row shows (docs/design/design-v1-dungeon-stock.md 1). */
+  stocking?: boolean;
+  /** Under the Monsters row: the creature limit's line. */
+  limit?: ReactNode;
 };
 
 export function RoomPanel(props: RoomPanelProps) {
@@ -121,6 +126,7 @@ export function RoomPanel(props: RoomPanelProps) {
           >
             <Reports lines={rows.lit} />
           </Choice>
+          {props.stocking ? <MonstersRow facts={facts} edit={edit} onChange={set} reports={rows.monsters} limit={props.limit} /> : null}
           <Reports lines={rows.other} />
           <div>
             <Button size="sm" disabled={!edited} onClick={() => props.onEdit(null)}>
@@ -141,6 +147,44 @@ export function RoomPanel(props: RoomPanelProps) {
 }
 
 export default RoomPanel;
+
+/**
+ * The room's fight (design 1): Off and On, its creatures as its help, and
+ * Other monsters, which draws the room's next fight from its own stream,
+ * so no other room changes (D-261127-064). A room is On as its claim is:
+ * by its edit, else by the Monsters share, so the entrance starts Off.
+ */
+function MonstersRow(props: { facts: RoomFacts; edit: RoomEdit | undefined; onChange(patch: RoomEdit): void; reports: readonly string[]; limit: ReactNode }) {
+  const { facts, edit } = props;
+  const on = roomClaim(facts, edit ? { [facts.room]: edit } : null, 1) > 0;
+  const fight = facts.monsters;
+  const list = on && fight && fight.lines.length > 0 ? fightLine(fight.lines, fight.xp) : undefined;
+  return (
+    <Choice<"off" | "on">
+      name="Monsters"
+      value={on ? "on" : "off"}
+      onChange={(v) => props.onChange({ monsters: v === "on" })}
+      options={[
+        { value: "off", label: "Off" },
+        { value: "on", label: "On" },
+      ]}
+      help={list}
+    >
+      <div>
+        <Button size="sm" disabled={!on} onClick={() => props.onChange(otherMonsters(edit))}>
+          {OTHER_MONSTERS}
+        </Button>
+      </div>
+      <Reports lines={props.reports} />
+      {props.limit}
+    </Choice>
+  );
+}
+
+/** Other monsters' pins: the room On, drawing from its next fight stream of 16, so no other room changes (D-261127-064). */
+export function otherMonsters(edit: RoomEdit | undefined): RoomEdit {
+  return { monstersDraw: ((edit?.monstersDraw ?? 0) + 1) % 16, monsters: true };
+}
 
 function HeightRow(props: { facts: RoomFacts; edit: RoomEdit | undefined; flat: boolean; onChange(ground: number): void; reports: readonly string[] }) {
   // The entrance is room 1 (keyRooms.ts numberRooms), and the generator never raises it.
