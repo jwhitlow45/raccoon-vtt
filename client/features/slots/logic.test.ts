@@ -6,7 +6,10 @@ import { usesCount, usesPresence } from "../combat/logic.ts";
 import { blockLevel, offerGone, offersAfterSend } from "../dice/cast/cast.ts";
 import {
   classesLine,
+  CON_RANGE,
+  conChoice,
   conSource,
+  dieGuard,
   dieRows,
   foldedBack,
   foldedUse,
@@ -129,6 +132,46 @@ describe("Hit Point Dice", () => {
     assert.deepEqual(conSource({ shaped: false, hasBlock: false, numbersCon: undefined, loading: false, failed: false }), { kind: "field" });
     // A shaped character never gets the field, even with nothing loaded.
     assert.notEqual(conSource({ shaped: true, hasBlock: false, numbersCon: undefined, loading: false, failed: false }).kind, "field");
+  });
+  test("the Constitution field: empty is +0, a modifier is itself, and anything else holds Roll with the range", () => {
+    assert.deepEqual(conChoice(""), { ok: true, con: 0 });
+    assert.deepEqual(conChoice("  "), { ok: true, con: 0 });
+    assert.deepEqual(conChoice("+3"), { ok: true, con: 3 });
+    assert.deepEqual(conChoice("-5"), { ok: true, con: -5 });
+    for (const t of ["11", "-6", "x", "2.5", "+"]) assert.deepEqual(conChoice(t), { ok: false, error: CON_RANGE }, t);
+  });
+  test("one guard for Roll, typed Spend and Restore: with answers held back, no second die goes before the first answer", () => {
+    // A fake server that answers only when told, as a slow connection would.
+    const pending: (() => void)[] = [];
+    const sent: string[] = [];
+    const heldSeen: boolean[] = [];
+    const guard = dieGuard((held) => heldSeen.push(held));
+    const tap = (what: string) =>
+      guard.run((done) => {
+        sent.push(what);
+        pending.push(done);
+        return true;
+      });
+    assert.equal(tap("roll d10"), true);
+    // Every other path waits: another Roll, a typed Spend, a Restore, and another row's.
+    for (const what of ["roll d10", "spend d10 4", "restore d10", "roll d8"]) assert.equal(tap(what), false, what);
+    assert.deepEqual(sent, ["roll d10"]);
+    assert.equal(guard.held(), true);
+    pending.shift()!();
+    assert.equal(guard.held(), false);
+    assert.equal(tap("spend d8 4"), true);
+    assert.equal(tap("roll d10"), false);
+    pending.shift()!();
+    // A late second answer for one done changes nothing.
+    assert.equal(tap("restore d8"), true);
+    pending[0]!();
+    pending[0]!();
+    assert.equal(guard.held(), false);
+    assert.deepEqual(sent, ["roll d10", "spend d8 4", "restore d8"]);
+    assert.deepEqual(heldSeen, [true, false, true, false, true, false]);
+    // A send that sent nothing frees the guard at once.
+    assert.equal(guard.run(() => false), true);
+    assert.equal(guard.held(), false);
   });
 });
 

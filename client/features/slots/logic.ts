@@ -245,6 +245,50 @@ export function conOf(text: string | null | undefined): number | null {
   return n >= -5 && n <= 10 ? n : null;
 }
 
+/** What a nonempty Constitution field that is not a modifier says, and why Roll is off (SLOTS-ASTRA-01). */
+export const CON_RANGE = "Type a Constitution modifier from -5 to 10.";
+
+/**
+ * The Constitution field's value for a roll: an empty field is +0, a
+ * modifier from -5 to 10 is itself, and anything else holds Roll with the
+ * range, so a typo never rolls as +0 and spends a die.
+ */
+export function conChoice(text: string): { ok: true; con: number } | { ok: false; error: string } {
+  if (text.trim() === "") return { ok: true, con: 0 };
+  const con = conOf(text);
+  return con === null ? { ok: false, error: CON_RANGE } : { ok: true, con };
+}
+
+/**
+ * The one pending guard of a Short Rest card's die rows (SLOTS-ASTRA-02):
+ * a Roll, a typed Spend and a Restore on any row each wait for their
+ * answer before another may go, so two dice are never spent before the
+ * first result is known. `run` calls `send` only while nothing waits, and
+ * hands it `done`, to call once the answer lands. A `send` that sent
+ * nothing returns false and frees the guard at once.
+ */
+export function dieGuard(onChange: (held: boolean) => void) {
+  let held = false;
+  return {
+    held: () => held,
+    run(send: (done: () => void) => boolean): boolean {
+      if (held) return false;
+      held = true;
+      onChange(true);
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        held = false;
+        onChange(false);
+      };
+      if (!send(done)) done();
+      return true;
+    },
+  };
+}
+export type DieGuard = ReturnType<typeof dieGuard>;
+
 // ------------------------------------------------------------ classes
 
 /** "Wizard 5", "Other class 3 (d8)", "Fighter 3 (its subclass casts spells)". */

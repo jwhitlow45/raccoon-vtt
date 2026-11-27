@@ -16,8 +16,9 @@ import { reasonText } from "../resources/logic.ts";
 import { CountRowHead, RowButton } from "../resources/ResourceRows.tsx";
 import { RollResultLine } from "../rolls/card.ts";
 import {
-  conOf,
+  conChoice,
   conSource,
+  dieGuard,
   dieBackLabel,
   dieFullText,
   dieName,
@@ -31,6 +32,7 @@ import {
   spendOff,
   typedLabel,
   typedOutcome,
+  type DieGuard,
   type DieRow,
 } from "./logic.ts";
 
@@ -76,10 +78,14 @@ export function HitDiceRows(props: { character: Character; actor: Pick<Actor, "h
   const source = conSource({ shaped, hasBlock: character.stats !== undefined, numbersCon: read.numbers?.abilities.con.mod, loading: read.loading, failed: read.failed });
   const [conText, setConText] = useState(() => readCon(character.id));
   const [status, setStatus] = useState<string | null>(null);
+  // One guard for every row's Roll, typed Spend and Restore, so no die goes before the last one's answer.
+  const [held, setHeld] = useState(false);
+  const [guard] = useState(() => dieGuard(setHeld));
   if (rows.length === 0) return null;
-  const typedCon = conOf(conText);
-  const con = source.kind === "numbers" ? source.con : source.kind === "field" ? (typedCon ?? 0) : null;
-  const sendCon = source.kind === "field" ? (typedCon ?? 0) : undefined;
+  const typed = conChoice(conText);
+  const con = source.kind === "numbers" ? source.con : source.kind === "field" && typed.ok ? typed.con : null;
+  const sendCon = source.kind === "field" && typed.ok ? typed.con : undefined;
+  const conError = source.kind === "field" && !typed.ok ? typed.error : null;
   return (
     <div data-hit-dice="" style={{ display: "grid", gap: theme.space(3) }}>
       {source.kind === "field" ? (
@@ -91,18 +97,24 @@ export function HitDiceRows(props: { character: Character; actor: Pick<Actor, "h
             autoComplete="off"
             placeholder="+0"
             value={conText}
-            error={conText.trim() !== "" && typedCon === null}
+            error={conError !== null}
+            aria-describedby={conError ? `${character.id}-con-error` : undefined}
             onChange={(e) => {
               setConText(e.target.value);
               writeCon(character.id, e.target.value);
             }}
             style={{ width: NUMBER_FIELD_WIDTH, textAlign: "right", fontVariantNumeric: "tabular-nums" }}
           />
+          {conError ? (
+            <p id={`${character.id}-con-error`} style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText }}>
+              {conError}
+            </p>
+          ) : null}
         </FieldRow>
       ) : null}
       <ul aria-label={`${character.name}'s Hit Point Dice`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {rows.map((row) => (
-          <DieLine key={row.die} character={character} hp={props.actor?.hp} row={row} con={con} sendCon={sendCon} loading={source.kind === "loading"} failed={source.kind === "failed"} onStatus={setStatus} />
+          <DieLine key={row.die} character={character} hp={props.actor?.hp} row={row} con={con} sendCon={sendCon} conError={conError} loading={source.kind === "loading"} failed={source.kind === "failed"} guard={guard} held={held} onStatus={setStatus} />
         ))}
       </ul>
       {source.kind === "failed" ? <SrdLoadFailed what="The Constitution modifier" inline /> : null}
@@ -120,13 +132,35 @@ function dieRollRow(characterId: string, die: HitDieSize): string {
   return `hitDie|${characterId}|d${die}`;
 }
 
-function DieLine(props: { character: Character; hp: { cur: number; max: number } | undefined; row: DieRow; con: number | null; sendCon: number | undefined; loading: boolean; failed: boolean; onStatus(text: string | null): void }) {
+function DieLine(props: {
+  character: Character;
+  hp: { cur: number; max: number } | undefined;
+  row: DieRow;
+  con: number | null;
+  sendCon: number | undefined;
+  conError: string | null;
+  loading: boolean;
+  failed: boolean;
+  guard: DieGuard;
+  held: boolean;
+  onStatus(text: string | null): void;
+}) {
   const { row, character } = props;
   const id = useId();
   const actions = useRoomActions();
   const card = useCardRoll(dieRollRow(character.id, row.die));
   const [sent, setSent] = useState<{ n: number; back: boolean } | null>(null);
   const busy = useAnyPending(sent === null ? [] : [sent.n]);
+  // The roll this row sent, freed from the card's guard once its answer is in.
+  const rolling = useRef<{ tag: string; done(): void } | null>(null);
+  useEffect(() => {
+    const mine = rolling.current;
+    if (mine && card.tag === mine.tag && card.receipt !== null && !card.waiting) {
+      rolling.current = null;
+      mine.done();
+    }
+  });
+  useEffect(() => () => rolling.current?.done(), []);
   const [typing, setTyping] = useState<{ text: string; error: string | null } | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const typeButton = useRef<HTMLButtonElement>(null);
@@ -136,26 +170,39 @@ function DieLine(props: { character: Character; hp: { cur: number; max: number }
   }, [opening]);
   const off = spendOff(row, props.hp, character.name);
   // Roll waits on Constitution: busy while the shape's numbers load, off with the load-failure line if they fail.
-  const rollOff = off ?? (props.failed ? "The Constitution modifier did not load." : null);
+  const rollOff = off ?? props.conError ?? (props.failed ? "The Constitution modifier did not load." : null);
   const first = card.rolls[0];
   const face = first?.faces[0];
   const result = first && face !== undefined ? rolledText(face, first.total - face) : null;
   const trouble = rollTrouble(card.receipt, card.unsent);
 
-  const send = (op: ClientOp, back: boolean, after?: () => void) => {
-    if (busy) return;
-    const onAnswer: OnAnswer = (answer, refusal) => {
-      props.onStatus(answer === "refused" ? reasonText(refusal) : null);
-      if (answer === "taken") after?.();
-    };
-    const n = actions.dispatch(op, { quiet: true, onAnswer });
-    if (n === null) props.onStatus("That could not be sent.");
-    else setSent({ n, back });
-  };
+  const send = (op: ClientOp, back: boolean, after?: () => void) =>
+    props.guard.run((done) => {
+      const onAnswer: OnAnswer = (answer, refusal) => {
+        done();
+        props.onStatus(answer === "refused" ? reasonText(refusal) : null);
+        if (answer === "taken") after?.();
+      };
+      const n = actions.dispatch(op, { quiet: true, onAnswer });
+      if (n === null) {
+        props.onStatus("That could not be sent.");
+        return false;
+      }
+      setSent({ n, back });
+      return true;
+    });
   const roll = () => {
-    if (card.waiting || props.loading || props.con === null) return;
-    props.onStatus(null);
-    if (card.send(hitDieRollOp(uuidv7(), character.id, row.die, props.sendCon)) === null) props.onStatus("That roll could not be sent. Try again.");
+    if (props.loading || props.con === null) return;
+    props.guard.run((done) => {
+      props.onStatus(null);
+      const tag = uuidv7();
+      if (card.send(hitDieRollOp(tag, character.id, row.die, props.sendCon)) === null) {
+        props.onStatus("That roll could not be sent. Try again.");
+        return false;
+      }
+      rolling.current = { tag, done };
+      return true;
+    });
   };
   const closeTyping = () => {
     setTyping(null);
@@ -193,13 +240,13 @@ function DieLine(props: { character: Character; hp: { cur: number; max: number }
           </>
         }
       >
-        <RowButton label={rollLabel(row, con)} off={rollOff !== null ? `${id}-off` : undefined} busy={card.waiting || props.loading} onClick={roll}>
+        <RowButton label={rollLabel(row, con)} off={rollOff !== null ? `${id}-off` : undefined} busy={props.held || card.waiting || props.loading} onClick={roll}>
           {rollText(row.die, con)}
         </RowButton>
         <RowButton ref={typeButton} label={`Type a roll for a d${row.die} Hit Point Die`} off={off !== null ? `${id}-off` : undefined} expanded={typing !== null} onClick={() => (typing ? closeTyping() : (props.onStatus(null), setTyping({ text: "", error: null })))}>
           Type a roll…
         </RowButton>
-        <RowButton label={dieBackLabel(row.die)} off={row.left >= row.max ? `${id}-full` : undefined} busy={busy && sent?.back === true} onClick={() => send(hitDieOp(character.id, row.die, { back: true }), true)}>
+        <RowButton label={dieBackLabel(row.die)} off={row.left >= row.max ? `${id}-full` : undefined} busy={props.held || (busy && sent?.back === true)} onClick={() => send(hitDieOp(character.id, row.die, { back: true }), true)}>
           Restore
         </RowButton>
       </CountRowHead>
@@ -232,7 +279,7 @@ function DieLine(props: { character: Character; hp: { cur: number; max: number }
               style={{ flex: "1 1 96px", minWidth: 0, fontVariantNumeric: "tabular-nums" }}
             />
             <div style={{ flex: "1 0 auto", display: "flex", justifyContent: "flex-end", gap: theme.space(1) }}>
-              <Button size="sm" variant="primary" type="submit" busy={busy && sent?.back === false}>
+              <Button size="sm" variant="primary" type="submit" busy={props.held || (busy && sent?.back === false)}>
                 Spend
               </Button>
               <Button size="sm" onClick={closeTyping}>
