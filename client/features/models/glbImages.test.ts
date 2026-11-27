@@ -34,6 +34,23 @@ function children(b: Uint8Array, from: number, to: number): { type: string; byte
   return out;
 }
 
+/** `real` with `tail` zero bytes at the end of its ipco, and ipco, iprp and meta grown to hold them. Only the header walk reads it. */
+function ipcoTail(real: Uint8Array, tail: number): Uint8Array {
+  const starts: number[] = [];
+  let from = 0;
+  let end = real.length;
+  for (const name of ["meta", "iprp", "ipco"]) {
+    let i = from;
+    while (type(real, i) !== name) i += u32(real, i);
+    starts.push(i);
+    from = i + (name === "meta" ? 12 : 8);
+    end = i + u32(real, i);
+  }
+  const out = join([real.slice(0, end), new Uint8Array(tail), real.slice(end)]);
+  for (const at of starts) new DataView(out.buffer).setUint32(at, u32(real, at) + tail);
+  return out;
+}
+
 /**
  * A real AVIF with an unused 1 by 1 extent put first among its properties
  * and `pad` empty boxes before its `meta`: every property index in `ipma`
@@ -154,10 +171,16 @@ describe("texture headers", () => {
     assert.deepEqual(imageHeader(loose), { mime: "image/avif", width: 32, height: 16 });
     const cut = real.slice(0, real.length - 3);
     assert.equal(imageHeader(cut), null);
-    // A file that ends inside a box's own header, after the extent was read, is cut short too.
-    const mdat = real.findIndex((_, i) => String.fromCharCode(...real.subarray(i, i + 4)) === "mdat") - 4;
-    assert.ok(mdat > 0, "the encoder's mdat follows meta");
-    assert.equal(imageHeader(real.slice(0, mdat + 5)), null);
+  });
+
+  test("let a tail too short for a box be after the last top-level box, but never inside meta, iprp or ipco", async () => {
+    const real = await bytes(flat(32, 16).avif());
+    const size = { mime: "image/avif", width: 32, height: 16 };
+    // 1 to 7 bytes after the last box are no box, and 8 zero bytes are an empty box running to the end.
+    for (const extra of [1, 4, 7, 8]) assert.deepEqual(imageHeader(join([real, new Uint8Array(extra)])), size, `${extra} bytes after`);
+    // Inside a box its children fill it: 3 bytes left over at the end of ipco stop the walk, where 8 are an empty box.
+    assert.equal(imageHeader(ipcoTail(real, 3)), null);
+    assert.deepEqual(imageHeader(ipcoTail(real, 8)), size);
   });
 
   test("give null when an AVIF walk's budget runs out after the decoy, and never the decoy's size at any padding", async () => {

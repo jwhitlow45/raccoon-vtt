@@ -113,8 +113,9 @@ function avif(b: Uint8Array): ImageHeader | null {
       }
       i += size;
     }
-    // Trailing bytes too few for a box header: the file ends inside a box.
-    return i === to;
+    // A box's children fill it exactly. After the last top-level box the file may end in a tail too short for a box
+    // header, as some writers leave one, and that tail is let be.
+    return parent === "" || i === to;
   };
   return walk(0, b.length, "") ? best : null;
 }
