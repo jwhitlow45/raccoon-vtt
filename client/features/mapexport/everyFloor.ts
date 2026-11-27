@@ -66,6 +66,19 @@ export function everyFloorFits(floors: readonly Pick<Scene, "bounds">[], pxPerCe
   return total <= EVERY_FLOOR_PIXELS;
 }
 
+/**
+ * One scale for every floor of Export as VTT file's Every floor
+ * (D-261127-352): the largest whole pixels a square, at most `requested`,
+ * at which every floor fits unlowered and all of them fit together, or 0
+ * when even 1 px does not. The floors keep one scale, so they still line
+ * up when stacked, and a long scene that no offered scale fits still
+ * exports.
+ */
+export function everyFloorScale(floors: readonly Pick<Scene, "bounds">[], requested: number, limits?: ExportLimits): number {
+  for (let px = Math.floor(requested); px >= 1; px--) if (everyFloorFits(floors, px, limits)) return px;
+  return 0;
+}
+
 /** The size the floors share, or null where floors made from files differ. */
 export function sharedBounds(floors: readonly Pick<Scene, "bounds">[]): { w: number; h: number } | null {
   const first = floors[0]?.bounds;

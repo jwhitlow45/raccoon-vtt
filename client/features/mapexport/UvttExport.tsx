@@ -12,14 +12,14 @@ import { uvttFile } from "../uvtt/encode.ts";
 import type { ExportCheck } from "../uvtt/steps.ts";
 import { uvttGeometry, type UvttHead } from "../uvtt/write.ts";
 import { fromServer, hasBuildOn, type ExportView } from "./content.ts";
-import { everyFloorFits, everyFloorZip, floorName, makingText, reachedText, sharedBounds, tooMuchText, useExportFloors, type FloorsChoice } from "./everyFloor.ts";
+import { everyFloorScale, everyFloorZip, floorName, makingText, reachedText, sharedBounds, tooMuchText, useExportFloors, type FloorsChoice } from "./everyFloor.ts";
 import { vttFileName, vttZipNames } from "./fileName.ts";
 import { MadeFile, Overtaken, Row, type Made } from "./made.tsx";
 import { floorPicture } from "./picture.ts";
 import { ExportError } from "./render.ts";
 import { prefersShare } from "./save.ts";
-import { DEFAULT_PX_PER_CELL, exportSize, exportWords, MAX_EXPORT_PIXELS, PX_PER_CELL_CHOICES, VTT_LIMITS } from "./size.ts";
-import { everyFloorVttHelp, HEX_LINE, lossLine, versionHelp, VTT_FAILED, vttNotes, type FloorFile } from "./vttNotes.ts";
+import { DEFAULT_PX_PER_CELL, exportSize, exportWords, PX_PER_CELL_CHOICES, VTT_LIMITS } from "./size.ts";
+import { everyFloorVttHelp, HEX_LINE, loweredText, lossLine, versionHelp, VTT_FAILED, vttNotes, type FloorFile } from "./vttNotes.ts";
 
 /**
  * Export as VTT file (docs/design/design-v1-uvtt-export.md): a scene, or
@@ -67,7 +67,9 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   const words = exportWords(sceneGrid(scene), scene.bounds, size);
   const every = useExportFloors(scene, view, true);
   const everyFloor = every && floorsChoice === "every" ? every : null;
-  const fits = everyFloor ? everyFloorFits(everyFloor.floors, size.requested, VTT_LIMITS) : true;
+  // Every floor shares one scale, lowered for all of them when the chosen one does not fit each (D-261127-352).
+  const scale = everyFloor ? everyFloorScale(everyFloor.floors, size.requested, VTT_LIMITS) : size.pxPerCell;
+  const fits = scale >= 1;
   const floors = everyFloor ? everyFloor.floors : scene;
   // Whether a wall or door in the DM's build is short enough that the import may close it up (write.ts SHORT_LATTICE), for the loss line before a file is made.
   const short = useMemo(
@@ -96,13 +98,13 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   );
 
   /** One floor's file, or null once the run was overtaken. */
-  const floorFile = async (floor: Scene, run: number, alone: boolean, name?: string): Promise<FloorMade | null> => {
+  const floorFile = async (floor: Scene, px: number, run: number, alone: boolean, name?: string): Promise<FloorMade | null> => {
     const { view: room, roomId } = store.getState();
     if (!room) throw new ExportError("The room is not loaded yet.");
     const stale = () => run !== runRef.current;
-    const picture = await floorPicture({ floor, purpose: "file", view, pxPerCell, limits: VTT_LIMITS, grid: false, alone, room, roomId, assets, stale });
+    const picture = await floorPicture({ floor, purpose: "file", view, pxPerCell: px, limits: VTT_LIMITS, grid: false, alone, room, roomId, assets, stale });
     if (!picture) return null;
-    const floorSize = exportSize(floor.bounds, pxPerCell, VTT_LIMITS);
+    const floorSize = exportSize(floor.bounds, px, VTT_LIMITS);
     // The player view's walls come from the chunks its picture is drawn from, never the DM's (section 5).
     const head: UvttHead =
       view === "player"
@@ -134,7 +136,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
         const made = await everyFloorZip({
           entries,
           picture: async (floor) => {
-            const one = await floorFile(floor, run, false, floorName(floor));
+            const one = await floorFile(floor, scale, run, false, floorName(floor));
             if (!one) throw new Overtaken();
             return one;
           },
@@ -147,7 +149,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
         files = made.pictures;
         file = new File([made.zip], names.zip, { type: "application/zip" });
       } else {
-        const one = await floorFile(scene, run, true);
+        const one = await floorFile(scene, pxPerCell, run, true);
         if (!one) return;
         files = [one];
         file = new File([one.blob], vttFileName(scene.name, view, scene.floor?.name), { type: "application/json" });
@@ -161,7 +163,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
           url,
           width: size.width,
           height: size.height,
-          pxPerCell: everyFloor ? size.requested : size.pxPerCell,
+          pxPerCell: scale,
           share: prefersShare(file),
           notes: vttNotes(files, view),
           ...(everyFloor ? { floors: files.length } : {}),
@@ -181,8 +183,8 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
   const reached = everyFloor && view === "player" ? reachedText(scene.name, everyFloor.floors.length, everyFloor.total) : null;
   const made = status.kind === "made" ? status.made : null;
   const shared = everyFloor ? sharedBounds(everyFloor.floors) : null;
-  const lowered = !everyFloor && size.pxPerCell < size.requested;
-  const sizeLine = everyFloor ? (shared && fits ? exportWords(sceneGrid(scene), shared, exportSize(shared, size.requested, VTT_LIMITS)).sizeLine : undefined) : lowered ? undefined : words.sizeLine;
+  const lowered = fits && scale < size.requested;
+  const sizeLine = lowered ? undefined : everyFloor ? (shared ? exportWords(sceneGrid(scene), shared, exportSize(shared, scale, VTT_LIMITS)).sizeLine : undefined) : words.sizeLine;
   const loss = lossLine({ otherFloors: every !== null && !everyFloor, short: short || (status.kind === "made" && status.short) });
   return (
     <Section label={EXPORT_LABEL}>
@@ -198,7 +200,7 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
         </SettingRow>
       </div>
       {scene.map?.video ? <Help>An animated map exports its still image.</Help> : null}
-      {lowered ? <Note>{loweredText(scene.bounds, size, words.cell)}</Note> : null}
+      {lowered ? <Note>{loweredText(everyFloor ? everyFloor.floors.map((f) => f.bounds) : [scene.bounds], scale, words.cell, everyFloor !== null)}</Note> : null}
       {everyFloor && !fits ? <Note>{tooMuchText(words.cell)}</Note> : null}
 
       {every ? (
@@ -253,11 +255,4 @@ export function UvttExport(props: { scene: Scene; inside: RefObject<HTMLDivEleme
 /** The floor's lights, which the DM view writes when they are on (write.ts leaves the others out and counts them). */
 function lightsOn(lights: RoomState["lights"], sceneId: string): Light[] {
   return Object.values(lights).filter((l): l is Light => l !== undefined && l.sceneId === sceneId);
-}
-
-/** Why the scale went down: the side the import takes, or the pixels an iPhone draws. */
-function loweredText(bounds: { w: number; h: number }, size: { pxPerCell: number; width: number; height: number }, cell: string): string {
-  const bySide = Math.floor(VTT_LIMITS.maxSide / Math.max(bounds.w, bounds.h)) < Math.floor(Math.sqrt(MAX_EXPORT_PIXELS / (bounds.w * bounds.h)));
-  const why = bySide ? "8,192 px a side, the most this app's import takes" : "16.7 million pixels, the most an iPhone can draw";
-  return `Lowered to ${size.pxPerCell} px per ${cell}, so the image stays within ${why}. It will be ${size.width} × ${size.height} px.`;
 }

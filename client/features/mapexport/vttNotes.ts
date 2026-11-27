@@ -1,4 +1,6 @@
 import { MAX_PHONE_FILE_BYTES } from "../uvtt/limits.ts";
+import { EVERY_FLOOR_PIXELS } from "./everyFloor.ts";
+import { exportSize, MAX_EXPORT_PIXELS, VTT_LIMITS } from "./size.ts";
 import type { ExportCheck } from "../uvtt/steps.ts";
 import type { UvttCounts } from "../uvtt/write.ts";
 import type { ExportContent, ExportView } from "./content.ts";
@@ -86,4 +88,22 @@ export function vttNotes(files: readonly FloorFile[], view: ExportView): string[
 /** "1 floor", "3 floors". */
 export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Why the scale went down, by the limit that bound it: the side this app's
+ * import takes, the pixels an iPhone draws, or on Every floor the pixels
+ * one file of every floor holds. `floors` is the one floor, or every floor
+ * the file holds.
+ */
+export function loweredText(floors: readonly { w: number; h: number }[], px: number, cell: string, every: boolean): string {
+  const bySide = Math.min(...floors.map((b) => Math.floor(VTT_LIMITS.maxSide / Math.max(b.w, b.h))));
+  const byPixels = Math.min(...floors.map((b) => Math.floor(Math.sqrt(MAX_EXPORT_PIXELS / (b.w * b.h)))));
+  const why =
+    px >= bySide ? "8,192 px a side, the most this app's import takes" : px >= byPixels || !every ? "16.7 million pixels, the most an iPhone can draw" : `${Math.round(EVERY_FLOOR_PIXELS / 1e6)} million pixels for every floor together`;
+  const first = floors[0]!;
+  const same = floors.every((b) => b.w === first.w && b.h === first.h);
+  const size = exportSize(first, px, VTT_LIMITS);
+  if (!every) return `Lowered to ${px} px per ${cell}, so the image stays within ${why}. It will be ${size.width} × ${size.height} px.`;
+  return `Lowered to ${px} px per ${cell} on every floor, so each image stays within ${why}.${same ? ` Each will be ${size.width} × ${size.height} px.` : ""}`;
 }

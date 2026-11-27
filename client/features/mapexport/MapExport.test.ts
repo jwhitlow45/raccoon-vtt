@@ -10,7 +10,9 @@ import { api } from "../../lib/api.ts";
 import { floorPicture, PLAYER_VIEW_FAILED } from "./picture.ts";
 import { ExportError } from "./render.ts";
 import { MAX_EXPORT_PIXELS } from "./size.ts";
-import { lossLine, vttNotes, type FloorFile } from "./vttNotes.ts";
+import { loweredText, lossLine, vttNotes, type FloorFile } from "./vttNotes.ts";
+import { everyFloorScale } from "./everyFloor.ts";
+import { VTT_LIMITS } from "./size.ts";
 
 /*
  * Export every floor (docs/design/design-v1-floors.md phase 4, 9.3): the
@@ -218,5 +220,32 @@ describe("Export as VTT file's notes", () => {
     } finally {
       api.getPlayerView = real;
     }
+  });
+});
+
+describe("Export as VTT file's Every floor on a long scene (UVTT-O-1, D-261127-352)", () => {
+  const long = [{ bounds: { w: 180, h: 30 } }, { bounds: { w: 180, h: 30 } }, { bounds: { w: 40, h: 20 } }];
+
+  test("no offered scale fits a floor 180 squares long, so every floor goes down to one shared scale", () => {
+    for (const px of [50, 70, 100]) assert.equal(everyFloorFits(long, px, VTT_LIMITS), false, `${px} px`);
+    assert.equal(everyFloorScale(long, 70, VTT_LIMITS), 45, "8,192 / 180, rounded down");
+    assert.ok(everyFloorFits(long, 45, VTT_LIMITS));
+    assert.equal(everyFloorScale([{ bounds: { w: 30, h: 20 } }], 70, VTT_LIMITS), 70, "a scale that fits stays");
+  });
+
+  test("the pixels of every floor together can lower it too", () => {
+    const tall = Array.from({ length: 8 }, () => ({ bounds: { w: 100, h: 80 } }));
+    const px = everyFloorScale(tall, 100, VTT_LIMITS);
+    assert.ok(px > 0 && px < 100);
+    assert.ok(8 * 100 * px * 80 * px <= EVERY_FLOOR_PIXELS);
+    assert.ok(8 * 100 * (px + 1) * 80 * (px + 1) > EVERY_FLOOR_PIXELS, "the largest that fits");
+  });
+
+  test("says what bound it, in the lowered scale's words", () => {
+    assert.equal(loweredText([{ w: 180, h: 30 }, { w: 180, h: 30 }], 45, "square", true), "Lowered to 45 px per square on every floor, so each image stays within 8,192 px a side, the most this app's import takes. Each will be 8100 × 1350 px.");
+    assert.equal(loweredText([{ w: 180, h: 30 }, { w: 40, h: 20 }], 45, "square", true), "Lowered to 45 px per square on every floor, so each image stays within 8,192 px a side, the most this app's import takes.");
+    assert.equal(loweredText([{ w: 200, h: 20 }], 40, "square", false), "Lowered to 40 px per square, so the image stays within 8,192 px a side, the most this app's import takes. It will be 8000 × 800 px.");
+    const tall = Array.from({ length: 8 }, () => ({ w: 100, h: 80 }));
+    assert.match(loweredText(tall, everyFloorScale(tall.map((bounds) => ({ bounds })), 100, VTT_LIMITS), "square", true), /within 67 million pixels for every floor together\./);
   });
 });
