@@ -92,6 +92,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   token bar on upright phones.
 - [design-v1-attach.md](design-v1-attach.md): attached tokens, such as a
   rider on a mount or a torch on a character.
+- [design-v1-token-models.md](design-v1-token-models.md): a 3D model on a
+  token, drawn once into 8 views that stand in the isometric view.
 - [design-v1-pc-stats.md](design-v1-pc-stats.md): stat blocks for player
   characters.
 - [design-v1-companion-stat-blocks.md](design-v1-companion-stat-blocks.md):

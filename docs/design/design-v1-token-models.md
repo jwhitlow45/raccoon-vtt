@@ -1,0 +1,382 @@
+# raccoon-vtt: a 3D model for a token, shown in Isometric
+
+Status: in build. The reader and renderer (lane B) were built on 2026-11-27, and the other lanes follow. Draft 7, after seven rounds of design review, which the "Design review" section at the end sums up. Read on main at a6ed9ce2 (OP_VERSION 67, SNAPSHOT_VERSION 50, deployed). Decisions D-261127-166 to 190, 373 to 389, 410 to 419, 470 to 479, 510 to 519 and 521 to 526, with the coordinator's 370 to 372, 429 and 520. The build's own are in "As built". Prototype and measurements: Appendix A.
+
+## 1. Feasibility first
+
+The project owner, 2026-11-27: "Another thing that I don't know how feasible it would be to do is to associate an stl (or other model file) to a token and then have that show in the isometric view appropriately sized for the tokens size. I know [STLs] are large files so we'd need some smaller way to represent the model the player uploaded. This may also have large performance impacts". And later: "we would also want to be able to "rotate" the models as we do the token itself, i assume this is part of what taking the multiple images is for but i just wanted to be sure".
+
+**It is feasible in the browser, and the prototype did it end to end.** The device that adds a model reads the file in a worker, cuts it down, stands it up, fits it to a 1 by 1 square, and draws it with three.js (already shipped for the dice) from the 8 directions Isometric can need. Those 8 pictures go up as one image, through the same upload, pipeline and storage as a token picture. Nobody else ever downloads the model. In play a model costs one cropped image draw, less than a standee's clipped picture (measured: 0.4 ms against 0.6 ms for 200 tokens, 1.3 ms against 2.5 ms at 4x CPU slowdown).
+
+**Rotation, the owner's second question: yes, that is what the 8 pictures are for.** Facing is set in the token's Position group (TokenPanel.tsx:426): its stepper moves 45 degrees a press, and Undo takes a turn of facing back. Isometric turns the view a quarter at a time (Q and E), and its 4 views sit at 45 degrees plus right angles. So with the stepper, the angle between the camera and the creature's front is always a whole multiple of 45 degrees, and 8 pictures cover every facing at every view turn exactly. A press of Facing moves the model one picture round. The stepper also takes a typed angle, and the protocol any angle from -360 to 360, so a typed 100° or an imported 10° shows the nearest picture while the ring's tick keeps the exact angle. Sixteen pictures would only help typed angles, and would double the memory. Per model: one 2048 by 1024 sheet, measured at 67 KiB stored at full size and 133 KiB with its phone and thumbnail copies (the textured wolf: 57 and 116 KiB). A detailed sculpt compresses worse, so plan on up to about 400 KiB.
+
+**What the table gives up.** None of these is a dead end, but each is a real limit:
+
+- **Pictures, not live 3D.** Only Isometric's own camera, from 8 directions. No free orbit, no animation or poses, and detail stops at the picture's resolution: a Medium figure is sharp to about 280 px a square on a computer and 140 px a square on a phone, about where a token picture softens today.
+- **The file stays on the uploader's device.** The room keeps only the pictures. Changing a model's color, size or which way is up means choosing the file again, and a removed model cannot be rebuilt from the room, so Remove takes two taps.
+- **STL and OBJ have no color.** Such a model draws as a single material: Stone (the default, like an unpainted mini), Bronze, Bone, Iron or the token picture's color. GLB keeps its base colors, color textures, vertex colors, cutouts and see-through parts, drawn matte, not its other material maps. No painting in the app.
+- **Limits.** STL up to 512 MB and OBJ up to 256 MB (read in pieces, so a phone copes), GLB up to 64 MB on a phone or tablet and 256 MB on a computer, drawing at most 500,000 triangles on a phone or tablet and 1,000,000 on a computer (section 5). A `.gltf` file, Draco or meshopt compression and 3MF are not read in this version. Supports on a pre-supported STL show, so the unsupported file is the one to use.
+- **When the creature is dead, dying or stable** it shows its picture with Top-down's marks instead of its model, so its state reads the same in both views.
+- **Top-down is unchanged.** A token keeps its picture there. **Old browsers.** Adding a model needs WebGL in a worker: Chrome and Edge, Firefox 105 and later, Safari 17 and later. Any browser can still see models others added.
+
+**Rejected, with the reason (D-261127-166):** live three.js models in play (every device downloads 10 to 150 MB, a WebGL scene beside Konva, phone GPU memory per creature, and the stand rule and depth order would need a second renderer), rendering on the server (parsing untrusted 3D files on a public server, and a headless GPU), and a light 3D copy sent to every device (still a download and a live renderer).
+
+## 2. Rules and other VTTs
+
+- **SRD 5.2.1, Rules Glossary, Creature Size, and Size and Space in Playing the Game:** a creature's space is 2½ ft for Tiny, 5 ft for Small and Medium, 10 ft for Large, 15 ft for Huge and 20 ft for Gargantuan. The rules give no heights, so the model's footprint follows its size (`SIZE_CELLS`, shared/model.ts:1276) and its height follows the model.
+- **Other VTTs, ideas only.** TaleSpire and Foundry's 3D Canvas module draw live 3D and need a capable GPU on every device. Owlbear Rodeo and Roll20 stay 2D. Hero Forge exports 2D token images rendered from its 3D figures. Isometric games from Diablo to the classic Fallout titles drew 3D models into 8 direction sprites ahead of time, which is this design. Taken: 8 directions, rendered once. Left: live 3D.
+
+## 3. What the DM and players see
+
+### 3.1 Adding a model
+
+- **Where.** The Image group's second button row (ImageField.tsx), after Crop: **3D model**. The row shows whenever the viewer may edit, picture or not (today it shows only with a picture, ImageField.tsx:112, D-261127-385). It appears wherever ImageField does: the token's panel, a character's page and card, a companion block, and the group edit sheet (3.4). A monster's page (MonsterImage.tsx) gets the same button beside its Change image, and "Apply to N tokens on this scene" carries the model with the picture.
+- **The 3D model sheet** opens over the panel: a bottom sheet on a phone held upright, the dialog pop-up on a phone held sideways, a tablet and a computer, as Attach's list does.
+  - Empty: the help "Stands in Isometric in place of the picture. STL, OBJ or GLB." and **Choose a file**, then "Or use one from this room", a row of the models on images this viewer can see (front views, 64 px), each a 44 px target.
+  - **Reading and drawing.** After a pick the shared loading indicator shows, delayed 200 ms, with "Reading the file…" and then "Drawing its 8 views…", and **Cancel**, which ends the worker at once.
+  - **Preview.** A 240 px square (200 px under 360 px wide) showing the current view standing on its ring over four squares of floor, and under it **Turn left** and **Turn right** (45 degrees each). With the preview focused, Left and Right turn it too.
+  - **Options** for a file just read, each change drawing the 8 views again (0.1 to 0.5 s, with the indicator): **Color** (STL and OBJ, and a GLB with a part that has no material: Stone, Bronze, Bone, Iron, and "Picture's color" when the token has a picture), **Stand it up** (cycles the six ways up, help "Lying down or upside down? Tap until it stands."), **Turn its front** (a quarter turn, help "Which way it faces at Facing 0°: away up the map."), and **Size** (50% up to a cap, in 10% steps, help "100% fills its square. Its base, if it has one, fills it exactly.").
+  - **Size cap (D-261127-371).** The worker works out the largest Size whose frame side stays at most 4 and the stepper stops there. When that is under 200% the help adds "This model stops at 160% to stay sharp.", with its own number.
+  - **Save** shows busy as "Saving…" and refuses a second tap, uploads the sheet (and the front view as the picture where the token has none, 3.4), then sends one update. **Cancel** closes without a trace, asking "Discard this model?" once a file was read.
+- **With a model** its sheet shows the stored views with the turn buttons, then **Choose another file** and **Remove model**. The help says "To change its color, size or which way is up, choose the file again."
+- **Remove model takes two taps for everyone (D-261127-370, 416)**, with the token panel's `ConfirmButton` (client/features/tokens/ui.tsx:407): red at rest, armed with the red outline and the words "Tap again to remove" for 4 s, a mouse reading "Click again to remove". The DM's Undo brings the model back. A player's undo stack holds only their drawings, moves and resizes (`onPlayerUndoStack`, shared/protocol.ts:3354), so a player has no Undo for it, which is why the second tap is there for everyone.
+
+### 3.2 In Isometric
+
+- A creature wearing a model stands as its model where it would stand as a standee: same ring, shadow, stem, facing tick, selection, active and caught rings, dimming on the DM's fogged ground, pits clipping it, and the stand rule laying it flat under a player's fog (flat shows the picture, as today).
+- The picture shown is `frameFor(turn, facing)` (4.4). Turning the view or the facing swaps the picture at once, with no animation, as turns are instant (ISO-D10).
+- The model scales with the footprint: Tiny to Gargantuan draw the same pictures larger or smaller, so Enlarge or a change of size needs no new upload. A custom footprint w by h draws it at its longer side, centered on the box's middle, and a squeezed creature draws full size, as its standee does (D-261127-383).
+- Names, chips and the HP bar sit over the model's drawn top. A covered model shows the ring-colored outline round its drawn box, as a standee's does round its picture. A press lands only on the drawn box of the view shown or on the ring, so a tap on a model's clear corner reaches the creature behind (D-261127-379).
+- Until its sheet arrives, a creature stands as its picture, so a slow link never shows a blank. A dead, dying or stable creature stands as its picture with Top-down's marks.
+- Top-down, the tracker, the party bar and every panel keep the picture.
+
+### 3.3 Players and the DM
+
+- **Who.** The DM on every token, character, monster and companion block. A player on the tokens and characters they own, as they may change the picture today (OWNER_TOKEN_FIELDS has `image`). The table display only shows models.
+- **Budgets.** A save spends one upload (two with the front-view picture) from the existing hourly budgets: 30 a session and 60 an IP, then 120 a room for the DM or 30 a member for a player (server/assets/limits.ts:154).
+- **A hidden creature's model reaches no player**: its token is not in their copy, so neither is its image, its model or the right to fetch the sheet (4.5).
+- **A disguise keeps its secret.** A model belongs to the picture it was added to, so the true face's model sits in the other images, which only the DM and owners receive. Swapping an image for Wild Shape swaps its model with it.
+
+### 3.4 Pictures and models together (D-261127-169, 375)
+
+- A model rides on the picture: the token's image, each of its other images, a character's default image, a monster's or a companion block's default image. A new token takes it with its picture, so a player's model follows their character to every scene, and every Goblin placed after the DM set the Goblin's default carries the Goblin model.
+- **Every write keeps the model except Remove.** One helper pair in shared/imageRef.ts, `copyImage(image)` (a deep copy, model included) and `keepModel(next, current)`, replaces every place that rebuilds an image field by field today: factory.ts:437 (placing a monster, Duplicate and its other images, at :101, :220 and :225), monsters/images.ts:178 (Apply to N tokens), ImageField.tsx:127 and :140 (an icon pick and a crop's save), MonsterImage.tsx:86 and :99, and RoomPaste.tsx:234 (a pasted picture). So Change image, Crop, an icon, a paste and Apply all keep the model.
+- **Remove** on a picture that carries a model is a `ConfirmButton` too, armed as "Remove both?", its `describedBy` the line "Removes the picture and its 3D model." under the row, so a screen reader hears it in both states (D-261127-388).
+- A token with no picture that gets a model also gets the model's front view as its picture, on the panel's raised surface color, so Top-down shows the figure too.
+- **A group (D-261127-384, 417, 418).** The group edit sheet (GroupMoreSheet.tsx:122) sends one `token.updateMany` with one patch for all today (groupEdit.ts `updateManyOps`), which cannot keep each token's own picture. So every image change there becomes one `token.update` per token, all in one gesture (`dispatchGesture`, one undo step): 3D model sets `{ ...token.image, model }` on each, a token with no picture getting the front view, Change image sends `keepModel(next, token.image)` per token so each keeps its own model, and Remove model removes each one's after the same two taps. **Picture's color** in a group whose pictures differ draws one sheet per distinct picture, each token taking its own picture's, for at most 6 distinct pictures. Past 6 the option is off, with the help "Picture's color works for up to 6 different pictures at once."
+
+## 4. The model and the format
+
+### 4.1 State
+
+```ts
+/** A 3D model drawn once into 8 views on one sheet (docs/design/design-v1-token-models.md). */
+export type ModelRef = {
+  /** An asset of kind `model`: 4 by 2 square frames, frame i the model turned 45 i degrees clockwise from facing the camera. */
+  assetId: AssetId;
+  /** A frame's side in footprint sides, 0.25 to 4. */
+  side: number;
+  /** The anchor, the footprint's center at its base, down the frame from its top, 0 to 1. Across, it is the middle. */
+  anchorY: number;
+  /** Each frame's drawn part, [x0, y0, x1, y1] in whole hundredths of the frame, 0 to 100: presses, outlines, culling and decor. */
+  boxes: [number, number, number, number][];
+};
+export type AssetImage = { assetId: AssetId; crop: Crop; model?: ModelRef };
+export type IconImage = { icon: IconKey; color: string; model?: ModelRef };
+```
+
+A ref is at most about 300 bytes (D-261127-381). 500 tokens on a scene each with 7 images and 7 models would add about 1 MB, inside the 3 MiB projected scene and 8 MiB state limits, which `checkLimits` already enforces. A real scene adds a few KB.
+
+### 4.2 Ops, permissions and versions
+
+- **No new op.** Every op that carries an ImageRef carries the model: `token.update` (image, altImages), `token.create`, `character.update` and the monster and companion block ops' `defaultImage`. Saved encounters carry no ImageRef. The protocol's `imageRef` schema gains `model` as a strict optional object: `side` 0.25 to 4, `anchorY` 0 to 1, `boxes` exactly 8 boxes of integers 0 to 100 with x0 < x1 and y0 < y1.
+- **Permissions.** `imageUsable` (shared/permissions.ts:1527) also requires `c.asset(model.assetId, "model")`, so a model must be an asset of kind `model` the actor may use, and a picture can never name a model sheet or the other way round. Who may set an image is unchanged. `assetIdsOf` (server/rooms/persistence.ts:1218) already finds the nested id.
+- **Equality (D-261127-413, 414).** `sameImage` (shared/imageRef.ts:30) compares the whole ModelRef (asset id, `side`, `anchorY` and every box), since the store keeps one sheet for identical bytes whatever the ref says, so Apply never reports "already wearing" over other sizes or boxes. `planApply`'s `pictureOf` (monsters/images.ts:66) adds the model's asset id. `isShippedIcon` (:76) is false for an image carrying a model, so a Goblin on its shipped icon with a model of its own counts as set by hand and is replaced only on the DM's say. A default applied earlier, model and all, is still the monster's through `previous`, matched by `pictureOf`.
+- **Versions (D-261127-182).** A new optional field an older build's strict schema refuses, so both steps are identity steps with no replay predicate: ops at 67 and below never carry a model. Models ride OP_VERSION 68 and SNAPSHOT_VERSION 51 only if they ship in the deploy that first ships 68, which is the one for Hit Point Dice and spell slots (design-v1-slots.md): that note then names models as a rider in its section 15, their fields go into its lane A contracts commit, and migrate.ts's comments name both. Otherwise models take 69 and 52 on their own. Either way docs/self-hosting.md gets the rule 15 bullet: back up first, reload every open page, rollback needs the backup.
+
+### 4.3 Asset kind and storage (D-261127-170)
+
+- **New kind `model`** in server/assets/kinds.ts: up to 10 MiB, 60 s deadline, variants `full` 2048, `mobile` 1024, `thumb` 512 (longest side), `dmOnly: false`, `playersRead: true`. The same store, files, queue and quota as a token picture, the room's 1,024 MB counting every variant. The other kind lists learn it too: `AssetKind` in client/lib/api.ts:71 and `AssetFact`'s kinds in server/rooms/persistence.ts:1161.
+- **The upload (D-261127-389)** goes straight through `api.uploadAsset(roomId, "model", blob)`, never `uploadTokenImage`, whose `prepareImageUpload` would draw the sheet down to 1024 px (images/upload.ts:64).
+- **The sheet check** in server/assets/process.ts reads the size after `autoOrient` (process.ts:99), so a sheet an EXIF tag turns is checked as drawn: a model must be 2:1 and 512, 1024 or 2048 wide, else 422 `bad_model_sheet`. Then sharp re-encodes it to WebP at quality 82 with its alpha. Powers of two keep every frame edge on a whole pixel in each variant.
+- **db/schema.sql** replaces `assets_kind_check` to add `'model'`, in the same guarded block form the thumb, video and sound kinds used.
+- The DM's Library lists model sheets under **3D models**: the front view, In use or Not in use, and Delete for one not in use. Cleanup ("Delete N not in use") includes them.
+
+### 4.4 Which picture (D-261127-167)
+
+```ts
+/** The camera's azimuth at a turn, in degrees clockwise from north: at turn 0 it looks from the south east. */
+const cameraAzimuth = (turn: Turn) => 135 - 90 * turn;
+/** The frame for a facing seen at a turn: the angle from the camera to the creature's front, in 45 degree steps. */
+export const frameFor = (turn: Turn, facing: number) => mod(Math.round(mod(facing - cameraAzimuth(turn), 360) / 45), 8);
+```
+
+Facing 0 faces north, as the ring's tick shows. The frame is exact for every facing the stepper reaches and the nearest for any typed or imported one. The camera is Isometric's own: orthographic, 30 degrees above the ground, so the ground halves and a cell of height rises K = cos 30° = 0.866, exactly `toView` (client/lib/view.ts:74). The art box is `{ x0: at.x - side·fp/2, y0: at.y - anchorY·side·fp, size side·fp }` in view units, with `fp` the footprint's longer side and `at` the ring's middle at the drawn base. `boxes[frame]` scaled the same way is the drawn box.
+
+### 4.5 Privacy
+
+- `visibleAssetIds` (shared/project.ts:5712) adds each image's model id through the same `addImage`, so a player may fetch a sheet only while their copy holds an image naming it: a hidden token's, a not-yet-found creature's and a disguise's true face's are never theirs. The monster, SRD image and companion block defaults (project.ts:5738 to 5741) go through the same `addImage`. `referencedAssetIds` and `entityAssetRefs` (shared/referencedAssets.ts) count model ids as in use, so cleanup never deletes a sheet a picture names.
+- No new field reaches anyone who does not already receive the image it rides on. The sheet shows only what any viewer of that creature in Isometric sees.
+
+### 4.6 Export and import
+
+The export writes model sheets as it writes every asset. The import re-processes each one through the pipeline, the sheet check included, and `remapState`'s `image` (server/rooms/remap.ts:263) maps a model's asset with kind `model` in both branches, an icon's as well as an upload's (today an icon ref returns untouched, :264), and drops a model whose sheet did not come through, keeping its picture. An older server meets the newer room format and refuses it whole, as every step does.
+
+## 5. Reading and drawing a model (client)
+
+All of it runs in one module worker with an OffscreenCanvas. three.js's renderer loads only there, and no three.js loader ships at all: STL, OBJ and GLB are read by the app's own bounded readers, stl.ts, obj.ts and glb.ts (D-261127-429, 479). As for the chunks (D-261127-377): the 3D model sheet loads `client.ts` by `import()`, and only `client.ts` makes the worker, by `new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })`. Vite bundles workers apart (vite.config.ts:187), so scripts/three-chunk.ts's rule (three's renderer in exactly one chunk, :72) becomes one main-thread chunk plus the model worker's bundle, and lazyThree.test.ts's STAGE (:16) gains the worker's files.
+
+- **Formats (D-261127-171, 372).** Sniffed from bytes, never the name: binary STL (header count matches the size), ASCII STL (`solid` and `facet`), OBJ (vertex and face lines, geometry only, no MTL) and GLB (magic `glTF`). A `.gltf` file: "Save it as GLB (one file) and pick that." Anything else: "That file is not a 3D model this app reads. Use STL, OBJ or GLB."
+- **Reading in pieces.** STL and OBJ stream from the File in 8 MiB slices: one pass for the bounding box, one or more to cluster. A GLB is read whole: up to 64 MB on a touch device (the sound decode budget's touch test) and 256 MB on a computer.
+- **Clustering with hard limits (D-261127-172, 374).** STL and OBJ go through vertex clustering to at most 250,000 triangles, starting from a grid of about √(250,000 / 4) cells a side. Its cells live in an open-addressing table of 2^20 slots with Float64 keys, since the 4,096 weld grid's keys need about 36 bits (12 MiB of keys and ids, no Map, D-261127-419), so at most 700,000 cells, and a pass holds at most 1,000,000 candidate triangles. A pass that reaches either limit stops at once and starts again with half the grid. After at most four passes the output must be at most 250,000 triangles, else "This model is too complex to draw here. Try a simpler file." Peak memory: a slice, the table, the cells' sums and the candidates, about 50 MB whatever the file. Measured, the reader holds 54 MiB on a 537 MB triangle soup and 83 MiB on a 150 MB STL, that one with its output, and the process peaks at 127 and 144 MiB, since each slice's buffer waits for the collector. Over every measured run the peaks were 71 to 164 MiB. The cluster arrays and the output set them, not the slices (D-261127-590). OBJ keeps one table of its vertex positions, at most 4,000,000 (48 MB), refused past that. A coordinate that is not finite, or a model with no size, is refused as not a model. Under the target, a pass with a 4,096 grid welds STL's repeated vertices for smooth shading.
+- **The GLB reader (D-261127-429, 470 to 478, 510 to 525).** glb.ts reads a GLB the way stl.ts and obj.ts read theirs, so every object three.js gets and every array the worker holds is a number the reader counted first.
+  - **JSON (D-261127-510).** The JSON chunk is at most 16 MB on a computer and 4 MB on a touch device. Before `JSON.parse`, one linear pre-scan (strings skipped, escapes honored) refuses it past a nesting depth of 64, past 200,000 containers (50,000 on touch) or past 2,000,000 values, keys included (500,000 on touch), because `JSON.parse` builds every container, extras too, before the reader can ignore one. The worst rates the bounded probe in Appendix A measured were about 192 bytes of V8 heap for an object with a key of its own and 32 to 37 bytes a value, so parsed JSON, string contents included, stays under about 100 MB on a computer and 25 MB on touch (V8 measured, JavaScriptCore not), and that is counted in the memory budget. Past a limit: "This model's file holds more data than the app can read. Export it again without extra data." A typical character's JSON built for the probe had 753 containers and 3,181 values, and one at the reader's own caps 344,372 and 1,841,047.
+  - **Chunks and accessors (D-261127-516).** The one BIN buffer is read in place through a DataView, never a view copied. A buffer other than the BIN chunk, which would name a file, is refused: "This GLB names files outside it. Save it as one GLB and pick that." Every accessor the reader uses has non-negative safe-integer offsets, lengths and counts, a count of at least 1, a stride from its element size to 252 (none on indices), offset + stride × (count - 1) + element size within its view and the view within the BIN chunk. Every attribute has POSITION's count, every index is below it, and a count must suit the mode (a multiple of 3 for TRIANGLES, at least 3 for a strip or fan). Any value read, source or composed, that is not finite, or a model with no size, is refused as not a model.
+  - **Nodes.** Only the default scene (`scene`, else scene 0) is walked, with an explicit stack and a visited set: a node reached twice or a cycle is refused as not a tree, at most 10,000 node visits. Each node's TRS or matrix is composed down the tree. Other scenes are never read. Counting and filling run the same traversal, so they cannot disagree.
+  - **What is read.** Only primitives of mode TRIANGLES, TRIANGLE_STRIP and TRIANGLE_FAN, and of them POSITION, NORMAL when present, the texture coordinate set the base color texture names (`texCoord`, 0 by default), COLOR_0 (RGB or RGBA, float or normalized, D-261127-513), a skin's JOINTS_0 and WEIGHTS_0, and indices. With `KHR_mesh_quantization` (D-261127-515) positions, normals and coordinates may be bytes or shorts, normalized or not, and are written as floats into the output. Points and lines are skipped. Extras, animations, morph targets, cameras and lights are never read. A sparse accessor on an attribute the reader uses is refused: "This model stores part of its shape as sparse data, which the app can't read. Export it again without it."
+  - **Skins (D-261127-521, 525).** glTF ignores a skinned mesh node's own transform, so a skinned primitive is drawn by linear blend skinning held still in its rest pose, as three's SkinnedMesh does each frame (SkinnedMesh.js:341). JOINTS_0 and WEIGHTS_0 are read under the accessor rules: four influences a vertex, weights normalized to sum 1, and a joint index past the skin's joint list or a non-finite weight refused as not a model. A vertex whose weights sum to 0 draws unskinned at its bind position, as three collapses it rather than failing the file (D-261127-526). A skin's joints must be distinct, at most 1,024 a skin and 16,384 over the drawn skins, counted before any matrix is kept (64 bytes each, at most 1 MB). Each joint's matrix is its world matrix times its inverse bind matrix (identity where `inverseBindMatrices` is absent). The counting pass keeps every visited node's world matrix (about 1.3 MB at 10,000), so the order joints come in the walk does not matter. A joint outside the walked tree takes the matrix composed down from its own root by the same rules, its steps counted in the 10,000 visits, and a joint with no single root (a cycle, or two parents) refuses the skin: "This model's skeleton is broken. Export it again with the skin applied." A skinned normal goes through the blended matrix's normal matrix and is renormalized. three's skin shader multiplies normals by the blended matrix itself (skinnormal_vertex.glsl.js:11), so under non-uniform scale the reader's normals are the correct ones and three's are not the test's oracle.
+  - **Extensions.** Draco, meshopt and `EXT_mesh_gpu_instancing` are refused by name wherever the JSON lists them, in `extensionsUsed` as well as `extensionsRequired`, with words such as "This model uses instancing, which the app can't read. Export it with the instances applied." A KTX2 texture (`KHR_texture_basisu`) uses its PNG or JPEG fallback source where it has one (D-261127-524), and is left out only where KTX2 is its only source, with the note "Some of its textures use a compressed format the app can't read, so it draws without them." `KHR_texture_transform` on the base color texture is applied (D-261127-522, below). `EXT_texture_webp` and `EXT_texture_avif` point a texture at its image. Every other extension is ignored.
+  - **Counting before allocating (D-261127-473).** The counting pass sums drawn triangles (each primitive's triangles times every node reference to its mesh) and drawn primitive references, points and lines included. Triangles are capped at 1,000,000 on a computer and 500,000 on a phone or tablet (D-261127-520), references at 16,384, both before any output array exists: "This model draws 2,400,000 triangles. A computer can take up to 1,000,000. Add it from a computer, or export a lighter one."
+  - **Groups and output (D-261127-474, 512).** One non-indexed buffer per group, at most 64 (more is refused: "This model has more than 64 materials. Merge some and export it again."). A group is keyed by whether its texture is read and, if so, by its image, sampler wrap, coordinate set and transform, then base color factor, `alphaMode`, `alphaCutoff` and `doubleSided` (D-261127-523). Each is pre-sized from the count: positions and normals, coordinates where its texture is read, and colors as normalized bytes where any of its primitives has COLOR_0, white for those that have none. three.js gets at most 64 Meshes, each one matte material (no metal, roughness 0.8, so nothing renders near black without an environment) with its base color, texture, vertex colors, `alphaTest` for MASK at its cutoff, blending for BLEND, and both sides drawn where `doubleSided` says. Peak memory on a phone: the 64 MB file, the parsed JSON, 54 MB of output, the textures below and one image while it decodes.
+  - **No material (D-261127-519).** Primitives with no material, glTF's default material, draw in the Color option's choice, Stone by default, as STL does, and the sheet offers Color whenever a drawn primitive has none.
+  - **Normals and winding (D-261127-511, 477, 517).** A supplied normal goes through the node's normal matrix (the inverse transpose of the upper 3 by 3, its cofactor matrix where that is singular) and is renormalized. Where a primitive has none, the reader computes smooth ones by welding, as for STL, and past the weld table's 700,000 cells it uses face normals. A strip keeps glTF's alternating winding, and where a node's composed determinant is negative, as on a mirrored part, every triangle's winding is reversed, since the merged buffer no longer carries the reflection the renderer would correct.
+  - **Textures (D-261127-476, 514).** Only images that a drawn group's base color texture names, in reading order. Each one's size is read from its PNG, JPEG, WebP or AVIF header without decoding: one past 16 MP, past 64 MP together, past the 16th kept, or with a header that cannot be read is left out, and its group draws in its base color factor. The rest decode one at a time with `createImageBitmap` from their view's bytes, drawn down to 1024 px a side (D-261127-415), so nothing is fetched and `connect-src 'self'` stays as it is. Each texture is sRGB and keeps its sampler's wrap (repeat by default, as glTF says, where three would clamp). A primitive that lacks the coordinate set its texture names joins its untextured group. Where the texture info carries `KHR_texture_transform`, its offset, rotation and scale (and its own `texCoord`, which wins) are applied to the coordinates as they are filled, as gltfpack's quantized coordinates need. An image named by `uri` instead of a view is left out with the note "Its textures are separate files, so it draws without them. Export one GLB to keep them."
+- **Standing up (D-261127-173).** STL and OBJ stand Z up with their front toward -Y, as printing and CAD files do. GLB stands Y up with its front toward +Z, as glTF's spec says. Stand it up and Turn its front adjust the rest.
+- **Centering and fit (D-261127-174).** The middle of the lowest 6% of the model's height (a base, or the feet) goes on the footprint's center, and its lowest point on the ground. Where that slice is round and at least 60% of the model's width, it is a base and fills the footprint, the height capped at 2.5 footprints. Otherwise the model fits a box 1 by 1 footprint wide and 1.4 tall. Size then scales it, up to the cap in 3.1.
+- **Drawing (D-261127-176, 382).** 8 frames of 512 px into one 2048 by 1024 canvas, each with an 8 px clear gutter (4 in the mobile copy, 2 in the thumbnail), antialiased, lit from the screen's upper left (as raised ground is lighter on the left) with a sky fill and a faint rim from behind, the lights fixed to the camera so every frame is right at every turn. A 1.5 px dark outline at 70%, inside the gutter, lets a grey figure read on a grey floor. A frame side covers the widest and tallest of the 8 views and the ring.
+- **Encoding.** WebP at 0.92 where the browser encodes it (Chrome, Edge, Firefox), PNG elsewhere (Safari), 0.1 to 0.8 MB, under the kind's 10 MiB. The server re-encodes either way.
+- **Budget.** A 20 s watchdog ends a run with "Drawing the model took too long on this device. Try a smaller file, or add it from a computer." No main-thread fallback: without WebGL in a worker the sheet says "This browser can't draw 3D models. Recent Chrome, Edge, Firefox and Safari can." (D-261127-184).
+
+## 6. Drawing in play (client)
+
+- **One predicate (D-261127-380).** `modelShown(token, actor, sheets)` in client/features/models/shown.ts says whether a creature stands as its model: its image has a model, its sheet is decoded, and `shownLife(actor, token)` (shared/rules/hp.ts:73, what TokenBody reads) is not dead, dying or stable (D-261127-376). An HP-less creature, or one whose HP the viewer cannot read, keeps its model. Every reader of a standee's shape asks it: the IsoBoard layout (IsoBoard.tsx:258 to 293), the drag (:446), the ghost (:723 to 726 and TokenGhost), keptTesting.ts:641 and the Standee's drawing, with the sheet store's version as a memo dependency, so the shape laid out is the shape drawn (TokenNode.tsx:347).
+- **Standee.** Where `modelShown`, TokenNode.tsx's `Standee` draws one `KImage` of the sheet, cropped to the frame, in place of `TokenBody`, with a `hitFunc` that draws only `boxes[frame]`, since presses go through Konva's hit canvas (TokenNode.tsx:177, Stage.tsx:1203). `standeeShape` (relief/standee.ts) takes the art box and drawn box, which the decor frame, the silhouette (IsoBoard.tsx:998), the seat of a rider and culling then read. A rider on a model sits half the holder's drawn box up it.
+- **Which copy.** `mobile` (1024 by 512, 2 MiB decoded) on Phone size map detail or Low power, else `full` (2048 by 1024, 8 MiB decoded). Sheets decode as ImageBitmaps shared by every token wearing them, at most 16 full or 24 mobile (128 or 48 MiB). **Admission (D-261127-387):** each layout asks for the models of standing creatures on screen, nearest the canvas's middle first. The first 16 or 24 get sheets, a sheet no layout asks for goes first, and the rest stand as pictures until one frees.
+- **Cost.** One draw per creature with no clip, cheaper than the standee it replaces (Appendix A). A turn changes only the crop. **Depth.** Order is unchanged, by the footprint's center. A wing that overhangs its footprint can draw over a piece just in front of it within that overhang, as a mid-drag standee can (5.6's accepted cases).
+- **Comments to update:** model.ts:1288 to 1293, permissions.ts:1522 to 1526, referencedAssets.ts:7 to 20, remap.ts:261 to 262, TokenNode.tsx:334 to 344 and standee.ts:4 to 11, which say an image is a picture alone or a standee always draws its picture.
+
+## 7. Keys, touch and accessibility
+
+- **Keys (D-261127-386).** Left and Right turn the preview while it has focus. They go in a scoped table of their own, **3D model preview**, in the shortcut sheet registry and FEATURES.md, as the Handout viewer's and Token window's do. No other new key or gesture.
+- **Screen readers.** The preview is an image labeled with the view, such as "Knight model, seen from the front left", and a turn announces the new view. A polite live region says "Reading the file.", "Drawing its views.", "Model ready." and each error. An armed Remove announces "Tap again to remove the model."
+- **Focus.** Opening the sheet focuses Choose a file, or the preview when a model is there. Closing returns focus to the 3D model button. Remove model moves focus to Choose a file.
+- **Contrast and motion.** The preview's floor uses the board's floor tones and the ring color, and the sheet's text the theme's. Nothing spins on its own, so reduced motion changes nothing. **Large interface sizes.** At 130% the option rows wrap, the preview shrinks to 200 px, and Save and Cancel stay in the sheet's footer.
+
+## 8. UI checklist
+
+- Loading: the shared indicator after 200 ms on reading, drawing and saving, Cancel while reading or drawing, Save busy and once only, every path ending in the preview or a plain error.
+- Exact words: "3D model", "Choose a file", "Or use one from this room", "Reading the file…", "Drawing its 8 views…", "Turn left", "Turn right", "Color", "Stone", "Bronze", "Bone", "Iron", "Picture's color", "Stand it up", "Turn its front", "Size", "This model stops at 160% to stay sharp.", "Save", "Saving…", "Cancel", "Discard this model?", "Choose another file", "Remove model", "Tap again to remove", "Remove both?", "Removes the picture and its 3D model.", "Save it as GLB (one file) and pick that.", "This model's file holds more data than the app can read. Export it again without extra data.", "This model's skeleton is broken. Export it again with the skin applied.", "Picture's color works for up to 6 different pictures at once.", "3D models" (Library), and the errors in section 5.
+- Alignment: the 3D model sheet empty, drawing, with a preview and with Remove armed, at 1440 by 900, 390 by 844 and 320 by 568, 100% and 130%, at most 1 px off, as new roots in e2e/alignmentRoom.ts.
+
+## 9. Cases
+
+| Case | Expected | Test |
+| --- | --- | --- |
+| Facing 0 to 315 at each turn, a turn right with facing 90° less, a typed 100° | frame `mod(round((f - 135 + 90t)/45), 8)`, exact, the same frame, the nearest frame with the tick at 100° | frames.property.test.ts, frames.test.ts |
+| Hidden token, disguise, monster, SRD and block defaults with a model | player's copy and visible assets identical to the twin without | project.models.twin.test.ts |
+| Player GETs a hidden token's sheet | the same 404 as an unknown id | serve.models.itest.ts |
+| Owner, then DM, removes a model | two taps each, no player Undo, the DM's Undo restores it | permissions.models.test.ts, e2e models |
+| Player sets a model on a monster | forbidden | permissions.models.test.ts |
+| Model names a `token` asset, or a picture names a `model` | refused | permissions.models.test.ts |
+| Sheet 2000 by 1000, 3:1, or turned by EXIF | 422 `bad_model_sheet` | process.test.ts |
+| Place, Duplicate (other images too), Apply, Crop, icon pick, paste | model kept, asset and icon pictures | imageRef.test.ts, factory.test.ts, images.test.ts, ImageField.test.ts |
+| Apply a new default: a Goblin on its shipped icon with its own model, and one wearing an earlier default with its model | the first set by hand (DM's say), the second the monster's through `previous` | images.test.ts |
+| Same sheet id, other `side`, `anchorY` or boxes | not "already wearing" | imageRef.test.ts, images.test.ts |
+| Group with different pictures: 3D model, Change image, Remove model | one `token.update` each, one undo step, each keeps its own picture or model | groupEdit.test.ts, GroupMoreSheet.test.ts |
+| Group with 3 different pictures, Picture's color | 3 sheets, each token its own | session.random.test.ts, e2e models |
+| Export, import, icon picture with a model | model on its new asset id, dropped with its sheet missing | remap.models.test.ts, importRoom.test.ts |
+| Based model 2.5 footprints tall at 200% | Size stops at the cap, side at most 4, protocol refuses 4.01 | normalize.test.ts, protocol test |
+| 153 MB binary STL on a touch device | slices, at most 250k triangles | stl.test.ts, cluster.property.test.ts |
+| Triangle soup, layered planes, NaN, one point, OBJ past 4,000,000 vertices | limits stop the pass, retry, or refuse in words | cluster.adversarial.test.ts, obj.test.ts |
+| GLB: 50M zero-filled accessor, 10,000 nodes naming one 1M triangle mesh, a node under two parents, buffer `uri` | refused before any output exists | glb.bombs.test.ts |
+| GLB: 9,999 nodes naming a mesh of 4,096 points primitives | points skipped, references counted, refused at 16,384 | glb.bombs.test.ts |
+| GLB JSON 65 deep, 200,001 empty objects, an extras subtree past the counts (touch: 50,001, 4 MB) | refused by the pre-scan before `JSON.parse` | glb.bombs.test.ts |
+| GLB accessors: negative offset, stride under its element, a stride on indices, an attribute short of POSITION's count, an index past it, a strip of 2, NaN | refused as not a model | glb.bombs.test.ts |
+| GLB: 64 overlapping views over the whole BIN, a primitive without normals, one past the weld table | read in place with nothing copied, smooth normals by weld, face normals past it | glb.test.ts |
+| GLB: sparse POSITION, 65 drawn groups, instancing listed, Draco only in `extensionsUsed` | refused in words, the extensions by name | glb.bombs.test.ts |
+| GLB nodes at scale -1 and at non-uniform scale, and a strip | front faces out and normals right | glb.test.ts, e2e models (8 frames) |
+| GLB masked, blended and double-sided parts, a vertex-painted GLB, a second UV set, tiled coordinates | each drawn as glTF says in several frames | glb.test.ts (groups), e2e models (pixels) |
+| GLB with quantized positions, no material, a second scene of bombs | read as floats, Stone with the Color options, the second scene never read | glb.test.ts |
+| GLB skins: two joints turned differently, a reordered joint list, no inverse bind matrices, a joint outside the scene, a joint with two parents, a weight past the joint list | every vertex where three's SkinnedMesh puts it at rest and every normal at its inverse-transpose expectation, a zero-weight vertex at its bind position, duplicate joints and 1,025 joints refused, the broken skeleton and the bad index refused | glb.test.ts |
+| GLB with `KHR_texture_transform` (gltfpack's coordinates), KTX2 with a PNG fallback, a COLOR_0 part beside one without, a part lacking its texture's set | coordinates as the transform places them, the fallback drawn, white where no COLOR_0, the untextured group | glb.test.ts, e2e models (pixels) |
+| GLB image: outside `uri`, KTX2 only, 20,000 px header, unreadable header, 17th texture | left out, base color factor drawn, the note for `uri` and KTX2 | glb.test.ts |
+| GLB with a WebP texture under the CSP | textured, no fetch | glb.test.ts, e2e models |
+| `.gltf` file | "Save it as GLB…" | read.test.ts |
+| Pick, cancel, pick again, save twice, close mid-draw | at most one sheet per distinct picture and one front view per picture-less token, per save, nothing after cancel, worker ended | session.random.test.ts |
+| Sheet loading, past the cache, dead, dying, stable, every HP visibility, HP-less | picture standee or model as `modelShown` says, layout equal to drawing | shown.test.ts, standee.test.ts |
+| Tap a model's clear corner | the creature behind is picked | e2e models |
+| Player's fog over a model | lies flat as the picture | one model case in stand.test.ts |
+
+## 10. Tests by file
+
+- **Unit and property (fast-check):** shared/imageRef.test.ts (`copyImage`, `keepModel`, `imageAssetIds`, `sameImage` over the whole ModelRef), client/features/monsters/images.test.ts (`planApply` with models, `isShippedIcon`), client/features/models/frames.test.ts and frames.property.test.ts (periodicity in 360, a turn right equal to facing minus 90, exact at multiples of 45), cluster.property.test.ts (random meshes: indices in range, no degenerate triangle, at most 250k, every output vertex inside the input box), cluster.adversarial.test.ts, stl.test.ts, obj.test.ts, glb.bombs.test.ts and glb.test.ts (hand-written GLBs: the JSON, accessor and extension bombs and every GLB row of section 9, with textures sharp makes from flat colors and checkers, checking groups, normals and winding in the output, skin positions against three's own `SkinnedMesh.applyBoneTransform`, skin normals against an inverse-transpose expectation computed in the test, and texture transforms against glTF's T × R × S written out in the test (three's `Matrix3.setUvTransform` is T × S × R, which GLTFLoader.js:2078 corrects), with a rotation and unequal scales, while the pixel rows run in e2e/models.e2e.ts), glbJson.test.ts (the pre-scan: strings with escaped quotes and brackets, depth and counts at and past each limit), glb.property.test.ts (random node trees, transforms and primitives: output length equals the counted triangles, every vertex the composed transform of an input vertex, every output normal unit length, winding facing out under any sign of determinant, nothing allocated past a cap), read.test.ts, normalize.test.ts (base found, feet centered, fit, height cap, Size cap), shown.test.ts, client/canvas/relief/standee.test.ts (model art and drawn boxes, each fallback).
+- **The twins:** shared/project.models.twin.test.ts (with and without a model: a hidden token, a disguise's other image, a monster's, an SRD image's and a companion block's default, the player's projection and `visibleAssetIds` byte for byte) and server/assets/serve.models.itest.ts (a player's GET of a hidden creature's sheet answers as an unknown id does).
+- **Permissions and server:** shared/permissions.models.test.ts, server/assets/process.test.ts, kinds.test.ts, server/rooms/remap.models.test.ts, the import round trip in importRoom.test.ts, and the migrate tests at the new versions with the stored replay fixtures unchanged.
+- **The state machine (rule 8):** client/features/models/session.random.test.ts, many random sequences of pick, read done, draw done, option change, cancel, close, save, upload answer and failure, with the invariants: at most one sheet per distinct picture and one front view per picture-less token, per save, nothing dispatched after cancel or close, the worker always ended, the busy state always cleared.
+- **E2E:** e2e/models.e2e.ts under the app's CSP (a DM adds a generated STL and a textured GLB, sees them stand by pixels, turns the view and the facing and sees the frame change, taps a clear corner, a player adds one to their own token, a player never requests a hidden creature's sheet, two-tap Remove and the DM's Undo, Wild Shape swap), plus the alignment roots. Test models are generated by the test from primitives, never art. Touched files to run besides: iso, tokenpanel, attach, reach.
+
+## 11. Lane plan
+
+Contracts first (lane A's first commit, with the `client.ts` stub), the others from it.
+
+| Lane | Files | Size |
+| --- | --- | --- |
+| A contracts and server | shared/model.ts, protocol.ts, imageRef.ts (copy helpers), permissions.ts, project.ts, referencedAssets.ts, migrate.ts (or the slots note's lane A carries the fields), limits.ts (MODEL_LIMITS), client/lib/api.ts, server/assets/kinds.ts, process.ts, server/rooms/persistence.ts, remap.ts, db/schema.sql, docs/self-hosting.md, their tests and the twins | M |
+| B reader and renderer | client/features/models/worker.ts, client.ts, read.ts, stl.ts, obj.ts, glb.ts, glbJson.ts (the pre-scan), glbImages.ts (header sizes), cluster.ts, normalize.ts, render.ts, scripts/three-chunk.ts and lazyThree.test.ts | L |
+| C board | client/features/models/frames.ts, shown.ts, sheets.ts (decode cache), client/canvas/TokenNode.tsx, relief/standee.ts, relief/IsoBoard.tsx, relief/keptTesting.ts | M |
+| D sheet, copy sites and docs | client/features/models/ModelSheet.tsx, ModelPreview.tsx, upload.ts, session.ts, client/features/images/ImageField.tsx, LibraryGrid.tsx, RoomPaste.tsx, client/features/tokens/factory.ts, GroupMoreSheet.tsx, groupEdit.ts, client/features/monsters/images.ts, MonsterImage.tsx, the shortcut registry, e2e/models.e2e.ts, alignment roots, then FEATURES.md and docs/dm-guide.md in its last commit | M |
+
+C's first commit is `frames.ts`, which D imports. B and D meet only at client.ts's `drawModel(file, options): Promise<{ sheet: Blob; meta: ModelRef minus assetId; front: Blob; maxSize: number }>`, stubbed in A's commit.
+
+## 12. Decisions
+
+- **D-261127-166** Draw at upload into sprites, never 3D in play. Rejected: live three.js per creature, server-side drawing, a light 3D copy for every device (section 1).
+- **D-261127-167** 8 frames, 45 degrees apart, picked by facing minus the camera's azimuth. Rejected: 4 (wrong at every odd facing), 16 (only typed angles land between, twice the memory), free angles (needs live 3D).
+- **D-261127-168** One sheet, 4 by 2 square 512 px frames. Rejected: 8 assets a model (8 uploads and rows), frames sized to the model (fractional frame edges after the pipeline's resize).
+- **D-261127-169** The model rides on the picture (ImageRef). Rejected: `token.model` (the disguise's true model would reach every player, a model added again on each scene, new default fields).
+- **D-261127-170** A new asset kind `model` in the existing store and pipeline. Rejected: kind `token` (its 512 px cap leaves 128 px frames), a second store.
+- **D-261127-171** STL, OBJ and GLB (narrowed by 372). Rejected for now: 3MF (zip reading, mostly print settings), FBX, USDZ and BLEND (no maintained loader or proprietary), compressed glTF (decoders and wasm under the CSP).
+- **D-261127-172** STL streamed to 512 MB, GLB 64 MB on touch and 256 MB on computers, 250k triangles after clustering, GLB drawing to 1M (500k on touch, 473). Rejected: one 64 MB cap (refuses ordinary sculpted minis), quadric simplification (slower, and the sprites cannot show the difference).
+- **D-261127-173** Z up for STL and OBJ, Y up for GLB, with Stand it up and Turn its front. Rejected: guessing up from shape (wrong on minis with long weapons).
+- **D-261127-174** Center on the lowest slice, a base fills the footprint, else a 1 by 1 by 1.4 box, then Size. Rejected: heights per size category (the rules give none), raw file units.
+- **D-261127-175** Stone by default for uncolored files, with four more. Rejected: the disposition color (reads as paint, and a new drawing when it changes).
+- **D-261127-176** Lights fixed to the camera, upper left, plus a dark outline. Rejected: the scene's lights (a new drawing per scene).
+- **D-261127-177** Picture standee while loading, past the cache, dead, dying or stable, and when flat. Rejected: tinting the model (a filtered copy of each sheet).
+- **D-261127-178** Mobile copy on Phone size detail or Low power, caches of 16 and 24. Rejected: full everywhere (8 MiB a model on a phone).
+- **D-261127-179** The DM and the image's owners, as for the picture. Rejected: DM only (the owner's words name the player).
+- **D-261127-180** A token with no picture gets the front view as one. Rejected: needing a picture first.
+- **D-261127-181** Change image keeps the model, Remove removes both (made exact by 375 and 388). Rejected: dropping the model with each new picture.
+- **D-261127-182** Identity steps, riding 68 and 51 only in the deploy that first ships 68 (Hit Point Dice and spell slots), else 69 and 52. Rejected: no step (an older build would meet an unknown field).
+- **D-261127-183** Outlines, decor and culling read the frame's drawn box. Rejected: the union of all 8 (a wolf seen head on would be as wide as its side view).
+- **D-261127-184** Worker and OffscreenCanvas only. Rejected: a main-thread fallback (a 1.6 s stall on a 4x slowed CPU, for a small share of browsers).
+- **D-261127-185** Embedded textures decoded in the worker with createImageBitmap (exact form in 476). Rejected: adding `blob:` to connect-src.
+- **D-261127-186** three loads only in the model worker (exact rule in 377). Rejected: sharing the dice chunk on the main thread.
+- **D-261127-187** Reuse through "Or use one from this room", the group edit and defaults. Rejected: a room-wide model library page.
+- **D-261127-188** The server checks the sheet's shape. Rejected: trusting the client's sizes.
+- **D-261127-189** The two twins in section 10. Rejected: a projection test alone (the asset route is the second door).
+- **D-261127-190** The Library lists models as 3D models for the DM. Rejected: hiding them (storage could not be freed).
+- **D-261127-373, 378, 410, 411, 412 and 518** (the GLB preflight on GLTFLoader, its `loadImageSource` override, its allocation budget, its drawn-triangle count, its extension refusals, and the first-joint skin rule) are replaced by 429, 470 to 478 and 521, which keep their caps and refusals in the reader.
+- **D-261127-374** Clustering in a fixed typed table with cell and candidate limits, a coarser retry, an asserted 250k output, and an OBJ vertex cap. Rejected: an unbounded Map, trusting the first grid.
+- **D-261127-375** One `copyImage` and `keepModel` pair in shared/imageRef.ts for every write. Rejected: fixing each call site by hand (the next one would drop it again).
+- **D-261127-376** The 0 HP fallback reads `shownLife`. Rejected: HP above 0 (most players' copies carry no HP number).
+- **D-261127-377** One main-thread three chunk plus the model worker bundle, the worker made only by the lazily loaded client.ts. Rejected: putting the renderer in the dice chunk.
+- **D-261127-379** A `hitFunc` drawing the frame's drawn box. Rejected: the image's whole square (a clear corner would steal a neighbor's tap).
+- **D-261127-380** One `modelShown` predicate for layout, drag, ghost and drawing. Rejected: each reader checking for itself (shape and drawing could disagree).
+- **D-261127-381** Boxes in whole hundredths. Rejected: decimals (longer refs).
+- **D-261127-382** An 8 px gutter at full size. Rejected: 4 px (1 px in the thumbnail lets frames bleed).
+- **D-261127-383** Custom footprints by their longer side, squeezed creatures full size. Rejected: stretching the sprite to w by h.
+- **D-261127-384** A group's 3D model goes on each picture as it is. Rejected: one shared picture for the group.
+- **D-261127-385** The 3D model button shows without a picture. Rejected: needing a picture first.
+- **D-261127-386** Preview keys in a scoped table of their own. Rejected: the main Keys table (they work only in the preview).
+- **D-261127-387** Sheets admitted nearest the canvas's middle first. Rejected: first come (a model off screen could keep one on screen out).
+- **D-261127-388** Remove on a picture with a model takes two taps, armed as "Remove both?". Rejected: one tap (a player cannot undo it).
+- **D-261127-389** The sheet uploads as kind `model` without the client's downscale, and the server checks its oriented size. Rejected: the token upload path (1024 px).
+- **D-261127-413** An image carrying a model is never the unmodified shipped icon. Rejected: icon and color alone (Apply would replace a custom model without asking).
+- **D-261127-414** `sameImage` compares the whole ModelRef. Rejected: the sheet's id alone (one sheet can carry other sizes and boxes).
+- **D-261127-415** Textures drawn down to 1024 px. Rejected: 2048 (four times the memory for 512 px frames).
+- **D-261127-416** Both Removes use `ConfirmButton`. Rejected: moving the Library's `TwoTapDelete` (a second component for the same job).
+- **D-261127-417** Group image changes go out as one `token.update` per token in one gesture. Rejected: one `token.updateMany` (one patch cannot keep each token's picture or model).
+- **D-261127-418** A mixed group's Picture's color draws one sheet per distinct picture, at most 6. Rejected: the first token's color for all, hiding the option for any mixed group.
+- **D-261127-419** Float64 keys in the clustering table. Rejected: 32-bit keys (the weld grid needs about 36 bits), a two-level weld.
+- **D-261127-470** The GLB is read in place: header, JSON to 16 MB, one BIN chunk through a DataView, every used accessor bounds-checked, no view copied, another buffer refused. Rejected: GLTFLoader (it slices each view and builds objects no cap counts, D-429).
+- **D-261127-471** Only the default scene, walked with a visited set, at most 10,000 node visits, transforms composed and checked finite. Rejected: every scene (what three loads), allowing a node under two parents.
+- **D-261127-472** (widened by 513, 514, 521) Only triangle modes are read, and of them POSITION, NORMAL, the base color texture's coordinate set, COLOR_0, a skin's JOINTS_0 and WEIGHTS_0, and indices. Extras, animations, morph targets, cameras and lights never are. Rejected: drawing points and lines (no part of a miniature), animation (a pose the views cannot show anyway).
+- **D-261127-473** A counting pass caps drawn triangles (1,000,000 on computers, 500,000 on touch) and primitive references (16,384, points and lines included) before any output exists. Rejected: one triangle cap for every device (96 MB of output on a phone), counting only triangles (a points fan-out builds millions of objects).
+- **D-261127-474** One pre-sized non-indexed buffer per base color material, at most 64, so three gets at most 64 Meshes. Rejected: a Mesh per primitive reference (three's way, unbounded objects), refusing models with more than one material.
+- **D-261127-475** (narrowed by 515) A sparse accessor on a used attribute is refused in words, and packed data is read. Rejected: expanding sparse data (a copy to budget for a rare export).
+- **D-261127-476** Textures: only drawn base color images, sizes from headers, at most 16 kept, 16 MP each and 64 MP together, one decode at a time from view bytes, 1024 px, the base color factor kept, other maps ignored (the properties 512 and 514 read excepted). Rejected: the other maps (more decoding for no visible gain in a 512 px frame).
+- **D-261127-477** Missing normals computed smooth by weld, as for STL. Rejected: flat shading (what three's loader set).
+- **D-261127-478** (KTX2 by 515 and 524, texture transforms by 522) Draco, meshopt and instancing refused by name, WebP and AVIF texture sources followed, every other extension but texture transforms ignored. Rejected: refusing every unknown extension (ordinary exports list harmless ones).
+- **D-261127-479** No three.js loader ships: the worker imports three's core and renderer, and the readers are the app's own. Rejected: STLLoader for ASCII STL and OBJLoader (whole-file parses no cap bounds).
+- **D-261127-510** A linear pre-scan before `JSON.parse`: depth 64, 200,000 containers and 2,000,000 values on a computer, 50,000 and 500,000 on touch, the chunk 16 MB or 4 MB, parsed JSON in the memory budget. Rejected: a byte cap alone (a 4 MB chunk of empty objects is 85 MB of heap), a streaming parser of our own (more code than counting needs).
+- **D-261127-511** Supplied normals through the normal matrix and renormalized, winding reversed under a negative determinant, strips alternating. Rejected: baking positions only (mirrored parts inside out, normals skewed by non-uniform scale).
+- **D-261127-512** Groups keyed by texture (image, wrap, coordinate set), base color factor, alpha mode and cutoff and sides, drawn matte. Rejected: one group per base color (cutouts solid, cloaks vanishing from behind), metal as authored (near black without an environment).
+- **D-261127-513** COLOR_0 read, stored as normalized bytes. Rejected: dropping it (vertex-painted models lose their colors), floats (four times the bytes).
+- **D-261127-514** Base color textures are sRGB and keep their wrap and coordinate set, and a primitive without that set draws untextured. Rejected: three's defaults (clamped, no color space, set 0).
+- **D-261127-515** `KHR_mesh_quantization` read into floats, KTX2 textures left out with a note. Rejected: refusing either (ordinary exports use quantization, and a texture is not the shape).
+- **D-261127-516** Accessor rules in full, one traversal for counting and filling, an explicit stack. Rejected: checking only the bounds (a short attribute reads past its sibling's count), recursion (a 10,000 deep chain overflows a worker's stack on WebKit).
+- **D-261127-517** Face normals past the weld table's limit. Rejected: refusing the model (it is within its triangle cap).
+- **D-261127-519** No material: the Color options, Stone, a fixed matte material. Rejected: glTF's default metallic material (near black without an environment).
+- **D-261127-521** A skinned primitive drawn by static linear blend skinning in its rest pose, four weighted joints a vertex, normals through the blended normal matrix. Rejected: the first joint's matrix for every vertex (a vertex on a joint turned 90 degrees stays put), refusing skinned models (most character exports are skinned).
+- **D-261127-522** `KHR_texture_transform` on the base color texture applied while filling coordinates. Rejected: ignoring it (gltfpack's quantized coordinates would land wrong), leaving such textures out.
+- **D-261127-523** "Texture read" joins the group key, a primitive without its texture's coordinate set joins the untextured group, and COLOR_0 groups fill white where a primitive has none. Rejected: one group per material whatever each primitive holds (undefined coordinates and colors).
+- **D-261127-524** A KTX2 texture with a PNG or JPEG fallback draws the fallback. Rejected: leaving every KTX2 texture out.
+- **D-261127-525** Joint matrices from every visited node's world matrix, a joint outside the walk composed from its own root, a broken skeleton refused in words. Rejected: requiring joints to come before the mesh in the walk, identity for an outside joint (a wrong shape with no warning).
+- The coordinator's **D-261127-370** (Remove model two taps for everyone), **371** (Size capped so the side stays at most 4) **372** (STL, OBJ and GLB, `.gltf` refused), **429** (the app's own GLB reader) and **520** (no GLB clustering on touch) are built as written. 191 to 195 are unused.
+
+**Look hardest at:** 470 to 474, 510 and 516 (the GLB reader's bounds, JSON pre-scan and accessor rules), 511 and 521 (winding, normals and skins), 374 (clustering limits), 375 and 417 (every copy and group path), 169 (model on the picture) and 182 (sharing the slots step).
+
+## 13. As built
+
+The reader and renderer (lane B) are built. The other lanes add their parts here as they are built.
+
+**The page's side and the worker.**
+
+- `drawModel(file, options)` takes `{ color, up, front, size }`, with an optional `signal` for Cancel, `onStage` ("reading", then "drawing") and `device`. It returns the design's `sheet`, `meta`, `front` and `maxSize`, plus `colorable` (whether the sheet offers Color) and `notes` (the KTX2 and separate-file notes). `endModelWorker()` ends the worker when the sheet closes (D-261127-533).
+- The worker keeps the file it read, so an option change draws again without reading again, and a second request for the same file waits, newest only. Each worker reads one file. Another file ends it before anything is read, busy or idle, so no read's peak sits on top of an old model, and a refused read ends it too. The kept mesh drops its texture bytes once the textures are loaded, so it no longer holds the file (D-261127-548).
+- The readers' shared types, refusal words and slice and line readers live in client/features/models/mesh.ts, a file the lane plan did not name, since read.ts imports every reader and the readers importing it back would make a cycle (D-261127-534).
+- The refusals the design gave no words for are D-261127-535, the triangle refusal's words on each device D-261127-536, and the skeleton refusals D-261127-532.
+
+**Reading.**
+
+- The design's MB caps are MiB, and a texture's 16 MP is 4096 by 4096, with 64 MP four of those, so a common 4K texture is kept (D-261127-537).
+- When a clustering pass keeps under 40% of the target with passes left, one finer pass runs, kept only if it fits under the target and its caps (D-261127-538).
+- STL and OBJ keep the 8 MiB slices, and section 5's peak line gives the measured peaks (D-261127-590). A binary STL whose header count disagrees with its size stays refused as not a model (D-261127-591).
+- The line cap holds for a line whole inside one slice, as well as for one that runs across slices.
+- An ASCII STL loop of more than three vertices fans from its first, and a loop or an OBJ face of fewer than three corners is skipped (D-261127-542).
+- STL and OBJ parts draw both sides, since those files say nothing of sides and many wind a few faces inward or leave a hole. A GLB keeps the sides its materials give (D-261127-549).
+- A negative skin weight is refused, like a non-finite one (D-261127-539). A vertex whose weights sum to 0 draws at its bind position as an intended difference from three's loader, which gives it all of joint 0's weight (D-261127-530).
+- The normal matrix keeps only the determinant's sign rather than dividing by it, and a normal shorter than 1e-12 of its matrix's scale squared takes its face's normal, so float noise never becomes a direction (D-261127-531).
+- A skin's joints and weights are checked only at the corners a primitive draws (its indices, where it has them), and each pair of accessors once for each skin, so many references to one mesh cost one check.
+- The node walk refuses a scene before its explicit stack can outgrow the visits left: more than 10,000 roots, or children that would take the visits so far and the stack past 10,000.
+- A texture takes one of the 16 places only where its primitive has the coordinate set it names.
+- Image header scans stop after 1,000 steps (JPEG segments, AVIF boxes), and a scan that stops before its end gives no size, so that image is left out rather than decoded. AVIF's `ispe` is read only inside `meta`, `iprp` and `ipco`, the largest one there.
+
+**Drawing.**
+
+- Each drawn box is padded 2 px for the outline and antialiasing and rounded outward to whole hundredths. The side is rounded up and the anchor to four places before drawing, and the camera uses exactly those values, so the stored ref is the drawing (D-261127-544). A Size off the 10% steps rounds to the nearest one, within 50% and the cap (D-261127-546).
+- The front view for a token with no picture is frame 0 cropped square round its drawn box with a 12% margin (D-261127-540).
+- A GLB part with no material but with COLOR_0 draws the Color choice times its vertex colors, as glTF multiplies base color by COLOR_0 (D-261127-541).
+- MASK tests the base color factor's alpha against its cutoff, and BLEND writes no depth, so a see-through part never hides what is behind it. The canvas fallback decodes textures with their alpha unpremultiplied, as the direct decode does.
+- One three.js texture serves each kept image and wrap, shared by every group that reads it and disposed once. Groups with other wraps share its upload.
+- The outline is computed on the sheet's pixels and drawn only where nothing is, so a translucent surface keeps its color and alpha (D-261127-547).
+- scripts/three-chunk.ts takes the worker's bundle as the chunk holding worker.ts and every chunk it imports, and lazyThree.test.ts checks that the worker's modules fetch nothing, load no script and make no blob or data URL (D-261127-543).
+
+**Measured.** The readers ran in Node 26, one process each, with peak memory over a baseline taken once the input was ready. The whole run (read, 8 frames, outline, encode) ran in Chrome with a GPU, under the app's own CSP: the page asked for nothing but itself, its script, the worker's bundle and the browser's favicon, and no violation was reported.
+
+| Case | Reader | Peak | Whole run in Chrome |
+| --- | --- | --- | --- |
+| 1,000,000 triangle GLB, 24 MB | 120 ms | 71 MiB | 384 to 461 ms, 100 ms to draw again at another Size |
+| 250,000 triangle STL, 12.5 MB | 61 ms | 84 MiB | 187 to 192 ms warm |
+| 150 MB STL, 3,059,000 triangles clustered to 230,636 | 642 ms | 144 MiB (83 MiB live) | 798 to 847 ms |
+| 537 MB triangle soup, refused after 4 passes | 1,743 ms | 127 MiB (54 MiB live) | |
+| GLB JSON at every computer cap | 44 ms | 28 MiB | |
+
+The worker's bundle is 578 kB minified and 147 kB gzipped, three's core and renderer included.
+
+## 14. Design review
+
+Seven rounds of design review, by two reviewers each, changed this note before the build, and every finding was adopted:
+
+- Rounds 1 and 2: hard limits on clustering and OBJ (D-374), one copy helper for every image write (D-375), `shownLife` for the fallback (D-376), the Size cap (D-371), the kind lists in api.ts and persistence.ts, two-tap Remove (D-370, 388), the three chunk rule (D-377), GLB as the only glTF form (D-372), the `hitFunc` (D-379), one `modelShown` predicate (D-380), an image with a model never the shipped icon (D-413), `sameImage` over the whole ModelRef (D-414), 1024 px textures (D-415), `ConfirmButton` (D-416), group image changes per token (D-417, 418) and Float64 keys (D-419). Smaller fixes covered typed facings, icon refs on import, boxes in hundredths, the oriented sheet size, the 8 px gutter, custom and squeezed footprints, scoped keys, the budgets, the upload path, the rider and stale comments.
+- Round 3: GLTFLoader built objects and copied data that no cap counted, so the owner's D-429 replaced it with the app's own reader (D-470 to 479), and missing normals are welded (D-477).
+- Round 4: the JSON pre-scan before `JSON.parse`, with its limits from the probe in Appendix A (D-510), the normal matrix and winding (D-511), material groups, COLOR_0, sRGB, the coordinate set and wrap (D-512 to 514), quantization and KTX2 (D-515, with the coordinator's D-520 keeping the touch cap), the accessor rules, one traversal and an explicit stack (D-516), face normals past the weld limit (D-517) and no material (D-519).
+- Round 5: static linear blend skinning in the rest pose, with joint matrices for every visited node and a joint outside the walk composed from its own root (D-521, 525), `KHR_texture_transform` (D-522), the group key and the white fill (D-523), and KTX2 fallbacks (D-524).
+- Round 6, the owner's edit: the test oracles read coordinates against glTF's T × R × S and skin normals against an inverse-transpose expectation, a skin's joints are distinct, at most 1,024 a skin and 16,384 over the drawn skins, and a zero-weight vertex draws at its bind position (D-526).
+- Round 7 agreed, and its small points went to the build (D-261127-530 to 532).
+
+## Appendix A. Prototype and measurements
+
+Throwaway prototype, not kept: the pipeline above in a module worker with OffscreenCanvas, served with the app's CSP, driven by Playwright. Test models built from primitives by the prototype itself: a knight mini on a 25 mm base as binary STL (659k triangles, 33 MB, and a 3.06M triangle, 153 MB copy), ASCII STL and OBJ (61k), and a textured wolf GLB with no base, off center and floating (16k, 0.6 MB). "x4" is Chromium's CPU slowdown, the iso design's stand-in for a mid-range phone. The prototype predates the review: it used a Map, a 4 px gutter, three's STLLoader for ASCII STL, OBJLoader and GLTFLoader with a `loadImageSource` override, so its memory is not the bounded design's.
+
+| Run | Wall | Main-thread worst gap | Decimate | Draw 8 | Encode |
+| --- | --- | --- | --- | --- | --- |
+| 33 MB STL, worker, Metal | 259 ms | 18 ms | 53 ms | 16 ms | 112 ms |
+| 153 MB STL, worker, Metal | 348 ms | 19 ms | 154 ms | 10 ms | 104 ms |
+| 153 MB STL, streamed, x4 | 1,143 ms | (main thread) | 868 ms | 17 ms | 141 ms |
+| WebKit worker, 33 MB STL, GLB | 383, 190 ms | 18 ms | 72 ms | 104, 79 ms | PNG |
+
+- Streamed reading kept the 153 MB file out of the JS heap. Read whole, it peaked at 371 MB. A software GPU at x4 took 1.2 s for the 33 MB STL. WebKit ran every format in a worker, decoded the GLB's texture with `createImageBitmap` under the CSP, and encoded PNG.
+- Stored size with the server's sharp at quality 82: knight 67 KiB full, 43 mobile and 23 thumb, the wolf 57, 38 and 21.
+- JSON probe for D-510 (Node 26's V8, `--expose-gc`, heap after two collections): 4 MB chunks held 116 MB as 2,097,152 nested arrays, 85 MB as 1,398,102 empty objects, 53 MB as empty arrays and 16 MB as one-digit numbers. 500,000 objects with a distinct key each held 92 MB (192 bytes an object), one object of 500,000 distinct keys 35 MB (37 bytes a value), and 500,000 distinct short strings 15 MB (32 bytes each). A GLB JSON at the reader's caps (13 MB) held 23 MB, the typical character's 0.05 MB. The pre-scan took 11 to 14 ms on 4 MB and 20 ms on 13 MB. JavaScriptCore was not measured.
+- Play cost, Konva, 200 tokens, one layer draw: picture standee 0.6 ms median (0.8 p90), model 0.4 (0.5), and at x4 2.5 (3.0) and 1.3 (1.8).
