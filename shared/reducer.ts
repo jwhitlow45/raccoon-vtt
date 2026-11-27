@@ -701,6 +701,7 @@ function dispatch(tx: Tx, op: Op): void {
     case "roll.dice":
     case "actor.deathRoll":
     case "actor.rechargeRoll":
+    case "actor.hitDieRoll":
       throw invalid(`${op.t} is resolved by the server before it reaches the reducer`);
   }
 }

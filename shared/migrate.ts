@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 50;
-export const OP_VERSION = 67;
+export const SNAPSHOT_VERSION = 51;
+export const OP_VERSION = 68;
 
 export type MigrationStep = {
   from: number;
@@ -311,6 +311,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // (server/rooms/reid.ts), after its stored ops replay, and stores the room at this version with it, so that runs
   // once. The number moves so that an older build refuses a v50 snapshot instead of loading it.
   { from: 49, to: 50, apply: (state) => state },
+  // Spell slots and Hit Point Dice (docs/design/design-v1-slots.md, SLOTS_SNAPSHOT_VERSION): a character's `classes`,
+  // `spent` and `useRev` are optional, and absent reads as none, so a v50 room is a v51 room as it is. The number moves
+  // so that an older build refuses a v51 snapshot instead of failing on the character, which its strict schema refuses.
+  // No first commit forces this snapshot, since only a version 68 op writes the fields.
+  { from: 50, to: 51, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1572,6 +1577,19 @@ export const opMigrations: MigrationStep[] = [
     to: 67,
     apply: (op) => op,
   },
+  {
+    // Spell slots and Hit Point Dice (USE_STAMP_OP_VERSION, docs/design/design-v1-slots.md 6): `actor.hitDieRoll`, the
+    // `use` kinds `slot`, `pact` and `hitDie`, a `character.update`'s `classes` and `spent`, the use line kinds, a roll's
+    // `hitDie` and a character's `useRev` are new, which an older strict schema refuses, so no stored op changes shape and
+    // the step is the identity. From this version every rest and every use that changes a character moves its `useRev`
+    // (usesStamped). Ops stored before replay as they ran, so a stored restore's hash guard still matches.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup for any room this build wrote a snapshot of, and for any room with changes at this version after its
+    // last snapshot, both of which an older build refuses.
+    from: 67,
+    to: 68,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2800,4 +2818,26 @@ export const FALL_ONCE_OP_VERSION = 67;
  */
 export function fallsOnce(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < FALL_ONCE_OP_VERSION);
+}
+
+/** The op version of spell slots and Hit Point Dice (docs/design/design-v1-slots.md 6). */
+export const USE_STAMP_OP_VERSION = 68;
+
+/**
+ * The room format of spell slots and Hit Point Dice: a character's `classes`,
+ * `spent` and `useRev` are new and optional, so a v50 room is a v51 room as
+ * it is.
+ */
+export const SLOTS_SNAPSHOT_VERSION = 51;
+
+/**
+ * Whether a rest, or a use that changes a character, moves the character's
+ * `useRev` (docs/design/design-v1-slots.md 5). From op version 68 it does, so
+ * a re-sync's Undo is refused after any rest or use since its Apply. Ops
+ * stored before never moved it and replay so: a stored rest replayed with the
+ * stamp would change the character and fail a later stored restore's hash
+ * guard. Live ops carry no stored version and take today's rule.
+ */
+export function usesStamped(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < USE_STAMP_OP_VERSION);
 }

@@ -10,6 +10,9 @@ import {
   TRAP_EDGE_OP_VERSION,
   FALL_ONCE_OP_VERSION,
   fallsOnce,
+  SLOTS_SNAPSHOT_VERSION,
+  USE_STAMP_OP_VERSION,
+  usesStamped,
   edgePinches,
   trapSettlesNamed,
   healRevivesDead,
@@ -2187,8 +2190,8 @@ describe("op version 64 and snapshot 48, openings between floors (docs/design/de
 describe("snapshot 50, version 8 ids", () => {
   test("a v49 room is a v50 room as it is, and a build at 49 refuses a v50 snapshot", () => {
     assert.equal(SEALED_IDS_SNAPSHOT_VERSION, 50);
-    assert.equal(SNAPSHOT_VERSION, SEALED_IDS_SNAPSHOT_VERSION);
-    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION, "no op changes shape");
+    assert.ok(SNAPSHOT_VERSION >= SEALED_IDS_SNAPSHOT_VERSION);
+    assert.ok(OP_VERSION >= FALL_ONCE_OP_VERSION, "no op changes shape");
     const state = room();
     assert.equal(runMigrations(state, 49, 50, snapshotMigrations), state);
     assert.equal(migrateSnapshot(state, 49), state);
@@ -2206,7 +2209,7 @@ describe("op version 65 and snapshot 49, walks that end with their turn", () => 
   test("keeps stored ops and snapshots unchanged through the identity steps, and the new op and fields parse", () => {
     assert.equal(WALK_TRIM_OP_VERSION, 65);
     assert.equal(WALK_TRIM_SNAPSHOT_VERSION, 49);
-    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION);
+    assert.ok(OP_VERSION >= FALL_ONCE_OP_VERSION);
     assert.ok(SNAPSHOT_VERSION >= WALK_TRIM_SNAPSHOT_VERSION);
     const old = restore({ climb, falls: [fall] });
     assert.equal(runMigrations(old, 64, 65, opMigrations), old);
@@ -2292,7 +2295,7 @@ describe("op version 66, trap cards per creature and squeezes along the map's ed
   test("is the identity step at version 66, with room format 50 as before", () => {
     assert.equal(TRAP_EDGE_OP_VERSION, 66);
     assert.ok(OP_VERSION >= TRAP_EDGE_OP_VERSION);
-    assert.equal(SNAPSHOT_VERSION, 50);
+    assert.ok(SNAPSHOT_VERSION >= 50);
     assert.equal(runMigrations(named, 65, 66, opMigrations), named);
     assert.equal(migrateOp(named, 65), named);
     assert.equal(migrateOp(named, 66), named);
@@ -2314,8 +2317,8 @@ describe("op version 67, a creature falls once a step", () => {
 
   test("is the identity step at version 67, with room format 50 as before", () => {
     assert.equal(FALL_ONCE_OP_VERSION, 67);
-    assert.equal(OP_VERSION, FALL_ONCE_OP_VERSION);
-    assert.equal(SNAPSHOT_VERSION, 50);
+    assert.ok(OP_VERSION >= FALL_ONCE_OP_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= 50);
     assert.equal(runMigrations(restore, 66, 67, opMigrations), restore);
     assert.equal(migrateOp(restore, 66), restore);
     assert.equal(migrateOp(restore, 67), restore);
@@ -2327,5 +2330,35 @@ describe("op version 67, a creature falls once a step", () => {
 
   test("a build at 66 refuses an op from this one by number", () => {
     assert.throws(() => runMigrations(restore, 67, 66, opMigrations), /cannot migrate from version 67 down to 66/);
+  });
+});
+
+describe("op version 68 and snapshot 51, spell slots and Hit Point Dice", () => {
+  const use = { t: "actor.use", target: { characterId: "bree" }, use: { kind: "slot", level: 3 } };
+  const roll = { t: "actor.hitDieRoll", tag: "t1", target: { characterId: "bree" }, die: 10 };
+  const classes = { t: "character.update", characterId: "bree", patch: { classes: [{ id: "wizard", level: 5 }] } };
+
+  test("are identity steps at 68 and 51, and the new ops parse", () => {
+    assert.equal(USE_STAMP_OP_VERSION, 68);
+    assert.equal(OP_VERSION, USE_STAMP_OP_VERSION);
+    assert.equal(SLOTS_SNAPSHOT_VERSION, 51);
+    assert.equal(SNAPSHOT_VERSION, SLOTS_SNAPSHOT_VERSION);
+    for (const op of [use, roll, classes]) {
+      assert.equal(runMigrations(op, 67, 68, opMigrations), op);
+      assert.equal(migrateOp(op, 67), op);
+      assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+    }
+    const state = room();
+    assert.equal(runMigrations(state, 50, 51, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 50), state);
+  });
+
+  test("gates the use stamp at 68, so rests and uses stored at 67 and before replay as they ran", () => {
+    assert.deepEqual([usesStamped(1), usesStamped(66), usesStamped(67), usesStamped(68), usesStamped(undefined)], [false, false, false, true, true]);
+  });
+
+  test("a build at 67 refuses an op from this one by number, and a build at 50 a v51 snapshot", () => {
+    assert.throws(() => runMigrations(use, 68, 67, opMigrations), /cannot migrate from version 68 down to 67/);
+    assert.throws(() => runMigrations(room(), 51, 50, snapshotMigrations), /down/);
   });
 });

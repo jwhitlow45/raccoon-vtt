@@ -8,7 +8,8 @@ import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
 import { sceneWeatherSchema } from "./weather.ts";
-import { CLASS_IDS } from "./rules/classResources.ts";
+import { CLASS_IDS, type ClassId } from "./rules/classResources.ts";
+import { MAX_CLASSES, MAX_LEVEL, SLOT_LEVELS, THIRD_CLASSES } from "./rules/spellSlots.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { cellIndexMost } from "./rules/grid.ts";
 import { sceneHexSpan } from "./rules/hex.ts";
@@ -712,6 +713,41 @@ const tokenPatch = z.strictObject({
 /** A character's level, as the XP budget table counts them. */
 const characterLevel = z.number().int().min(1).max(20);
 
+/** A Hit Point Die's size. */
+const hitDieSize = z.union([z.literal(12), z.literal(10), z.literal(8), z.literal(6)]);
+
+/**
+ * A character's classes (docs/design/design-v1-slots.md 5): at most 12, each
+ * SRD class once, levels 1 to 20 adding up to at most 20, `third` only on a
+ * Fighter or Rogue, and an Other class with its Hit Point Die. An empty list
+ * removes them.
+ */
+const classLevels = z
+  .array(
+    z.union([
+      z.strictObject({ id: z.enum(CLASS_IDS), level: characterLevel, third: z.literal(true).optional() }),
+      z.strictObject({ id: z.literal("other"), level: characterLevel, die: hitDieSize }),
+    ]),
+  )
+  .max(MAX_CLASSES)
+  .refine((list) => unique(list.filter((c) => c.id !== "other").map((c) => c.id)), { message: "a class is listed twice" })
+  .refine((list) => list.every((c) => !("third" in c) || c.third === undefined || THIRD_CLASSES.has(c.id as ClassId)), { message: "only a Fighter or Rogue's subclass casts by the one-third table" })
+  .refine((list) => list.reduce((sum, c) => sum + c.level, 0) <= MAX_LEVEL, { message: "the classes add up to at most level 20" });
+
+/** A spent count of one kind: 0 to 20, the most any count reaches. */
+const spentCount = z.number().int().min(0).max(20);
+
+/**
+ * What a character has spent, by shape alone (Spent): the reducer clamps it
+ * to the classes' counts and writes it in its normal form, and an import's
+ * schema checks it against them (server/rooms/stateSchema.ts).
+ */
+const spentSchema = z.strictObject({
+  slots: z.array(spentCount).length(SLOT_LEVELS).optional(),
+  pact: spentCount.optional(),
+  dice: z.strictObject({ d12: spentCount.optional(), d10: spentCount.optional(), d8: spentCount.optional(), d6: spentCount.optional() }).optional(),
+});
+
 /*
  * A player character's stat block (docs/design/design-v1-pc-stats.md 3.2 and 3.5).
  * A formula is bounded by its length and its characters and never parsed
@@ -1019,6 +1055,7 @@ export const EXPECT_PARTS = [
   "actor.shape",
   "ddbSync",
   "resources",
+  "classes",
 ] as const;
 export type ExpectPart = (typeof EXPECT_PARTS)[number];
 const characterExpect = z.strictObject(Object.fromEntries(EXPECT_PARTS.map((part) => [part, syncHash.optional()])) as { [P in ExpectPart]: z.ZodOptional<typeof syncHash> });
@@ -1132,6 +1169,17 @@ const characterPatch = z.strictObject({
    * removes them.
    */
   resources: resources.optional(),
+  /**
+   * The classes, whole (docs/design/design-v1-slots.md 6). The reducer clamps
+   * `spent` to their counts, and an empty list removes the classes and every
+   * spent count.
+   */
+  classes: classLevels.optional(),
+  /**
+   * The exact spent counts a re-sync's Undo puts back, only beside `classes`,
+   * `ddbSync` and `expect.classes` (D-261127-264, 367).
+   */
+  spent: spentSchema.optional(),
 });
 
 /** A stat block line the DM reads as text, such as the skills or the languages. */
@@ -1804,6 +1852,18 @@ const rechargeRollFields = {
   record: turnRecordId.optional(),
 };
 
+/**
+ * A Short Rest's Hit Point Die rolled on the server (docs/design/design-v1-slots.md 6):
+ * one die of `die`'s size plus the Constitution modifier the character's
+ * numbers give, `con` only where they give none.
+ */
+const hitDieRollFields = {
+  tag: id,
+  target: actorTarget,
+  die: hitDieSize,
+  con: z.number().int().min(-5).max(10).optional(),
+};
+
 /** An extra that parses, in the grammar's own words when it does not. */
 function extraParses(o: { extra?: string | undefined }, ctx: z.RefinementCtx): void {
   if (o.extra === undefined) return;
@@ -1816,6 +1876,7 @@ const diceRollAsked = z.strictObject({ t: z.literal("dice.roll"), ...diceRollFie
 const rollDiceAsked = z.strictObject({ t: z.literal("roll.dice"), ...rollDiceFields });
 const deathRollAsked = z.strictObject({ t: z.literal("actor.deathRoll"), ...deathRollFields });
 const rechargeRollAsked = z.strictObject({ t: z.literal("actor.rechargeRoll"), ...rechargeRollFields });
+const hitDieRollAsked = z.strictObject({ t: z.literal("actor.hitDieRoll"), ...hitDieRollFields });
 
 /** What the server drew for one roll (DiceResult). Bounded by shape alone, as `asked` is. */
 const diceResult = z.strictObject({
@@ -2102,6 +2163,11 @@ const useKind = z.discriminatedUnion("kind", [
     .refine((u) => u.short === undefined || u.limit === "day", { message: "only a use a day comes back on a Short Rest by itself" }),
   z.strictObject({ kind: z.literal("regenerate"), key: useKey, amount: z.number().int().min(1).max(LIMITS.regenerateMax), record: turnRecordId }),
   z.strictObject({ kind: z.literal("resource"), id: plainId, amount: z.number().int().min(1).max(LIMITS.resourcePoolMax).optional() }),
+  // A character's spell slot of one level, a Pact Magic slot, or a Hit Point Die (docs/design/design-v1-slots.md 6). A
+  // die's spend heals by the typed roll in `heal`, and its give back takes none.
+  z.strictObject({ kind: z.literal("slot"), level: z.number().int().min(1).max(SLOT_LEVELS) }),
+  z.strictObject({ kind: z.literal("pact") }),
+  z.strictObject({ kind: z.literal("hitDie"), die: hitDieSize, heal: z.number().int().min(1).max(100_000).optional() }),
 ]);
 
 const op = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) => z.strictObject({ t: z.literal(t), ...shape });
@@ -2678,7 +2744,8 @@ const stateClientOps = [
    */
   op("actor.use", { target: actorTarget, use: useKind, back: z.literal(true).optional(), quiet: z.literal(true).optional() })
     .refine((o) => o.back === undefined || o.use.kind !== "regenerate", { message: "Regeneration is taken back with its HP" })
-    .refine((o) => o.back === undefined || o.use.kind !== "ability" || o.use.ifReady === undefined, { message: "a give back is never the Dice panel's mark" }),
+    .refine((o) => o.back === undefined || o.use.kind !== "ability" || o.use.ifReady === undefined, { message: "a give back is never the Dice panel's mark" })
+    .refine((o) => o.use.kind !== "hitDie" || (o.back === undefined) === (o.use.heal !== undefined), { message: "a Hit Point Die spent heals by its roll, and one given back heals nothing" }),
   /**
    * Skips a turn's prompt, or reopens a skipped one while its turn runs
    * (docs/design/design-v1-combat-controls.md 3.1): `what` names it in the record
@@ -2692,7 +2759,10 @@ const stateClientOps = [
    * the server refuses the op when any of them changed since. It is checked
    * where ops arrive, never on replay.
    */
-  op("character.update", { characterId: id, patch: characterPatch, expect: characterExpect.optional() }),
+  op("character.update", { characterId: id, patch: characterPatch, expect: characterExpect.optional() }).refine(
+    (o) => o.patch.spent === undefined || (o.patch.classes !== undefined && o.patch.ddbSync !== undefined && o.expect?.classes !== undefined),
+    { message: "spent counts come back only with a re-sync's Undo" },
+  ),
   op("character.delete", { characterId: id }),
   op("monster.create", { monster: monsterInput }),
   op("monster.update", { monsterId: id, patch: monsterPatch }),
@@ -3047,6 +3117,8 @@ const stateClientOps = [
   op("actor.deathRoll", deathRollFields).superRefine(extraParses),
   /** An ability's recharge roll on the server (docs/design/design-v1-combat-controls.md 3.1), permitted as `actor.use` is. */
   op("actor.rechargeRoll", rechargeRollFields),
+  /** A Short Rest's Hit Point Die rolled on the server (docs/design/design-v1-slots.md 6), permitted as a die's `actor.use` is. */
+  op("actor.hitDieRoll", hitDieRollFields),
 ] as const;
 
 export const clientOps = [...stateClientOps, ...historyCommandSchema.options] as const;
@@ -3286,7 +3358,7 @@ export const serverOnlyOps = [
    */
   op("sys.sound", { from: z.number().int().min(0), music: musicRunSchema.nullable(), loops: z.strictObject({}).optional(), effects: z.array(z.never()).max(0).optional() }),
   op("sys.dice", {
-    asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked, rechargeRollAsked]),
+    asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked, rechargeRollAsked, hitDieRollAsked]),
     batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/, "not a batch id"),
     results: z.array(diceResult).min(1).max(LIMITS.diceRollsPerOp),
     /** A request's answer rolled with the bonus the player typed, since the server knew none (4.1). */
@@ -4388,6 +4460,7 @@ export const ID_RULES: { readonly [T in OpType]: IdRule<T> } = {
   "roll.dice": "none",
   "actor.deathRoll": "none",
   "actor.rechargeRoll": "none",
+  "actor.hitDieRoll": "none",
   undo: "copied",
   redo: "copied",
   "sys.memberJoin": "server",
@@ -4609,6 +4682,7 @@ export const NEW_ID_PATHS: { readonly [T in OpType]: NewIdRule<T> } = {
   "roll.dice": "none",
   "actor.deathRoll": "none",
   "actor.rechargeRoll": "none",
+  "actor.hitDieRoll": "none",
   undo: "none",
   redo: "none",
   "sys.memberJoin": "none",

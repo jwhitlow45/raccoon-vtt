@@ -71,6 +71,7 @@ export const FAR_TREATMENT: { readonly [T in OpType]: FarTreatment } = {
   "actor.deathSave": "bookkeeping",
   "actor.deathRoll": "bookkeeping",
   "actor.rechargeRoll": "bookkeeping",
+  "actor.hitDieRoll": "bookkeeping",
   "actor.rest": "bookkeeping",
   "actor.prompt": "bookkeeping",
   "actor.saveDue": "bookkeeping",

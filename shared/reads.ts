@@ -215,6 +215,7 @@ export function opReads(op: Op, state: RoomState): Reads {
     case "roll.dice":
     case "actor.deathRoll":
     case "actor.rechargeRoll":
+    case "actor.hitDieRoll":
     // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design/design-v1-player-save-spell.md 5.6).
     case "cast.ask":
       return NEVER;

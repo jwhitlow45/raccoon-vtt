@@ -440,7 +440,7 @@ function promptFits(op: Op, c: Check): Decision {
  * A character as `expect` reads it: the server's, or a player's own copy,
  * whose actor holds every part `expect` names.
  */
-export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSync" | "resources"> & {
+export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSync" | "resources" | "classes" | "spent" | "useRev"> & {
   actor: Pick<Actor, "ac" | "speeds" | "senses" | "sheetUrl" | "srdId" | "wildShape"> & { hp?: Pick<Actor["hp"], "cur" | "max"> };
 };
 
@@ -481,6 +481,10 @@ function expectValue(character: ExpectSubject, part: ExpectPart): unknown {
     case "resources":
       // The list whole, each count spent included, so a use spent since the review refuses the write (docs/design/design-v1-ddb-resources.md 5).
       return character.resources ?? null;
+    case "classes":
+      // The classes with the counts spent and the use stamp (docs/design/design-v1-slots.md 6), the one part that hashes the stamp: any
+      // rest or use since the sender read the character, on any device, refuses the write, even where every count reads the same.
+      return [character.classes ?? null, character.spent ?? null, character.useRev ?? null];
   }
 }
 
@@ -837,6 +841,7 @@ function forDm(op: Op, c: Check): Decision {
     // The DM's death roll and recharge roll need a creature that exists, checked before anything is drawn.
     case "actor.deathRoll":
     case "actor.rechargeRoll":
+    case "actor.hitDieRoll":
       return ("tokenId" in op.target ? ownEntry(c.state.tokens, op.target.tokenId) : ownEntry(c.state.characters, op.target.characterId)) ? OK : GONE;
     // The rule of the op it carries (docs/design/design-v1-dice.md 4.2).
     case "sys.dice":
@@ -984,6 +989,9 @@ function hideCheck(c: Check, sceneId: string): Decision {
 function partyOn(state: RoomState, sceneId: string): boolean {
   return Object.values(state.tokens).some((t) => t.sceneId === sceneId && unhiddenPartyMember(state, t));
 }
+
+/** The uses that spend what the character holds beside its actor, which a player lent only its token never spends. */
+const CHARACTER_USES: ReadonlySet<string> = new Set(["resource", "slot", "pact", "hitDie"]);
 
 function forPlayer(op: Op, c: Check): Decision {
   // The floors the player holds, which behind a blackout are none (design 7.3): an op on the table then answers as if it were not there.
@@ -1254,13 +1262,14 @@ function forPlayer(op: Op, c: Check): Decision {
       return t.owned ? OK : NOT_YOURS;
     }
 
-    case "actor.use": {
+    case "actor.use":
+    case "actor.hitDieRoll": {
       const t = c.target(op.target);
       if (!t.visible) return GONE;
       if (!t.owned) return NOT_YOURS;
-      // Class resources are the character's players' alone (docs/design/design-v1-combat-controls.md 7.2), so a player lent
-      // only the token spends none, as they read and edit none.
-      if (op.use.kind !== "resource" || !("tokenId" in op.target)) return OK;
+      // Class resources, spell slots and Hit Point Dice are the character's players' alone (docs/design/design-v1-combat-controls.md
+      // 7.2, docs/design/design-v1-slots.md 6), so a player lent only the token spends none, as they read and edit none.
+      if ((op.t === "actor.use" && !CHARACTER_USES.has(op.use.kind)) || !("tokenId" in op.target)) return OK;
       const token = ownEntry(c.state.tokens, op.target.tokenId);
       return token && "ref" in token.actor && !c.ownsCharacterId(token.actor.ref) ? NOT_YOURS : OK;
     }

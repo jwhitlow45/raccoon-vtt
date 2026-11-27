@@ -129,7 +129,7 @@ describe("undo classifier inventory", () => {
 
   const characterFields = {
     name: "Bree", size: "large", ownerIds: ["p2"], defaultImage: null, actor: { ac: 19 }, level: 6,
-    stats: { evasion: true }, knownForms: ["wolf"], ddbSync: null, resources: [],
+    stats: { evasion: true }, knownForms: ["wolf"], ddbSync: null, resources: [], classes: [{ id: "wizard", level: 5 }], spent: {},
   } satisfies Record<keyof OpOf<"character.update">["patch"], unknown>;
   for (const [field, value] of Object.entries(characterFields)) {
     test(`character field ${field} is Setup unless covered by the exact actor exceptions`, () => {

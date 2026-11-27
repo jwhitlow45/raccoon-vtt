@@ -627,10 +627,26 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
  * again." for a recharge, and "Adult Red Dragon regains a Legendary Resistance
  * (2 of 3 left)." for a use restored.
  */
+/**
+ * A character's spell slot, Pact Magic slot or Hit Point Die line
+ * (docs/design/design-v1-slots.md 7), which only the DM and the character's
+ * owners read: "Bree used a level 3 spell slot (2 of 3 left).", "Bree: a
+ * level 3 spell slot is back (3 of 3).", "Thorn spent a d10 Hit Point Die
+ * (2 of 5 left)."
+ */
+function slotText(data: Extract<LogEvent, { type: "use" }>, who: string): string {
+  const thing = data.what === "slot" ? `a level ${data.level ?? 1} spell slot` : data.what === "pact" ? "a Pact Magic slot" : `a d${data.die ?? 8} Hit Point Die`;
+  const known = data.left !== undefined && data.max !== undefined;
+  if (data.back) return `${who}: ${thing} is back${known ? ` (${data.left} of ${data.max})` : ""}.`;
+  const after = known ? ` (${data.left} of ${data.max} left)` : "";
+  return data.what === "hitDie" ? `${who} spent ${thing}${after}.` : `${who} used ${thing}${after}.`;
+}
+
 export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): string {
   const counts = data.left !== undefined && data.max !== undefined ? `${data.left} of ${data.max} left` : undefined;
   const after = counts ? ` (${counts})` : "";
   const several = data.cost !== undefined && data.cost > 1;
+  if (data.what === "slot" || data.what === "pact" || data.what === "hitDie") return slotText(data, who);
   if (data.back) {
     switch (data.what) {
       case "legendary":

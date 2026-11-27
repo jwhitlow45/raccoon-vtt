@@ -10,6 +10,7 @@
  * feet. See design section 5.
  */
 
+import type { ClassId } from "./rules/classResources.ts";
 import type { DamageType } from "./rules/damage.ts";
 import type { CorrectionLogEvent } from "./undoContract.ts";
 import type { SaveOutcomeLedger } from "./saveOutcomeContract.ts";
@@ -1789,7 +1790,49 @@ export type Character = {
    * patch. Absent until then, and in rooms from before it.
    */
   longRest?: LongRestStamp;
+  /**
+   * The character's classes and class levels (docs/design/design-v1-slots.md 5),
+   * from which shared/rules/spellSlots.ts counts its spell slots, Pact Magic
+   * slots and Hit Point Dice. At most `MAX_CLASSES` (12) entries,
+   * each SRD class once, levels 1 to 20 adding up to at most 20. Absent is
+   * none, never an empty list. Its players and the DM read them, other
+   * players never.
+   */
+  classes?: ClassLevel[];
+  /**
+   * What the character has spent of the counts its classes give, in the one
+   * normal form `spentWithin` writes. Written only by use, roll and rest ops
+   * and a re-sync's Undo, never typed. Absent while nothing is spent.
+   */
+  spent?: Spent;
+  /**
+   * Moved by every rest and every use that changes the character from change
+   * format 68 (`usesStamped`), so a re-sync's Undo can tell a rest or a use
+   * since its Apply even where every count reads the same. A whole number
+   * from 0, absent before the first. Its players and the DM read it.
+   */
+  useRev?: number;
 };
+
+/** A Hit Point Die's size. */
+export const HIT_DIE_SIZES = [12, 10, 8, 6] as const;
+export type HitDieSize = (typeof HIT_DIE_SIZES)[number];
+
+/**
+ * One of a character's classes and its level, 1 to 20. `third` marks a
+ * Fighter or Rogue whose subclass casts spells, by the one-third caster
+ * table, which is not in SRD 5.2.1. An Other class (`other`) counts toward
+ * the level and the Hit Point Dice by its `die`, never spell slots.
+ */
+export type ClassLevel = { id: ClassId; level: number; third?: true } | { id: "other"; level: number; die: HitDieSize };
+
+/**
+ * A character's spent counts (docs/design/design-v1-slots.md 5): `slots` the
+ * nine spell slot levels' counts, present while one is above 0, `pact` the
+ * Pact Magic slots, and `dice` each die size's, only above 0 and in d12,
+ * d10, d8, d6 order.
+ */
+export type Spent = { slots?: number[]; pact?: number; dice?: { d12?: number; d10?: number; d8?: number; d6?: number } };
 
 /**
  * A character's record of its last D&D Beyond sync (docs/design/design-v1-resync.md
@@ -1844,6 +1887,8 @@ export type DdbBase = {
   hpMax?: number;
   speeds?: Actor["speeds"];
   senses?: string;
+  /** The classes D&D Beyond sent, read whole (docs/design/design-v1-slots.md 8). Absent when they were not read. */
+  classes?: ClassLevel[];
 };
 
 /**
@@ -3168,7 +3213,20 @@ export type LogEvent =
    * back, and `hidden` a use after a secret roll: both reach only the DM and
    * the creature's owners.
    */
-  | (AboutCreature & { type: "use"; what: "legendary" | "resist" | "ability" | "resource"; name?: string; cost?: number; left?: number; max?: number; back?: true; hidden?: true })
+  | (AboutCreature & {
+      type: "use";
+      what: "legendary" | "resist" | "ability" | "resource" | "slot" | "pact" | "hitDie";
+      name?: string;
+      cost?: number;
+      left?: number;
+      max?: number;
+      back?: true;
+      hidden?: true;
+      /** A spell slot's level, or the Pact Magic slots' (docs/design/design-v1-slots.md 7). */
+      level?: number;
+      /** A Hit Point Die's size. */
+      die?: HitDieSize;
+    })
   | ClockLogEvent;
 
 /**
@@ -3207,8 +3265,11 @@ export type ClockLogEvent = {
  * roller asked it (docs/design/design-v1-combat-controls.md 3.4), since a label is
  * cut to fit or typed by hand and so names no type for certain. `seenBy`
  * is the token's list on a per-player scene, as other token events carry it.
+ * `hitDie` marks a Short Rest's Hit Point Die roll (docs/design/design-v1-slots.md
+ * 7), which reaches only the DM and the character's own players and is
+ * never made again.
  */
-export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; seenBy?: MemberId[]; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true; type?: DamageType };
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; seenBy?: MemberId[]; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true; type?: DamageType; hitDie?: HitDieSize };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

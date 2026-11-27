@@ -161,6 +161,7 @@ export const UNDO_SCOPE_BY_OP = {
   "roll.dice": "none",
   "actor.deathRoll": "none",
   "actor.rechargeRoll": "none",
+  "actor.hitDieRoll": "none",
   undo: "none",
   redo: "none",
   "sys.memberJoin": "none",

@@ -482,6 +482,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `rolling a Death Save for ${target(op.target)}`;
     case "actor.rechargeRoll":
       return `rolling the recharge of ${quoted(op.name, "an ability")} for ${target(op.target)}`;
+    case "actor.hitDieRoll":
+      return `rolling a d${op.die} Hit Point Die for ${target(op.target)}`;
     case "undo":
     case "redo":
       return op.t;
@@ -822,6 +824,11 @@ export function describeHpEvent(event: Extract<LogEvent, { type: "hp" }>, state:
 function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): string {
   const use = op.use;
   if (use.kind === "regenerate") return `Regeneration for ${who}`;
+  // A character's slots and dice (docs/design/design-v1-slots.md 6): "using a level 3 spell slot for Bree", "giving back a d10 Hit Point Die for Thorn".
+  if (use.kind === "slot" || use.kind === "pact" || use.kind === "hitDie") {
+    const thing = use.kind === "slot" ? `a level ${use.level} spell slot` : use.kind === "pact" ? "a Pact Magic slot" : `a d${use.die} Hit Point Die`;
+    return op.back ? `giving back ${thing} for ${who}` : `using ${thing} for ${who}`;
+  }
   const name =
     use.kind === "legendary"
       ? quoted(use.name, "a Legendary Action")
