@@ -58,6 +58,13 @@ describe("the built SPA", () => {
     }
   });
 
+  test("a hashed file the build does not have gets the page, revalidated, never cached for good", async () => {
+    const res = await app.inject({ method: "GET", url: "/assets/missing-Bt3UaMHt.js" });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /RaccoonVTT/);
+    assert.notEqual(res.headers["cache-control"], IMMUTABLE);
+  });
+
   test("other files keep the default revalidation", async () => {
     for (const url of ["/app.js", "/index.html", "/assets/readme.txt", "/fonts/Inter-LICENSE.txt"]) {
       const res = await app.inject({ method: "GET", url });
