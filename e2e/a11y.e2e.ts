@@ -24,15 +24,16 @@ import { barControl, ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, Sock
  * and saved, with each walk's stops, as a11y-violations.json in the
  * screenshot directory. The run fails on any violation KNOWN does not name
  * with its reason, so a fixed rule stays fixed, and a drawn page first
- * proves each check finds what it looks for. It runs on demand, by a lane,
- * never in CI, as opportunity-bench does: `A11Y_REPORT=1` lists every
+ * proves each check finds what it looks for. As opportunity-bench is, it
+ * is skipped when CI is set, so a lane runs it on demand and a local full
+ * run (`pnpm test:e2e`) runs it too. `A11Y_REPORT=1` lists every
  * violation without failing, for a sweep of new surfaces.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
-const SKIP = process.env.CI ? "the accessibility sweep runs on demand, not in CI" : false;
+const SKIP = process.env.CI ? "the accessibility sweep is skipped when CI is set" : false;
 const REPORT_ONLY = process.env.A11Y_REPORT === "1";
 /** While fixing one: `A11Y_ONLY=<pattern>` opens and scans only the surfaces whose names match. */
 const ONLY = process.env.A11Y_ONLY ? new RegExp(process.env.A11Y_ONLY) : null;
