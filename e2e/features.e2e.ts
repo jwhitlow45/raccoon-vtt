@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import { uuidv7 } from "#shared/ids.ts";
 import type { Character } from "#shared/model.ts";
 import { modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
-import { ConsoleWatch, diceFoldsOpen, openSideTab, OpSocket, pagePoint, pickTool, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, openSideTab, OpSocket, pagePoint, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -1202,6 +1202,51 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
       await tiles.first().scrollIntoViewIfNeeded();
       await waitFor("the previews drawn again", async () => ((await painted()) ? true : null), 20_000);
     } finally {
+      await setChoices(player, null);
+      await closeSheets(player);
+    }
+  });
+
+  test("ftd-3. Roll animation turned off and then Low power off loads no dice, since the picker passes on that Dice animation hid as its tiles go (D-261127-715)", async (t) => {
+    const webgl = await player.evaluate(`document.createElement("canvas").getContext("webgl2", { failIfMajorPerformanceCaveat: true }) !== null`);
+    if (!webgl) {
+      assert.ok(!process.env.CI, "no WebGL2 on the CI runner, so the dice loader's probe cannot be seen");
+      t.skip("this browser has no WebGL2 for the dice loader to probe");
+      return;
+    }
+    // Counts the WebGL2 contexts a page asks for, the dice loader's probe among them, from the next load on.
+    await playerContext.addInitScript(`(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+        if (kind === "webgl2") globalThis.__rvttWebgl2 = (globalThis.__rvttWebgl2 ?? 0) + 1;
+        return get.call(this, kind, ...rest);
+      };
+    })()`);
+    const probes = async () => Number(await player.evaluate(`globalThis.__rvttWebgl2 ?? 0`));
+    await closeSheets(player);
+    // A fresh load with Low power on, so the dice chunk waits and This device's picker is the only rolling surface mounted.
+    await player.evaluate(`localStorage.setItem("rvtt.lowPower", "on")`);
+    await reopenRoom(player);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    try {
+      const menu = await openThisDevice(player, true);
+      await openGroup(menu, "Rolls");
+      const roll = menu.getByRole("switch", { name: "Roll animation", exact: true });
+      assert.equal(await roll.getAttribute("aria-checked"), "true");
+      await roll.click();
+      await menu.locator("[data-dice-set]").first().waitFor({ state: "detached" });
+      const before = await probes();
+      await openGroup(menu, "Battery");
+      const low = menu.getByRole("switch", { name: "Low power", exact: true });
+      await low.click();
+      await waitFor("Low power off", async () => ((await low.getAttribute("aria-checked")) === "false" ? true : null));
+      await sleep(1_500);
+      assert.equal(await probes(), before, "the dice loader probed WebGL while Dice animation hides");
+      // Shown again, the loader probes, so the count above would have seen it.
+      await roll.click();
+      await waitFor("the dice loader's probe once Dice animation shows", async () => ((await probes()) > before ? true : null));
+    } finally {
+      await player.evaluate(`localStorage.removeItem("rvtt.lowPower")`);
       await setChoices(player, null);
       await closeSheets(player);
     }
