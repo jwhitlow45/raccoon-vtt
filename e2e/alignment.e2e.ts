@@ -1,4 +1,4 @@
-import { undoSaveAlignmentTests, undoScopeAlignmentTests, alignmentFile, helperTest, joinRequestAlignmentTests, noErrorsTest, restScrollsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
+import { undoSaveAlignmentTests, undoScopeAlignmentTests, alignmentFile, helperTest, joinRequestAlignmentTests, noErrorsTest, opportunityAlignmentTests, restScrollsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
 
 /**
  * The alignment sweep (e2e/alignmentRoom.ts says what it measures): the
@@ -18,5 +18,7 @@ alignmentFile("the upright phones", () => {
   undoScopeAlignmentTests(["390x844", "320x568"]);
   undoSaveAlignmentTests(["390x844", "320x568"]);
   joinRequestAlignmentTests(["390x844", "320x568"]);
+  // Opportunity Attack notices' card and switch at a computer's size too, so one file holds them (docs/design/design-v1-opportunity-attacks.md 9).
+  opportunityAlignmentTests(["1440x900", "390x844", "320x568"]);
   noErrorsTest();
 });

@@ -17,7 +17,7 @@ import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { assertCanvasAt, barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { pointerText } from "./helpers/pointerText.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
@@ -3138,7 +3138,9 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await page.mouse.up();
   await sweep.measure(page, "ruler-done", bar);
   await pressOption(page, "Ruler", "Keep this ruler on the map");
-  const c = await pagePoint(page, BOUNDS, { x: 2.5, y: 2.5 });
+  // Thorn's walks leave the Kobold's reach, so on a short phone his folded turn card can lie over the map's top: the second ruler starts on the first row below it that takes a press.
+  let c = await pagePoint(page, BOUNDS, { x: 2.5, y: 2.5 });
+  for (let y = 3.5; y <= 6.5 && !(await assertCanvasAt(page, c).then(() => true, () => false)); y++) c = await pagePoint(page, BOUNDS, { x: 2.5, y });
   const d = await pagePoint(page, BOUNDS, { x: 8.5, y: 11.5 });
   await page.mouse.move(c.x, c.y);
   await page.mouse.down();
@@ -9396,6 +9398,93 @@ export function confirmMoreTests(): void {
 }
 
 // Undo batch A roots. Keep this block independent of the parallel alignment additions.
+/**
+ * Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md 3
+ * and 9): Pat's turn card after Thorn walks out of a goblin's reach, its row
+ * with no Reaction used, the DM's after the goblin walks out of Thorn's, its
+ * row with one, and Room settings' Combat group with the room's switch. Snag
+ * and Thorn stand in the scene's empty top right corner, so no other
+ * creature's reach meets either walk. Each size builds the fight again, since
+ * each card shows on its own creature's turn.
+ */
+export function opportunityAlignmentTests(names: readonly string[]): void {
+  const snag = uuidv7();
+  let placed = false;
+  for (const name of names) {
+    const size = SIZES.find((candidate) => candidate.name === name);
+    assert.ok(size, `unknown Opportunity Attacks alignment size ${name}`);
+    for (const scale of SCALES) {
+      const at = `${name}${scale === 1 ? "" : "-130"}`;
+      test(`oa-align-${at}. the turn card's Opportunity Attacks, Pat's without Reaction used and the DM's with it, and Room settings' Combat group with the room's switch, within ${LIMIT_PX} px`, async () => {
+        const sweep = new Sweep(`oa-${at}`);
+        try {
+          // The step before ended its fight, which the DM's copy may not show yet.
+          await ops.send({ t: "encounter.end" }).catch(() => {});
+          await resetThorn();
+          await ops.send({ t: "token.update", tokenId: run.ids.thorn, patch: { x: 17, y: 1, elevation: 0 } });
+          if (placed) await ops.send({ t: "token.update", tokenId: snag, patch: { x: 18, y: 1, elevation: 0 } });
+          else await ops.send({ t: "token.create", token: { id: snag, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Snag", x: 18, y: 1, disposition: "hostile", actor: { inline: actor() } } });
+          placed = true;
+          await ops.send({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: run.ids.thorn, value: 18 }, { id: uuidv7(), tokenId: snag, value: 14 }] });
+          await ops.send({ t: "encounter.next" });
+          // Down three squares: two from Snag's, past its reach, at the second.
+          await patOps.send({ t: "token.move", tokenId: run.ids.thorn, x: 17, y: 4 });
+          pat.setDefaultTimeout(10_000);
+          await openAt(pat, size, scale);
+          await dismissToasts(pat);
+          let card = await alertCard(pat, "Thorn's turn");
+          if (card && (await card.getAttribute("data-turn-folded")) !== null) {
+            await card.getByRole("button", { name: "Show Thorn's turn" }).click();
+            card = await alertCard(pat, "Thorn's turn");
+          }
+          if (card) {
+            await card.getByRole("group", { name: "Opportunity Attacks" }).getByText("Snag (5 ft counted)").waitFor();
+            await sweep.measure(pat, "oa-pat-card", card);
+            await shots.take(pat, `alignment-${at}-oa-pat-card`);
+          } else await sweep.missing(pat, "oa-pat-card", "Thorn's walk showed Pat no turn card");
+          await pat.goto("about:blank");
+
+          // Snag's turn: beside Thorn, then three squares up, out of his reach at the first past it.
+          await ops.send({ t: "encounter.next" });
+          await ops.send({ t: "token.move", tokenId: snag, x: 18, y: 3 });
+          await ops.send({ t: "token.move", tokenId: snag, x: 18, y: 0 });
+          const page = await dmPageFor(size);
+          page.setDefaultTimeout(10_000);
+          await openAt(page, size, scale);
+          // The Undo steps before leave a refusal the DM's page toasts on each load, which can lie over the folded card.
+          await dismissToasts(page);
+          let dmCard = await alertCard(page, "Snag's turn");
+          if (dmCard && (await dmCard.getAttribute("data-turn-folded")) !== null) {
+            await dmCard.getByRole("button", { name: "Show Snag's turn" }).click();
+            dmCard = await alertCard(page, "Snag's turn");
+          }
+          if (dmCard) {
+            await dmCard.getByRole("button", { name: "Reaction used: Thorn", exact: true }).waitFor();
+            await sweep.measure(page, "oa-dm-card", dmCard);
+            await shots.take(page, `alignment-${at}-oa-dm-card`);
+          } else await sweep.missing(page, "oa-dm-card", "Snag's walk showed the DM no turn card");
+          await closeSheets(page);
+
+          const menu = await openMenu(page);
+          const back = page.getByRole("button", { name: /^Back to Menu/ });
+          if (await visible(back)) await back.click();
+          await menu.getByRole("button", { name: /^Room settings/ }).click();
+          const notices = menu.getByRole("switch", { name: "Opportunity Attack notices" });
+          await notices.scrollIntoViewIfNeeded();
+          const combat = menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: "Combat", exact: true }) }).last();
+          await sweep.measure(page, "oa-room-settings-combat", (await combat.count()) > 0 ? combat : menu);
+          await shots.take(page, `alignment-${at}-oa-room-settings-combat`);
+          await closeSheets(page);
+        } finally {
+          sweep.tally();
+          if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" }).catch(() => {});
+        }
+        assert.deepEqual(sweep.lines, [], `Opportunity Attacks out of line at ${sweep.at}`);
+      });
+    }
+  }
+}
+
 export function undoScopeAlignmentTests(names: readonly string[]): void {
   for (const name of names) {
     const size = [...SIZES, COMBAT_SMALL].find((candidate) => candidate.name === name);
