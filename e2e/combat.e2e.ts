@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { namedId, barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { assertCanvasAt, namedId, barControl, ConsoleWatch, openPage, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
 
 /**
@@ -458,6 +458,69 @@ function fightRows(): { party: (number | null)[]; monsters: (number | null)[]; a
   if (!state || !entries) return null;
   const kind = (tokenId: string | undefined) => (tokenId === undefined ? undefined : state.tokens[tokenId]?.kind);
   return { party: entries.filter((e) => kind(e.tokenId) === "pc").map((e) => e.value), monsters: entries.filter((e) => kind(e.tokenId) === "monster").map((e) => e.value), all: entries.length };
+}
+
+/**
+ * The Opportunity Attack notices' room (docs/design/design-v1-opportunity-attacks.md):
+ * Snag and Grub, two goblins on the scene's free lower left, with Bree and
+ * Cyra moved beside them, so no earlier step's creature stands in a walk.
+ */
+const oa = { snag: uuidv7(), grub: uuidv7(), toasts: "__oaToasts" };
+
+/** The words on the board's canvas, as Konva holds them. */
+function boardTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { text(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages.flatMap((s) => s.find("Text")).filter((t) => t.isVisible()).map((t) => t.text());
+  });
+}
+
+/** The creatures a drag's dashed reach rings are round, by token id (movement/MoveLayer.tsx ReachRings). */
+function reachRings(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { name(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages
+      .flatMap((s) => s.find(".reach-ring"))
+      .filter((n) => n.isVisible())
+      .map((n) => n.name().split(" ").find((part) => part.startsWith("reach-") && part !== "reach-ring")!.slice("reach-".length))
+      .sort();
+  });
+}
+
+/** Presses on a cell's center and moves to another's, held down there, so the drag's label and rings show. */
+async function holdDragCells(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  const a = await pagePoint(page, run.bounds, { x: from.x + 0.5, y: from.y + 0.5 });
+  const b = await pagePoint(page, run.bounds, { x: to.x + 0.5, y: to.y + 0.5 });
+  await assertCanvasAt(page, a);
+  await assertCanvasAt(page, b);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / 12, a.y + ((b.y - a.y) * i) / 12);
+}
+
+/** Counts every toast that comes on a page with words that match, so one that leaves again still counts. */
+async function countToasts(page: Page, words: string): Promise<void> {
+  await page.evaluate(
+    ([key, text]) => {
+      type El = { matches?(s: string): boolean; textContent: string | null; querySelectorAll?(s: string): ArrayLike<El> };
+      const g = globalThis as unknown as Record<string, number> & { document: { body: unknown }; MutationObserver: new (cb: (records: { addedNodes: ArrayLike<El> }[]) => void) => { observe(n: unknown, o: object): void } };
+      g[key] = 0;
+      new g.MutationObserver((records) => {
+        for (const r of records)
+          for (const n of Array.from(r.addedNodes)) {
+            const toasts = [...(n.matches?.("[data-toast]") ? [n] : []), ...Array.from(n.querySelectorAll?.("[data-toast]") ?? [])];
+            g[key] = (g[key] ?? 0) + toasts.filter((t) => (t.textContent ?? "").includes(text)).length;
+          }
+      }).observe(g.document.body, { childList: true, subtree: true });
+    },
+    [oa.toasts, words] as const,
+  );
+}
+
+function toastsCounted(page: Page): Promise<number> {
+  return page.evaluate((key) => (globalThis as unknown as Record<string, number>)[key] ?? 0, oa.toasts);
 }
 
 describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
@@ -2692,6 +2755,142 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     } finally {
       await ops.send({ t: "encounter.end" }).catch(() => {});
     }
+  });
+
+  test("oa-1. on Snag's turn the DM's drag away from Bree and Cyra names them on its label and rings them, and the drop lists them on Snag's turn card, each with a 44 px Reaction used (docs/design/design-v1-opportunity-attacks.md 1 and 3)", async () => {
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { x: 5, y: 15 } });
+    await ops.send({ t: "token.update", tokenId: run.cyPc.id, patch: { x: 7, y: 14 } });
+    const goblin = (id: string, name: string, x: number, y: number) => ({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name, size: "medium", x, y, visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } }) as const;
+    await ops.send(goblin(oa.snag, "Snag", 6, 15));
+    await ops.send(goblin(oa.grub, "Grub", 4, 16));
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: namedId("oa-snag"), tokenId: oa.snag, value: 25 },
+        { id: namedId("oa-bree"), tokenId: run.bree.id, value: 20 },
+        { id: namedId("oa-cy"), tokenId: run.cyPc.id, value: 15 },
+        { id: namedId("oa-grub"), tokenId: oa.grub, value: 10 },
+      ],
+    });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Snag's turn", () => (dmSocket.state?.encounter?.activeEntryId === namedId("oa-snag") ? true : null));
+    await dm.bringToFront();
+    await dm.keyboard.press("Escape");
+
+    // Down three squares: Bree, beside Snag's square, is 10 ft off at the second, and Cyra, on its corner, at the first.
+    await holdDragCells(dm, { x: 6, y: 15 }, { x: 6, y: 18 });
+    try {
+      const label = await waitFor("the drag's leaves line", async () => (await boardTexts(dm)).find((t) => t.includes("\nLeaves ")) ?? null, 5_000);
+      assert.match(label, /^15 ft · 15 ft left\nLeaves the reach of (Bree and Cyra|Cyra and Bree)$/);
+      assert.deepEqual(await reachRings(dm), [run.bree.id, run.cyPc.id].sort(), "a dashed ring round Bree and one round Cyra");
+      await shots.take(dm, "oa-dm-drag-line");
+    } finally {
+      await dm.mouse.up();
+    }
+    await waitFor("Snag three squares down", () => (dmSocket.state?.tokens[oa.snag]?.y === 18 ? true : null));
+    await waitFor("the rings gone with the drag", async () => ((await reachRings(dm)).length === 0 ? true : null));
+
+    const block = dm.getByRole("group", { name: "Snag's turn" }).getByRole("group", { name: "Opportunity Attacks" });
+    for (const name of ["Bree", "Cyra"]) {
+      const used = block.getByRole("button", { name: `Reaction used: ${name}`, exact: true });
+      await used.waitFor();
+      const box = (await used.boundingBox())!;
+      assert.ok(Math.abs(box.height - 44) < 0.5, `${name}'s Reaction used is ${box.height} px tall`);
+    }
+    await block.getByText("Unless Snag took the Disengage action.").waitFor();
+    await shots.take(dm, "oa-dm-card-block");
+    // Snag's turn is the DM's: Ana's computer, in the same fight, lists nobody.
+    await waitFor("Snag's turn on Ana's computer", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-snag") ? true : null));
+    await ana.waitForTimeout(500);
+    assert.equal(await ana.getByRole("group", { name: "Opportunity Attacks" }).count(), 0, "Ana's computer drew Snag's notices");
+  });
+
+  test("oa-2. Reaction used on a second DM computer waits on the wire busy, refuses a second tap, and once the server answers marks Cyra's Reaction, takes her row away and hands focus to Bree's", async () => {
+    const context = await browser.newContext({ viewport: DESK });
+    try {
+      await context.addCookies(await dmContext.cookies(server.origin));
+      const page = await context.newPage();
+      const wire = await routedSocket(page);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      const block = page.getByRole("group", { name: "Snag's turn" }).getByRole("group", { name: "Opportunity Attacks" });
+      const cyra = block.getByRole("button", { name: "Reaction used: Cyra", exact: true });
+      await cyra.waitFor();
+      wire.hold = /"t":"encounter\.update"/;
+      await cyra.click();
+      await waitFor("the press held on the wire", () => (wire.held.length === 1 ? true : null));
+      assert.equal(await cyra.getAttribute("aria-busy"), "true", "Reaction used is busy while the server has not answered");
+      await cyra.click();
+      assert.equal(sentOps(wire, "encounter.update"), 1, "a second tap sent the op again");
+      release(wire);
+      await waitFor("Cyra's Reaction used in the DM's copy", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === namedId("oa-cy"))?.reactionUsed === true ? true : null));
+      await cyra.waitFor({ state: "detached" });
+      await waitFor("focus on Bree's Reaction used", () => page.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") === "Reaction used: Bree" || null));
+      await dm.getByRole("group", { name: "Snag's turn" }).getByRole("button", { name: "Reaction used: Cyra", exact: true }).waitFor({ state: "detached" });
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("oa-3. a push after Snag's walk keeps Bree's row, and a reload, its card dismissed, shows the card again with the row and announces nothing", async () => {
+    const block = dm.getByRole("group", { name: "Snag's turn" }).getByRole("group", { name: "Opportunity Attacks" });
+    const bree = block.getByRole("button", { name: "Reaction used: Bree", exact: true });
+    // Two squares off Snag's start, where a walk scanned now would leave no reach of hers.
+    await ops.send({ t: "token.move", tokenId: run.bree.id, x: 4, y: 14, elevation: 0 });
+    await waitFor("Bree pushed", () => (dmSocket.state?.tokens[run.bree.id]?.x === 4 ? true : null));
+    await dm.waitForTimeout(500);
+    assert.equal(await bree.count(), 1, "the push took Bree's row away");
+    await ops.send({ t: "token.move", tokenId: run.bree.id, x: 5, y: 15, elevation: 0 });
+    await waitFor("Bree back", () => (dmSocket.state?.tokens[run.bree.id]?.x === 5 ? true : null));
+    await dm.getByRole("button", { name: "Dismiss Snag's turn", exact: true }).click();
+    await bree.waitFor({ state: "detached" });
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await bree.waitFor();
+    assert.equal(await block.getByRole("button", { name: "Reaction used: Cyra", exact: true }).count(), 0, "Cyra's Reaction is used");
+    const live = await block.locator('[aria-live="polite"]').textContent();
+    assert.equal(live, "", "the reload announced an old row");
+  });
+
+  test("oa-4. on Bree's turn Ana's drag away from Grub reads Leaves 5 ft of Grub, her card lists Grub with no Reaction used, and the DM gets one toast", async () => {
+    await countToasts(dm, "Bree left Grub's reach.");
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Bree's turn on Ana's computer", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-bree") ? true : null));
+    await ana.bringToFront();
+    await ana.keyboard.press("Escape");
+    await holdDragCells(ana, { x: 5, y: 15 }, { x: 8, y: 15 });
+    try {
+      const label = await waitFor("Ana's leaves line", async () => (await boardTexts(ana)).find((t) => t.includes("\nLeaves ")) ?? null, 5_000);
+      // Grub has no stat block, so Ana's device counts 5 ft and says so.
+      assert.match(label, /\nLeaves 5 ft of Grub$/);
+      assert.deepEqual(await reachRings(ana), [oa.grub]);
+      await shots.take(ana, "oa-ana-drag-line");
+    } finally {
+      await ana.mouse.up();
+    }
+    await waitFor("Bree three squares on", () => (dmSocket.state?.tokens[run.bree.id]?.x === 8 ? true : null));
+    const block = ana.getByRole("group", { name: "Bree's turn" }).getByRole("group", { name: "Opportunity Attacks" });
+    await block.getByText("Grub (5 ft counted)").waitFor();
+    assert.equal(await block.locator("button[data-reach-used]").count(), 0, "a player marks no goblin's Reaction");
+    await shots.take(ana, "oa-ana-card-block");
+    await waitFor("the DM's toast", async () => ((await toastsCounted(dm)) >= 1 ? true : null));
+    await dm.waitForTimeout(500);
+    assert.equal(await toastsCounted(dm), 1, "one toast for one leave");
+  });
+
+  test("oa-5. Next and Previous bring Bree's walk back: Ana's card lists Grub again, and the DM gets no second toast (R4-02)", async () => {
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Cyra's turn", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-cy") ? true : null));
+    await ops.send({ t: "encounter.prev" });
+    await waitFor("Bree's turn again", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-bree") ? true : null));
+    await ana.getByRole("group", { name: "Bree's turn" }).getByRole("group", { name: "Opportunity Attacks" }).getByText("Grub (5 ft counted)").waitFor();
+    await dm.waitForTimeout(1_000);
+    assert.equal(await toastsCounted(dm), 1, "Previous toasted the walk again");
+    await ops.send({ t: "encounter.end" });
+    for (const id of [oa.snag, oa.grub]) await ops.send({ t: "token.delete", tokenId: id });
+    await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { x: 5, y: 5 } });
+    await ops.send({ t: "token.update", tokenId: run.cyPc.id, patch: { x: 9, y: 5 } });
   });
 
   test("14. no page logged an error", () => {
