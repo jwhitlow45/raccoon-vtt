@@ -5,6 +5,7 @@ import { D20Icon } from "../dice/throw/D20Icon.tsx";
 import { DICE_SETS } from "../dice/throw/sets.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
 import { useThrows, useThrowView } from "../dice/throw/useThrows.ts";
+import type { ThrowStore } from "../dice/throw/store.ts";
 import { partMark } from "../modules/gate.ts";
 import { useModule } from "../modules/Gate.tsx";
 import { setDiceSetId, useDiceSetId, useLowPower } from "./settings.ts";
@@ -58,14 +59,17 @@ export function tileStyle(picked: boolean): CSSProperties {
 }
 
 export function DiceSetPicker() {
+  // The throw store's subscription stays here, so it passes on that Dice animation hid before the tiles go: where nothing else rolls, the loader would
+  // otherwise go on reading it shown and load the dice once Low power turns off (D-261127-715).
+  const store = useThrows();
   // The tiles are their own component, so hiding unmounts them with their drawn state, and showing again draws the new canvases (D-261127-710).
-  return useModule("diceAnimation") ? <DiceSetTiles /> : null;
+  return useModule("diceAnimation") ? <DiceSetTiles store={store} /> : null;
 }
 
-function DiceSetTiles() {
+function DiceSetTiles(props: { store: ThrowStore }) {
+  const { store } = props;
   const lowPower = useLowPower();
   const chosen = useDiceSetId();
-  const store = useThrows();
   const throwing = useThrowView().shown !== null;
   const loaded = useSyncExternalStore(diceLoader.subscribe, diceLoader.state, diceLoader.state);
   const name = useId();
