@@ -28,8 +28,8 @@ export function viewLabel(frame: number): string {
 /** The sheet the preview draws: one just drawn, still on this device, or one stored in the room. */
 export type PreviewSheet = { blob: Blob } | { assetId: string };
 
-/** The floor's two tones and its squares' line: the board's raised stone, lit and plain, as Isometric draws a side. */
-const FLOOR = { plain: theme.relief.side, lit: "#6a665f", line: theme.relief.squareLine };
+/** The floor's stone, the light laid over every other square, and the squares' line: the board's raised stone as Isometric draws a lit side. */
+const FLOOR = { stone: theme.relief.side, light: theme.relief.lit, line: theme.relief.squareLine };
 
 /**
  * Where everything stands in the preview, in view units with the ring's
@@ -128,13 +128,17 @@ export function ModelPreview(props: { sheet: PreviewSheet; model: Pick<ModelRef,
     const fit = previewFit(props.model, px);
     const at = (wx: number, wy: number) => ({ x: fit.x + (Math.SQRT1_2 * (wx - wy)) * fit.scale, y: fit.y + ((Math.SQRT1_2 * (wx + wy)) / 2) * fit.scale });
     // Four squares round the ring, as Isometric's first view draws the ground.
-    for (const [cx, cy, tone] of [[-1, -1, FLOOR.lit], [0, -1, FLOOR.plain], [-1, 0, FLOOR.plain], [0, 0, FLOOR.lit]] as const) {
+    for (const [cx, cy, lit] of [[-1, -1, true], [0, -1, false], [-1, 0, false], [0, 0, true]] as const) {
       const corners = [at(cx, cy), at(cx + 1, cy), at(cx + 1, cy + 1), at(cx, cy + 1)];
       ctx.beginPath();
       corners.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
       ctx.closePath();
-      ctx.fillStyle = tone;
+      ctx.fillStyle = FLOOR.stone;
       ctx.fill();
+      if (lit) {
+        ctx.fillStyle = FLOOR.light;
+        ctx.fill();
+      }
       ctx.strokeStyle = FLOOR.line;
       ctx.lineWidth = 1;
       ctx.stroke();
