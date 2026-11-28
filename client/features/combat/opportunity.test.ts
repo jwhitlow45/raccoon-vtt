@@ -5,10 +5,10 @@ import type { SrdRolls } from "#shared/dice/bonus.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { reachInput, reachScan, type Chunks, type SrdBlocks } from "#shared/rules/opportunity.ts";
+import { byCreature, reachInput, reachScan, type Chunks, type SrdBlocks } from "#shared/rules/opportunity.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
-import { actor, DM, entry, env, int, pick, rng, token } from "#shared/testutil.ts";
+import { actor, character, DM, entry, env, int, pick, rng, token } from "#shared/testutil.ts";
 import { pathNow } from "../measure/movement.ts";
 import { onTurn, thorn, world } from "../movement/testing.ts";
 type TurnReach = import("./opportunity.ts").TurnReach;
@@ -369,6 +369,21 @@ describe("a leg's job", () => {
     assert.deepEqual(h.jobs.store.getState().movers, {});
     h.sync(null);
     assert.deepEqual(h.jobs.store.getState().movers, {});
+  });
+
+  test("a character shown by two tokens is one row, one name in a drag's words, and skipped whole by the next drag (LP62-OA-TWICE)", () => {
+    const h = harness();
+    const shade = (id: string, x: number, y: number) => token(id, { name: "Shade", x, y, actor: { ref: "shade" } });
+    const set = beside([shade("s1", 6, 6), shade("s2", 6, 4)]);
+    const state = move({ ...set, characters: { ...set.characters, shade: character("shade", { name: "Shade", ownerIds: [] }) } }, "thorn", 8, 5);
+    h.sync(state);
+    h.drain();
+    const reach = h.jobs.store.getState();
+    assert.equal(rowsOf(reach).length, 2, "one row for Shade, one for the goblin: " + rowsOf(reach));
+    assert.equal(rowsOf(reach).filter((id) => id !== "goblin").length, 1);
+    const skip = h.jobs.leaves.getState().movers.thorn!.skip;
+    assert.ok(skip.has("s1") && skip.has("s2"), "every token of the creature");
+    assert.deepEqual(byCreature(state, [{ id: "s1" }, { id: "goblin" }, { id: "s2" }]).map((l) => l.id), ["s1", "goblin"]);
   });
 });
 

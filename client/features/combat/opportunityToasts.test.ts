@@ -8,7 +8,7 @@ import { applyOp } from "#shared/reducer.ts";
 import type { SrdBlocks } from "#shared/rules/opportunity.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
-import { actor, DM, env, token } from "#shared/testutil.ts";
+import { actor, character, DM, env, token } from "#shared/testutil.ts";
 import { reachTurn, type ShownLeaves } from "../movement/store.ts";
 import { onTurn, thorn, world } from "../movement/testing.ts";
 
@@ -116,6 +116,16 @@ describe("the DM's Opportunity Attack toast", () => {
     dm.see(start);
     dm.see(move(start, "thorn", 9, 5));
     assert.deepEqual(dm.said, ["Thorn left the reach of Goblin and Goblin 2."]);
+  });
+
+  test("a character shown by two tokens is named once (LP62-OA-TWICE)", () => {
+    const dm = dmDevice();
+    const shade = (id: string, x: number, y: number) => token(id, { name: "Shade", x, y, actor: { ref: "shade" } });
+    const set = beside([shade("s1", 6, 6), shade("s2", 6, 4)]);
+    const start = { ...set, characters: { ...set.characters, shade: character("shade", { name: "Shade", ownerIds: [] }) } };
+    dm.see(start);
+    dm.see(move(start, "thorn", 9, 5));
+    assert.deepEqual(dm.said, ["Thorn left the reach of Goblin and Shade."]);
   });
 
   test("waits for the SRD's data before it reads a leg, so a 10 ft reach is never read at 5 ft", async () => {

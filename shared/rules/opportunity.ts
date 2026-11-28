@@ -10,7 +10,7 @@ import { footprintRect, occupiedRange, type CellRange, type FootprintToken, type
 import { sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexNeighbors, type HexGrid } from "./hex.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
-import { rowCharacter } from "./initiative.ts";
+import { creatureKey, rowCharacter } from "./initiative.ts";
 import { legSpots, type LegSpot, type Spot } from "./path.ts";
 import { APART, AREAS, PIECE, contact, onSegment, orient } from "./segments.ts";
 import { parseSenses } from "./vision.ts";
@@ -895,4 +895,24 @@ export function reachWords(names: readonly string[], verb: "Leaves" | "left", fi
 /** Whether the room's Opportunity Attack notices are on: absent reads on. Typed locally, so this builds before the room switch. */
 export function opportunityNoticesOn(settings: { opportunityNotices?: boolean }): boolean {
   return settings.opportunityNotices !== false;
+}
+
+/**
+ * The creature a token stands for, as the tracker names it (initiative.ts
+ * creatureKey): a character shown by two tokens is one creature, so a
+ * notice names it, and a card shows it, once.
+ */
+export function creatureOf(view: Pick<RoomState, "tokens">, tokenId: string): string {
+  return creatureKey(view, { tokenId }) ?? `token:${tokenId}`;
+}
+
+/** The leaves with only the first of each creature, in order. */
+export function byCreature<T extends { id: string }>(view: Pick<RoomState, "tokens">, leaves: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return leaves.filter((l) => {
+    const key = creatureOf(view, l.id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

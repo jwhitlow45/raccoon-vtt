@@ -6,7 +6,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { reachInput, turnReach, type Chunks } from "#shared/rules/opportunity.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { actor, DM, env, P1, P2, token } from "#shared/testutil.ts";
+import { actor, character, DM, env, P1, P2, token } from "#shared/testutil.ts";
 import { dragLabel, pathNow } from "../measure/movement.ts";
 import { dropView, moveOpsOf, planWalk } from "./drop.ts";
 import { dragLeaves, walkPreview, type DragReach } from "./preview.ts";
@@ -63,6 +63,15 @@ describe("the drag's Opportunity Attacks line", () => {
     assert.equal(dragLabel(player.read).split("\n").at(-1), "Leaves 5 ft of Goblin");
     // A step that stays beside it leaves nothing.
     assert.equal(drag(state, "thorn", { x: 5, y: 6 }, reach(DM)).read.leaves, undefined);
+  });
+
+  test("a character shown by two tokens is named once, and both tokens keep their rings (LP62-OA-TWICE)", () => {
+    const shade = (id: string, x: number, y: number) => token(id, { name: "Shade", x, y, actor: { ref: "shade" } });
+    const set = beside([shade("s1", 6, 6), shade("s2", 6, 4)]);
+    const state = { ...set, characters: { ...set.characters, shade: character("shade", { name: "Shade", ownerIds: [] }) } };
+    const out = drag(state, "thorn", { x: 8, y: 5 }, reach(DM));
+    assert.deepEqual(out.read.leaves, { names: ["Goblin", "Shade"], fiveFt: false });
+    assert.deepEqual([...out.leaving].sort(), ["goblin", "s1", "s2"]);
   });
 
   test("only on a DM device or the turn's answerer's, with the part and the room's notices on", () => {

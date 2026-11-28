@@ -1,7 +1,7 @@
 import type { PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintSize, isSqueezed, stopFootprint, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
-import { chunksNeeded, DRAG_WORK, opportunityNoticesOn, reachInput, reachScan, type Chunks, type ReachLeave, type ScanInput } from "#shared/rules/opportunity.ts";
+import { byCreature, chunksNeeded, DRAG_WORK, opportunityNoticesOn, reachInput, reachScan, type Chunks, type ReachLeave, type ScanInput } from "#shared/rules/opportunity.ts";
 import { placedOnTrace, routePoints, routeWalkers, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -207,7 +207,8 @@ function scanDrag(view: DropView, moverId: string, turn: number, from: PathStop,
   if (step.value === "over") return LATER;
   const left: readonly ReachLeave[] = step.value;
   if (left.length === 0) return null;
-  const names = left.flatMap((l) => {
+  // A character shown by two tokens is named once.
+  const names = byCreature(view, left).flatMap((l) => {
     const t = view.tokens[l.id];
     return t ? [displayName(t, labels)] : [];
   });

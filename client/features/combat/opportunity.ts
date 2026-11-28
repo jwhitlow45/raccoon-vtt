@@ -4,7 +4,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { SrdRolls } from "#shared/dice/bonus.ts";
 import type { PathStop, RoomState, TokenPath, Viewer } from "#shared/model.ts";
 import type { Spot } from "#shared/rules/path.ts";
-import { chunksNeeded, opportunityNoticesOn, reachInput, reachScan, reconcileLegs, rowStands, SLICE_WORK, type Chunks, type LegRecord, type ReachLeave, type ReachView, type SrdBlocks } from "#shared/rules/opportunity.ts";
+import { chunksNeeded, creatureOf, opportunityNoticesOn, reachInput, reachScan, reconcileLegs, rowStands, SLICE_WORK, type Chunks, type LegRecord, type ReachLeave, type ReachView, type SrdBlocks } from "#shared/rules/opportunity.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import { scopeSlot, useRoomScope, type RoomScope } from "../../state/scope.ts";
@@ -388,18 +388,26 @@ export class LegJobs {
         return { id: record.id, provokes: provoking.length > 0, done: parts.every((p) => p.done), over: provoking.some((p) => p.over), leaves: union, parts };
       });
       const seen = new Set<string>();
+      const creatures = new Set<string>();
       const rows: ReachRow[] = [];
       for (const leg of legs) {
         if (!leg.provokes) continue;
         for (const left of leg.leaves) {
           if (seen.has(left.id)) continue;
           seen.add(left.id);
+          // One row per creature: its other tokens are skipped by the drag (below) and named by no one.
+          const creature = creatureOf(view, left.id);
+          if (creatures.has(creature)) continue;
+          creatures.add(creature);
           if (view.tokens[left.id] !== undefined && rowStands(kept, left, viewer)) rows.push({ moverId: mover.id, leg: leg.id, left });
         }
       }
       const checking = legs.some((l) => !l.done);
       movers[mover.id] = { turn: mover.turn, legs, rows, checking, over: legs.some((l) => l.over) };
-      leaves[mover.id] = { turn: mover.turn, skip: seen, settled: !checking };
+      // A creature's every token is skipped once any of them left, so a later drag never names it again by another token.
+      const skip = new Set(seen);
+      for (const t of Object.values(view.tokens)) if (creatures.has(creatureOf(view, t.id))) skip.add(t.id);
+      leaves[mover.id] = { turn: mover.turn, skip, settled: !checking };
       for (const row of rows) {
         const id = `${row.moverId}|${row.left.id}`;
         if (shown.ids.has(id) && shown.turn === mover.turn) continue;
