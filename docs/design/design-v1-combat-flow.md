@@ -816,3 +816,22 @@ DiceRoll.hidden?: true                          // an initiative roll players ma
 3. `feat(encounter): a row's place in the order reaches players on its first turn`: `hadTurn`, `withTurn`, the versions, `orderShown` in the projection and `rowSeenByNonOwners`, the fixtures and their tests.
 4. `feat(dice): an initiative roll for a creature whose place is secret stays the dm's`: `initiative` on the roll, `DiceRoll.hidden`, the client's two marking paths and their tests.
 5. The e2e step, then `docs:` commits for FEATURES.md and the DM guide's tracker section.
+
+## 12. Addendum. One Initiative row a creature (2026-11-28)
+
+The SRD gives each creature one turn: "Everyone involved in the combat encounter rolls Initiative, determining the order of combatants' turns" (SRD 5.2.1, Combat, "Combat Step by Step"). Before this, "Everyone here", "Visible to players", the group bar's Add to the fight and a player's own add made a row for each token, so a character shown by two tokens took two turns a round, and the server took the same token twice (LP52B-INIT-ROWS).
+
+### 12.1 The rule
+
+- **A creature** is its character, else its own token, in the holder form the DM's cards use: `character:<id>` or `token:<id>` (`creatureKey`, `shared/rules/initiative.ts`, D-261128-039). A label row is no creature.
+- **The DM's rows carry it** (`creature`), projected from the room and never stored, since the DM's copy holds the shown floors' tokens alone (D-261128-044). A write of a row's token or character projects the fight again, so a token linked to another character or deleted moves its row's creature. A player's copy holds a row only with its token or character, so its rows carry none and are read off the copy.
+- **Each way into a fight offers a creature once** (`addCandidates`, `ownCandidates` and `fightCandidates` through `oncePerCreature`): a creature with a row, by its `creature` or else its key from the copy, is not offered, and of its tokens offered together the first every player can see stands for it, else the first in the list (D-261128-040).
+- **The server refuses a second row** (`oneRowEach` in `shared/permissions.ts`): a start or an add that names a creature twice, or one with a row already, is refused whole, "Shade is already in the fight." or "That creature is already in the fight.", and for several "Shade is already in the fight, so no one was added. Press again to add the rest." (D-261128-045). A player's add counts only the rows their copy holds, so a row the DM hides never refuses it (D-261128-041). Replay runs no permission rule (design.md 16.2), so a stored op that made two rows replays as it did, and fights stored with two rows keep them until the DM removes one (D-261128-042).
+
+### 12.2 As built
+
+- **The refusal's code** is `forbidden`, which a toast shows as its own sentence (`client/state/store.ts` `refusalText`). The design said `invalid`, whose toast puts "Not saved." before it, against the words above (D-261128-110).
+- **The group bar's key** reads the device's whole copy (`TokenActionBar.tsx`), so a row still on its way, which names no creature, reads its token there. `fightCandidates` and `fightOps` take it as a last parameter that defaults to each row's own ids, which their older callers pass.
+- **The DM's fight** is built anew each projection, as a player's is, since a fight kept per stored object would go stale where a test sets a field in place. A fight with no creature's row is the stored one.
+- **Tests outside the design's list.** `shared/project.test.ts` and the goldens read the DM's rows with their creatures left out, and the square golden counts a one-row refusal as the build before's allowed add. `shared/permissions.test.ts` now refuses a player's character row beside its token's row, and its typed-totals case has the DM add a creature with no row.
+
