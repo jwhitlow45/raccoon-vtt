@@ -289,6 +289,22 @@ describe("distance first, with a neighbor one cell's feet (D-261128-056)", () =>
     assert.deepEqual(leavesOf(state, "bree", [stop(2, 2, 0), stop(2, 2, 30)], chunks), [{ id: "devil", spot: 1, reach: 5 }], "both crossed in one step");
   });
 
+  test("a squeezed Large creature stands on its squeezed space at every stop, the drag's start and the card's alike", () => {
+    // At x 2.5 a squeezed Large creature covers the one column 3, so a goblin at column 5 is 10 ft away. Its full space reaches column 4, beside it.
+    const state = world([bree({ size: "large", x: 0.5, y: 2 }), gob("g2", 5, 2)]);
+    const squeezed = { w: 2, h: 2, squeeze: true as const };
+    assert.deepEqual(left(state, "bree", [stop(2.5, 2, 0, { footprint: squeezed }), stop(0.5, 2, 0, { footprint: squeezed })]), [], "never within 5 ft");
+    assert.deepEqual(left(state, "bree", [stop(2.5, 2, 0, { footprint: { w: 2, h: 2 } }), stop(0.5, 2, 0, { footprint: { w: 2, h: 2 } })]), ["g2"], "at full size it leaves");
+    // Walking down the squeeze, every spot on the way keeps it.
+    assert.deepEqual(left(state, "bree", [stop(2.5, 2, 0, { footprint: squeezed }), stop(2.5, 7, 0, { footprint: squeezed })]), []);
+    assert.deepEqual(left(state, "bree", [stop(2.5, 2, 0, { footprint: { w: 2, h: 2 } }), stop(2.5, 7, 0, { footprint: { w: 2, h: 2 } })]), ["g2"]);
+    // Squeezed now, with stops made at the size it has now, the token's own squeeze is read.
+    const now = world([bree({ size: "large", x: 0.5, y: 2, squeeze: true }), gob("g2", 5, 2)]);
+    assert.deepEqual(left(now, "bree", [stop(2.5, 2), stop(0.5, 2)]), []);
+    // Squeezed only at the start: the walk starts on the one column, so nothing is left.
+    assert.deepEqual(left(state, "bree", [stop(2.5, 2, 0, { footprint: squeezed }), stop(0.5, 2)]), []);
+  });
+
   test("Large and Huge movers and reactors are measured edge to edge, a squeezed stop at its own size", () => {
     const state = world([bree({ size: "large", x: 2, y: 2 }), gob("h", 4, 2, { size: "huge" })]);
     assert.deepEqual(leavesOf(state, "bree", [stop(2, 2), stop(2, 8)]), [{ id: "h", spot: 7, reach: 5 }], "a Large creature can squeeze, so it walks half squares");
@@ -344,6 +360,14 @@ describe("cover at the departure spot (D-261128-056)", () => {
   test("a Large reactor behind a wall on one of its squares is seen past it from another", () => {
     const state = world([bree({ x: 2, y: 4 }), gob("o", 2, 2, { size: "large" })], { edges: { "2,4,n": { kind: "wall" } } });
     assert.deepEqual(left(state, "bree", [stop(2, 4), stop(2, 7)]), ["o"], "the square at (3,3) sees (2,4) past the wall's end");
+  });
+
+  test("cover is judged between squares within reach: a clear line from a farther square of a Large creature does not count", () => {
+    // Short walls cut the lines from Bree's square to the ogre's two near squares, and the line to its far square at (4,2) passes a wall's end.
+    const walls = [free(3, 3.25, 3, 3.75), free(2.75, 3, 3.25, 3)];
+    const state = world([bree({ x: 2, y: 3 }), gob("o", 3, 2, { size: "large" })], { walls });
+    assert.deepEqual(left(state, "bree", [stop(2, 3), stop(0, 3)]), []);
+    assert.deepEqual(left(world([bree({ x: 2, y: 3 }), gob("o", 3, 2, { size: "large" })]), "bree", [stop(2, 3), stop(0, 3)]), ["o"], "and with no walls it leaves");
   });
 
   test("R2-07: the DM's stored free walls read exactly, a player's held pieces by pieceTouches", () => {
