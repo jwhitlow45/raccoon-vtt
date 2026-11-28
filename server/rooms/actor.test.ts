@@ -287,6 +287,29 @@ async function answerTo(sent: ServerMessage[], n: number): Promise<Extract<Serve
   });
 }
 
+/**
+ * The retry the actor sends op `n`, waited for. A busy answer given in the op's
+ * turn of the queue reaches the socket after `actor.op` has returned, so a
+ * test reads it only once it came. The deadline fires only on a real hang.
+ */
+async function retryTo(sent: ServerMessage[], n: number, code = "busy"): Promise<Extract<ServerMessage, { t: "retry" }> | "stuck"> {
+  const found = () => sent.find((m): m is Extract<ServerMessage, { t: "retry" }> => m.t === "retry" && m.n === n && m.code === code);
+  let looking = true;
+  return within(
+    10_000,
+    (async (): Promise<Extract<ServerMessage, { t: "retry" }> | "stuck"> => {
+      while (looking) {
+        const retry = found();
+        if (retry) return retry;
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      return "stuck";
+    })(),
+  ).finally(() => {
+    looking = false;
+  });
+}
+
 describe("room actor commits", () => {
   test("a lost COMMIT answer is read back until the read works, and the batch is never written twice", async () => {
     const dm = member("DM", "dm");
@@ -604,7 +627,8 @@ describe("op admission", () => {
       const from = sent.length;
       await actor.op(conn, 2, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
-      // Read among the frames after it, which a presence frame can follow.
+      // Answered in its turn, so the retry is waited for, then read among the frames after it, which a presence frame can follow.
+      assert.deepEqual(await retryTo(sent, 2), { t: "retry", n: 2, code: "busy" });
       const after = sent.slice(from);
       assert.deepEqual(after.filter((m) => m.t === "retry"), [{ t: "retry", n: 2, code: "busy" }]);
       assert.ok(!after.some((m) => m.t === "ev" && m.acks?.includes(2)), "op 2 is not acked");
@@ -2232,7 +2256,7 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
         void actor.op(laptop.conn, 1, { t: "log.chat", text: "hi" });
         if (rate === "socket's") while (table.conn.opRate.wouldAllow()) table.conn.opRate.allow();
         void actor.op(table.conn, 2, { t: "token.move", tokenId: goblinId, x: 6, y: 2 });
-        assert.ok(table.sent.some((m) => m.t === "retry" && m.n === 2 && m.code === "busy"), "the walk is answered busy");
+        assert.notEqual(await retryTo(table.sent, 2), "stuck", "the walk is answered busy");
         await new Promise((r) => setTimeout(r, 100));
         assert.deepEqual(commits, [], "nothing committed before the batch's own timer");
         assert.notEqual(await answerTo(table.sent, 1), "stuck");
@@ -4050,6 +4074,7 @@ describe("map discovery on the actor (docs/design/design-v1-map-discovery.md 5.3
       assert.ok(table.conn.opRate.wouldAllow(1) && !table.conn.opRate.wouldAllow(16));
       const from = table.sent.length;
       await actor.op(table.conn, 3, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g3");
+      assert.deepEqual(await retryTo(table.sent, 3), { t: "retry", n: 3, code: "busy" });
       const after = table.sent.slice(from);
       assert.deepEqual(after.filter((m) => m.t === "retry"), [{ t: "retry", n: 3, code: "busy" }]);
       assert.ok(!after.some((m) => m.t === "ev" && m.acks?.includes(3)), "the ask is not acked");
