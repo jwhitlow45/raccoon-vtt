@@ -317,11 +317,13 @@ function OptionButton(props: { label: string; help: string; disabled?: boolean; 
 /** "Or use one from this room": the front view of each model the viewer can see, 64 px, each a 44 px target or more. */
 function RoomModels(props: { models: readonly RoomModel[]; onPick(model: RoomModel): void }) {
   return (
-    <div role="group" aria-labelledby="model-room-label" style={{ display: "grid", gap: theme.space(1) }}>
+    // A section label's 8 px over what it heads, as the sheet's other sections stand.
+    <div role="group" aria-labelledby="model-room-label" style={{ display: "grid", gap: theme.space(2) }}>
       <SectionLabel id="model-room-label">Or use one from this room</SectionLabel>
       <ul style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), margin: 0, padding: 0, listStyle: "none" }}>
         {props.models.map((m, i) => (
-          <li key={m.model.assetId}>
+          // A flex item, so the button leaves no line's descender under it.
+          <li key={m.model.assetId} style={{ display: "flex" }}>
             <FrontView model={m} index={i} onPick={() => props.onPick(m)} />
           </li>
         ))}
