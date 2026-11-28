@@ -135,6 +135,11 @@ function touchBlind(state: RoomState, who: Viewer, op: Op, code: string, message
   return TOUCH_WORDS.has(message) ? `${code}: stopped` : said;
 }
 
+/** A second row for a creature, which the build before took (one row a creature, D-261128-041, 045). */
+function oneRowRefused(op: Op, message: string): boolean {
+  return (op.t === "encounter.start" || op.t === "encounter.add") && / is already in the fight(, so no one was added\. Press again to add the rest)?\.$/.test(message);
+}
+
 /** The scene an op the touch rule judges acts on, or null for one it never judges. */
 function opScene(state: RoomState, op: Op): string | null {
   const of = (tokenId: string | undefined) => (tokenId === undefined ? null : (state.tokens[tokenId]?.sceneId ?? null));
@@ -292,7 +297,7 @@ function run(seed: number): { input: string; output: string } {
     const op = guardedBefore(opSchema.parse(randomOp(r, state, who)), state);
     inputs.push(stableStringify(op));
     const decision = canApply(op, who, state, deps);
-    outputs.push(decision.ok ? "allowed" : touchBlind(state, who, op, decision.code, decision.message));
+    outputs.push(decision.ok || oneRowRefused(op, decision.message) ? "allowed" : touchBlind(state, who, op, decision.code, decision.message));
     const result = applyOp(state, op, who, beforeCovers(op, env(100 + i)));
     outputs.push(...answer(state, result));
     if (!result.ok) continue;

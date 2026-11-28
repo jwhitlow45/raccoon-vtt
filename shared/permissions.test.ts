@@ -593,7 +593,9 @@ describe("encounter", () => {
   test("players add and remove their own creatures and set their own values", () => {
     const state = combat();
     assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "own" }] }, P1, state), "ok");
-    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", characterId: "c1" }] }, P1, state), "ok");
+    // Ayla's token holds her row, so her character row would be a second one (one row a creature, permissions.rows.test.ts).
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", characterId: "c1" }] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", characterId: "c1" }] }, P1, apply(state, { t: "encounter.remove", entryIds: ["n1"] }, P1)), "ok");
     assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "gob" }] }, P1, state), "forbidden");
     assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "hidden" }] }, P1, state), "gone");
     assert.equal(code({ t: "encounter.add", entries: [{ id: "n1", tokenId: "own" }] }, P1, state), "gone");
@@ -665,7 +667,7 @@ describe("encounter", () => {
     assert.equal(add([{ id: "x", tokenId: "wolf", value: 15 }]), "forbidden", "a companion's own row");
     const readd = apply(state, { t: "encounter.remove", entryIds: ["n1"] }, P1);
     assert.equal(code({ t: "encounter.add", entries: [{ id: "n9", tokenId: "pc1", value: 20 }] }, P1, readd), "forbidden", "a re-add after removing the row");
-    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "gob", value: 9 }] }, DM, state), "ok", "the DM's values are unaffected");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "own", value: 9 }] }, DM, state), "ok", "the DM's values are unaffected");
     assert.equal(code({ t: "encounter.start", entries: [{ id: "x", tokenId: "own", value: 9 }] }, P1, state), "forbidden", "a fight is the DM's to start");
     state.meta.settings.playersTypeTotals = true;
     assert.equal(add([{ id: "x", tokenId: "own", value: 100 }]), "ok", "on, a typed value goes");

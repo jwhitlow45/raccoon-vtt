@@ -4,6 +4,9 @@ import type { InitEntry, LogEntry, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
+import { creatureKey } from "#shared/rules/initiative.ts";
+import { alreadyFighting } from "#shared/permissions.ts";
+import { refusalText } from "../../state/store.ts";
 import { actor, apply, character, DM, effect, entry, P1, reveal, room, token } from "#shared/testutil.ts";
 import { ATTIC, CAVE, tower, TOWER, UPPER } from "../floors/testing.ts";
 import { fightCandidates, fightOps } from "../tokens/groupEdit.ts";
@@ -735,5 +738,84 @@ describe("the DM's tag on a row players do not see yet (docs/design/design-v1-co
     assert.equal(SECRET_ROW.label, "Secret until its turn");
     assert.match(SECRET_ROW.help, /first turn comes/);
     assert.doesNotMatch(`${SECRET_ROW.label} ${SECRET_ROW.help}`, /[—;]/);
+  });
+});
+
+describe("one Initiative row a creature (LP52B-INIT-ROWS, D-261128-039, 040)", () => {
+  /** Shade, a player character, with Shade A on s2 and Shade B here on s1, beside a goblin. */
+  function shade(): RoomState {
+    const s = room();
+    s.characters.shade = character("shade", { name: "Shade", ownerIds: ["p1"] });
+    s.tokens.sa = token("sa", { name: "Shade", kind: "pc", ownerIds: ["p1"], actor: { ref: "shade" }, sceneId: "s2" });
+    s.tokens.sb = token("sb", { name: "Shade", kind: "pc", ownerIds: ["p1"], actor: { ref: "shade" }, x: 5, y: 5 });
+    s.tokens.gob = token("gob", { name: "Goblin", x: 1, y: 1 });
+    return s;
+  }
+  const ids = (tokens: readonly { id: string }[]) => tokens.map((t) => t.id);
+
+  test("a creature shown by two tokens is offered once, by the token every player can see, else the first in order", () => {
+    const s = shade();
+    s.tokens.sa = { ...s.tokens.sa!, sceneId: "s1", x: 9, y: 9 };
+    assert.deepEqual(ids(addCandidates(s, "s1", "scene", null, new Map())), ["gob", "sa"], "Everyone here (2): the first of Shade's two");
+    s.tokens.sa = { ...s.tokens.sa, visibility: "dm" };
+    assert.deepEqual(ids(addCandidates(s, "s1", "scene", null, new Map())), ["gob", "sb"], "Shade A is hidden, so Shade B stands for her");
+    assert.deepEqual(ids(addCandidates(s, "s1", "visible", null, new Map())), ["gob", "sb"]);
+    assert.deepEqual(ids(ownCandidates(s, "p1", "s1", new Map())), ["sb"], "Shade's player gets one Add Shade, for the token the server takes");
+    const both = [s.tokens.sa, s.tokens.sb!, s.tokens.gob!];
+    assert.deepEqual(ids(fightCandidates(both, null, (e) => creatureKey(s, e))), ["sb", "gob"], "the group's Add to the fight");
+    const ops = fightOps(both, null, () => "n", undefined, (e) => creatureKey(s, e));
+    assert.deepEqual(ops, [{ t: "encounter.start", entries: [{ id: "n", tokenId: "sb" }, { id: "n", tokenId: "gob" }] }]);
+  });
+
+  test("with Shade A's row, Shade B is offered nowhere: on Shade B's scene, after a reload and on another floor", () => {
+    const s = shade();
+    s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-sa", { tokenId: "sa" })] };
+    // The DM's copy of s1 lacks Shade A, so only the row's projected creature says she is in the fight.
+    const dm = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
+    assert.equal(dm.tokens.sa, undefined);
+    for (const mode of ["scene", "visible"] as const) assert.deepEqual(ids(addCandidates(dm, "s1", mode, null, new Map())), ["gob"], mode);
+    assert.deepEqual(addCandidates(dm, "s1", "selected", "sb", new Map()), [], "nor as the selected token");
+    const view = (e: Parameters<typeof creatureKey>[1]) => creatureKey(dm, e);
+    assert.deepEqual(ids(fightCandidates([dm.tokens.sb!, dm.tokens.gob!], dm.encounter, view)), ["gob"]);
+    // A row still on its way names no creature and is read off the copy, as the store's fightAhead hands it on.
+    assert.deepEqual(ids(fightCandidates([dm.tokens.sb!, dm.tokens.gob!], { entries: [{ tokenId: "sb" }] }, view)), ["gob"]);
+    // Rows read by their token alone, as before, would offer Shade B again.
+    assert.deepEqual(ids(fightCandidates([dm.tokens.sb!, dm.tokens.gob!], dm.encounter, (e) => creatureKey({ tokens: {} }, e))), ["sb", "gob"]);
+
+    // Upper floor holds Shade A and the DM shows the Ground floor: the copy holds both floors, and Shade is still one creature.
+    const t = tower();
+    t.characters.shade = s.characters.shade!;
+    t.tokens.sa = { ...s.tokens.sa!, sceneId: UPPER };
+    t.tokens.sb = { ...s.tokens.sb!, sceneId: TOWER };
+    t.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-sa", { tokenId: "sa" })] };
+    const ground = projectState(t, DM, { sceneId: TOWER }) as unknown as RoomState;
+    assert.deepEqual(ids(addCandidates(ground, TOWER, "scene", null, new Map())), ["bree", "thorn"]);
+    assert.deepEqual(ids(addCandidates(ground, new Set([TOWER, UPPER, ATTIC]), "scene", null, new Map())), ["bree", "thorn"]);
+  });
+
+  test("a character row counts as its creature, and a player's own copy reads its rows off the tokens it holds", () => {
+    const s = shade();
+    s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-shade", { characterId: "shade" })] };
+    assert.deepEqual(ids(addCandidates(s, "s1", "scene", null, new Map())), ["gob"]);
+    s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-sb", { tokenId: "sb" })] };
+    const mine = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+    assert.ok(mine.encounter!.entries.every((e) => !("creature" in e)));
+    assert.deepEqual(ownCandidates(mine, "p1", "s1", new Map()), [], "Add Shade goes once Shade has a row");
+  });
+
+  test("the server's refusal reads as its toast word for word, with no Not saved. before it (D-261128-045)", () => {
+    const s = shade();
+    assert.equal(refusalText("forbidden", alreadyFighting(s, "character:shade", false)), "Shade is already in the fight.");
+    assert.equal(refusalText("forbidden", alreadyFighting(s, "token:gob", false)), "That creature is already in the fight.");
+    assert.equal(refusalText("forbidden", alreadyFighting(s, "character:shade", true)), "Shade is already in the fight, so no one was added. Press again to add the rest.");
+  });
+
+  test("after a refused batch the second press offers the rest: the row the refusal named is in the copy by then", () => {
+    const s = shade();
+    // A stale device sent Shade B with the goblin after Shade A's row, and the server refused both. The copy now holds the row.
+    s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-sa", { tokenId: "sa" })] };
+    const dm = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
+    const again = fightOps([dm.tokens.sb!, dm.tokens.gob!], dm.encounter, () => "n2", undefined, (e) => creatureKey(dm, e));
+    assert.deepEqual(again, [{ t: "encounter.add", entries: [{ id: "n2", tokenId: "gob" }] }]);
   });
 });

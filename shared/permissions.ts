@@ -2,7 +2,7 @@ import { chunkKey, doorChunk, holderChunkKey, keys, parseKey, wallMidpoint } fro
 import { imageAssetId, imageModelId } from "./imageRef.ts";
 import { ownLines } from "./logRings.ts";
 import type { Actor, AreaTemplate, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, FallRecord, FloorLink, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollRequest, RollTarget, RoomSettings, RoomState, Scene, ShownEnds, Token, Viewer } from "./model.ts";
-import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
+import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type EntryInput, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, HIDDEN_ROW_REFUSED, LIMITS, stillFitsVideo } from "./limits.ts";
 import { referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
@@ -45,7 +45,7 @@ import {
 } from "./rules/movement.ts";
 import { fileOutOfReach, legSteps, onRouteLattice, routeLattice, routePoints, routeStop, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeCandidates, resizeRefusal } from "./rules/resize.ts";
-import { turnMovedOn } from "./rules/initiative.ts";
+import { creatureKey, turnMovedOn } from "./rules/initiative.ts";
 import { turnUnderWay } from "./rules/path.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
 import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
@@ -855,6 +855,11 @@ function forDm(op: Op, c: Check): Decision {
     // Two DM devices that opened one ask apply it once.
     case "actor.outcome":
       return op.cast === undefined || ownEntry(c.state.casts, op.cast) ? OK : refuse("gone", ASK_CLOSED);
+    // A second DM device, or a page from before, can name a creature that has its row (D-261128-041). A start's fight has none yet.
+    case "encounter.start":
+      return oneRowEach(c, op.entries, []);
+    case "encounter.add":
+      return oneRowEach(c, op.entries, c.state.encounter?.entries ?? []);
     default:
       return OK;
   }
@@ -1398,7 +1403,8 @@ function forPlayer(op: Op, c: Check): Decision {
         const row: InitEntry = { id: entry.id, value: null, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, ...(entry.tokenId !== undefined ? { tokenId: entry.tokenId } : {}), ...(entry.characterId !== undefined ? { characterId: entry.characterId } : {}) };
         if (typedInitiative(c, row, entry.value ?? null, entry.roll)) return refuse("forbidden", NO_TYPED_INITIATIVE);
       }
-      return OK;
+      // Only the rows their copy holds, so a row the DM hides never refuses their add, nor says it exists (D-261128-041).
+      return oneRowEach(c, op.entries, c.visibleEncounter()?.entries ?? []);
     }
     case "encounter.remove": {
       for (const id of op.entryIds) {
@@ -1611,6 +1617,39 @@ function rollAnswerCheck(c: Check, op: OpOf<"roll.answer">): Decision {
  */
 export function playersTypeTotals(settings: Partial<Pick<RoomSettings, "playersTypeTotals">>): boolean {
   return settings.playersTypeTotals !== false;
+}
+
+/**
+ * One Initiative row a creature (D-261128-039, 041, 045): a start or an
+ * add that names a creature twice, or one with a row in `rows` already,
+ * is refused whole, so none of its creatures joins and the device's
+ * optimistic rows go with it. Its next press then offers the rest, since
+ * the device holds the row by then. A label row is no creature. Replay
+ * runs no permission rule (docs/design/design.md 16.2), so a stored op
+ * that made two rows still makes them.
+ */
+function oneRowEach(c: Check, entries: readonly EntryInput[], rows: readonly Pick<InitEntry, "tokenId" | "characterId">[]): Decision {
+  const fighting = new Set(rows.flatMap((row) => creatureKey(c.state, row) ?? []));
+  for (const entry of entries) {
+    const creature = creatureKey(c.state, entry);
+    if (creature === undefined) continue;
+    if (fighting.has(creature)) return refuse("forbidden", alreadyFighting(c.state, creature, entries.length > 1));
+    fighting.add(creature);
+  }
+  return OK;
+}
+
+/**
+ * "Shade is already in the fight.", by the character's name, else "That
+ * creature is already in the fight.", and for a batch "…, so no one was
+ * added. Press again to add the rest.", so the DM never thinks the others
+ * joined. Its own sentence as a toast (client refusalText), which a
+ * "forbidden" refusal shows without "Not saved.".
+ */
+export function alreadyFighting(state: Pick<RoomState, "characters">, creature: string, batch: boolean): string {
+  const characterId = creature.startsWith("character:") ? creature.slice("character:".length) : undefined;
+  const name = (characterId === undefined ? undefined : ownEntry(state.characters, characterId)?.name.trim()) || "That creature";
+  return batch ? `${name} is already in the fight, so no one was added. Press again to add the rest.` : `${name} is already in the fight.`;
 }
 
 /** The refusal of a player's typed total while the room has them off. */

@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type Token } from "#shared/model.ts";
 import { stopFootprint } from "#shared/rules/footprint.ts";
+import { creatureKey } from "#shared/rules/initiative.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { reshapeLeg } from "#shared/rules/path.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
@@ -27,7 +28,7 @@ import { tokenSizeLabel } from "../features/grid/words.ts";
 import { ViewAsButton } from "../features/dm/viewAs.tsx";
 import { useFightAhead, useRowFacts, useSend, useSortedEntries } from "../features/encounter/hooks.ts";
 import { useEndTurn } from "../features/encounter/InitiativeStrip.tsx";
-import { turnStatus } from "../features/encounter/logic.ts";
+import { turnStatus, type CreatureOf } from "../features/encounter/logic.ts";
 import { EndTurnPill } from "../features/encounter/parts.tsx";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
@@ -717,6 +718,9 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const playersApplyDamage = useRoomView((s) => s.floorView?.meta.settings.playersApplyDamage ?? false);
   // A start still waiting for its answer counts, so the fight's button adds behind it rather than starting another, and Hidden shows the rows it sent.
   const fight = useFightAhead();
+  // A creature with a row by any token is in the fight (D-261128-039): the DM's rows name theirs, and a row still on its way, of a token the selection on this floor offered, is read off the floor's copy.
+  const floorTokens = useRoomView((s) => s.floorView?.tokens);
+  const creatureOf = useMemo((): CreatureOf => (entry) => creatureKey({ tokens: floorTokens ?? {} }, entry), [floorTokens]);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [more, setMore] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
@@ -733,10 +737,10 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const hidden = flagLit(tokens, "hidden");
   const locked = flagLit(tokens, "locked");
   // The rows join by the rule every path into a fight shares (combat/state.ts useFightJoin), reading their blocks for the DM only.
-  const joining = useMemo(() => (offers.dm ? fightCandidates(tokens, fight) : []), [offers.dm, tokens, fight]);
+  const joining = useMemo(() => (offers.dm ? fightCandidates(tokens, fight, creatureOf) : []), [offers.dm, tokens, fight, creatureOf]);
   const join = useFightJoin(joining);
   const joinState = join.stateOf(joining);
-  const outOfFight = fightCandidates(tokens, fight).length;
+  const outOfFight = fightCandidates(tokens, fight, creatureOf).length;
   const scope = useRoomScope();
   const anyPlayed = useRoomView((s) => (s.floorView ? offersRequest(s.floorView, tokens, labels) : false));
   const openRolls = useOpenRollOptions();
@@ -854,7 +858,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
               </BarButton>
             ) : null}
             {offers.dm && outOfFight > 0 ? (
-              <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, fight, actions.newId, join.mark))}>
+              <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, fight, actions.newId, join.mark, creatureOf))}>
                 {fight ? "Add to the fight" : "Start a fight"}
               </BarButton>
             ) : null}

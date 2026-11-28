@@ -5,6 +5,8 @@ import type { Character, Effect, ImageRef, MemberId, Token } from "#shared/model
 import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type EntryInput, type TokenGroupPatch } from "#shared/protocol.ts";
 import type { FightRows } from "../../state/store.ts";
+import { creatureKey } from "#shared/rules/initiative.ts";
+import { fightingCreatures, oncePerCreature, type CreatureOf, type FightCreatures } from "../encounter/logic.ts";
 import { tokenAccess, type Role } from "./access.ts";
 
 /**
@@ -233,18 +235,24 @@ export function deleteButtonWords(armed: boolean, armedText?: string): { text: s
   return armedText !== undefined ? { text: armedText, label: armedText } : { text: "Sure?", label: pointerWords("Tap again to delete") };
 }
 
+/** Each token its own creature, each row by its own ids: what a list read without the room's tokens can tell. */
+const BY_IDS: CreatureOf = (entry) => creatureKey({ tokens: {} }, entry);
+
 /**
- * The selected tokens "Add to the fight" would add: those not in it yet,
- * objects left out, as the tracker's "Everyone here" and the group's
- * conditions leave them out. A box drawn over a fight often catches a
- * barrel or a marker, which takes no turn (LP5-ROLLS-7). `encounter` is
- * the fight with a start still on its way counted in (state/store.ts
- * fightAhead).
+ * The selected tokens "Add to the fight" would add: the creatures not in it
+ * yet, each once, objects left out, as the tracker's "Everyone here" and
+ * the group's conditions leave them out. A box drawn over a fight often
+ * catches a barrel or a marker, which takes no turn (LP5-ROLLS-7).
+ * `encounter` is the fight with a start still on its way counted in
+ * (state/store.ts fightAhead). `creatureOf` reads the copy's tokens, so a
+ * character with a row by another token, on any scene or floor, is not
+ * offered, and of its two tokens selected the one players see joins
+ * (encounter/logic.ts oncePerCreature).
  */
-export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { companion?: Token["companion"] }>(tokens: readonly T[], encounter: FightRows | null | undefined): T[] {
-  const taken = new Set((encounter?.entries ?? []).map((e) => e.tokenId));
+export function fightCandidates<T extends Pick<Token, "id" | "kind"> & Partial<Pick<Token, "visibility">> & { companion?: Token["companion"] }>(tokens: readonly T[], encounter: FightCreatures | null | undefined, creatureOf: CreatureOf = BY_IDS): T[] {
   // A companion that acts on its character's turn takes no row of its own (docs/design/design-v1-combat-flow.md 3.6.7).
-  return tokens.filter((t) => t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t));
+  const offered = tokens.filter((t) => t.kind !== "object" && !actsOnCharacterTurn(t));
+  return oncePerCreature(offered, fightingCreatures(encounter, creatureOf), creatureOf, (t) => t.visibility !== "dm");
 }
 
 /**
@@ -256,12 +264,13 @@ export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { compani
  * a creature placed in its lair.
  */
 export function fightOps(
-  tokens: readonly (Pick<Token, "id" | "kind"> & { companion?: Token["companion"] })[],
-  encounter: FightRows | null | undefined,
+  tokens: readonly (Pick<Token, "id" | "kind"> & Partial<Pick<Token, "visibility">> & { companion?: Token["companion"] })[],
+  encounter: FightCreatures | null | undefined,
   newId: () => string,
   mark: (entry: EntryInput) => EntryInput = (entry) => entry,
+  creatureOf: CreatureOf = BY_IDS,
 ): ClientOp[] {
-  const entries = fightCandidates(tokens, encounter).map((t) => mark({ id: newId(), tokenId: t.id }));
+  const entries = fightCandidates(tokens, encounter, creatureOf).map((t) => mark({ id: newId(), tokenId: t.id }));
   const parts = chunks(entries, MAX_ENTRIES_PER_OP);
   if (!encounter) {
     const [first = [], ...rest] = parts;

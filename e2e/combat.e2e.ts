@@ -2899,3 +2899,130 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.deepEqual(cyConsole.errors, [], "Cy's page logged errors");
   });
 });
+
+/*
+ * One Initiative row a creature (LP52B-INIT-ROWS, D-261128-039 to 045), in a
+ * room of its own after the flow above, so its rows stay as they are: Shade,
+ * a player character shown by two tokens, joins a fight once, by the token
+ * players see, and her other token is offered on no scene, after a reload
+ * too. A stale device's batch naming her is refused whole, and the next
+ * press adds the rest.
+ */
+describe("raccoon-vtt: one Initiative row a creature", { timeout: 300_000 }, () => {
+  const rows = {
+    roomId: "",
+    roomName: `E2E combat rows ${new Date().toISOString().slice(0, 19)}`,
+    sceneId: "",
+    roadId: uuidv7(),
+    shade: uuidv7(),
+    sa: uuidv7(),
+    sb: uuidv7(),
+    gob: uuidv7(),
+    wolf: uuidv7(),
+  };
+  let rowsServer: Server;
+  let rowsBrowser: Browser;
+  let rowsContext: BrowserContext;
+  let page: Page;
+  let rowsOps: OpSocket;
+  const rowsWork = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-combat-rows-"));
+  const socket = new SocketWatch("dm-rows");
+  const watch = new ConsoleWatch("dm-rows");
+  const fight = () => socket.state?.encounter?.entries.map((e) => e.tokenId).sort() ?? null;
+  const everyone = () => page.getByRole("button", { name: /^Everyone here \(\d+\)$/ });
+
+  before(async () => {
+    rowsServer = await startServer({ port: PORT, assetDir: path.join(rowsWork, "assets"), databaseUrl: DATABASE_URL });
+    rowsBrowser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
+    rowsContext = await rowsBrowser.newContext({ viewport: DESK });
+    page = await rowsContext.newPage();
+    watch.attach(page);
+    await socket.attach(rowsContext, page);
+  });
+
+  after(async () => {
+    rowsOps?.close();
+    if (rows.roomId && rowsContext) {
+      try {
+        const res = await rowsContext.request.delete(`${rowsServer.origin}/api/rooms/${rows.roomId}`, { headers: { Origin: rowsServer.origin }, data: { name: rows.roomName } });
+        if (!res.ok()) console.error(`Deleting room ${rows.roomId} answered ${res.status()}`);
+      } catch (err) {
+        console.error(`Deleting room ${rows.roomId} failed`, err);
+      }
+    }
+    await rowsBrowser?.close();
+    await rowsServer?.stop();
+    rmSync(rowsWork, { recursive: true, force: true });
+  });
+
+  test("dedge-b-1. Everyone here counts Shade's two tokens as one creature, and the fight takes the one players see", async () => {
+    await page.goto(`${rowsServer.origin}/`);
+    await page.getByLabel("Room name").fill(rows.roomName);
+    await page.getByLabel("Your name").fill("Dana the DM");
+    await page.getByRole("button", { name: "Create room" }).click();
+    await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
+    const link = (await page.locator("code").first().textContent()) ?? "";
+    const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
+    assert.ok(match, `DM link looks wrong: ${link}`);
+    rows.roomId = match[1]!.replace("-", "");
+    await page.getByLabel("I saved my DM link").check();
+    await page.getByRole("button", { name: "Continue to the room" }).click();
+    await waitFor("the DM's snapshot", () => socket.state);
+    rows.sceneId = socket.state!.meta.playerSceneId!;
+    const cookie = (await rowsContext.cookies(rowsServer.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    rowsOps = await OpSocket.open({ origin: rowsServer.origin, roomId: rows.roomId, cookie });
+    await rowsOps.send({ t: "scene.create", scene: { id: rows.roadId, name: "The road", bounds: { w: 30, h: 20 } } });
+    await rowsOps.send({ t: "character.create", character: { id: rows.shade, name: "Shade", size: "medium", ownerIds: [], actor: actor(18, 14) } });
+    const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: rows.sceneId, size: "medium", visibility: "all", ...extra } });
+    // Shade A is the DM's alone, so Shade B, whom players see, stands for her.
+    await rowsOps.send(token(rows.sa, { kind: "pc", name: "Shade", x: 4, y: 4, disposition: "ally", visibility: "dm", actor: { ref: rows.shade } }));
+    await rowsOps.send(token(rows.sb, { kind: "pc", name: "Shade", x: 6, y: 4, disposition: "ally", actor: { ref: rows.shade } }));
+    await rowsOps.send(token(rows.gob, { kind: "monster", name: "Goblin", x: 10, y: 4, disposition: "hostile", actor: { inline: actor(7) } }));
+    await page.locator(".konvajs-content").first().waitFor();
+    await openSideTab(page, "Initiative");
+    await waitFor("Everyone here (2)", async () => ((await everyone().count()) > 0 && (await everyone().innerText()).includes("(2)") ? true : null));
+    await shots.take(page, "dedge-b-1-everyone");
+    await everyone().click();
+    await waitFor("a row for Shade B and the goblin", () => (JSON.stringify(fight()) === JSON.stringify([rows.gob, rows.sb].sort()) ? true : null));
+    assert.ok(!fight()!.includes(rows.sa), "Shade A has no row of her own");
+  });
+
+  test("dedge-b-2. on the scene her other token stands on, and after a reload, Shade is not offered, a stale batch naming her is refused whole, and the next press adds the rest", async () => {
+    // Shade A goes to the road, where a wolf waits, off the copy of the scene the row's token stands on.
+    await rowsOps.send({ t: "token.update", tokenId: rows.sa, patch: { sceneId: rows.roadId } });
+    await rowsOps.send({ t: "token.create", token: { id: rows.wolf, sceneId: rows.roadId, kind: "monster", name: "Wolf", size: "medium", visibility: "all", x: 8, y: 8, disposition: "hostile", actor: { inline: actor(11) } } });
+    await openSideTab(page, "Scenes");
+    const scenes = page.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    await scenes.getByRole("button", { name: /^The road(?![A-Za-z])/ }).first().click();
+    await waitFor("the DM on the road", () => (socket.you?.sceneId === rows.roadId ? true : null));
+    assert.equal(socket.state?.tokens[rows.sb], undefined, "the copy of the road lacks Shade B, whose row it holds");
+    await openSideTab(page, "Initiative");
+    const offered = async (label: string) => {
+      await waitFor(`${label}: Everyone here (1)`, async () => ((await everyone().count()) > 0 && (await everyone().innerText()).includes("(1)") ? true : null));
+    };
+    await offered("on the road");
+    await openPage(page, page.url());
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    if (socket.you?.sceneId !== rows.roadId) {
+      await openSideTab(page, "Scenes");
+      await page.getByRole("tabpanel", { name: sideTabName("Scenes") }).getByRole("button", { name: /^The road(?![A-Za-z])/ }).first().click();
+      await waitFor("the DM on the road again", () => (socket.you?.sceneId === rows.roadId ? true : null));
+    }
+    await openSideTab(page, "Initiative");
+    await offered("after a reload");
+    await shots.take(page, "dedge-b-2-road");
+
+    // A second device that still offers Shade A sends her with the wolf: the server takes neither.
+    await assert.rejects(
+      rowsOps.send({ t: "encounter.add", entries: [{ id: uuidv7(), tokenId: rows.sa }, { id: uuidv7(), tokenId: rows.wolf }] }),
+      /refused: forbidden: Shade is already in the fight, so no one was added\. Press again to add the rest\.$/,
+    );
+    assert.equal(fight()!.length, 2, "no one was added");
+    await everyone().click();
+    await waitFor("the wolf joins on the second press", () => (JSON.stringify(fight()) === JSON.stringify([rows.gob, rows.sb, rows.wolf].sort()) ? true : null));
+  });
+
+  test("dedge-b-3. no page logged an error", () => {
+    assert.deepEqual(watch.errors, [], "the DM's page logged errors");
+  });
+});

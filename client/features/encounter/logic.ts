@@ -5,7 +5,7 @@ import type { ProjectedActor } from "#shared/project.ts";
 import { orderShown } from "#shared/project.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
-import { advantageHint, compareEntries, rowCharacter, rowGroup } from "#shared/rules/initiative.ts";
+import { advantageHint, compareEntries, creatureKey, rowCharacter, rowGroup } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
 import { withheldFromEveryPlayer } from "../vision/union.ts";
 import type { Labels } from "../../lib/labels.ts";
@@ -499,6 +499,57 @@ export function stripRows(input: {
 
 export type AddMode = "selected" | "scene" | "visible";
 
+/**
+ * A fight's rows as every way into a fight reads them: who has a row, and
+ * on the DM's copy the creature each stands for (`creature`, D-261128-044),
+ * which the copy cannot work out for a token on another scene or floor.
+ */
+export type FightCreatures = { readonly entries: readonly (Pick<InitEntry, "tokenId" | "characterId"> & { readonly creature?: string })[] };
+
+/** A token's or a row's creature, as the copy reads it (rules/initiative.ts creatureKey). */
+export type CreatureOf = (entry: Pick<InitEntry, "tokenId" | "characterId">) => string | undefined;
+
+/**
+ * The creatures with a row: each row's own `creature` where the DM's
+ * projection gives one, and its key from the copy, which is all a player's
+ * rows and a row still on its way have: a player's copy holds a row only
+ * with its creature. Both are kept, so a list that keys tokens by their ids
+ * alone (groupEdit.ts fightCandidates' default) still leaves out a row's
+ * own token.
+ */
+export function fightingCreatures(fight: FightCreatures | null | undefined, creatureOf: CreatureOf): Set<string> {
+  const out = new Set<string>();
+  for (const row of fight?.entries ?? []) {
+    if (row.creature !== undefined) out.add(row.creature);
+    const own = creatureOf(row);
+    if (own !== undefined) out.add(own);
+  }
+  return out;
+}
+
+/**
+ * One token for each creature not in the fight (D-261128-039, 040): a
+ * creature with a row is not offered, and of a creature's tokens offered
+ * together the first every player can see stands for it, else the first in
+ * the list's order, so its row hides no creature players see. The list
+ * keeps its order.
+ */
+export function oncePerCreature<T extends Pick<Token, "id">>(tokens: readonly T[], fighting: ReadonlySet<string>, creatureOf: CreatureOf, seen: (token: T) => boolean): T[] {
+  const chosen = new Map<string, T>();
+  for (const token of tokens) {
+    const creature = creatureOf({ tokenId: token.id }) ?? `token:${token.id}`;
+    if (fighting.has(creature)) continue;
+    const first = chosen.get(creature);
+    if (first === undefined || (!seen(first) && seen(token))) chosen.set(creature, token);
+  }
+  return tokens.filter((token) => chosen.get(creatureOf({ tokenId: token.id }) ?? `token:${token.id}`) === token);
+}
+
+/** Whether every player can see the token where it stands: not hidden, nor withheld from all of them (the Visible mode's rule). */
+function playersSee(view: RoomState, token: Token): boolean {
+  return token.visibility !== "dm" && !withheldFromEveryPlayer(view, token);
+}
+
 function tokenOrder(labels: Labels): (a: Token, b: Token) => number {
   return (a, b) => {
     const an = displayName(a, labels);
@@ -519,20 +570,22 @@ function tokenOrder(labels: Labels): (a: Token, b: Token) => number {
  * check alone would leave out every monster the party sees in explored
  * ground. On a per-player scene it is what any player sees, the union
  * (docs/design/design-v1-per-player-vision.md decision 14, vision/union.ts).
- * Tokens with a row in `fight` are left out: the view's fight, or one whose
- * start still waits for its answer (state/store.ts fightAhead).
+ * A creature with a row in `fight` is left out, by any of its tokens, here
+ * or on another scene or floor: the view's fight, or one whose start still
+ * waits for its answer (state/store.ts fightAhead). A creature shown by
+ * two tokens is offered once (oncePerCreature), so "Everyone here" counts
+ * creatures.
  *
  * `floors` is the floor on screen, or for a fight on every floor the set of
  * the scene's floors (docs/design/design-v1-floors.md phase 4, 9.4), each
  * creature then judged visible by its own floor's fog, sight and vision.
  */
-export function addCandidates(view: RoomState, floors: string | ReadonlySet<string> | null, mode: AddMode, selectedId: string | null, labels: Labels, fight: { readonly entries: readonly Pick<InitEntry, "tokenId">[] } | null = view.encounter): Token[] {
+export function addCandidates(view: RoomState, floors: string | ReadonlySet<string> | null, mode: AddMode, selectedId: string | null, labels: Labels, fight: FightCreatures | null = view.encounter): Token[] {
   if (floors === null) return [];
   const on = typeof floors === "string" ? (sceneId: string) => sceneId === floors : (sceneId: string) => floors.has(sceneId);
-  const taken = new Set((fight?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   const out: Token[] = [];
   for (const token of Object.values(view.tokens)) {
-    if (!token || !on(token.sceneId) || taken.has(token.id)) continue;
+    if (!token || !on(token.sceneId)) continue;
     // A companion that acts on its character's turn takes no row of its own, which the server refuses anyway (docs/design/design-v1-combat-flow.md 3.6.7).
     if (actsOnCharacterTurn(token)) continue;
     if (mode === "selected") {
@@ -540,19 +593,26 @@ export function addCandidates(view: RoomState, floors: string | ReadonlySet<stri
       continue;
     }
     if (token.kind === "object" || isDefeated(entryActor(view, { tokenId: token.id }))) continue;
-    if (mode === "visible" && (token.visibility === "dm" || withheldFromEveryPlayer(view, token))) continue;
+    if (mode === "visible" && !playersSee(view, token)) continue;
     out.push(token);
   }
-  return out.sort(tokenOrder(labels));
+  const creatureOf: CreatureOf = (entry) => creatureKey(view, entry);
+  return oncePerCreature(out.sort(tokenOrder(labels)), fightingCreatures(fight, creatureOf), creatureOf, (token) => playersSee(view, token));
 }
 
-/** A player's own creatures on their scene that are not in the fight yet. */
+/**
+ * A player's own creatures on their scene that are not in the fight yet,
+ * each once: a character with a row by another token, or shown by two
+ * here, gets no second button. Of two here, one the DM has not hidden
+ * stands for it, since the server takes no hidden row from a player.
+ */
 export function ownCandidates(view: Pick<RoomState, "tokens" | "characters" | "encounter">, memberId: string, sceneId: string | null, labels: Labels): Token[] {
   if (sceneId === null) return [];
-  const taken = new Set((view.encounter?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
-  return Object.values(view.tokens)
-    .filter((t) => t && t.sceneId === sceneId && t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t) && ownsEntry(view, memberId, { tokenId: t.id }))
+  const own = Object.values(view.tokens)
+    .filter((t) => t && t.sceneId === sceneId && t.kind !== "object" && !actsOnCharacterTurn(t) && ownsEntry(view, memberId, { tokenId: t.id }))
     .sort(tokenOrder(labels));
+  const creatureOf: CreatureOf = (entry) => creatureKey(view, entry);
+  return oncePerCreature(own, fightingCreatures(view.encounter, creatureOf), creatureOf, (token) => token.visibility !== "dm");
 }
 
 /**
