@@ -1,7 +1,7 @@
 import { createElement, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { RoomState, Viewer } from "#shared/model.ts";
-import { reachWords } from "#shared/rules/opportunity.ts";
+import { creatureOf, reachWords } from "#shared/rules/opportunity.ts";
 import { sameSpot } from "#shared/rules/path.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { Labels } from "../../lib/labels.ts";
@@ -73,7 +73,7 @@ export class ReachToasts {
             // Seeded: its creatures count as named once it finishes, never toasted.
             if (part.done) {
               this.#read.add(part.id);
-              for (const left of part.leaves) this.#named.add(`${moverId}|${left.id}`);
+              for (const left of part.leaves) this.#named.add(`${moverId}|${creatureOf(view, left.id)}`);
             }
             continue;
           }
@@ -82,8 +82,8 @@ export class ReachToasts {
           this.#read.add(part.id);
           // A part that does not provoke says nothing, though a join holding it does: a Teleport joined with a walk is still a Teleport.
           if (part.over || !part.provokes) continue;
-          const fresh = part.leaves.filter((l) => rows.has(l.id) && !this.#named.has(`${moverId}|${l.id}`));
-          for (const left of fresh) this.#named.add(`${moverId}|${left.id}`);
+          const fresh = part.leaves.filter((l) => rows.has(l.id) && !this.#named.has(`${moverId}|${creatureOf(view, l.id)}`));
+          for (const left of fresh) this.#named.add(`${moverId}|${creatureOf(view, left.id)}`);
           if (fresh.length === 0) continue;
           // This device's own drag line already named them at the drop that landed this very leg.
           const line = input.shown.find((s) => this.#lines.get(s) === part.id);

@@ -128,6 +128,22 @@ describe("the DM's Opportunity Attack toast", () => {
     assert.deepEqual(dm.said, ["Thorn left the reach of Goblin and Shade."]);
   });
 
+  test("a character's other token on a later leg is not named again after Doesn't count on the first (FUOA1-SOL-1)", () => {
+    const dm = dmDevice();
+    const shade = (id: string, x: number, y: number) => token(id, { name: "Shade", x, y, actor: { ref: "shade" } });
+    const set = onTurn(world({ blockMovement: false, tokens: [thorn({ x: 5, y: 5 }), shade("s1", 6, 6), shade("s2", 9, 6)] }), "thorn");
+    const start = { ...set, characters: { ...set.characters, shade: character("shade", { name: "Shade", ownerIds: [] }) } };
+    dm.see(start);
+    let state = move(start, "thorn", 8, 5);
+    dm.see(state);
+    assert.deepEqual(dm.said, ["Thorn left Shade's reach."]);
+    state = apply(state, { t: "token.countLeg", tokenId: "thorn", counts: false } as Op);
+    dm.see(state);
+    state = move(state, "thorn", 12, 5);
+    dm.see(state);
+    assert.deepEqual(dm.said, ["Thorn left Shade's reach."], "Shade is named once a turn");
+  });
+
   test("waits for the SRD's data before it reads a leg, so a 10 ft reach is never read at 5 ft", async () => {
     const dm = dmDevice();
     const air = token("air", { name: "Air Elemental", size: "large", x: 6, y: 5, actor: { inline: actor({ srdId: "air-elemental" }) } });
