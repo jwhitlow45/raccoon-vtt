@@ -63,6 +63,7 @@ const LISTED: Record<string, Uses> = {
   "scripts/guide-hex-relief.ts": TOOL,
   "scripts/guide-iso.ts": TOOL,
   "scripts/guide-music.ts": TOOL,
+  "scripts/guide-opportunity.ts": TOOL,
   "scripts/guide-panel-size.ts": TOOL,
   "scripts/guide-pervision.ts": TOOL,
   "scripts/guide-scenes.ts": TOOL,
