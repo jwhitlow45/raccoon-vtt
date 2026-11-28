@@ -260,15 +260,21 @@ function boardScale(page: Page): Promise<number> {
  * overlay. A ring's line is a Shape dashed 8 by 5 (measure/ringScene.ts), an
  * aura's shading a Shape filled in its color, and a pill a Label with its
  * words. `clipped` counts the aura's shadings under a
- * group with a clip, as one moving over fog draws.
+ * group with a clip, as one moving over fog draws. `ringColors` holds each
+ * ring's line color, set by its creature's disposition.
  */
-type IsoMarks = { ground: { rings: number; aura: number; texts: string[] }; drag: { rings: number; texts: string[]; uprightTexts: string[]; circles: number }; overlay: { rings: number; aura: number; clipped: number; texts: string[] } };
+type IsoMarks = {
+  ground: { rings: number; aura: number; texts: string[] };
+  drag: { rings: number; ringColors: string[]; texts: string[]; uprightTexts: string[]; circles: number };
+  overlay: { rings: number; ringColors: string[]; aura: number; clipped: number; texts: string[] };
+};
 
 function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
   return page.evaluate((color) => {
     type Node = {
       dash?: () => number[] | undefined;
       fill?: () => string | undefined;
+      stroke?: () => string | undefined;
       text?: () => string;
       clipFunc?: () => unknown;
       getParent(): Node | null;
@@ -284,7 +290,9 @@ function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
     const layers = main.getLayers();
     const drag = layers[1]!;
     const overlay = layers[2]!;
-    const rings = (n: { find(s: string): Node[] }) => n.find("Shape").filter((x) => JSON.stringify(x.dash?.()) === "[8,5]").length;
+    const ringLines = (n: { find(s: string): Node[] }) => n.find("Shape").filter((x) => JSON.stringify(x.dash?.()) === "[8,5]");
+    const rings = (n: { find(s: string): Node[] }) => ringLines(n).length;
+    const ringColors = (n: { find(s: string): Node[] }) => ringLines(n).map((x) => x.stroke?.() ?? "");
     const auras = (n: { find(s: string): Node[] }) => n.find("Shape").filter((x) => x.fill?.() === color);
     const texts = (n: { find(s: string): Node[] }) => n.find("Text").map((t) => t.text?.() ?? "");
     const clippedBy = (x: Node) => {
@@ -297,10 +305,20 @@ function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
     };
     return {
       ground: { rings: rings(ground), aura: auras(ground).length, texts: texts(ground) },
-      drag: { rings: rings(drag), texts: texts(drag), uprightTexts: drag.find("Text").filter(upright).map((t) => t.text?.() ?? ""), circles: drag.find("Circle").length },
-      overlay: { rings: rings(overlay), aura: auras(overlay).length, clipped: auras(overlay).filter(clippedBy).length, texts: overlay.find("Text").filter(upright).map((t) => t.text?.() ?? "") },
+      drag: { rings: rings(drag), ringColors: ringColors(drag), texts: texts(drag), uprightTexts: drag.find("Text").filter(upright).map((t) => t.text?.() ?? ""), circles: drag.find("Circle").length },
+      overlay: { rings: rings(overlay), ringColors: ringColors(overlay), aura: auras(overlay).length, clipped: auras(overlay).filter(clippedBy).length, texts: overlay.find("Text").filter(upright).map((t) => t.text?.() ?? "") },
     };
   }, auraColor);
+}
+
+/** Whether a frame a page received ends another member's drag of `tokenId`, at its drop or by its cancel. */
+function endsDrag(frame: string, tokenId: string): boolean {
+  try {
+    const msg = JSON.parse(frame) as { t?: string; e?: { k?: string; tokenId?: string } };
+    return msg.t === "eph" && (msg.e?.k === "dragEnd" || msg.e?.k === "dragCancel") && msg.e.tokenId === tokenId;
+  } catch {
+    return false;
+  }
 }
 
 /** The isometric main stage's camera and the page point of its corner. */
@@ -1411,6 +1429,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
     assert.ok(still!.overlay.texts.includes("15 ft"), "the ring's label stands on the overlay, above the fog as in Top-down");
 
     // Down on the goblin and part of the way to a new cell, held there.
+    let dropSeen = 0;
     const from = await pagePoint(dm, { w: 16, h: 12 }, { x: 6.5, y: 5.5 });
     const to = await pagePoint(dm, { w: 16, h: 12 }, { x: 7.5, y: 6.5 });
     await dm.mouse.move(from.x, from.y);
@@ -1429,8 +1448,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
       assert.ok(moving!.overlay.texts.includes("15 ft"), "the moving ring's label stands");
       await shots.take(pat, "iso-pat-goblin-dragged-ring-aura");
     } finally {
+      dropSeen = patSocket.received.length;
       await dm.mouse.up();
     }
+    // The drop's end frame can reach Pat after the ev that moves the goblin, and its preview then holds the drop point a
+    // moment (client/state/ephemeral.ts DRAG_END_HOLD_MS), so a clear overlay before that frame is the gap between the two.
+    await waitFor("the DM's drop at Pat", () => (patSocket.received.slice(dropSeen).some((f) => endsDrag(f, hall.goblin)) ? true : null));
     await waitFor("the goblin's ring and aura back on Pat's ground stage", async () => {
       const after = await isoMarks(pat, AURA);
       return after && after.ground.aura >= 1 && after.overlay.aura === 0 && after.overlay.rings === 0 ? true : null;
@@ -1450,7 +1473,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
         const marks = await isoMarks(pat, AURA);
         return marks && marks.drag.rings >= 1 && marks.drag.uprightTexts.includes("10 ft") ? marks : null;
       });
-      assert.equal(m.overlay.rings, 0, "nothing of Pat's own drag moves on the overlay");
+      // Bree's ring by its color, as the drag layer draws it: the overlay draws other members' drags, which are not Pat's.
+      const breeRing = m.drag.ringColors[0];
+      assert.deepEqual(m.overlay.ringColors.filter((c) => c === breeRing), [], `nothing of Pat's own drag moves on the overlay (its rings ${JSON.stringify(m.overlay.ringColors)}, Bree's ${breeRing})`);
       assert.equal(await parentOf(pat, hall.bree), "dragGround", "her standee moved into the drag layer over the ring");
       // FU39-B: neither wheel nor keyboard zoom changes the grip's geometry mid-drag.
       const gripCamera = await isoCamera(pat);
