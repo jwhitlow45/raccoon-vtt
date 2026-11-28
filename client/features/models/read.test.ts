@@ -38,6 +38,33 @@ describe("sniffing a model file", () => {
     assert.equal(sniffModel(bytes, bytes.length + 1), null);
   });
 
+  test("calls a binary STL cut short damaged, however much of it is left, and a binary file that only seems to promise facets no model (review LP59-WORDS-1)", () => {
+    const bytes = binaryStl(cube, "solid exported by a slicer");
+    // Unit normals, as most exporters write them, as well as the fixture's zero ones.
+    const normals = bytes.slice();
+    for (let i = 0; i < cube.length / 9; i++) new DataView(normals.buffer).setFloat32(84 + 50 * i + 8, -1, true);
+    for (const whole of [bytes, normals]) {
+      for (const cut of [84 + 50, 84 + 50 + 1, 84 + 50 * 3 + 17, whole.length - 1]) assert.equal(sniffModel(whole.subarray(0, cut), cut), "damaged", `cut at ${cut}`);
+    }
+    // Not one whole facet left to tell it by, so no model.
+    assert.equal(sniffModel(bytes.subarray(0, 84 + 49), 84 + 49), null);
+    // A picture whose byte 80 happens to promise facets: its facets read as noise.
+    const noise = new Uint8Array(84 + 50 * 4);
+    for (let i = 0; i < noise.length; i++) noise[i] = (i * 131 + 7) % 251;
+    noise[50] = 0;
+    new DataView(noise.buffer).setUint32(80, 9, true);
+    assert.equal(sniffModel(noise, noise.length), null);
+    // A facet with a normal longer than a unit one, or a corner past any real model's or no number at all, is noise too.
+    const long = bytes.slice(0, 84 + 50 * 2);
+    new DataView(long.buffer).setFloat32(84 + 50, 3, true);
+    assert.equal(sniffModel(long, long.length), null);
+    for (const corner of [1e10, Number.NaN]) {
+      const far = bytes.slice(0, 84 + 50 * 2);
+      new DataView(far.buffer).setFloat32(84 + 50 + 12 + 4 * 8, corner, true);
+      assert.equal(sniffModel(far, far.length), null, `corner ${corner}`);
+    }
+  });
+
   test("knows a glTF JSON file, with or without a byte order mark", () => {
     assert.equal(sniff(enc(' {\n  "asset": { "version": "2.0" }, "meshes": [] }')), "gltf");
     assert.equal(sniff(enc('﻿{"asset":{"version":"2.0"}}')), "gltf");
@@ -56,6 +83,12 @@ describe("reading a model file", () => {
   test("refuses a .gltf with the words to save it as GLB", async () => {
     await assert.rejects(readModel(new Blob([enc('{"asset":{"version":"2.0"}}')]), "computer"), { message: MODEL_WORDS.gltf });
     assert.equal(MODEL_WORDS.gltf, "Save it as GLB (one file) and pick that.");
+  });
+
+  test("refuses a binary STL cut short as a damaged model, not as a file it does not read (review LP59-WORDS-1)", async () => {
+    const bytes = binaryStl(cube);
+    await assert.rejects(readModel(new Blob([bytes.slice(0, bytes.length - 20)]), "computer"), { message: MODEL_WORDS.crashed });
+    assert.equal(MODEL_WORDS.crashed, "The model could not be read. It may be damaged, or too large for this device.");
   });
 
   test("refuses a file no reader reads in the design's words", async () => {
