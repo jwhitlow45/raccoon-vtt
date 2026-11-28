@@ -6,3 +6,9 @@ overrides:
   # @fastify/static still asks for glob ^13. Drop both lines once it allows 14.
   glob: 14.0.3
   minimatch: 11.0.3
+  # Held at the newest release that is two weeks old, since the bumped
+  # pdfjs-dist and file-type pulled in newer ones. Drop these lines once the
+  # releases are old enough for the lockfile to take them unforced.
+  "@napi-rs/canvas": 1.1.1
+  "@tokenizer/inflate": 0.6.0
+  "@tybys/wasm-util": 0.10.4
