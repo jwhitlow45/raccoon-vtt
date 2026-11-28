@@ -12210,7 +12210,7 @@ export function qolPanelTests(): void {
  * measured, so the wait shows however fast the worker would answer.
  */
 export function modelSheetTests(): void {
-  test(`md-a. the 3D model sheet empty, reading a file, with its preview and with Remove model armed, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`md-a. the 3D model sheet empty, reading a file, with its preview and with Remove model armed, and with Isometric view hidden the line in place of 3D model and of the Library's 3D models, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await freshDm();
     const was = dmSocket.state!.characters[run.ids.thornChar]!.defaultImage;
     const stl = Buffer.from(binaryStl(zUp(figure(24))));
@@ -12287,6 +12287,33 @@ export function modelSheetTests(): void {
         await sheet.waitFor({ state: "detached" });
         await closeSheets(page);
         await escapeAll(page);
+        // Isometric view hidden on this device: its way back where the 3D model button stood, and in the Library where the 3D models stood (D-261127-692).
+        await setDmParts(page, { isometric: false });
+        try {
+          const back = (scope: Locator) => scope.getByRole("group", { name: "Hidden on this device" }).filter({ has: page.getByRole("button", { name: "Show Isometric view" }) });
+          const thorn = await thornsPage(page);
+          await openGroup(thorn, "Image");
+          const picture = back(thorn);
+          if (await shows(picture)) {
+            await picture.scrollIntoViewIfNeeded();
+            // The picture's buttons with the line under them.
+            await sweep.measure(page, "md-images-line", picture.locator("xpath=ancestor::div[2]"));
+          } else await sweep.missing(page, "md-images-line", "Thorn's picture held no line in place of 3D model");
+          await closeSheets(page);
+          await escapeAll(page);
+          const library = await openDmPanel(page, "Library");
+          const models = back(library);
+          if (await shows(models)) {
+            await models.scrollIntoViewIfNeeded();
+            // The 3D models' heading with the line under it.
+            await sweep.measure(page, "md-library-line", models.locator("xpath=.."));
+            await shots.take(page, `alignment-${sweep.at}-md-library-line`);
+          } else await sweep.missing(page, "md-library-line", "the Library held no line in place of its 3D models");
+        } finally {
+          await setDmParts(page, null);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
         console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
         lines.push(...sweep.lines);
       }
