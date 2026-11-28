@@ -12,7 +12,7 @@ import { frameFor } from "../client/features/models/frames.ts";
 import type { Turn } from "../client/lib/view.ts";
 import { openGroup } from "./helpers/groups.ts";
 import { setupHistory } from "./helpers/undoScope.ts";
-import { barControl, ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, openSideTab, pagePoint, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * 3D models on token pictures (docs/design/design-v1-token-models.md 3, 6
@@ -25,7 +25,8 @@ import { barControl, ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, star
  * model, a Wild Shape swap swaps it, and a group under Picture's color
  * draws one sheet per picture. Every socket frame Pat's page receives and
  * every asset it fetches is recorded, and none names the hidden
- * creature's sheet.
+ * creature's sheet. With Isometric view hidden on the DM's device the 3D
+ * model controls go, nothing is sent, and their Show brings them back.
  *
  * Test models are made here from primitives and flat colors, never art
  * (client/features/models/fixtures.testutil.ts).
@@ -230,6 +231,22 @@ async function pixelsLike(page: Page, clip: Standing["box"], match: (r: number, 
   for (let i = 0; i < info.width * info.height; i++) if (match(data[i * 3]!, data[i * 3 + 1]!, data[i * 3 + 2]!)) n++;
   return n;
 }
+
+/**
+ * Writes this device's choices of parts as another window of the app does,
+ * so the page hears them by its storage event (features/modules/store.ts).
+ */
+async function setParts(page: Page, dm: Record<string, boolean>): Promise<void> {
+  type Win = { localStorage: { setItem(k: string, v: string): void }; dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string }) => unknown };
+  await page.evaluate((v) => {
+    const w = globalThis as unknown as Win;
+    w.localStorage.setItem("rvtt.features", v);
+    w.dispatchEvent(new w.StorageEvent("storage", { key: "rvtt.features", newValue: v }));
+  }, JSON.stringify({ v: 1, dm, player: {} }));
+}
+
+/** A surface's Hidden on this device line (features/modules/Gate.tsx HiddenHere). */
+const hiddenLine = (within: Locator) => within.getByRole("group", { name: "Hidden on this device" });
 
 /** The model a token's image carries in a socket's copy. */
 const modelOf = (socket: SocketWatch, id: string): ModelRef | undefined => tokenOf(socket, id)?.image?.model;
@@ -670,7 +687,6 @@ describe("3D models on token pictures", { concurrency: false }, () => {
     const goblin = uuidv7();
     await ops.send(tokenOp(goblin, { name: "Goblin Warrior", x: 8, y: 8, actor: { inline: actor({ srdId: "goblin-warrior" }) } }));
     await waitFor("the goblin in the DM's view", () => tokenOf(dmSocket, goblin));
-    const { openSideTab, sideTabName } = await import("./harness.ts");
     await openSideTab(dm, "Monsters");
     const monsters = dm.getByRole("tabpanel", { name: sideTabName("Monsters") });
     await monsters.getByRole("searchbox", { name: "Search monsters" }).fill("goblin warrior");
@@ -859,6 +875,57 @@ describe("3D models on token pictures", { concurrency: false }, () => {
       const seen = (await frameHues(dmContext, model.assetId, frame)).opaque;
       assert.ok(seen.green < 20 && seen.blue < 20 && seen.red > 100, `frame ${frame} sees only the double-sided plane: ${JSON.stringify(seen)}`);
     }
+  });
+
+  test("md-18. Isometric view hidden on the DM's device: an open 3D model sheet closes, the knight's and the Goblin's 3D model buttons and the Library's 3D models go, nothing is sent, and the Show where the button stood brings them back, while Pat's Isometric still stands the knight as its model", async () => {
+    const knightModel = modelOf(dmSocket, run.knight);
+    assert.ok(knightModel, "the knight carries its model from md-1");
+    let panel = await imageGroup(dm, { x: 5, y: 5 }, "Knight");
+    await panel.getByRole("button", { name: "3D model", exact: true }).click();
+    await modelSheet(dm).waitFor();
+    const from = dmSocket.sent.length;
+    const sentOps = () => dmSocket.sent.slice(from).filter((f) => f.startsWith('{"t":"op"'));
+    await setParts(dm, { isometric: false });
+    await modelSheet(dm).waitFor({ state: "detached" });
+    await hiddenLine(panel).getByRole("button", { name: "Show Isometric view", exact: true }).waitFor();
+    assert.equal(await panel.getByRole("button", { name: "3D model", exact: true }).count(), 0, "the knight's 3D model button stayed");
+    assert.equal(await panel.getByRole("button", { name: "Change image", exact: true }).count(), 1, "the picture's own buttons stay");
+    await shots.take(dm, "md-18-hidden-button");
+    // Pat's device keeps every part, so the knight stands there as its model.
+    await pickView(pat, "isometric");
+    await standingAs(pat, run.knight);
+    await pickView(pat, "topDown");
+    // The Goblin's page, which md-7 left open: its 3D model button has gone too.
+    await openSideTab(dm, "Monsters");
+    const monsters = dm.getByRole("tabpanel", { name: sideTabName("Monsters") });
+    const change = monsters.getByRole("button", { name: "Change image", exact: true });
+    if (!(await change.isVisible())) {
+      await monsters.getByRole("searchbox", { name: "Search monsters" }).fill("goblin warrior");
+      await monsters.getByRole("button", { name: /^Goblin Warrior/ }).first().click();
+    }
+    await change.waitFor();
+    await hiddenLine(monsters).getByRole("button", { name: "Show Isometric view", exact: true }).waitFor();
+    assert.equal(await monsters.getByRole("button", { name: "3D model", exact: true }).count(), 0, "the Goblin's 3D model button stayed");
+    // The Library: the 3D models' heading holds the line, and no sheet is listed.
+    await openSideTab(dm, "Library");
+    const library = dm.getByRole("tabpanel", { name: sideTabName("Library") });
+    await hiddenLine(library).getByRole("button", { name: "Show Isometric view", exact: true }).waitFor();
+    assert.equal(await library.getByText("3D models", { exact: true }).count(), 1, "the 3D models' heading stays for its line");
+    assert.equal(await library.getByRole("list", { name: "3D models in this room" }).count(), 0, "the Library still lists the 3D models");
+    await shots.take(dm, "md-18-hidden-library");
+    // Back at the knight, the line's Show brings the button back with focus on it, and the closed sheet stays closed.
+    panel = await imageGroup(dm, { x: 5, y: 5 }, "Knight");
+    await hiddenLine(panel).getByRole("button", { name: "Show Isometric view", exact: true }).click();
+    const button = panel.getByRole("button", { name: "3D model", exact: true });
+    await button.waitFor();
+    await waitFor("focus on the 3D model button", () => button.evaluate((el) => (el === (el.ownerDocument as unknown as { activeElement: unknown }).activeElement ? true : null)));
+    assert.equal(await hiddenLine(panel).count(), 0, "the line stayed after its Show");
+    assert.equal(await modelSheet(dm).count(), 0, "the sheet opened again with the part");
+    await openSideTab(dm, "Library");
+    await library.getByRole("list", { name: "3D models in this room" }).waitFor();
+    assert.deepEqual(sentOps(), [], "hiding or showing Isometric view sent an op");
+    assert.deepEqual(modelOf(dmSocket, run.knight), knightModel, "the knight's model changed");
+    await dm.keyboard.press("Escape");
   });
 
   test("md-17. no page logged an error", () => {
