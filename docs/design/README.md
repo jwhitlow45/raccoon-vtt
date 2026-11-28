@@ -261,3 +261,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   file beside Export as image, a scene or every floor as Universal VTT
   files with the map, walls, doors, windows and lights, a player view
   that holds nothing hidden, and this app's own import check as a note.
+- [design-v1-opportunity-attacks.md](design-v1-opportunity-attacks.md):
+  Opportunity Attack notices when a move on a creature's own turn leaves
+  an enemy's reach, on the drag's label with rings, on the turn card
+  with Reaction used and in the DM's toast, never rolling or stopping a
+  move, behind a room switch and a Features part.
