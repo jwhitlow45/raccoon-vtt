@@ -54,10 +54,11 @@ function board(view: RoomState, role: DragDeps["role"] = "player", you?: { membe
   const frames = new Hand();
   const work = new RouteWork(frames, () => new WorkBudget({ limit: 1000 }));
   const sent: ClientOp[] = [];
+  const answers: ((answer: "taken" | "refused" | "unknown") => void)[] = [];
   let n = 0;
   const deps: DragDeps = {
     store: { getState: () => ({ view, floorView: view, you }) } as unknown as DragDeps["store"],
-    actions: { dispatch: (op: ClientOp) => (sent.push(op), ++n), newId: () => `id${++n}` } as unknown as DragDeps["actions"],
+    actions: { dispatch: (op: ClientOp, opts?: { onAnswer?: (answer: "taken" | "refused" | "unknown") => void }) => (sent.push(op), opts?.onAnswer && answers.push(opts.onAnswer), ++n), newId: () => `id${++n}` } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope: new RoomScope(),
     role,
@@ -74,7 +75,7 @@ function board(view: RoomState, role: DragDeps["role"] = "player", you?: { membe
     };
     work.run(filler);
   };
-  return { frames, work, sent, stops, spend, scope: deps.scope as RoomScope };
+  return { frames, work, sent, answers, stops, spend, scope: deps.scope as RoomScope };
 }
 
 
@@ -271,5 +272,32 @@ describe("the drag's stops", () => {
     for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
     assert.ok(landed);
     assert.deepEqual(b.scope.get(shownLeavesSlot).getState().shown, [{ tokenId: "thorn", turn: reachTurn("room|dm|dm1", view.encounter, undefined), after: 7, x: 8, y: 5, elevation: 0, ids: ["goblin"] }]);
+  });
+
+  test("a drop's kept line goes when the server refuses its move, so a later move of the turn to the same square keeps its own (OASTACK-SOL-5)", () => {
+    const view = onTurn(world({ blockMovement: false, tokens: [thorn({ x: 5, y: 5 }), token("goblin", { name: "Goblin", x: 6, y: 5 })] }), "thorn");
+    const hero = view.tokens.thorn!;
+    const b = board(view, "dm", { memberId: "dm1", role: "dm" });
+    b.scope.get(turnLeavesSlot).setState({ on: true, key: "room|dm|dm1", last: 7, chunks: { rolls: "failed", monsters: "failed" }, movers: {} }, true);
+    b.frames.frame();
+    const dropOnce = () => {
+      b.stops.start(hero.id);
+      const finger = node(hero, 3);
+      for (let k = 0; k < 50; k++) {
+        b.stops.frame(finger, hero);
+        b.frames.frame();
+      }
+      let landed: DropPlan | null = null;
+      // The board sends from inside the landing (Stage.tsx landDrop), as the line is kept just before it.
+      b.stops.drop(finger, hero, [hero], (plan) => ((landed = plan), b.stops.send(plan)));
+      for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
+    };
+    dropOnce();
+    assert.equal(b.scope.get(shownLeavesSlot).getState().shown.length, 1);
+    b.answers.shift()!("refused");
+    assert.deepEqual(b.scope.get(shownLeavesSlot).getState().shown, [], "refused: the line goes");
+    dropOnce();
+    b.answers.shift()!("taken");
+    assert.equal(b.scope.get(shownLeavesSlot).getState().shown.length, 1, "taken: the line stays for its leg");
   });
 });

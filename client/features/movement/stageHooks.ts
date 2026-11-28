@@ -24,7 +24,7 @@ import { meetsCreature, RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
-import { holdSlot, reachSlot, reachTurn, rememberShown, routeSlot, sameHold, shownLeavesSlot, stopNoteSlot, turnLeavesSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
+import { holdSlot, reachSlot, reachTurn, rememberShown, routeSlot, sameHold, shownLeavesSlot, stopNoteSlot, turnLeavesSlot, type DragRoute, type Hold as StoredHold, type ShownLeaves } from "./store.ts";
 import { labelsOf } from "../../state/labels.ts";
 
 /** Where a drag's preview is held, and what holds it. */
@@ -465,8 +465,13 @@ export function dragStops(deps: DragDeps): DragStops {
   };
 
   const attempts = new Map<string, number>();
-  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
-    sendPlan(plan, {
+  /** The line the drop being landed just kept, for the send that follows it to retire if the server refuses the move. */
+  let keptLine: ShownLeaves | null = null;
+  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] => {
+    // A line speaks for the leg its own drop sends, so it goes with that move's refusal: left kept, it would bind a later same-turn move to the same square and silence its DM toast.
+    const line = keptLine;
+    keptLine = null;
+    return sendPlan(plan, {
       labels: labelsOf(store.getState()),
       dispatch: (op, opts) =>
         actions.dispatch(op, {
@@ -474,6 +479,7 @@ export function dragStops(deps: DragDeps): DragStops {
           onAnswer: (answer, ...rest) => {
             opts?.onAnswer?.(answer, ...rest);
             onAnswer?.(op, answer);
+            if (line && answer === "refused" && (op.t === "token.move" ? op.tokenId === line.tokenId : op.t === "token.moveMany" && op.moves.some((m) => m.tokenId === line.tokenId))) shownLeaves.setState((s) => ({ shown: s.shown.filter((l) => l !== line) }));
           },
         }),
       newId: () => actions.newId(),
@@ -487,6 +493,7 @@ export function dragStops(deps: DragDeps): DragStops {
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });
+  };
 
   return {
     start(tokenId, pressed) {
@@ -603,6 +610,7 @@ export function dragStops(deps: DragDeps): DragStops {
               const turn = reachTurn(jobs.key, now.encounter, Object.values(jobs.movers)[0]?.turn);
               const line = { tokenId: token.id, turn, after: jobs.last, x: shown.to.x, y: shown.to.y, elevation: marks.elevation, ids: marks.ids };
               shownLeaves.setState((s) => ({ shown: rememberShown(s.shown, line) }));
+              keptLine = line;
             }
             setRoute(null);
             if (marks !== null) reaches.setState({ reach: null });
@@ -630,6 +638,7 @@ export function dragStops(deps: DragDeps): DragStops {
                   }
                 : undefined;
             placed(now, namedFollower(now, labelsOf(store.getState()), cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account, inTheWay), walkersFor(now, token.id, role), nowMode), searched));
+            keptLine = null;
           });
         });
         // Still searching: the drop waits at the ghost, which says so.
