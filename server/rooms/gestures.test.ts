@@ -166,7 +166,15 @@ describe("a held frame's kept form", () => {
 describe("what the server keeps, measured against its charges", () => {
   setFlagsFromString("--expose-gc");
   const gc = runInNewContext("gc") as () => void;
-  function perObject(n: number, make: (i: number) => unknown): number {
+  /**
+   * Bytes kept per object. One run of a slow runner can read high or low (a
+   * collector that has not finished, a sweep that lands mid-run), so this
+   * takes the median of several runs. A real growth past a charge moves every
+   * run, so the median still shows it. `lastRuns` holds the runs for a message.
+   */
+  let lastRuns: number[] = [];
+  const RUNS = 5;
+  function once(n: number, make: (i: number) => unknown): number {
     const keep: unknown[] = new Array(n).fill(null);
     gc();
     gc();
@@ -178,28 +186,36 @@ describe("what the server keeps, measured against its charges", () => {
     assert.equal(keep.length, n);
     return (after.heapUsed - before.heapUsed + (after.arrayBuffers - before.arrayBuffers)) / n;
   }
+  function perObject(n: number, make: (i: number) => unknown): number {
+    lastRuns = Array.from({ length: RUNS }, () => once(n, make)).sort((a, b) => a - b);
+    return lastRuns[RUNS >> 1]!;
+  }
+  const runs = () => `runs ${lastRuns.map((b) => b.toFixed(1)).join(", ")}`;
   const wide = (i: number, j: number) => String.fromCharCode(0x4e00 + (i % 500), 0x4e00 + (j % 500), 0x4e00 + Math.floor(i / 500)) + "一".repeat(61);
   const N = -1.2345678901234567e-100;
   const nums = (count: number) => Array.from({ length: count }, (_, i) => N * (i + 1));
   const held = (e: GroupFrame | EphEvent, i: number): HeldFrame => holdFrame("s1", e, null, i, i, i);
 
   test("a roster version and each member it stores", () => {
+    const noise: string[] = [];
     const measured = (m: number, n: number) => {
       const texts = Array.from({ length: n }, (_, i) => JSON.stringify({ k: "dragStart", tokenId: wide(i, 999), g: 1, x: N, y: N, with: Array.from({ length: m }, (_, j) => ({ tokenId: wide(i, j), x: N * j, y: N })), from: { x: N, y: N } }));
       const frames = texts.map((t) => JSON.parse(t) as unknown);
       const empty = perObject(n, () => new GestureVersions());
+      const emptyRuns = runs();
       const one = perObject(n, (i) => {
         const store = new GestureVersions();
         store.arrive(group(frames[i]), 0);
         return store;
       });
+      noise.push(`${m} members: empty ${emptyRuns}, held ${runs()}`);
       return one - empty;
     };
     const base = measured(0, 4_000);
     const full = measured(99, 400);
-    assert.ok(base <= ephCaps.charges.version, `a version: ${base} bytes`);
-    assert.ok((full - base) / 99 <= ephCaps.charges.member, `a member: ${(full - base) / 99} bytes`);
-    assert.ok(full <= versionCharge(99), `a full version: ${full} bytes`);
+    assert.ok(base <= ephCaps.charges.version, `a version: ${base} bytes (${noise.join("; ")})`);
+    assert.ok((full - base) / 99 <= ephCaps.charges.member, `a member: ${(full - base) / 99} bytes (${noise.join("; ")})`);
+    assert.ok(full <= versionCharge(99), `a full version: ${full} bytes (${noise.join("; ")})`);
   });
 
   for (const [name, make, charge] of [
@@ -220,7 +236,7 @@ describe("what the server keeps, measured against its charges", () => {
       const frames = Array.from({ length: 3_000 }, (_, i) => frame(JSON.parse(JSON.stringify(make(i)))));
       if ((frames[0] as { k: string }).k === "ruler") assert.ok(serializedBytes(frames[0]) > 0.98 * MAX_EPH_BYTES || name.includes("two-byte"), `${serializedBytes(frames[0])} bytes`);
       const bytes = perObject(frames.length, (i) => held(frames[i]!, i));
-      assert.ok(bytes <= charge, `${bytes} bytes against ${charge}`);
+      assert.ok(bytes <= charge, `${bytes} bytes against ${charge} (${runs()})`);
     });
   }
 
