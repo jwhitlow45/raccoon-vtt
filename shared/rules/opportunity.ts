@@ -121,92 +121,112 @@ function leaves(record: LegRecord): LegRecord[] {
  * - footprints filled, corners dropped, a mark changed: every id kept
  * - an Undo that reverses a join: its parts back with their ids
  *
- * Anything else it cannot match is matched in order where the spots agree,
- * and the rest is removed records and new legs, never a known leg scanned
+ * A walk that comes back to where it was can match more than one way, so
+ * the match is the one that keeps the most occurrences for the fewest new
+ * joins, then matches the most legs, and on a tie reads a join at the
+ * oldest legs and a removal at the newest. What it
+ * cannot match is removed records and new legs, never a known leg scanned
  * again. `added` and `removed` list leaf records only: a join is neither
  * added nor removed, and a join gone is its parts removed.
  */
 export function reconcileLegs(prev: readonly LegRecord[], next: readonly Pick<ReachLeg, "from" | "to">[], newId: () => number): { legs: LegRecord[]; added: LegRecord[]; removed: LegRecord[] } {
-  const work = [...prev];
+  const all = prev.flatMap(leaves);
+  const n = all.length;
+  const m = next.length;
+  const span = new Map<LegRecord, [number, number]>();
+  // The joins the previous update held, by the leaf each ends on, so a run of leaves knows how many it holds whole.
+  const joinsEndingAt: number[][] = Array.from({ length: n }, () => []);
+  let count = 0;
+  const index = (r: LegRecord): void => {
+    const lo = count;
+    if (r.parts) r.parts.forEach(index);
+    else count++;
+    span.set(r, [lo, count - 1]);
+    if (r.parts) joinsEndingAt[count - 1]!.push(lo);
+  };
+  prev.forEach(index);
+  // withStop joins only once the path is full, so a shorter path's update never joins.
+  const full = m >= MAX_PATH_STOPS - 1;
+  const w = m + 1;
+  // For the leaves from a and the legs from b, the best match: the most leaves kept less the new joins it needs (a join
+  // of k leaves keeps k for k - 1 joins, so it beats k removed and one new leg, and never beats a split back as it was),
+  // then the most legs matched. A tie takes the first choice offered here, the shortest match, then a removal, then a
+  // new leg, so a tie reads a join at the oldest legs, where withStop joins, and a removal at the newest, where an Undo
+  // takes a leg back.
+  const score = new Int32Array((n + 1) * w);
+  const matched = new Int32Array((n + 1) * w);
+  const choice = new Int32Array((n + 1) * w);
+  const DELETE = -1;
+  const INSERT = -2;
+  for (let a = n; a >= 0; a--) {
+    for (let b = m; b >= 0; b--) {
+      const at = a * w + b;
+      if (a === n && b === m) continue;
+      let best = -Infinity;
+      let bestLegs = -1;
+      let pick = 0;
+      const offer = (sc: number, legs: number, c: number) => {
+        if (sc > best || (sc === best && legs > bestLegs)) {
+          best = sc;
+          bestLegs = legs;
+          pick = c;
+        }
+      };
+      if (a < n && b < m && same(all[a]!.from, next[b]!.from)) {
+        let whole = 0;
+        for (let c = a; c < n; c++) {
+          if (c > a && !same(all[c]!.from, all[c - 1]!.to)) break;
+          for (const lo of joinsEndingAt[c]!) if (lo >= a) whole++;
+          if (same(all[c]!.to, next[b]!.to)) {
+            const fresh = c - a - whole;
+            const rest = (c + 1) * w + b + 1;
+            offer(c - a + 1 - fresh + score[rest]!, 1 + matched[rest]!, c);
+          }
+          if (!full) break;
+        }
+      }
+      if (a < n) offer(score[(a + 1) * w + b]!, matched[(a + 1) * w + b]!, DELETE);
+      if (b < m) offer(score[a * w + b + 1]!, matched[a * w + b + 1]!, INSERT);
+      score[at] = best;
+      matched[at] = bestLegs;
+      choice[at] = pick;
+    }
+  }
+  // The fewest records of the previous update that cover leaves lo to hi, so a join that holds as it was keeps its id.
+  const cover = (records: readonly LegRecord[], lo: number, hi: number, out: LegRecord[]): LegRecord[] => {
+    for (const r of records) {
+      const [s, e] = span.get(r)!;
+      if (e < lo || s > hi) continue;
+      if (s >= lo && e <= hi) out.push(r);
+      else cover(r.parts!, lo, hi, out);
+    }
+    return out;
+  };
   const legs: LegRecord[] = [];
   const added: LegRecord[] = [];
   const removed: LegRecord[] = [];
-  // withStop joins only once the path is full, so a shorter path's update never joins.
-  const full = next.length >= MAX_PATH_STOPS - 1;
-  let i = 0;
-  let j = 0;
-  while (i < work.length && j < next.length) {
-    const was = work[i]!;
-    const now = next[j]!;
-    if (same(was.from, now.from) && same(was.to, now.to)) {
-      legs.push(was);
-      i++;
-      j++;
-      continue;
-    }
-    if (!same(was.from, now.from)) break;
-    // Joins: the records from here that chain to the new leg's end, read as one, a join of a join keeping the first.
-    let k = i;
-    while (full && k + 1 < work.length && !same(work[k]!.to, now.to)) k++;
-    if (full && k > i && same(work[k]!.to, now.to)) {
-      let joined = was;
-      for (let m = i + 1; m <= k; m++) joined = { id: newId(), from: spotOf(joined.from), to: spotOf(work[m]!.to), parts: [joined, work[m]!] };
-      legs.push(joined);
-      i = k + 1;
-      j++;
-      continue;
-    }
-    // An Undo that reverses a join: the join's parts take its place.
-    if (was.parts) {
-      work.splice(i, 1, ...was.parts);
-      continue;
-    }
-    break;
-  }
-  // What is left: undone or rewritten records, and appended or rewritten legs, matched in order where their spots agree.
-  const restPrev = work.slice(i).flatMap(leaves);
-  const restNext = next.slice(j);
-  const kept = inOrder(restPrev, restNext);
-  restNext.forEach((leg, n) => {
-    const match = kept.get(n);
-    if (match !== undefined) {
-      legs.push(restPrev[match]!);
-      return;
-    }
-    const record: LegRecord = { id: newId(), from: spotOf(leg.from), to: spotOf(leg.to) };
-    legs.push(record);
-    added.push(record);
-  });
-  const used = new Set(kept.values());
-  restPrev.forEach((record, n) => {
-    if (!used.has(n)) removed.push(record);
-  });
-  return { legs, added, removed };
-}
-
-/** The longest in-order matching of `next` legs to `prev` records with the same spots, as a map from a next index to a prev index. */
-function inOrder(prev: readonly LegRecord[], next: readonly Pick<ReachLeg, "from" | "to">[]): Map<number, number> {
-  const out = new Map<number, number>();
-  if (prev.length === 0 || next.length === 0) return out;
-  const eq = (a: number, b: number) => same(prev[a]!.from, next[b]!.from) && same(prev[a]!.to, next[b]!.to);
-  const w = next.length + 1;
-  const table = new Uint16Array((prev.length + 1) * w);
-  for (let a = prev.length - 1; a >= 0; a--) {
-    for (let b = next.length - 1; b >= 0; b--) {
-      table[a * w + b] = eq(a, b) ? table[(a + 1) * w + b + 1]! + 1 : Math.max(table[(a + 1) * w + b]!, table[a * w + b + 1]!);
-    }
-  }
   let a = 0;
   let b = 0;
-  while (a < prev.length && b < next.length) {
-    if (eq(a, b)) {
-      out.set(b, a);
+  while (a < n || b < m) {
+    const c = choice[a * w + b]!;
+    if (c === DELETE) {
+      removed.push(all[a]!);
       a++;
+    } else if (c === INSERT) {
+      const record: LegRecord = { id: newId(), from: spotOf(next[b]!.from), to: spotOf(next[b]!.to) };
+      legs.push(record);
+      added.push(record);
       b++;
-    } else if (table[(a + 1) * w + b]! >= table[a * w + b + 1]!) a++;
-    else b++;
+    } else {
+      const [first, ...rest] = cover(prev, a, c, []);
+      let joined = first!;
+      for (const part of rest) joined = { id: newId(), from: spotOf(joined.from), to: spotOf(part.to), parts: [joined, part] };
+      legs.push(joined);
+      a = c + 1;
+      b++;
+    }
   }
-  return out;
+  return { legs, added, removed };
 }
 
 // ---------------------------------------------------------------------------
