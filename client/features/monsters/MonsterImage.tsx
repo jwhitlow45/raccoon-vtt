@@ -14,7 +14,8 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
 import { iconCredit } from "../images/icons.ts";
 import { ModelSheet } from "../models/ModelSheet.tsx";
-import { HiddenHere, Module } from "../modules/Gate.tsx";
+import { partMark } from "../modules/gate.ts";
+import { HiddenHere, useModule } from "../modules/Gate.tsx";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { applyOps, optInCount, optInLabel, planApply, sameImage, type MonsterRef } from "./images.ts";
 import { isAssetImage, keepModel } from "#shared/imageRef.ts";
@@ -63,37 +64,49 @@ export function MonsterImageField(props: {
   const twoTaps = set && props.value?.model !== undefined;
   // The image the monster shows now, the shipped icon included, which a 3D model added here turns into the room's own.
   const wearers = useMemo(() => [shown], [shown]);
+  const modelShown = useModule("isometric");
+  const row = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
+  const crop = value ? (
+    <Button size="sm" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
+      Crop
+    </Button>
+  ) : null;
+  const remove = twoTaps ? (
+    <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => props.onChange(null)}>
+      {props.fallback ? "Use the default icon" : "Remove image"}
+    </ConfirmButton>
+  ) : set && props.fallback ? (
+    <Button size="sm" onClick={() => props.onChange(null)}>
+      Use the default icon
+    </Button>
+  ) : set ? (
+    <Button variant="danger" size="sm" onClick={() => props.onChange(null)}>
+      Remove image
+    </Button>
+  ) : null;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
       <ImagePreview image={shown} shape="circle" aspect={1} width={64} ring={theme.color.hostile} initials={initials(props.name)} />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+      <div style={row}>
         <Button size="sm" onClick={() => setStep({ kind: "pick" })}>
           {shown ? "Change image" : "Set image"}
         </Button>
-        {value ? (
-          <Button size="sm" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
-            Crop
-          </Button>
-        ) : null}
-        {/* Isometric view's, as beside a token's picture, with the way back at the row's end (D-261127-692). */}
-        <Module id="isometric">
-          <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
-            3D model
-          </Button>
-        </Module>
-        {twoTaps ? (
-          <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => props.onChange(null)}>
-            {props.fallback ? "Use the default icon" : "Remove image"}
-          </ConfirmButton>
-        ) : set && props.fallback ? (
-          <Button size="sm" onClick={() => props.onChange(null)}>
-            Use the default icon
-          </Button>
-        ) : set ? (
-          <Button variant="danger" size="sm" onClick={() => props.onChange(null)}>
-            Remove image
-          </Button>
+        {modelShown ? (
+          <>
+            {crop}
+            {/* Isometric view's, marked on the button itself as beside a token's picture, with the way back at the row's end (D-261127-692). */}
+            <Button ref={modelButton} size="sm" icon="viewIsometric" {...partMark("isometric")} onClick={() => setStep({ kind: "model" })}>
+              3D model
+            </Button>
+            {remove}
+          </>
+        ) : crop || remove ? (
+          // Hidden, Crop and the picture's removal wrap as one, so the last of three never wraps alone under the other two.
+          <div style={row}>
+            {crop}
+            {remove}
+          </div>
         ) : null}
         {twoTaps ? (
           <Help id={removeHelp} style={{ flexBasis: "100%" }}>

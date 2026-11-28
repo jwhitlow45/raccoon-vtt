@@ -7,7 +7,8 @@ import { theme } from "../../lib/theme.ts";
 import type { Initials } from "../../lib/tokenView.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ModelSheet } from "../models/ModelSheet.tsx";
-import { HiddenHere, Module, useHiddenHere } from "../modules/Gate.tsx";
+import { partMark } from "../modules/gate.ts";
+import { HiddenHere, useHiddenHere, useModule } from "../modules/Gate.tsx";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { DEFAULT_CROP, type Crop } from "./crop.ts";
 import { CreditLine } from "./CreditLine.tsx";
@@ -83,6 +84,7 @@ export function ImageField(props: {
   const picked = (next: ImageRef) => each((current) => keepModel(next, current));
   const wearers = useMemo(() => group?.images ?? [props.value], [group?.images, props.value]);
   const hasModel = props.value?.model !== undefined;
+  const modelShown = useModule("isometric");
 
   const change = (
     // Words alone, so the pair still fits beside the picture in the side panel and on a 390 px phone (docs/design/design-v1-icons.md 4.1).
@@ -97,12 +99,15 @@ export function ImageField(props: {
           Crop
         </Button>
       ) : null}
-      {/* Isometric view's: a model stands only there, so a device that hides it hides the button, and its way back stands under the buttons (D-261127-692). */}
-      <Module id="isometric">
-        <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
+      {/*
+       * Isometric view's: a model stands only there, so a device that hides it hides the button, and its way back stands under the buttons (D-261127-692).
+       * The button carries the part's mark itself, since a wrapper around it would be a box the row's measures read in place of the button.
+       */}
+      {modelShown ? (
+        <Button ref={modelButton} size="sm" icon="viewIsometric" {...partMark("isometric")} onClick={() => setStep({ kind: "model" })}>
           3D model
         </Button>
-      </Module>
+      ) : null}
       {set && hasModel ? (
         // The model goes with its picture and cannot be rebuilt from the room, so this asks twice (D-261127-388).
         <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => each(() => null)}>
@@ -152,14 +157,16 @@ export function ImageField(props: {
             </div>
             <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{fix}</div>
             {removeLine ? <div style={{ width: 0, minWidth: "100%" }}>{removeLine}</div> : null}
-            {hiddenLine ? <div style={{ width: 0, minWidth: "100%" }}>{hiddenLine}</div> : null}
+            {/* Always drawn, a box only while it holds the line, so a Show's focus still finds the button from the line's place once the line goes (ShowFocus.tsx). */}
+            <div style={{ display: hiddenLine ? "block" : "contents", width: 0, minWidth: "100%" }}>{hiddenLine}</div>
             {props.extra.below ? <div style={{ width: 0, minWidth: "100%" }}>{props.extra.below}</div> : null}
           </div>
         ) : props.canEdit ? (
           <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
             <div style={buttons}>
               {change}
-              {fix}
+              {/* Isometric view hidden leaves three buttons, and Remove would wrap alone under the other two: Crop and Remove wrap as one, so the row breaks after Change image. */}
+              {modelShown || !set ? fix : <div style={buttons}>{fix}</div>}
             </div>
             {removeLine}
             {hiddenLine}
