@@ -6,7 +6,7 @@ import type { SrdMonster, StatBlockMonster } from "../srd/monsters.ts";
 import { monsterView, statBlockOf } from "../statBlock.ts";
 import { carriedGroup, holderOf } from "./attach.ts";
 import { legFeet, stepsBetween, tokenCellBox, type CellBox, type DistanceSettings } from "./distance.ts";
-import type { FootprintToken, PlacedToken } from "./footprint.ts";
+import { footprintRect, occupiedRange, type CellRange, type FootprintToken, type PlacedToken } from "./footprint.ts";
 import { sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexNeighbors, type HexGrid } from "./hex.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
@@ -229,7 +229,8 @@ export function reconcileLegs(prev: readonly LegRecord[], next: readonly Pick<Re
 /** A cell under a creature for the cover gate: its center, and its own box for the distance within reach. */
 type Cell = { cx: number; cy: number; box: CellBox };
 
-type Prepared = { reactor: Reactor; index: number; box: CellBox; max: number; cells: Cell[] | null };
+/** `bound`: the cells that bucket the creature. `box`: its box, built the first time the walk comes near it (boxOf). */
+type Prepared = { reactor: Reactor; index: number; bound: CellRange; box: CellBox | null; max: number; cells: Cell[] | null };
 
 /**
  * Work done, in units (section 5): a distance test between two boxes is 1 on
@@ -239,14 +240,35 @@ type Prepared = { reactor: Reactor; index: number; box: CellBox; max: number; ce
 type Work = { n: number };
 
 /**
- * What building one creature's box on hexes costs, in units: finding the
- * hexes it covers (distance.ts occupiedHexes) costs about as much as this
- * many square tests, and a scan builds one for every creature it reads and
- * every spot of the walk. Calibrated on the phone benchmark's cold first
- * pass of 200 creatures on hexes, so a slice stays under 8 ms there
- * (D-261128-099). A box on squares is a few sums, which the units leave out.
+ * What building one box on hexes costs, in units: finding the hexes it
+ * covers (distance.ts occupiedHexes) costs about as much as this many square
+ * tests. A scan builds one for each spot of the walk and each creature, where
+ * the two come near each other. Calibrated on the phone benchmark's cold
+ * first walk among 200 creatures on hexes, the dearest slice, so it stays
+ * under 8 ms there (D-261128-099). A box on squares is a few sums, which the
+ * units leave out.
  */
-export const HEX_BOX_UNITS = 300;
+export const HEX_BOX_UNITS = 500;
+
+/**
+ * The cells that bucket a creature: on squares its own, and on hexes its
+ * drawn square grown by the one cell its hexes reach past it at most, which
+ * costs no hexes to find. So a creature the walk never comes near costs no
+ * work on hexes either.
+ */
+export function bucketRange(g: Grid, token: PlacedToken): CellRange {
+  if (g.shape !== "hex") return occupiedRange(g, token);
+  const r = footprintRect(g, token);
+  return { x0: Math.floor(r.x) - 1, y0: Math.floor(r.y) - 1, x1: Math.ceil(r.x + r.w) + 1, y1: Math.ceil(r.y + r.h) + 1 };
+}
+
+/** A creature's box, built once, when the walk first comes near it. */
+function boxOf(p: Prepared, g: Grid, feetPerCell: number, work: Work): CellBox {
+  if (p.box) return p.box;
+  p.box = tokenCellBox(g, p.reactor.token, feetPerCell);
+  if (p.box.hexes) work.n += HEX_BOX_UNITS;
+  return p.box;
+}
 
 /** How far past a gate line's box a piece on hexes may end and still meet the line at a hex corner, which rounds to the 1/64 lattice (hex.ts cornerAt). */
 const HEX_PAD = 1 / 64;
@@ -428,27 +450,18 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
   if (!leg.provokes) return [];
   const { grid, rules } = input;
   const fpc = rules.feetPerCell;
-  const work: Work = { n: 0 };
-  let nextYield = slice;
   const prepared: Prepared[] = [];
   for (const reactor of input.reactors) {
     if (skip.has(reactor.id) || reactor.reaches.length === 0) continue;
-    const box = tokenCellBox(grid, reactor.token, fpc);
-    if (box.hexes) work.n += HEX_BOX_UNITS;
-    prepared.push({ reactor, index: prepared.length, box, max: Math.max(...reactor.reaches), cells: null });
-    // Many creatures on hexes take a slice or more to read before the walk does.
-    if (work.n >= nextYield) {
-      yield work.n;
-      nextYield = work.n + slice;
-    }
+    prepared.push({ reactor, index: prepared.length, bound: bucketRange(grid, reactor.token), box: null, max: Math.max(...reactor.reaches), cells: null });
   }
   const out: ReachLeave[] = [];
   if (prepared.length === 0) return out;
   const buckets = new Map<number, Prepared[]>();
   for (const p of prepared) {
     const grow = Math.ceil(p.max / fpc) + 1;
-    for (let bx = Math.floor((p.box.x0 - grow) / BUCKET); bx <= Math.floor((p.box.x1 - 1 + grow) / BUCKET); bx++) {
-      for (let by = Math.floor((p.box.y0 - grow) / BUCKET); by <= Math.floor((p.box.y1 - 1 + grow) / BUCKET); by++) {
+    for (let bx = Math.floor((p.bound.x0 - grow) / BUCKET); bx <= Math.floor((p.bound.x1 - 1 + grow) / BUCKET); bx++) {
+      for (let by = Math.floor((p.bound.y0 - grow) / BUCKET); by <= Math.floor((p.bound.y1 - 1 + grow) / BUCKET); by++) {
         const key = bucketKey(bx, by);
         const list = buckets.get(key);
         if (list) list.push(p);
@@ -456,12 +469,11 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
       }
     }
   }
+  // On hexes the walk starts a slice of its own: its spots and the first boxes it builds are its dearest work, more so cold, and the creatures' read before it is not counted.
+  if (grid.shape === "hex") yield 0;
   const spots = legSpots(grid, input.mover, leg.from, leg.to);
-  // A walk read cold costs a slice of its own, so one that follows a long read of the creatures starts a fresh slice.
-  if (work.n - (nextYield - slice) >= slice / 2) {
-    yield work.n;
-    nextYield = work.n + slice;
-  }
+  const work: Work = { n: 0 };
+  let nextYield = slice;
   const stamp = new Uint32Array(prepared.length);
   const left = new Uint8Array(prepared.length);
   let within = new Map<number, number>();
@@ -469,15 +481,14 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
   for (let k = 0; k < spots.length; k++) {
     const spot = spots[k]!;
     const standing: FootprintToken = input.mover.height === undefined ? spot : { ...spot, height: input.mover.height };
-    const box = tokenCellBox(grid, standing, fpc);
-    if (box.hexes) work.n += HEX_BOX_UNITS;
+    const near = bucketRange(grid, standing);
     const candidates: Prepared[] = [];
     for (const i of within.keys()) {
       stamp[i] = k + 1;
       candidates.push(prepared[i]!);
     }
-    for (let bx = Math.floor(box.x0 / BUCKET); bx <= Math.floor((box.x1 - 1) / BUCKET); bx++) {
-      for (let by = Math.floor(box.y0 / BUCKET); by <= Math.floor((box.y1 - 1) / BUCKET); by++) {
+    for (let bx = Math.floor(near.x0 / BUCKET); bx <= Math.floor((near.x1 - 1) / BUCKET); bx++) {
+      for (let by = Math.floor(near.y0 / BUCKET); by <= Math.floor((near.y1 - 1) / BUCKET); by++) {
         for (const p of buckets.get(bucketKey(bx, by)) ?? []) {
           if (stamp[p.index] === k + 1 || left[p.index]) continue;
           stamp[p.index] = k + 1;
@@ -487,8 +498,19 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
     }
     candidates.sort((a, b) => a.index - b.index);
     const next = new Map<number, number>();
+    // The spot's own box, built only where some creature is near enough to test.
+    let box: CellBox | null = null;
     for (const p of candidates) {
-      const feet = feetBetween(box, p.box, rules, work);
+      // A spot that first comes near many creatures on hexes builds their boxes over more than one slice.
+      if (work.n >= nextYield) {
+        yield work.n;
+        nextYield = work.n + slice;
+      }
+      if (!box) {
+        box = tokenCellBox(grid, standing, fpc);
+        if (box.hexes) work.n += HEX_BOX_UNITS;
+      }
+      const feet = feetBetween(box, boxOf(p, grid, fpc, work), rules, work);
       const was = spot.jump ? undefined : within.get(p.index);
       if (was !== undefined && before) {
         for (const reach of p.reactor.reaches) {

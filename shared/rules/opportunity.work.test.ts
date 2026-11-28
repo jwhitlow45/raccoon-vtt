@@ -2,57 +2,102 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token, Viewer } from "../model.ts";
 import { room, token } from "../testutil.ts";
-import { HEX_BOX_UNITS, reachInput, reachScan, SLICE_WORK } from "./opportunity.ts";
+import { footprintRect, occupiedRange, placedOnHex } from "./footprint.ts";
+import { bucketRange, HEX_BOX_UNITS, reachInput, reachScan, SLICE_WORK } from "./opportunity.ts";
 
 /**
  * What a scan counts as work on hexes, where finding the hexes a creature
- * covers costs far more than a test between two boxes (D-261128-099): the
- * creatures' read yields like the walk does, and a long read hands the walk
- * a fresh slice.
+ * covers costs far more than a test between two boxes (D-261128-099): a
+ * creature's box and a spot's are each built and counted once, where the two
+ * come near each other, so a creature the walk never comes near costs
+ * nothing, and a spot near many of them builds their boxes over several
+ * slices.
  */
 
 const DM: Viewer = { memberId: "dm1", role: "dm" };
 
-/** Bree at the corner and this many goblins in a far block, none of them near her walk. */
-function crowd(goblins: number, shape?: "hexRows"): RoomState {
-  const tokens: Token[] = [token("bree", { kind: "pc", name: "Bree", disposition: "ally", x: 0, y: 0 })];
-  for (let i = 0; i < goblins; i++) tokens.push(token(`g${i}`, { name: `Goblin ${i}`, x: 40 + (i % 20), y: 40 + Math.floor(i / 20) }));
+type Spot = { x: number; y: number };
+
+/** Bree at `at` and goblins on `cells`, on squares or hex rows. */
+function crowd(at: Spot, cells: readonly Spot[], shape?: "hexRows"): RoomState {
+  const tokens: Token[] = [token("bree", { kind: "pc", name: "Bree", disposition: "ally", ...at })];
+  cells.forEach((c, i) => tokens.push(token(`g${i}`, { name: `Goblin ${i}`, ...c })));
   const state = room({ tokens: Object.fromEntries(tokens.map((t) => [t.id, t])) });
   state.scenes.s1 = { ...state.scenes.s1!, autoWalls: "off", ...(shape ? { gridShape: shape } : {}) };
   return state;
 }
 
-/** The work counts the scan of Bree's walk from the corner straight down this many cells yields at, one slice of SLICE_WORK at a time. */
-function yields(state: RoomState, cells = 2): number[] {
-  const read = reachInput(state, "bree", { turn: 1, stops: [{ x: 0, y: 0, elevation: 0 }, { x: 0, y: cells, elevation: 0 }] }, { rolls: {}, monsters: [] }, DM);
+/** A block of cells, `w` by `h` from `x0, y0`, less any listed. */
+function block(x0: number, y0: number, w: number, h: number, less: readonly Spot[] = []): Spot[] {
+  const out: Spot[] = [];
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (!less.some((l) => l.x === x && l.y === y)) out.push({ x, y });
+  return out;
+}
+
+/** The work counts Bree's walk from `at` straight down `cells` cells yields at, `slice` units at a time. */
+function yields(state: RoomState, at: Spot, cells: number, slice = SLICE_WORK): number[] {
+  const read = reachInput(state, "bree", { turn: 1, stops: [{ ...at, elevation: 0 }, { x: at.x, y: at.y + cells, elevation: 0 }] }, { rolls: {}, monsters: [] }, DM);
   assert.ok(read);
-  const run = reachScan(read.input, { ...read.legs[0]!, provokes: true }, new Set(), SLICE_WORK);
+  const run = reachScan(read.input, { ...read.legs[0]!, provokes: true }, new Set(), slice);
   const out: number[] = [];
   for (let step = run.next(); !step.done; step = run.next()) out.push(step.value);
   return out;
 }
 
+/** All the work a scan does, read by yielding at every chance. */
+const workOf = (state: RoomState, at: Spot, cells: number) => yields(state, at, cells, 1).at(-1) ?? 0;
+
 describe("a scan's work on hexes", () => {
-  test("120 goblins on hexes: the read yields once a slice's worth of boxes is built, and the walk starts a fresh slice", () => {
-    const boxesPerSlice = Math.ceil(SLICE_WORK / HEX_BOX_UNITS);
-    const seen = yields(crowd(120, "hexRows"));
-    assert.equal(seen[0], boxesPerSlice * HEX_BOX_UNITS, "the first yield comes inside the creatures' read");
-    assert.equal(seen[1], 120 * HEX_BOX_UNITS, "past half a slice since that yield, the walk waits for the next slice");
+  const start = { x: 2, y: 2 };
+
+  test("120 goblins on hexes far from the walk cost nothing: neither their hexes nor the walk's are found", () => {
+    assert.equal(workOf(crowd(start, block(40, 40, 20, 6), "hexRows"), start, 2), 0);
   });
 
-  test("a read that ends right on a yield gives the walk that slice, with no empty one between", () => {
-    const boxesPerSlice = Math.ceil(SLICE_WORK / HEX_BOX_UNITS);
-    const seen = yields(crowd(2 * boxesPerSlice, "hexRows"));
-    assert.deepEqual(seen.slice(0, 2), [boxesPerSlice * HEX_BOX_UNITS, 2 * boxesPerSlice * HEX_BOX_UNITS]);
-    assert.ok(seen.every((n, i) => i === 0 || n > seen[i - 1]!), `every yield follows new work: ${seen.join(", ")}`);
+  test("each goblin near the walk on hexes costs HEX_BOX_UNITS once, and the same goblins on squares a few tests", () => {
+    // A column beside a walk 8 cells down, so every spot has a goblin near it either way, and a second column one cell further.
+    const beside = block(3, 2, 1, 8);
+    const more = [...beside, ...block(4, 2, 1, 8)];
+    const hexes = workOf(crowd(start, more, "hexRows"), start, 8) - workOf(crowd(start, beside, "hexRows"), start, 8);
+    assert.ok(hexes >= 8 * HEX_BOX_UNITS && hexes < 9 * HEX_BOX_UNITS, `8 more boxes, each built once: ${hexes} units`);
+    const squares = workOf(crowd(start, more), start, 8) - workOf(crowd(start, beside), start, 8);
+    assert.ok(squares > 0 && squares < HEX_BOX_UNITS, `distance tests alone: ${squares} units`);
   });
 
-  test("the same 120 goblins on squares cost a few sums, so the scan never yields", () => {
-    assert.deepEqual(yields(crowd(120)), []);
+  test("a spot first near 63 goblins on hexes builds their boxes over several slices, none of them running a box past its slice", () => {
+    const at = { x: 10, y: 10 };
+    const slice = 5_000;
+    const seen = yields(crowd(at, block(6, 6, 8, 8, [at]), "hexRows"), at, 1, slice);
+    assert.ok(seen.length >= 3, `the first spot's boxes in ${seen.length} slices`);
+    seen.forEach((n, i) => assert.ok(n - (seen[i - 1] ?? 0) < slice + 2 * HEX_BOX_UNITS, `a slice ran to ${n - (seen[i - 1] ?? 0)} units: ${seen.join(", ")}`));
   });
 
-  test("each spot of a long walk on hexes builds a box, so 100 cells past one goblin take more than a slice", () => {
-    assert.ok(yields(crowd(1, "hexRows"), 100).length > 0);
-    assert.deepEqual(yields(crowd(1), 100), [], "on squares the same walk fits in one slice");
+  test("a walk on hexes past 30 goblins builds a box for each and for each spot near them, which together take more than a slice", () => {
+    const beside = block(3, 2, 1, 30);
+    // Past the yield that starts the walk on hexes, which comes before any work.
+    assert.ok(yields(crowd(start, beside, "hexRows"), start, 100).some((n) => n > 0));
+    assert.deepEqual(yields(crowd(start, beside), start, 100), [], "on squares the same walk fits in one slice");
+  });
+
+  test("on hexes the walk starts a slice of its own, before any of its work, and on squares it runs on", () => {
+    const one = [{ x: 3, y: 2 }];
+    assert.equal(yields(crowd(start, one, "hexRows"), start, 2)[0], 0);
+    assert.deepEqual(yields(crowd(start, one), start, 2), []);
+  });
+
+  test("a creature's bucket bound holds every cell its hexes reach, at every size and on both hex grids", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g = { shape: "hex", orient } as const;
+      for (const size of ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const) {
+        for (let col = -3; col < 9; col++) {
+          for (let row = -3; row < 9; row++) {
+            const placed = { size, ...placedOnHex(g, { size, x: 0, y: 0 }, { col, row }) };
+            const r = occupiedRange(g, placed);
+            const b = bucketRange(g, placed);
+            assert.ok(b.x0 <= r.x0 && b.y0 <= r.y0 && b.x1 >= r.x1 && b.y1 >= r.y1, `${orient} ${size} at ${col},${row}: ${JSON.stringify({ r, b, rect: footprintRect(g, placed) })}`);
+          }
+        }
+      }
+    }
   });
 });
