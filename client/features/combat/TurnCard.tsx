@@ -32,13 +32,14 @@ export function turnTitle(model: Pick<TurnCardModel, "name">): string {
  * the news (docs/design/design-v1-opportunity-attacks.md 1): "left Goblin 2's
  * reach, 2 attacks", "left 3 creatures' reach".
  */
-export function turnUsesText(model: Pick<TurnCardModel, "count"> & Partial<Pick<TurnCardModel, "attacks" | "left">>): string {
+export function turnUsesText(model: Pick<TurnCardModel, "count"> & Partial<Pick<TurnCardModel, "attacks" | "left" | "checking">>): string {
   const uses = `${model.count} ${model.count === 1 ? "use" : "uses"}`;
   const attacks = model.attacks ?? 0;
   const left = model.left ?? [];
   const attackText = `${attacks} ${attacks === 1 ? "attack" : "attacks"}`;
   const counts = attacks === 0 ? uses : model.count > 0 ? `${attackText}, ${uses}` : attackText;
-  if (left.length === 0) return counts;
+  // A card that shows only for its walk's check says so, not "0 uses".
+  if (left.length === 0) return attacks === 0 && model.count === 0 && model.checking === true ? REACH_WORDS.checkingFolded : counts;
   const notice = reachWords(left, "left", false, 1);
   return attacks === 0 && model.count === 0 ? notice : `${notice}, ${counts}`;
 }
@@ -48,6 +49,7 @@ export const REACH_WORDS = {
   heading: "Opportunity Attacks",
   used: "Reaction used",
   checking: "Checking the walk…",
+  checkingFolded: "checking the walk…",
   over: "Too many creatures here to check this walk.",
   disengage: (name: string) => `Unless ${name} took the Disengage action.`,
   avoid: (name: string, trait: string) => `${name} has ${trait}, which may avoid them.`,
@@ -215,7 +217,8 @@ function ReachBlock(props: { reach: BlockReach; name: string; announce?: string 
           <ReachRow key={row.id} row={row} onPressed={() => setPressed({ id: row.id, at: i })} />
         ))}
         {rest > 0 ? <p style={muted}>{REACH_WORDS.more(rest)}</p> : null}
-        <Loading text={REACH_WORDS.checking} active={reach.checking} small />
+        {/* The block's check counts only once it has lasted the shared delay (alerts.ts reachByMover), so it shows at once here. */}
+        <Loading text={REACH_WORDS.checking} active={reach.checking} delay={0} small />
         {reach.over ? <p style={muted}>{REACH_WORDS.over}</p> : null}
         {reach.rows.length > 0 ? <p style={muted}>{REACH_WORDS.disengage(name)}</p> : null}
         {reach.rows.length > 0 && reach.avoid ? <p style={muted}>{REACH_WORDS.avoid(name, reach.avoid)}</p> : null}

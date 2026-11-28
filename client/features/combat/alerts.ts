@@ -5,6 +5,7 @@ import { healRevivesDead } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { avoidTrait, reachWords } from "#shared/rules/opportunity.ts";
+import { useDelayed } from "../../components/Loading.tsx";
 import { displayName } from "../../lib/scene.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -64,10 +65,10 @@ export type PromptCard<P> = { id: string; participant: Participant; record: numb
 export type ReachRowModel = { id: string; name: string; fiveFt: boolean; trait: string | null; mark: ReactionTarget | null };
 
 /**
- * A block's Opportunity Attacks: its rows, a job still checking, a leg past
- * the cap, the mover unseen, a trait of its block that may avoid them, and
- * what its live region says of the rows new on this device ("Left Goblin
- * 2's reach.").
+ * A block's Opportunity Attacks: its rows, a job still checking once the
+ * wait has lasted the shared delay (reachByMover), a leg past the cap, the
+ * mover unseen, a trait of its block that may avoid them, and what its live
+ * region says of the rows new on this device ("Left Goblin 2's reach.").
  */
 export type BlockReach = { rows: readonly ReachRowModel[]; checking: boolean; over: boolean; unseen: boolean; avoid: string | null; announce?: string };
 
@@ -81,6 +82,8 @@ export type TurnCardModel = {
   blocks: { participant: Participant; uses: readonly LimitedUse[] | null; count: number; attacks: number; reach: BlockReach }[];
   /** The names of every block's Opportunity Attack rows, for the folded row's words. */
   left: readonly string[];
+  /** A block's walk is still checked, for the folded row's words when it says nothing else. */
+  checking: boolean;
   count: number;
   /** The attacks of every block, for the folded row's words. */
   attacks: number;
@@ -132,11 +135,13 @@ export function useCombatAlerts(): CombatAlerts {
   const rolls = useDiceView(targets);
   const attacks = useMemo(() => targets.map((t) => (rolls.dice ? (creatureRolls(rolls.dice, t)?.named ?? null) : null)), [targets, rolls.dice]);
   const turnReach = useTurnReach();
+  // The turn's jobs run one queue, so one wait covers them: a check done within the shared delay never shows, nor a card that only it would bring.
+  const waited = useDelayed(Object.values(turnReach.movers).some((m) => m.checking));
   const movers = useMemo(() => Object.keys(turnReach.movers).map((id): ActorTarget => ({ tokenId: id })), [turnReach.movers]);
   const moverDice = useDiceView(movers);
   const reach = useMemo(
-    () => (view && you ? reachByMover(view, you, labels, turnReach, (id) => (moverDice.dice ? creatureBlock(moverDice.dice, { tokenId: id }) : null), confirmed) : {}),
-    [view, confirmed, you, labels, turnReach, moverDice.dice],
+    () => (view && you ? reachByMover(view, you, labels, turnReach, (id) => (moverDice.dice ? creatureBlock(moverDice.dice, { tokenId: id }) : null), confirmed, waited) : {}),
+    [view, confirmed, you, labels, turnReach, moverDice.dice, waited],
   );
   useReachReturns(turnReach, view, you);
   if (!view || !you || (shown.length === 0 && Object.keys(reach).length === 0)) return NONE;
@@ -157,7 +162,10 @@ export function useCombatAlerts(): CombatAlerts {
 /**
  * Each mover's Opportunity Attacks as its block shows them, by the mover's
  * token: the rows of the turn's jobs (opportunity.ts), named as this viewer
- * reads them, with the Reaction used each row may mark.
+ * reads them, with the Reaction used each row may mark. A job still
+ * checking counts only once the wait has lasted the shared delay
+ * (`waited`), so "Checking the walk…" shows then, and a card it alone
+ * brings never flashes for a check that ends sooner.
  */
 export function reachByMover(
   view: Pick<RoomState, "tokens" | "characters" | "encounter">,
@@ -167,10 +175,11 @@ export function reachByMover(
   blockOf: (moverId: string) => Parameters<typeof avoidTrait>[0] | null,
   /** The server's copy under `view`: a Reaction marked here and not yet taken there keeps its row's button, busy. */
   confirmed?: Pick<RoomState, "tokens" | "encounter"> | null,
+  waited = true,
 ): Record<string, BlockReach> {
   const out: Record<string, BlockReach> = {};
   for (const [moverId, mover] of Object.entries(reach.movers)) {
-    const block = moverBlock(view, confirmed ?? view, you, labels, moverId, mover, blockOf(moverId));
+    const block = moverBlock(view, confirmed ?? view, you, labels, moverId, { ...mover, checking: mover.checking && waited }, blockOf(moverId));
     if (!block) continue;
     const fresh = reach.fresh.rows.filter((r) => r.moverId === moverId).flatMap((r) => block.rows.filter((m) => m.id === r.left.id).map((m) => m.name));
     out[moverId] = fresh.length > 0 ? { ...block, announce: `${capitalized(reachWords(fresh, "left", false, 3))}.` } : block;
@@ -305,13 +314,13 @@ export function combatAlerts(input: {
     const mover = moverOf(view, p.target);
     const reach = (mover !== null ? input.reach?.[mover] : undefined) ?? NO_REACH;
     if (mover !== null) placed.add(mover);
-    // A creature whose walk left an enemy's reach gets the card for its rows alone (docs/design/design-v1-opportunity-attacks.md 1).
-    if (count > 0 || skipped || attacks > 0 || attacksUnknown || (uses === null && (input.loading || input.failed)) || reach.rows.length > 0 || reach.over) blocks.push({ participant: p, uses, count, attacks, reach });
+    // A creature whose walk left an enemy's reach gets the card for its rows alone, and one whose walk is still checked for "Checking the walk…" (docs/design/design-v1-opportunity-attacks.md 1).
+    if (count > 0 || skipped || attacks > 0 || attacksUnknown || (uses === null && (input.loading || input.failed)) || reach.rows.length > 0 || reach.checking || reach.over) blocks.push({ participant: p, uses, count, attacks, reach });
   });
   // A controlled mount sharing the turn, with no record of its own, still gets a block for the rows its walk left, for whoever answers for the turn.
   const turnCreature = activeTarget(view);
   for (const [moverId, reach] of Object.entries(input.reach ?? {})) {
-    if (placed.has(moverId) || (reach.rows.length === 0 && !reach.over) || !turnCreature || !answersFor(view, you, turnCreature)) continue;
+    if (placed.has(moverId) || (reach.rows.length === 0 && !reach.checking && !reach.over) || !turnCreature || !answersFor(view, you, turnCreature)) continue;
     const token = view.tokens[moverId];
     if (!token) continue;
     blocks.push({ participant: { target: { tokenId: moverId }, holder: `t:${moverId}`, name: entryName(view, { tokenId: moverId }, input.labels), record: null, landing: false }, uses: null, count: 0, attacks: 0, reach });
@@ -325,7 +334,7 @@ export function combatAlerts(input: {
       const name = landing?.name ?? (entry ? entryName(view, entry, input.labels) : "This");
       const since = turnSince(view, input.participants) ?? Number.POSITIVE_INFINITY;
       const left = blocks.flatMap((b) => b.reach.rows.map((r) => r.name));
-      out.turn = { id, name, blocks, left, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
+      out.turn = { id, name, blocks, left, checking: blocks.some((b) => b.reach.checking), count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
     }
   }
   return out;

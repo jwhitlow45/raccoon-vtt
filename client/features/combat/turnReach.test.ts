@@ -98,6 +98,21 @@ describe("a block's Opportunity Attacks, as the model reads the turn's jobs", ()
     assert.equal(elsewhere.turn, null, "a player who does not answer for the turn reads no mount's block");
   });
 
+  test("a creature with no attacks or uses gets the card while its walk is checked, past the shared delay, and so does a shared mount", () => {
+    const state = fight();
+    state.tokens.horse = token("horse", { name: "Warhorse", kind: "npc", disposition: "ally", x: 4, y: 4 });
+    const participant = { target: { tokenId: "bree" }, holder: "t:bree", name: "Bree", record: null, landing: true };
+    const alerts = (moverId: string, waited: boolean) =>
+      combatAlerts({ labels: new Map(), view: state, you: P1, participants: [participant], uses: [[]], loading: false, failed: false, dismissed: new Set(), reach: reachByMover(state, P1, new Map(), reachOf(moverId, [], { checking: true }), () => null, null, waited) });
+    const card = alerts("bree", true).turn;
+    assert.deepEqual(card?.blocks.map((b) => [b.participant.holder, b.reach.checking]), [["t:bree", true]], "the block holds the check alone");
+    assert.equal(turnUsesText(card!), "checking the walk…", "folded, it says so rather than 0 uses");
+    assert.deepEqual(alerts("horse", true).turn?.blocks.map((b) => [b.participant.holder, b.reach.checking]), [["t:horse", true]], "the mount's block for its check alone");
+    // Within the delay a quick check brings no card that would come and go at once.
+    assert.equal(alerts("bree", false).turn, null);
+    assert.equal(alerts("horse", false).turn, null);
+  });
+
   test("the folded words", () => {
     assert.equal(turnUsesText({ count: 3, attacks: 2, left: ["Goblin 2"] }), "left Goblin 2's reach, 2 attacks, 3 uses");
     assert.equal(turnUsesText({ count: 0, attacks: 2, left: ["Goblin 2", "Goblin 3", "Goblin 4"] }), "left 3 creatures' reach, 2 attacks");
@@ -116,7 +131,7 @@ describe("the block as it draws", () => {
     const state = fight();
     const store = createStore(() => ({ view: state, confirmed: state, you: { memberId: you.memberId, role: you.role }, roomId: "r1", connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
     const block = { participant: { target: { tokenId: "bree" }, holder: "t:bree", name: "Bree", record: null, landing: true }, uses: [], count: 0, attacks: 0, reach };
-    const model = { id: "turn|eb|1", name: "Bree", blocks: [block], left: reach.rows.map((r) => r.name), count: 0, attacks: 0, since: 0, loading: false, failed: false, usesLoad: { loading: false, failed: false }, rollsFailed: false };
+    const model = { id: "turn|eb|1", name: "Bree", blocks: [block], left: reach.rows.map((r) => r.name), checking: reach.checking, count: 0, attacks: 0, since: 0, loading: false, failed: false, usesLoad: { loading: false, failed: false }, rollsFailed: false };
     return renderToStaticMarkup(
       createElement(RoomProvider, {
         store: store as never,
@@ -144,9 +159,10 @@ describe("the block as it draws", () => {
     const html = draw({ rows, checking: false, over: true, unseen: true, avoid: "Flyby", announce: "Left Goblin 1's reach." });
     assert.equal((html.match(/Goblin \d+<\/span>/g) ?? []).length, REACH_ROWS);
     for (const words of ["and 3 more", REACH_WORDS.over, "Bree has Flyby, which may avoid them.", "Bree is Invisible. Creatures that can&#x27;t see Bree get no Opportunity Attack.", "Left Goblin 1&#x27;s reach."]) assert.ok(html.includes(words), words);
-    // A walk still checked with no row yet holds the block for its wait alone, which the shared indicator shows after 200 ms.
+    // A walk still checked with no row yet holds the block for its wait alone. The model counts it only past the shared delay, so the line shows at once.
     const waiting = draw({ ...NO_REACH, checking: true });
     assert.match(waiting, /aria-label="Opportunity Attacks"/);
+    assert.ok(waiting.includes(REACH_WORDS.checking), "Checking the walk… with no second delay");
     assert.ok(!waiting.includes("Disengage"), "no Disengage line before any row");
   });
 
