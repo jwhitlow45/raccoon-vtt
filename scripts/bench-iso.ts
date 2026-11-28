@@ -630,6 +630,38 @@ function timedEachFrame(parts: FrameParts[], settleFrames = 4): Timer {
   };
 }
 
+/** What a pan step did to the sheets and the board: the sheet cache's loads, evictions, arrivals and news (features/models/sheets.ts counts), and the board's commits and whole repaints. */
+type StepCounts = { ms: number; loads: number; evictions: number; arrivals: number; news: number; commits: number; whole: number };
+
+function sheetCounts(page: Page): Promise<Omit<StepCounts, "ms"> | null> {
+  return page.evaluate(() => {
+    const g = globalThis as unknown as { __rvttSheets?: { counts(): { loads: number; evictions: number; arrivals: number; news: number } }; __rvttIsoHook?: { kept?(): { boardCommits: number; whole: number } | null } };
+    const c = g.__rvttSheets?.counts();
+    const k = g.__rvttIsoHook?.kept?.();
+    return c && k ? { ...c, commits: k.boardCommits, whole: k.whole } : null;
+  });
+}
+
+/** Like `timed`, also counting what each step did to the sheets and the board, read between steps outside the busy time. */
+function countedSteps(per: StepCounts[], settleFrames = 4): Timer {
+  return async (page, cdp, steps, act) => {
+    const out: number[] = [];
+    let before = await sheetCounts(page);
+    if (!before) throw new Error("no sheet counts: the page needs the test flag");
+    for (let i = 0; i < steps; i++) {
+      const t = await busy(cdp);
+      await act(i);
+      await frames(page, settleFrames);
+      const ms = (await busy(cdp)) - t;
+      out.push(ms);
+      const after = (await sheetCounts(page))!;
+      per.push({ ms, loads: after.loads - before.loads, evictions: after.evictions - before.evictions, arrivals: after.arrivals - before.arrivals, news: after.news - before.news, commits: after.commits - before.commits, whole: after.whole - before.whole });
+      before = after;
+    }
+    return out;
+  };
+}
+
 /** The parts of the frames past `over` ms: how many there were, and how many of them repainted whole, ran a background slice or rendered the board. */
 export function partsPast(parts: readonly FrameParts[], over: number): { frames: number; whole: number; sliced: number; rendered: number; slicedAll: number } {
   const past = parts.filter((p) => p.ms > over);
@@ -1251,10 +1283,32 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await page.waitForTimeout(1000);
       await frames(page, 30);
       await addPan(MODEL_PICTURES_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      // One more round of a pan row, counted and untimed: what each move did to the sheets and the board. A pan must load and evict nothing (D-261127-708).
+      const countPan = async (row: string) => {
+        const per: StepCounts[] = [];
+        await throttled(() => touchPan(page, cdp, STEPS, countedSteps(per)));
+        for (const what of ["loads", "evictions", "arrivals", "news", "commits", "whole"] as const) {
+          const n = per.reduce((sum, p) => sum + p[what], 0);
+          rows.push({ row: `${row}: ${what} in a round of ${STEPS} moves (counts, not ms)`, view, ms: { median: n, max: Math.max(...per.map((p) => p[what])), n: per.length } });
+        }
+        if (process.env.BENCH_STEPS === "1") for (const [i, p] of per.entries()) console.error(`${row} step ${i}: ${JSON.stringify(p)}`);
+      };
+      if (view === "isometric") await countPan(MODEL_PICTURES_ROW);
       for (const [i, tokenId] of scene.models!.entries()) await dm.op({ t: "token.update", tokenId, patch: { image: { assetId: picture, crop, model: modelOf(i) } } });
       if (view === "isometric") await waitFor("the creatures standing as their models", async () => ((await modelsStanding(page)) >= 20 ? true : null), 30_000);
       await frames(page, 30);
       await addPan(MODEL_MODELS_ROW, (t) => touchPan(page, cdp, STEPS, t));
+      if (view === "isometric") {
+        await countPan(MODEL_MODELS_ROW);
+        // A turn and back keeps the same creatures in the cull box, so it must load and evict nothing either.
+        const before = (await sheetCounts(page))!;
+        for (const turn of [1, 0]) {
+          await page.evaluate((t) => (globalThis as unknown as { __rvttIsoHook: { turn(t: number): void } }).__rvttIsoHook.turn(t), turn);
+          await frames(page, 30);
+        }
+        const after = (await sheetCounts(page))!;
+        for (const what of ["loads", "evictions"] as const) rows.push({ row: `${MODEL_MODELS_ROW}: ${what} over a turn and back (counts, not ms)`, view, ms: { median: after[what] - before[what], max: after[what] - before[what], n: 2 } });
+      }
       /*
        * The sheets arriving: the page opened again, so its cache starts
        * empty, with every sheet's answer held until the board has laid out
@@ -1266,6 +1320,9 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         let holding = true;
         const held: (() => void)[] = [];
         let answered = 0;
+        const arrivalFrames: (StepCounts & { models: number })[][] = [];
+        /** When each round let the sheets go, in µs on the clock CPU profiles use (`--profile`). */
+        const releases: number[] = [];
         const isSheet = (url: string) => sheets.some((id) => url.includes(id));
         await page.route((url) => isSheet(url.href), async (route) => {
           if (holding) await new Promise<void>((go) => held.push(go));
@@ -1277,28 +1334,52 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         page.on("requestfinished", onAnswer);
         page.on("requestfailed", onAnswer);
         try {
-          const arrival = await throttled(() =>
-            rounds(async () => {
-              holding = true;
-              await openView(context, page, view, room.roomId);
-              await waitFor("the board asking for the sheets", () => (held.length > 0 ? true : null), 30_000);
-              await page.waitForTimeout(1000);
-              await frames(page, 30);
-              const letGo = held.length;
-              const from = answered;
-              const counts: number[] = [];
-              const got = await timedUntil(page, cdp, async () => {
-                holding = false;
-                for (const go of held.splice(0)) go();
-              }, async () => {
-                counts.push(await modelsStanding(page));
-                const last = counts.slice(-10);
-                return answered - from >= letGo && last.length === 10 && last[0]! > 0 && last.every((n) => n === last[0]);
-              });
-              return got.frames;
-            }),
-          );
+          // One round: the page opened again, the sheets let go at once, and each frame until the models stand.
+          const arrive = async () => {
+            holding = true;
+            await openView(context, page, view, room.roomId);
+            await waitFor("the board asking for the sheets", () => (held.length > 0 ? true : null), 30_000);
+            await page.waitForTimeout(1000);
+            await frames(page, 30);
+            const letGo = held.length;
+            const from = answered;
+            const counts: number[] = [];
+            const per: Omit<StepCounts, "ms">[] = [];
+            let prev = (await sheetCounts(page))!;
+            const got = await timedUntil(page, cdp, async () => {
+              releases.push((await busyAt(cdp)).at);
+              holding = false;
+              for (const go of held.splice(0)) go();
+            }, async () => {
+              // One look a frame, so the frames timed hold no more than a frame's work each.
+              const { models, now } = await standingAndCounts(page);
+              counts.push(models);
+              per.push({ loads: now.loads - prev.loads, evictions: now.evictions - prev.evictions, arrivals: now.arrivals - prev.arrivals, news: now.news - prev.news, commits: now.commits - prev.commits, whole: now.whole - prev.whole });
+              prev = now;
+              const last = counts.slice(-10);
+              return answered - from >= letGo && last.length === 10 && last[0]! > 0 && last.every((n) => n === last[0]);
+            }, 1);
+            arrivalFrames.push(got.frames.map((ms, i) => ({ ms, ...per[i]!, models: counts[i]! })));
+            return got.frames;
+          };
+          const arrival = await throttled(() => rounds(arrive));
           rows.push({ row: MODEL_ARRIVAL_ROW, view, ms: frameStats(arrival) });
+          if (process.env.BENCH_STEPS === "1") for (const [r, list] of arrivalFrames.entries()) for (const [i, f] of list.entries()) console.error(`arrival round ${r} frame ${i}: ${JSON.stringify(f)}`);
+          // With --profile, one more round under the CPU profiler and one under a trace, counted nowhere, as a pan row's (profiled above).
+          if (opts.profile) {
+            mkdirSync(opts.profile, { recursive: true });
+            const name = `${view}-${MODEL_ARRIVAL_ROW.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`;
+            await cdp.send("Profiler.enable");
+            await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
+            await cdp.send("Profiler.start");
+            await throttled(arrive);
+            const { profile } = (await cdp.send("Profiler.stop")) as { profile: unknown };
+            await cdp.send("Profiler.disable");
+            writeFileSync(path.join(opts.profile, `${name}.cpuprofile`), JSON.stringify(profile));
+            writeFileSync(path.join(opts.profile, `${name}.release.json`), JSON.stringify({ release: releases.at(-1), frames: arrivalFrames.at(-1) }));
+            const trace = await traceOf(cdp, () => throttled(arrive));
+            writeFileSync(path.join(opts.profile, `${name}.trace.json`), JSON.stringify({ events: trace, frames: arrivalFrames.at(-1) }));
+          }
         } finally {
           page.off("requestfinished", onAnswer);
           page.off("requestfailed", onAnswer);
@@ -2006,6 +2087,17 @@ async function uploadImage(context: BrowserContext, origin: string, roomId: stri
   const res = await context.request.put(`${origin}/api/rooms/${roomId}/assets?kind=${kind}`, { headers: { Origin: origin, "content-type": "image/png" }, data });
   if (!res.ok()) throw new Error(`the ${kind} upload answered ${res.status()}`);
   return ((await res.json()) as { id: string }).id;
+}
+
+/** How many models stand on the board on screen, and the sheet cache's and the board's counts, in one look. */
+function standingAndCounts(page: Page): Promise<{ models: number; now: Omit<StepCounts, "ms"> }> {
+  return page.evaluate(() => {
+    type Stage = { width(): number; listening(): boolean; find(s: string): unknown[] };
+    const g = globalThis as unknown as { Konva: { stages: Stage[] }; __rvttSheets: { counts(): { loads: number; evictions: number; arrivals: number; news: number } }; __rvttIsoHook: { kept(): { boardCommits: number; whole: number } } };
+    const models = g.Konva.stages.filter((st) => st.width() > 0 && st.listening()).reduce((n, st) => n + st.find(".standeeModel").length, 0);
+    const k = g.__rvttIsoHook.kept();
+    return { models, now: { ...g.__rvttSheets.counts(), commits: k.boardCommits, whole: k.whole } };
+  });
 }
 
 /** How many models stand on the board on screen. */
