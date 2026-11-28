@@ -679,15 +679,21 @@ newest first.
 
 **Since v0.5.0**
 
-- **Opportunity Attack notices** ([design](design/design-v1-opportunity-attacks.md)):
-  change format 70, room format 53. Back up the database just before the
-  update, and reload DM pages first, then every other open page, since the
-  change format rises and a page from before works by the older one until
-  it reloads. After a clean stop an older build refuses any room this
-  version saved a snapshot of, and after a crash or a forced stop any room
-  with changes at format 70 after its last snapshot, so going back needs
-  the backup taken just before the update for those rooms. A room only
-  opened and left untouched needs nothing.
+- **Squeezing walks and traps, and Opportunity Attack notices**
+  ([traps design](design/design-v1-traps.md), [notices
+  design](design/design-v1-opportunity-attacks.md)): change format 70, room
+  format 53. A Large or larger creature that squeezes into a corridor, or
+  along one from a squeeze, now sets off only the traps on the squares its
+  space wholly covers between its walk's ends, where it could set off one
+  past the corridor's south or east wall, or a trapdoor beside it along the
+  map's edge. Back up the database just before the update, and reload DM
+  pages first, then every other open page, since the change format rises
+  and a page from before works by the older one until it reloads. After a
+  clean stop an older build refuses any room this version saved a snapshot
+  of, and after a crash or a forced stop any room with changes at format 70
+  after its last snapshot, so going back needs the backup taken just before
+  the update for those rooms. A room only opened and left untouched needs
+  nothing.
 - **3D models on token pictures** ([design](design/design-v1-token-models.md)):
   change format 69, room format 52. Back up the database just before the
   update, and reload DM pages first, then every other open page, since the
