@@ -9,6 +9,7 @@ import { srdRollsOf } from "../shared/srd/rolls.ts";
 import type { EnvironmentKey, RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
 import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
 import { trapPresetFacts } from "../shared/srd/traps.ts";
+import { REACH_WEAPONS } from "../shared/dice/named.ts";
 
 /**
  * Regenerates the SRD 5.2.1 data in shared/srd/ from the text of the SRD PDF:
@@ -1395,6 +1396,29 @@ function environmentText(lines: readonly Line[]): RulesText["environment"] {
   };
 }
 
+/**
+ * The Reach weapons the Opportunity Attack notices read (shared/dice/named.ts
+ * REACH_WEAPONS, written by hand) against the Weapons table's melee rows
+ * with the Reach property. A new SRD revision that changes them fails the
+ * run, so the list is written again.
+ */
+function checkReachWeapons(lines: readonly Line[]): string[] {
+  const reach = (rest: string) => /\bReach\b/.test(rest);
+  const found = [...weaponNamesWhere(lines, "Simple Melee Weapons", "Simple Ranged Weapons", reach), ...weaponNamesWhere(lines, "Martial Melee Weapons", "Martial Ranged Weapons", reach)].sort();
+  const listed = [...REACH_WEAPONS].sort();
+  return found.join(",") === listed.join(",") ? [] : [`the Weapons table's Reach weapons are ${found.join(", ")}, and REACH_WEAPONS lists ${listed.join(", ")}`];
+}
+
+/** weaponNames where a group may hold none that pass `keep`, as the simple melee weapons hold no Reach weapon. */
+function weaponNamesWhere(lines: readonly Line[], group: string, next: string, keep: (rest: string) => boolean): string[] {
+  const out: string[] = [];
+  for (const line of sectionLines(lines, 91, group, next)) {
+    const row = WEAPON_ROW.exec(line.text);
+    if (row && keep(row[3]!)) out.push(row[1]!);
+  }
+  return out;
+}
+
 function buildRulesText(lines: readonly Line[], spells: readonly Spell[]): RulesText {
   const finish = (where: string, e: RulesTextEntry): RulesTextEntry => {
     const text = fixEmDashes(e.text);
@@ -1565,6 +1589,9 @@ function main(): void {
   const corrected = applyErrata(raw);
   const lines = loadLines(corrected);
   stats = wordStats(lines);
+  const reachProblems = checkReachWeapons(lines);
+  if (reachProblems.length > 0) throw new Error(`reach weapon checks failed:\n${reachProblems.join("\n")}`);
+  console.log(`reach weapons checked: ${REACH_WEAPONS.length}`);
   const trapProblems = checkTrapPresets(corrected);
   if (trapProblems.length > 0) throw new Error(`trap preset checks failed:\n${trapProblems.join("\n")}`);
   console.log(`trap presets checked: ${trapPresetFacts().length}`);

@@ -6,7 +6,7 @@ import { emptyStatBlock, monsterView } from "../statBlock.ts";
 import type { NamedRoll } from "./bonus.ts";
 import { formatFormula, parseFormula } from "./formula.ts";
 import { weatherPreset } from "../rules/weather.ts";
-import { attackTest, blockActions, blockEntries, hasTrait, multiattackNote, rangedOf, weaponNamed, type BlockEntry } from "./named.ts";
+import { attackTest, blockActions, blockEntries, hasTrait, multiattackNote, rangedOf, REACH_WEAPONS, weaponNamed, weaponReach, type BlockEntry } from "./named.ts";
 
 /**
  * The stat block reader (docs/design/design-v1-roll-options.md 3.1) over every
@@ -421,6 +421,12 @@ describe("which attacks are with a ranged weapon (docs/design/design-v1-weather.
     assert.equal(weaponNamed("Hammer, Light"), "thrown");
     for (const name of ["Javelin", "Silvered Dagger", "Trident +2", "Light Hammer"]) assert.equal(weaponNamed(name), "thrown", name);
     for (const name of ["Bone Bow", "Longbows of Doom", "Crossbow", "Rock", "Force Bolt", "Longsword", "Bowling"]) assert.equal(weaponNamed(name), null, name);
+  });
+
+  test("the Reach weapons, by a name's whole or its last words, as weaponNamed matches (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+    assert.deepEqual(REACH_WEAPONS, ["Glaive", "Halberd", "Lance", "Pike", "Whip"]);
+    for (const name of ["Glaive", "halberd", "Lance +1", "Silvered Pike", "Whip (Finesse)", "Pike, +2"]) assert.equal(weaponReach(name), true, name);
+    for (const name of ["Longsword", "Dagger", "Whipping Cream", "Pikes", "Spear", "Unarmed Strike", "Longbow"]) assert.equal(weaponReach(name), false, name);
   });
 
   test("2014 names the weapon or the spell itself, whatever the section", () => {

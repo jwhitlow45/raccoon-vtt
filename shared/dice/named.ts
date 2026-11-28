@@ -117,6 +117,28 @@ export function weaponNamed(name: string): "ranged" | "thrown" | null {
   return null;
 }
 
+/**
+ * The SRD 5.2.1's weapons with the Reach property, from its Weapons table
+ * (Equipment, Weapons), which adds 5 ft to the reach of an attack made with
+ * one, Opportunity Attacks included. Written out by hand, since the table
+ * is not among the rules text the app ships. scripts/srd-import.ts checks
+ * the list against the table when it runs from the SRD's text.
+ */
+export const REACH_WEAPONS: readonly string[] = ["Glaive", "Halberd", "Lance", "Pike", "Whip"];
+
+const reachKeys = new Set(REACH_WEAPONS.map(weaponKey));
+
+/**
+ * Whether a roll's name names one of the SRD's Reach weapons ("Pike",
+ * "Whip +1", "Silvered Glaive"), by the whole name or its last words, as
+ * `weaponNamed` matches.
+ */
+export function weaponReach(name: string): boolean {
+  const words = weaponKey(nameParts(name).name).split(" ");
+  for (let from = 0; from < words.length; from++) if (reachKeys.has(words.slice(from).join(" "))) return true;
+  return false;
+}
+
 type AttackKind = Pick<NamedRoll, "range" | "weapon" | "spell">;
 
 /**
