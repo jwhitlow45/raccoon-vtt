@@ -10,10 +10,7 @@ import type { AssetImage, IconImage, ImageRef, ModelRef } from "./model.ts";
  * Every write that builds an image from another must go through
  * `copyImage` or `keepModel`, so no new picture, crop, icon, paste or copy
  * drops the model on the way (D-261127-375). Only Remove takes it off, with
- * `withoutModel`. The copy sites that still rebuild an image by hand
- * (client/features/tokens/factory.ts, monsters/images.ts and
- * MonsterImage.tsx, images/ImageField.tsx and RoomPaste.tsx) move onto
- * these with the model sheet's build (the design's lane D).
+ * `withoutModel`.
  */
 
 /**
