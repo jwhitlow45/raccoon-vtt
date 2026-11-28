@@ -2336,7 +2336,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
   async function phoneSheet(page: Page, name: string): Promise<Locator> {
     await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
     await page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true }).click();
-    // The outer match is the panel's sheet. A panel can draw a section of the same name inside it, as Party's bar does.
+    // The outer match is the panel's sheet, should a panel ever draw a section of the same name inside it, as Party's bar once did.
     const sheet = page.locator(`section[aria-label="${name}"]`).first();
     await sheet.waitFor();
     return sheet;

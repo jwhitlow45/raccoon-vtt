@@ -135,8 +135,10 @@ export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): v
     );
   }
 
+  // As the Party panel it stands in a sheet whose own region is named Party, so it is no second region of that name inside the first.
+  const Frame = props.dock ? "section" : "div";
   return (
-    <section aria-label="Party" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+    <Frame aria-label={props.dock ? "Party" : undefined} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch }}>
         {heading ?? <span style={{ flex: 1 }} />}
         {props.dock ? (
@@ -155,7 +157,7 @@ export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): v
           </li>
         ))}
       </ul>
-    </section>
+    </Frame>
   );
 }
 

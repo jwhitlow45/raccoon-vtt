@@ -17,7 +17,7 @@ import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { Entry, FoldedParty } = await import("./PartyBar.tsx");
+const { Entry, FoldedParty, PartyBar } = await import("./PartyBar.tsx");
 const { hasParty } = await import("./PartyDock.tsx");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
@@ -225,5 +225,34 @@ describe("a party member's row", () => {
     assert.doesNotMatch(markup, /Dead/, "drawn alive");
     assert.doesNotMatch(markup, /Armor Class/);
     assert.doesNotMatch(markup, /AC 15/);
+  });
+});
+
+/*
+ * On a phone the bar is the Party panel, inside a sheet whose own region
+ * is named Party, so a screen reader's landmarks listed "Party" twice, one
+ * inside the other (axe landmark-unique, e2e/a11y.e2e.ts). The bar is that
+ * region only where it docks atop the side panel.
+ */
+describe("the party bar's region", () => {
+  const render = (dock: boolean) => {
+    const state = room({
+      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"] }) },
+      tokens: { a1: token("a1", { kind: "pc", sceneId: "s1", actor: { ref: "ayla" } }) },
+    });
+    const store = createStore(() => ({ view: state, sceneId: "s1", you: { role: "dm" } }));
+    const bar = createElement(PartyBar, { dock });
+    return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: bar }) }));
+  };
+
+  test("is the region named Party where it docks atop the side panel", () => {
+    assert.match(render(true), /^<section aria-label="Party"/);
+  });
+
+  test("is no region of its own as the Party panel, whose sheet is that region", () => {
+    const markup = render(false);
+    assert.match(markup, /Ayla/, "the panel lists the party");
+    assert.doesNotMatch(markup, /<section/);
+    assert.doesNotMatch(markup, /aria-label="Party"/);
   });
 });
