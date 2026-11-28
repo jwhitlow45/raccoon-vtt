@@ -99,6 +99,8 @@ const run = {
   sceneId: "",
   goblin: uuidv7(),
   ogre: uuidv7(),
+  /** An ally beside the goblin for one drag, whose reach the drag leaves. */
+  brin: uuidv7(),
   entry: uuidv7(),
   patId: "",
   benId: "",
@@ -208,6 +210,18 @@ function boardTexts(page: Page): Promise<string[]> {
     return konva.stages[0]!.find("Text")
       .filter((t) => t.isVisible())
       .map((t) => t.text());
+  });
+}
+
+/** The creatures a drag's dashed reach rings are round, by token id (movement/MoveLayer.tsx ReachRings). */
+function reachRings(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { name(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages
+      .flatMap((s) => s.find(".reach-ring"))
+      .filter((n) => n.isVisible())
+      .map((n) => n.name().split(" ").find((part) => part.startsWith("reach-") && part !== "reach-ring")!.slice("reach-".length));
   });
 }
 
@@ -713,6 +727,30 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await goblinAt(placedOnHex(G, goblin(), end), "the goblin 4 hexes on");
     const stop = await waitFor("the move's stop", () => dmSocket.state?.tokens[run.goblin]?.path?.stops.at(-1));
     assert.equal(stop.cost, 20, "the path stores 20 ft");
+  });
+
+  test("HX-3b. on the goblin's turn a drag two hexes away from Brin, an ally on the next hex, reads Leaves Brin's reach and rings Brin while it is held (docs/design/design-v1-opportunity-attacks.md 1)", async () => {
+    const start = tokenRefHex(G, goblin());
+    const away = hexNeighbors(G, hexNeighbors(G, start)[1]!)[1]!;
+    const behind = hexNeighbors(G, start).find((h) => hexDistance(G, h, away) === 3)!;
+    await ops.send({ t: "token.create", token: { id: run.brin, sceneId: run.sceneId, kind: "monster", name: "Brin", size: "medium", ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, behind), disposition: "ally", visibility: "all", actor: { inline: ACTOR } } });
+    await waitFor("Brin in the DM's state", () => dmSocket.state?.tokens[run.brin] ?? null);
+    await holdDrag(dm, hexCenter(G, start), hexCenter(G, away));
+    try {
+      // One hex on, Brin is two hexes off: 10 ft, past a reach the DM's copy reads as 5 ft.
+      const label = await waitFor("the drag's leaves line", async () => (await boardTexts(dm)).find((t) => t.includes("\nLeaves ")) ?? null, 5_000);
+      assert.match(label, /^10 ft · .*\nLeaves Brin's reach$/s);
+      assert.deepEqual(await reachRings(dm), [run.brin]);
+      await shots.take(dm, "hex-dm-drag-leaves-brin");
+    } finally {
+      // Back onto its own hex before the drop, so the goblin's turn keeps the walk HX-3 stored and no notice comes of it.
+      const home = await pagePoint(dm, BOUNDS, hexCenter(G, start));
+      await dm.mouse.move(home.x, home.y, { steps: 8 });
+      await dm.mouse.up();
+    }
+    await waitFor("the ring gone with the drag", async () => ((await reachRings(dm)).length === 0 ? true : null));
+    assert.deepEqual(tokenRefHex(G, goblin()), start, "the goblin stayed on its hex");
+    await ops.send({ t: "token.delete", tokenId: run.brin });
   });
 
   test("HX-4. arrow keys move the goblin one hex, up one column in Top-down and by the screen in Isometric", async () => {
