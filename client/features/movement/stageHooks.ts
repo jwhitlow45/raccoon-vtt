@@ -471,7 +471,7 @@ export function dragStops(deps: DragDeps): DragStops {
     // A line speaks for the leg its own drop sends, so it goes with that move's refusal: left kept, it would bind a later same-turn move to the same square and silence its DM toast.
     const line = keptLine;
     keptLine = null;
-    return sendPlan(plan, {
+    const sent = sendPlan(plan, {
       labels: labelsOf(store.getState()),
       dispatch: (op, opts) =>
         actions.dispatch(op, {
@@ -493,6 +493,9 @@ export function dragStops(deps: DragDeps): DragStops {
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });
+    // Nothing went out (no moves, or every dispatch declined), so no leg will come for the line.
+    if (line && sent.length === 0) shownLeaves.setState((s) => ({ shown: s.shown.filter((l) => l !== line) }));
+    return sent;
   };
 
   return {

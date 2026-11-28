@@ -281,7 +281,7 @@ describe("the drag's stops", () => {
     const b = board(view, "dm", { memberId: "dm1", role: "dm" });
     b.scope.get(turnLeavesSlot).setState({ on: true, key: "room|dm|dm1", last: 7, chunks: { rolls: "failed", monsters: "failed" }, movers: {} }, true);
     b.frames.frame();
-    const dropOnce = (sends = true) => {
+    const dropOnce = (sends: boolean | "empty" = true) => {
       b.stops.start(hero.id);
       const finger = node(hero, 3);
       for (let k = 0; k < 50; k++) {
@@ -290,7 +290,7 @@ describe("the drag's stops", () => {
       }
       let landed: DropPlan | null = null;
       // The board sends from inside the landing (Stage.tsx landDrop), as the line is kept just before it.
-      b.stops.drop(finger, hero, [hero], (plan) => ((landed = plan), sends ? b.stops.send(plan) : undefined));
+      b.stops.drop(finger, hero, [hero], (plan) => ((landed = plan), sends === "empty" ? b.stops.send({ ...plan, moves: [] }) : sends ? b.stops.send(plan) : undefined));
       for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
     };
     dropOnce();
@@ -304,5 +304,8 @@ describe("the drag's stops", () => {
     b.scope.get(shownLeavesSlot).setState({ shown: [] });
     dropOnce(false);
     assert.deepEqual(b.scope.get(shownLeavesSlot).getState().shown, [], "no send, no line");
+    // A plan with no moves sends nothing, so its line goes as well.
+    dropOnce("empty");
+    assert.deepEqual(b.scope.get(shownLeavesSlot).getState().shown, [], "no moves, no line");
   });
 });
