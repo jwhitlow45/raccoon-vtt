@@ -8,7 +8,7 @@ import { carriedGroup, holderOf } from "./attach.ts";
 import { legFeet, stepsBetween, tokenCellBox, type CellBox, type DistanceSettings } from "./distance.ts";
 import { stopFootprint, type FootprintToken, type PlacedToken } from "./footprint.ts";
 import { sceneGrid, type Grid } from "./grid.ts";
-import { hexCenter } from "./hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexNeighbors, type HexGrid } from "./hex.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 import { rowCharacter } from "./initiative.ts";
 import { legSpots, reshapeLeg, type LegSpot, type Spot } from "./path.ts";
@@ -240,8 +240,10 @@ type Prepared = { reactor: Reactor; index: number; box: CellBox; max: number; ce
 /** Work done, in units (section 5): a distance test between two boxes is 1 on squares and one per hex pair on hexes, a piece a gate line meets 1. */
 type Work = { n: number };
 
-/** How far a piece's end on hexes may lie from a gate line and still meet it at that end: past the rounding of hex corners to the 1/64 lattice (hex.ts cornerAt), short of anything a line between hex centers passes. */
-const HEX_TOUCH = 1 / 80;
+/** How far past a gate line's box a piece on hexes may end and still meet the line at a hex corner, which rounds to the 1/64 lattice (hex.ts cornerAt). */
+const HEX_PAD = 1 / 64;
+/** How near a gate line a hex corner's true vertex lies to stand on it: rounding only, since centers and vertices come from the same numbers. */
+const VERTEX_EPS = 1e-9;
 /** Reactors are bucketed in squares of this many cells. */
 const BUCKET = 4;
 
@@ -280,7 +282,36 @@ function nearLine(x: number, y: number, px: number, py: number, qx: number, qy: 
   const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - px) * dx + (y - py) * dy) / len2));
   const ex = px + t * dx - x;
   const ey = py + t * dy - y;
-  return ex * ex + ey * ey <= HEX_TOUCH * HEX_TOUCH;
+  return ex * ex + ey * ey <= VERTEX_EPS * VERTEX_EPS;
+}
+
+const vertices = new Map<string, { x: number; y: number } | null>();
+
+/**
+ * The true vertex a hex corner stands for, where three hexes meet: the
+ * middle of their centers. A wall along hex sides ends on the corner as
+ * rounded to the 1/64 lattice, a hair off the vertex a line between hex
+ * centers passes, so a gate line meets such an end where it passes the
+ * vertex. Null for a point that is no hex corner, which is read exactly.
+ */
+function trueVertex(g: HexGrid, x: number, y: number): { x: number; y: number } | null {
+  const key = `${g.orient}:${x},${y}`;
+  const known = vertices.get(key);
+  if (known !== undefined) return known;
+  // The hex nearest a corner is one of the three that meet there, so its own six corners name it.
+  const named = hexCorners(g, hexAt(g, { x, y })).find((c) => {
+    const at = cornerAt(g, c);
+    return at.x === x && at.y === y;
+  });
+  let out: { x: number; y: number } | null = null;
+  if (named) {
+    const around = hexNeighbors(g, named.hex);
+    const three = (named.k === 0 ? [named.hex, around[4]!, around[5]!] : [named.hex, around[2]!, around[1]!]).map((h) => hexCenter(g, h));
+    out = { x: (three[0]!.x + three[1]!.x + three[2]!.x) / 3, y: (three[0]!.y + three[1]!.y + three[2]!.y) / 3 };
+  }
+  if (vertices.size > 8192) vertices.clear();
+  vertices.set(key, out);
+  return out;
 }
 
 /**
@@ -292,16 +323,23 @@ function nearLine(x: number, y: number, px: number, py: number, qx: number, qy: 
  * outside and a wall beside a closed door stop it, and a bend's inner
  * corner, an outer corner and a free end let it pass. The stored walls are
  * read exactly, and a player's held pieces by `pieceTouches`, as the
- * client's other checks read them. On hexes a piece's end within HEX_TOUCH
- * of the line meets it there, since corners are rounded off the line's
- * exact path.
+ * client's other checks read them. On hexes a piece ending on a hex corner
+ * meets the line there when the line passes the corner's true vertex
+ * (`trueVertex`).
  */
-function lineClear(walls: WallSet, hex: boolean, px: number, py: number, qx: number, qy: number, work: Work): boolean {
+function lineClear(walls: WallSet, g: Grid, px: number, py: number, qx: number, qy: number, work: Work): boolean {
   const s = walls.stored;
-  const pad = hex ? HEX_TOUCH : 0;
+  const pad = g.shape === "hex" ? HEX_PAD : 0;
   const sides = new Map<string, number>();
   let blocked = false;
-  const on = hex ? (x: number, y: number) => nearLine(x, y, px, py, qx, qy) : (x: number, y: number) => onSegment(x, y, px, py, qx, qy);
+  const on =
+    g.shape === "hex"
+      ? (x: number, y: number) => {
+          if (onSegment(x, y, px, py, qx, qy)) return true;
+          const v = trueVertex(g, x, y);
+          return v !== null && nearLine(v.x, v.y, px, py, qx, qy);
+        }
+      : (x: number, y: number) => onSegment(x, y, px, py, qx, qy);
   walls.storedIndex.query(Math.min(px, qx) - pad, Math.min(py, qy) - pad, Math.max(px, qx) + pad, Math.max(py, qy) + pad, AREAS, (k) => {
     if (blocked) return;
     work.n++;
@@ -346,7 +384,7 @@ function coverClear(input: ScanInput, moverCells: readonly Cell[], target: Prepa
   for (const m of moverCells) {
     for (const c of target.cells) {
       if (feetBetween(m.box, c.box, rules, work) > reach) continue;
-      if (lineClear(input.walls, grid.shape === "hex", m.cx, m.cy, c.cx, c.cy, work)) return true;
+      if (lineClear(input.walls, grid, m.cx, m.cy, c.cx, c.cy, work)) return true;
     }
   }
   return false;
