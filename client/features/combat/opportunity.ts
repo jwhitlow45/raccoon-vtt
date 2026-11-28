@@ -406,7 +406,7 @@ export class LegJobs {
       movers[mover.id] = { turn: mover.turn, legs, rows, checking, over: legs.some((l) => l.over) };
       // A creature's every token is skipped once any of them left, so a later drag never names it again by another token.
       const skip = new Set(seen);
-      for (const t of Object.values(view.tokens)) if (creatures.has(creatureOf(view, t.id))) skip.add(t.id);
+      if (creatures.size > 0) for (const t of Object.values(view.tokens)) if (creatures.has(creatureOf(view, t.id))) skip.add(t.id);
       leaves[mover.id] = { turn: mover.turn, skip, settled: !checking };
       for (const row of rows) {
         const id = `${row.moverId}|${row.left.id}`;
