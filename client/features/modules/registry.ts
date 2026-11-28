@@ -1,6 +1,6 @@
 /**
  * The parts of the app a device may hide (docs/design/design-v1-features.md 3):
- * 23 modules in five groups, each with the role defaults, its homes, the
+ * 24 modules in five groups, each with the role defaults, its homes, the
  * parts it needs and what it claims in the app's registries. Hiding is
  * this device's and UI only: it never changes game state, what anyone
  * else sees, the rules or what the server sends (D-261127-127).
@@ -30,6 +30,7 @@ export type ModuleId =
   | "ping"
   | "pins"
   | "traps"
+  | "opportunity"
   | "builder"
   | "dungeon"
   | "floors"
@@ -280,6 +281,17 @@ export const MODULES: readonly ModuleDef[] = [
     claims: tool("trap"),
   },
   {
+    id: "opportunity",
+    name: "Opportunity Attacks",
+    help: { dm: "A note when a move leaves an enemy's reach.", player: "A note when your move leaves an enemy's reach." },
+    group: "tools",
+    // The drag's line and rings, the turn card's block and the DM's toast are no registry's entries, so it claims none. The room's switch stays in Room settings, as the room's rule (D-261128-063).
+    roles: BOTH(["menu"], { dm: true, player: true }),
+    display: "no",
+    names: ["opportunity attack notices", "attacks of opportunity", "OA", "reach", "disengage"],
+    claims: [],
+  },
+  {
     id: "builder",
     name: "Map builder",
     help: "Paint floors, walls, doors, heights, lights and stamps, and place stairs between floors.",
@@ -502,7 +514,7 @@ export function moduleById(id: ModuleId): ModuleDef {
   return BY_ID.get(id)!;
 }
 
-/** The parts a role has, in registry order: 23 for a DM, 15 for a player. */
+/** The parts a role has, in registry order: 24 for a DM, 16 for a player. */
 export function modulesFor(role: Role): ModuleDef[] {
   return MODULES.filter((m) => m.roles[role] !== undefined);
 }

@@ -35,6 +35,7 @@ export const SWITCH_ANCHORS: Readonly<Record<ModuleId, { search: string }>> = {
   ping: { search: "menu.this-device.features.ping" },
   pins: { search: "menu.this-device.features.pins" },
   traps: { search: "menu.this-device.features.traps" },
+  opportunity: { search: "menu.this-device.features.opportunity" },
   builder: { search: "menu.this-device.features.builder" },
   dungeon: { search: "menu.this-device.features.dungeon" },
   floors: { search: "menu.this-device.features.floors" },

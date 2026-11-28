@@ -56,8 +56,8 @@ describe("the Features page's words", () => {
     assert.equal(ownChoiceLine("player", simple), null);
     // Simple, then one switch changed: neither preset holds (section 13).
     const own = withChoice(simple, "player", "ping", false);
-    // Simple keeps seven of a player's fifteen parts, so eight hide, and Ping makes nine.
-    assert.equal(simpleFor("player").size, 7);
+    // Simple keeps eight of a player's sixteen parts, so eight hide, and Ping makes nine.
+    assert.equal(simpleFor("player").size, 8);
     assert.equal(featuresValue("player", own), "9 hidden");
     assert.equal(ownChoiceLine("player", own), "Your own choice: 9 parts hidden.");
     assert.equal(ownChoiceLine("dm", withChoice(NO_CHOICES, "dm", "sound", false)), "Your own choice: 1 part hidden.");
@@ -87,8 +87,10 @@ describe("the Features page's words", () => {
     assert.deepEqual(ids("dm", "3d dice"), ["diceAnimation"]);
     assert.ok(ids("dm", "iso").includes("isometric"));
     assert.deepEqual(ids("player", "trap"), [], "a player has no Traps");
-    assert.equal(partsMatching("dm", "").length, 23);
-    assert.equal(partsMatching("player", "  ").length, 15);
+    assert.deepEqual(ids("player", "attacks of opportunity"), ["opportunity"]);
+    assert.deepEqual(ids("dm", "disengage"), ["opportunity"]);
+    assert.equal(partsMatching("dm", "").length, 24);
+    assert.equal(partsMatching("player", "  ").length, 16);
     assert.equal(coreMatching("x-card"), "The X-card always shows.");
     assert.equal(coreMatching("xcard"), null, "a core name is matched as written");
     assert.equal(coreMatching("fog"), "The Fog always shows.");
@@ -102,22 +104,22 @@ describe("the Features page's words", () => {
 });
 
 describe("the Features page as it draws", () => {
-  test("a DM's: the help, the role line, Start from on Everything, the search, five groups of 23 switches, Always shown and Reset all", () => {
+  test("a DM's: the help, the role line, Start from on Everything, the search, five groups of 24 switches, Always shown and Reset all", () => {
     resetAllFeatures();
     const html = draw("dm");
     for (const words of [FEATURES_WORDS.help.replace("'", "&#x27;"), FEATURES_WORDS.role.dm, "Start from", "Every part shows.", "Find a part", "Always shown", "Reset all", FEATURES_WORDS.resetHelp]) assert.ok(html.includes(words), words);
     for (const group of ["Characters", "Tools", "Maps", "Panels", "Visuals"]) assert.ok(html.includes(`>${group}<`), group);
-    assert.equal((html.match(/role="switch"/g) ?? []).length, 23);
-    assert.equal((html.match(/role="switch" aria-checked="true"/g) ?? []).length, 23);
+    assert.equal((html.match(/role="switch"/g) ?? []).length, 24);
+    assert.equal((html.match(/role="switch" aria-checked="true"/g) ?? []).length, 24);
     assert.match(html, /checked="" value="everything"/);
     assert.ok(html.includes(`data-search="${switchAnchor("tableDisplay")}"`));
   });
 
-  test("a player's: 15 switches, the player's line, no DM part", () => {
+  test("a player's: 16 switches, the player's line, no DM part", () => {
     resetAllFeatures();
     const html = draw("player");
     assert.ok(html.includes(FEATURES_WORDS.role.player));
-    assert.equal((html.match(/role="switch"/g) ?? []).length, 15);
+    assert.equal((html.match(/role="switch"/g) ?? []).length, 16);
     for (const name of ["Map pins", "Traps", "Map builder", "Encounters", "Table display"]) assert.ok(!html.includes(`>${name}<`), name);
   });
 

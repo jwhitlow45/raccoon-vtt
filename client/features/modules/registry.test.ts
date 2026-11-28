@@ -4,7 +4,7 @@ import { CLAIM_CONDITIONS, CLAIM_KINDS, CORE_PARTS, HOMES, MODULE_GROUPS, MODULE
 
 /*
  * The registry's own rules (docs/design/design-v1-features.md 3 and 14):
- * 23 parts with unique ids, 15 of them a player's, help and homes for every
+ * 24 parts with unique ids, 16 of them a player's, help and homes for every
  * role a part has, needs that end and stay within a role, and Simple's
  * lists as its preset's words say them.
  */
@@ -12,11 +12,11 @@ import { CLAIM_CONDITIONS, CLAIM_KINDS, CORE_PARTS, HOMES, MODULE_GROUPS, MODULE
 const ROLES: readonly Role[] = ["dm", "player"];
 
 describe("the parts registry", () => {
-  test("23 parts with unique ids, 23 for a DM and 15 for a player, in five groups", () => {
-    assert.equal(MODULES.length, 23);
-    assert.equal(new Set(MODULE_IDS).size, 23);
-    assert.equal(modulesFor("dm").length, 23);
-    assert.equal(modulesFor("player").length, 15);
+  test("24 parts with unique ids, 24 for a DM and 16 for a player, in five groups", () => {
+    assert.equal(MODULES.length, 24);
+    assert.equal(new Set(MODULE_IDS).size, 24);
+    assert.equal(modulesFor("dm").length, 24);
+    assert.equal(modulesFor("player").length, 16);
     const groups = MODULE_GROUPS.map((g) => g.id);
     assert.deepEqual(MODULE_GROUPS.map((g) => g.name), ["Characters", "Tools", "Maps", "Panels", "Visuals"]);
     for (const m of MODULES) assert.ok(groups.includes(m.group), m.id);
@@ -69,10 +69,10 @@ describe("the parts registry", () => {
   });
 
   test("Simple keeps what its preset's words name", () => {
-    // DM: "The map, tokens, monsters, fog, dice and turns, with Ruler, Areas, Draw and Ping." The dice keep their animation.
-    assert.deepEqual([...simpleFor("dm")], ["ruler", "areas", "draw", "ping", "diceAnimation"]);
-    // Player: "Your character's HP, conditions and rolls, turns, Ruler and Ping, and what the DM shares": Sound, the clock, the journal and the weather.
-    assert.deepEqual([...simpleFor("player")], ["ruler", "ping", "sound", "time", "journal", "weather", "diceAnimation"]);
+    // DM: "The map, tokens, monsters, fog, dice and turns, with Ruler, Areas, Draw and Ping." The dice keep their animation, and the turns their Opportunity Attack notices.
+    assert.deepEqual([...simpleFor("dm")], ["ruler", "areas", "draw", "ping", "opportunity", "diceAnimation"]);
+    // Player: "Your character's HP, conditions and rolls, turns, Ruler and Ping, and what the DM shares": the turns' notices, Sound, the clock, the journal and the weather.
+    assert.deepEqual([...simpleFor("player")], ["ruler", "ping", "opportunity", "sound", "time", "journal", "weather", "diceAnimation"]);
   });
 
   test("the Always shown list names the X-card", () => {

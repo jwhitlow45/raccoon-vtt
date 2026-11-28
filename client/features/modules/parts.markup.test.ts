@@ -112,7 +112,9 @@ const ADMITTED: readonly InnerOwner[] = [];
  * fails until it is taken off, so the list shrinks to empty as the gates
  * land (the scans' pending lists do the same, D-261127-458).
  */
-const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B"; why: string }[] = [];
+const PENDING: readonly { surface: string; part: ModuleId; lane: "FT-B" | "DOA-C2"; why: string }[] = [
+  { surface: "Time, Sound, Initiative, Log, Members", part: "opportunity", lane: "DOA-C2", why: "the turn card's Opportunity Attacks block, which lane C2 places" },
+];
 
 /**
  * Ways back that are a part's own switch at its home, not a Show on the
