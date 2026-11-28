@@ -14,6 +14,8 @@ import {
   USE_STAMP_OP_VERSION,
   MODELS_OP_VERSION,
   MODELS_SNAPSHOT_VERSION,
+  OPPORTUNITY_OP_VERSION,
+  OPPORTUNITY_SNAPSHOT_VERSION,
   usesStamped,
   edgePinches,
   trapSettlesNamed,
@@ -2373,9 +2375,9 @@ describe("op version 69 and snapshot 52, 3D models on pictures (docs/design/desi
 
   test("are identity steps at 69 and 52, and an op carrying a model parses", () => {
     assert.equal(MODELS_OP_VERSION, 69);
-    assert.equal(OP_VERSION, MODELS_OP_VERSION);
+    assert.ok(OP_VERSION >= MODELS_OP_VERSION);
     assert.equal(MODELS_SNAPSHOT_VERSION, 52);
-    assert.equal(SNAPSHOT_VERSION, MODELS_SNAPSHOT_VERSION);
+    assert.ok(SNAPSHOT_VERSION >= MODELS_SNAPSHOT_VERSION);
     for (const op of [update, portrait, restore]) {
       assert.equal(runMigrations(op, 68, 69, opMigrations), op);
       assert.equal(migrateOp(op, 68), op);
@@ -2391,5 +2393,32 @@ describe("op version 69 and snapshot 52, 3D models on pictures (docs/design/desi
   test("a build at 68 refuses an op from this one by number, and a build at 51 a v52 snapshot", () => {
     assert.throws(() => runMigrations(update, 69, 68, opMigrations), /cannot migrate from version 69 down to 68/);
     assert.throws(() => runMigrations(room(), 52, 51, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 70 and snapshot 53, Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+  const update = { t: "room.update", settings: { skipDefeated: true } };
+  const named = { t: "room.update", name: "Crypt" };
+  const restore = { t: "sys.restore", from: "undo", deps: true, entries: [{ key: "room", value: null }] };
+
+  test("are identity steps at 70 and 53", () => {
+    assert.equal(OPPORTUNITY_OP_VERSION, 70);
+    assert.equal(OP_VERSION, OPPORTUNITY_OP_VERSION);
+    assert.equal(OPPORTUNITY_SNAPSHOT_VERSION, 53);
+    assert.equal(SNAPSHOT_VERSION, OPPORTUNITY_SNAPSHOT_VERSION);
+    for (const op of [update, named, restore]) {
+      assert.equal(runMigrations(op, 69, 70, opMigrations), op);
+      assert.equal(migrateOp(op, 69), op);
+      assert.equal(migrateOp(op, 68), op, "and from before 3D models, through both steps");
+    }
+    const state = room();
+    assert.equal(runMigrations(state, 52, 53, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 52), state);
+    assert.equal(migrateSnapshot(state, 51), state);
+  });
+
+  test("a build at 69 refuses an op from this one by number, and a build at 52 a v53 snapshot", () => {
+    assert.throws(() => runMigrations(update, 70, 69, opMigrations), /cannot migrate from version 70 down to 69/);
+    assert.throws(() => runMigrations(room(), 53, 52, snapshotMigrations), /down/);
   });
 });

@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 52;
-export const OP_VERSION = 69;
+export const SNAPSHOT_VERSION = 53;
+export const OP_VERSION = 70;
 
 export type MigrationStep = {
   from: number;
@@ -321,6 +321,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // refuses a v52 snapshot instead of failing on the image, which its strict schema refuses. No first commit forces this
   // snapshot, since only a version 69 op writes the field.
   { from: 51, to: 52, apply: (state) => state },
+  // Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md 4, OPPORTUNITY_SNAPSHOT_VERSION): the room
+  // settings' `opportunityNotices` is optional, and absent reads as on, so a v52 room is a v53 room as it is. The number
+  // moves so that an older build refuses a v53 snapshot instead of failing on the settings, which its strict schema
+  // refuses. No first commit forces this snapshot, since only a version 70 op writes the field.
+  { from: 52, to: 53, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1607,6 +1612,20 @@ export const opMigrations: MigrationStep[] = [
     to: 69,
     apply: (op) => op,
   },
+  {
+    // Opportunity Attack notices (OPPORTUNITY_OP_VERSION, docs/design/design-v1-opportunity-attacks.md 4): a
+    // `room.update`'s `opportunityNotices` setting is new, which an older strict schema refuses, so no stored op changes
+    // shape and the step is the identity. No rule changes with the switch, so ops stored before replay as they ran.
+    // Op 70 is one step shared with the squeezing walks' whole-squares walk (WHOLE_SQUARES_OP_VERSION, its own predicate
+    // in its own lane): when the two ship together, op 70 also carries that walk, and ops stored at 69 and below replay
+    // with the reading they had. If they ship apart, the later one takes its own step.
+    // Deploy: back up the database just before, and reload DM pages first, then every other open page. Rollback needs
+    // the backup for any room this build wrote a snapshot of, and for any room with changes at this version after its
+    // last snapshot, both of which an older build refuses.
+    from: 69,
+    to: 70,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -2864,3 +2883,12 @@ export const MODELS_OP_VERSION = 69;
 
 /** The room format of 3D models on pictures: an image's `model` is new and optional, so a v51 room is a v52 room as it is. */
 export const MODELS_SNAPSHOT_VERSION = 52;
+
+/**
+ * The op version of Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md 4): an identity step,
+ * since a `room.update`'s `opportunityNotices` is new. No notice rule reads it.
+ */
+export const OPPORTUNITY_OP_VERSION = 70;
+
+/** The room format of Opportunity Attack notices: the settings' `opportunityNotices` is new and optional, so a v52 room is a v53 room as it is. */
+export const OPPORTUNITY_SNAPSHOT_VERSION = 53;
