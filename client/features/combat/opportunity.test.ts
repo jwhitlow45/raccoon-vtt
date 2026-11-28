@@ -117,6 +117,22 @@ describe("a leg's job", () => {
     assert.equal(h.timers.length, 0, "no rescan for any of it");
   });
 
+  test("a Reaction used this device sent stands in the server's copy before its row leaves, so the row's button can show busy until then", () => {
+    const h = harness();
+    const state = move(beside(), "thorn", 8, 5);
+    h.jobs.sync({ key: "room|dm", view: state, confirmed: state, viewer: DM, on: true });
+    h.drain();
+    const marked = { ...state, encounter: { ...state.encounter!, entries: [...state.encounter!.entries, entry("eg", { tokenId: "goblin", reactionUsed: true })] } };
+    h.jobs.sync({ key: "room|dm", view: marked, confirmed: state, viewer: DM, on: true });
+    assert.deepEqual(rowsOf(h.jobs.store.getState()), ["goblin"], "sent, not yet taken");
+    h.jobs.sync({ key: "room|dm", view: marked, confirmed: marked, viewer: DM, on: true });
+    assert.deepEqual(rowsOf(h.jobs.store.getState()), [], "taken");
+    // A creature gone from the view leaves at once, whatever the server's copy still holds.
+    const { goblin: _gone, ...tokens } = state.tokens;
+    h.jobs.sync({ key: "room|dm", view: { ...state, tokens }, confirmed: state, viewer: DM, on: true });
+    assert.deepEqual(rowsOf(h.jobs.store.getState()), []);
+  });
+
   test("a creature its block says reaches 10 ft waits behind Checking the walk for the rolls table, then reads its reach (SOL-06)", async () => {
     const h = harness();
     const air = token("air", { name: "Air Elemental", size: "large", x: 6, y: 5, actor: { inline: actor({ srdId: "air-elemental" }) } });

@@ -57,6 +57,15 @@ describe("a block's Opportunity Attacks, as the model reads the turn's jobs", ()
     assert.deepEqual(player.bree!.rows, [{ id: "g1", name: "Goblin 1", fiveFt: true, trait: null, mark: null }]);
   });
 
+  test("a Reaction marked on this device keeps its row's Reaction used until the server's copy has it", () => {
+    const state = fight();
+    const marked = { ...state, encounter: { ...state.encounter!, entries: state.encounter!.entries.map((e) => (e.id === "e1" ? { ...e, reactionUsed: true } : e)) } };
+    const mark = { kind: "row", entryId: "e1", tokenId: "g1" };
+    assert.deepEqual(reachByMover(marked, DM, new Map(), reachOf("bree", [{ id: "g1" }]), () => null, state).bree!.rows[0]!.mark, mark, "sent, not yet taken");
+    assert.equal(reachByMover(marked, DM, new Map(), reachOf("bree", [{ id: "g1" }]), () => null, marked).bree!.rows[0]!.mark, null, "taken");
+    assert.equal(reachByMover(marked, DM, new Map(), reachOf("bree", [{ id: "g1" }]), () => null).bree!.rows[0]!.mark, null, "with no server's copy given, the view's");
+  });
+
   test("the mover Invisible or Hidden, and a trait of its block that avoids them, as the Owl's Flyby", async () => {
     const state = fight();
     state.tokens.bree = { ...state.tokens.bree!, actor: { inline: actor({ effects: [effect("i1", { key: "hidden" })] }) } };

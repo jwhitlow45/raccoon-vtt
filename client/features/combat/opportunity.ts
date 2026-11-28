@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { SrdRolls } from "#shared/dice/bonus.ts";
-import type { PathStop, TokenPath, Viewer } from "#shared/model.ts";
+import type { PathStop, RoomState, TokenPath, Viewer } from "#shared/model.ts";
 import type { Spot } from "#shared/rules/path.ts";
 import { chunksNeeded, opportunityNoticesOn, reachInput, reachScan, reconcileLegs, rowStands, SLICE_WORK, type Chunks, type LegRecord, type ReachLeave, type ReachView, type SrdBlocks } from "#shared/rules/opportunity.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
@@ -22,7 +22,9 @@ import { answersFor } from "./logic.ts";
  * appears on this device, waits until the SRD chunks its creatures need have
  * loaded or failed, and finishes its slices on that snapshot. Later changes
  * only remove rows, through `rowStands` over the room as it is now, so a push
- * of the goblin or a door closed after the walk never adds or drops one.
+ * of the goblin or a door closed after the walk never adds or drops one. The
+ * room it reads is the server's copy, so a row leaves once the server takes
+ * the change, and its Reaction used shows busy until then.
  *
  * Jobs queue and never cancel each other. A job goes only when its leg goes
  * (reconcileLegs removes it: an Undo, or a rewrite it cannot match), or the
@@ -74,7 +76,8 @@ export type LegJobsDeps = {
 };
 
 /** The room, the viewer and whether notices run, as one sync gives them. `key` names the room and the view (role, member, View as a player): a new one starts afresh. */
-export type SyncInput = { key: string; view: ReachView | null; viewer: Viewer | null; on: boolean };
+/** `confirmed`: the server's copy under `view`, which rows leave by. Left out, they leave by `view`. */
+export type SyncInput = { key: string; view: ReachView | null; confirmed?: ReachView | null; viewer: Viewer | null; on: boolean };
 
 type Job = {
   id: number;
@@ -150,6 +153,7 @@ export class LegJobs {
   readonly #deps: LegJobsDeps;
   #key: string | null = null;
   #view: ReachView | null = null;
+  #confirmed: ReachView | null = null;
   #viewer: Viewer | null = null;
   #movers = new Map<string, Mover>();
   #jobs = new Map<number, Job>();
@@ -173,8 +177,10 @@ export class LegJobs {
       return;
     }
     if (input.key !== this.#key) this.#reset(input.key);
-    if (view === this.#view && viewer === this.#viewer) return;
+    const confirmed = input.confirmed ?? null;
+    if (view === this.#view && viewer === this.#viewer && confirmed === this.#confirmed) return;
     this.#view = view;
+    this.#confirmed = confirmed;
     this.#viewer = viewer;
     const now = turnMovers(view, viewer);
     const kept = new Set(now.map((m) => m.id));
@@ -226,6 +232,7 @@ export class LegJobs {
     this.#timer = null;
     this.#key = key;
     this.#view = null;
+    this.#confirmed = null;
     this.#viewer = null;
     if (this.store.getState() !== EMPTY) this.store.setState({ ...EMPTY, key, fresh: this.store.getState().fresh }, true);
     this.leaves.setState({ on: key !== null, chunks: this.#chunks, movers: {} }, true);
@@ -311,6 +318,7 @@ export class LegJobs {
     const leaves: Record<string, TurnLeaves["movers"][string]> = {};
     const fresh: ReachRow[] = [];
     const shown = this.#readShown();
+    const kept = this.#confirmed ?? view;
     for (const mover of this.#movers.values()) {
       const legs: LegOut[] = mover.records.map((record, i) => {
         const parts = partsOf(record).map((part): PartOut => {
@@ -328,7 +336,7 @@ export class LegJobs {
         for (const left of leg.leaves) {
           if (seen.has(left.id)) continue;
           seen.add(left.id);
-          if (rowStands(view, left, viewer)) rows.push({ moverId: mover.id, leg: leg.id, left });
+          if (view.tokens[left.id] !== undefined && rowStands(kept, left, viewer)) rows.push({ moverId: mover.id, leg: leg.id, left });
         }
       }
       const checking = legs.some((l) => !l.done);
@@ -422,11 +430,13 @@ export function useTurnReach(): TurnReach {
   const jobs = useMemo(() => turnJobs(scope), [scope]);
   const room = useRoomYouIfAny();
   const view = useRoomView((s) => s.view);
+  // The copy `view` is built on, read as the view is (GroupSave.tsx reads it so too).
+  const confirmed = useRoomView((s) => s.confirmed as RoomState | null);
   const you = useRoomView((s) => s.you);
   const shown = useModule("opportunity");
   const viewer = useMemo(() => (you ? { memberId: you.memberId, role: you.role } : null), [you]);
   const on = noticesOn({ shown, room, view });
   const key = `${room?.roomId ?? ""}|${viewer?.role ?? ""}|${viewer?.memberId ?? ""}`;
-  useEffect(() => jobs.sync({ key, view, viewer, on }), [jobs, key, view, viewer, on]);
+  useEffect(() => jobs.sync({ key, view, confirmed, viewer, on }), [jobs, key, view, confirmed, viewer, on]);
   return useStore(jobs.store);
 }

@@ -116,6 +116,8 @@ type You = { role: "dm" | "player"; memberId: string };
 export function useCombatAlerts(): CombatAlerts {
   const labels = useLabels();
   const view = useRoomView((s) => s.view);
+  // The copy `view` is built on, read as the view is (GroupSave.tsx reads it so too).
+  const confirmed = useRoomView((s) => s.confirmed as RoomState | null);
   const you = useRoomView((s) => s.you);
   const local = useDismissed();
   const here = useFeaturesHere();
@@ -132,7 +134,10 @@ export function useCombatAlerts(): CombatAlerts {
   const turnReach = useTurnReach();
   const movers = useMemo(() => Object.keys(turnReach.movers).map((id): ActorTarget => ({ tokenId: id })), [turnReach.movers]);
   const moverDice = useDiceView(movers);
-  const reach = useMemo(() => (view && you ? reachByMover(view, you, labels, turnReach, (id) => (moverDice.dice ? creatureBlock(moverDice.dice, { tokenId: id }) : null)) : {}), [view, you, labels, turnReach, moverDice.dice]);
+  const reach = useMemo(
+    () => (view && you ? reachByMover(view, you, labels, turnReach, (id) => (moverDice.dice ? creatureBlock(moverDice.dice, { tokenId: id }) : null), confirmed) : {}),
+    [view, confirmed, you, labels, turnReach, moverDice.dice],
+  );
   useReachReturns(turnReach, view, you);
   if (!view || !you || (shown.length === 0 && Object.keys(reach).length === 0)) return NONE;
   return combatAlerts({
@@ -160,10 +165,12 @@ export function reachByMover(
   labels: Labels,
   reach: Pick<TurnReach, "movers" | "fresh">,
   blockOf: (moverId: string) => Parameters<typeof avoidTrait>[0] | null,
+  /** The server's copy under `view`: a Reaction marked here and not yet taken there keeps its row's button, busy. */
+  confirmed?: Pick<RoomState, "tokens" | "encounter"> | null,
 ): Record<string, BlockReach> {
   const out: Record<string, BlockReach> = {};
   for (const [moverId, mover] of Object.entries(reach.movers)) {
-    const block = moverBlock(view, you, labels, moverId, mover, blockOf(moverId));
+    const block = moverBlock(view, confirmed ?? view, you, labels, moverId, mover, blockOf(moverId));
     if (!block) continue;
     const fresh = reach.fresh.rows.filter((r) => r.moverId === moverId).flatMap((r) => block.rows.filter((m) => m.id === r.left.id).map((m) => m.name));
     out[moverId] = fresh.length > 0 ? { ...block, announce: `${capitalized(reachWords(fresh, "left", false, 3))}.` } : block;
@@ -171,13 +178,22 @@ export function reachByMover(
   return out;
 }
 
-function moverBlock(view: Pick<RoomState, "tokens" | "characters" | "encounter">, you: You, labels: Labels, moverId: string, mover: MoverOut, block: Parameters<typeof avoidTrait>[0] | null): BlockReach | null {
+function moverBlock(
+  view: Pick<RoomState, "tokens" | "characters" | "encounter">,
+  confirmed: Pick<RoomState, "tokens" | "encounter">,
+  you: You,
+  labels: Labels,
+  moverId: string,
+  mover: MoverOut,
+  block: Parameters<typeof avoidTrait>[0] | null,
+): BlockReach | null {
   if (mover.rows.length === 0 && !mover.checking && !mover.over) return null;
   const rows = mover.rows.flatMap((row): ReachRowModel[] => {
     const token = view.tokens[row.left.id];
     if (!token) return [];
-    const entry = view.encounter?.entries.find((e) => e.tokenId === token.id);
-    const used = token.companion?.turn !== undefined && token.companion.turn !== "own" ? token.companion.reactionUsed === true : entry?.reactionUsed === true;
+    const kept = confirmed.tokens[token.id] ?? token;
+    const entry = confirmed.encounter?.entries.find((e) => e.tokenId === token.id);
+    const used = kept.companion?.turn !== undefined && kept.companion.turn !== "own" ? kept.companion.reactionUsed === true : entry?.reactionUsed === true;
     const mark = used ? null : reactionFor(view, you, { tokenId: token.id });
     return [{ id: token.id, name: displayName(token, labels), fiveFt: you.role === "player" && !row.left.known, trait: row.left.extra ? `${displayName(token, labels)}: ${row.left.extra}` : null, mark }];
   });
