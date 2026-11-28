@@ -1,11 +1,12 @@
 import type { BuildChunk, Fall, LogEntry, LogEvent, RoomState, Token, Trap, TrapAction, TrapDue } from "#shared/model.ts";
 import { compareLogIds } from "#shared/keys.ts";
+import type { AwayName, AwayNames, ProjectedFall } from "#shared/project.ts";
 import { ownEntry } from "#shared/records.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
 import { fallDice, floorBelow } from "#shared/rules/floorLinks.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { displayName } from "../../lib/scene.ts";
-import { holderOf } from "../dice/targets.ts";
+import { characterHolder, holderOf } from "../dice/targets.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { floorWord } from "./rules.ts";
@@ -25,11 +26,28 @@ export function deskTraps(traps: Readonly<Record<string, Trap | undefined>>): De
   return out.sort((a, b) => compareLogIds(b.due.id, a.due.id) || (a.trap.id < b.trap.id ? -1 : 1));
 }
 
-type Names = Pick<RoomState, "tokens">;
+/**
+ * The copy's tokens, and the creatures a card names that the copy lacks, as
+ * the DM's projection of the card carries them (`away`, LP53-TRAP-2), so a
+ * card names a creature on another scene or floor on every device and
+ * after a reload.
+ */
+type Names = Pick<RoomState, "tokens"> & { away?: AwayNames };
+
+function withAway(names: Pick<RoomState, "tokens">, away: AwayNames | undefined): Names {
+  return away ? { tokens: names.tokens, away } : names;
+}
+
+/** A creature away by the card's word for it: its name and table number. A label map holds only the copy's tokens. */
+function awayName(entry: AwayName, labels: Labels): string {
+  return displayName(entry.number === undefined ? { name: entry.name } : { name: entry.name, number: entry.number }, labels);
+}
 
 function nameOf(names: Names, id: string, labels: Labels): string {
   const token = names.tokens[id];
-  return token ? displayName(token, labels) : "a creature";
+  if (token) return displayName(token, labels);
+  const away = names.away?.[id];
+  return away ? awayName(away, labels) : "a creature";
 }
 
 /**
@@ -50,41 +68,44 @@ export function nameList(names: Names, ids: readonly string[], labels: Labels, m
  * The card's lines on who (5.6): who set it off, frozen when it went off,
  * and who it hits that still waits (6.2). Those the DM's copy holds read
  * as before, "It hits Thorn and 2 more.", with the count past its list's
- * bound. Those it does not, on another scene, follow by the names `known`
- * last read for them (FallNames), else "a creature": "It hits Thorn. It
- * also hits Bree, not on this scene now.", or alone "It hits Bree, not on
- * this scene now." `reaches` is whether Save and damage reaches anyone:
- * where the occurrence names no one, its page takes the room's selection,
- * and else only a creature the copy holds gets a row, so a page with every
- * named creature away would open with none (D-261126-237).
+ * bound. Those it does not, on another scene, follow by the names the
+ * trap's `away` gives (LP53-TRAP-2), else those `known` last read for them
+ * (FallNames), else "a creature": "It hits Thorn. It also hits Bree, not
+ * on this scene now.", or alone "It hits Bree, not on this scene now." The
+ * setters' line names them by `away` too. `reaches` is whether Save and
+ * damage reaches anyone: where the occurrence names no one, its page takes
+ * the room's selection, and else only a creature the copy holds gets a
+ * row, so a page with every named creature away would open with none
+ * (D-261126-237).
  */
-export function whoLines(names: Names, due: TrapDue, labels: Labels, known?: FallNames): { by: string; hits: string; reaches: boolean } {
+export function whoLines(copy: Pick<RoomState, "tokens">, due: TrapDue, labels: Labels, known?: FallNames, away?: AwayNames): { by: string; hits: string; reaches: boolean } {
+  const names = withAway(copy, away);
   const by = nameList(names, due.by, labels, due.more ?? 0);
   const set = due.how === "hand" ? (by ? `You set it off for ${by}.` : "You set it off.") : by ? `${by} set it off.` : "It went off.";
   const here = due.hits.filter((id) => ownEntry(names.tokens, id) !== undefined);
-  const away = due.hits.filter((id) => ownEntry(names.tokens, id) === undefined);
+  const elsewhere = due.hits.filter((id) => ownEntry(names.tokens, id) === undefined);
   if (known) for (const id of here) keepName(known, id, nameOf(names, id, labels), holderIdOf(names, id));
   const hits = nameList(names, here, labels, due.hitsMore ?? 0);
   const reaches = due.hits.length === 0 || here.length > 0;
-  const gone = awayNames(known, away, new Set(here.map((id) => holderIdOf(names, id))));
+  const gone = awayNames(names, labels, known, elsewhere, new Set(here.map((id) => holderIdOf(names, id))));
   if (gone === null) return { by: set, hits: hits ? `It hits ${hits}.` : "It hits no one.", reaches };
-  const elsewhere = `${gone}, not on this scene now.`;
-  return { by: set, hits: hits ? `It hits ${hits}. It also hits ${elsewhere}` : `It hits ${elsewhere}`, reaches };
+  const notHere = `${gone}, not on this scene now.`;
+  return { by: set, hits: hits ? `It hits ${hits}. It also hits ${notHere}` : `It hits ${notHere}`, reaches };
 }
 
 /**
  * "Bree", "Bree and Thorn", "Bree and a creature", "2 creatures": the
- * creatures an occurrence names that the copy does not hold, by the names
- * `known` last read, each holder once, and the rest counted. A creature
- * with another token here is named there alone, so null where every one
- * away is such a creature.
+ * creatures an occurrence names that the copy does not hold, by the card's
+ * `away`, else the names `known` last read, each holder once, and the rest
+ * counted. A creature with another token here is named there alone, so
+ * null where every one away is such a creature.
  */
-function awayNames(known: FallNames | undefined, ids: readonly string[], hereHolders: ReadonlySet<string>): string | null {
+function awayNames(copy: Names, labels: Labels, known: FallNames | undefined, ids: readonly string[], hereHolders: ReadonlySet<string>): string | null {
   const seen = new Set(hereHolders);
   const names: string[] = [];
   let unnamed = 0;
   for (const id of ids) {
-    const entry = known?.get(id);
+    const entry = readAway(copy, labels, known, id);
     if (entry === undefined) unnamed++;
     else if (!seen.has(entry.holder)) {
       seen.add(entry.holder);
@@ -97,8 +118,8 @@ function awayNames(known: FallNames | undefined, ids: readonly string[], hereHol
 }
 
 /** A hidden springing's line (5.5): "Imp set it off, out of the players' sight. The trap is still armed for them." */
-export function hiddenLine(names: Names, due: TrapDue, labels: Labels): string {
-  const by = nameList(names, due.by, labels, due.more ?? 0) || "A creature";
+export function hiddenLine(copy: Pick<RoomState, "tokens">, due: TrapDue, labels: Labels, away?: AwayNames): string {
+  const by = nameList(withAway(copy, away), due.by, labels, due.more ?? 0) || "A creature";
   return `${by} set it off, out of the players' sight. The trap is still armed for them.`;
 }
 
@@ -228,10 +249,12 @@ export function fallers(view: Pick<RoomState, "tokens">, card: Fall): string[] {
   return [card.tokenId, ...(card.riders ?? [])].filter((id) => ownEntry(view.tokens, id) !== undefined);
 }
 
-/** Whose creature a token is: its character's, shared by every token of it, else its own. */
-export function holderIdOf(view: Pick<RoomState, "tokens">, id: string): string {
+/** Whose creature a token is: its character's, shared by every token of it, else its own. A token away is its character's by the card's `away`. */
+export function holderIdOf(view: Names, id: string): string {
   const token = ownEntry(view.tokens, id);
-  return token ? holderOf(token) : `token:${id}`;
+  if (token) return holderOf(token);
+  const ref = view.away?.[id]?.ref;
+  return ref !== undefined ? characterHolder(ref) : `token:${id}`;
 }
 
 /**
@@ -239,7 +262,7 @@ export function holderIdOf(view: Pick<RoomState, "tokens">, id: string): string 
  * character shown by two tokens, one riding and one carried, is one
  * creature that fell once (LP47B-FALL-1). Apply still takes every token.
  */
-export function fallNamed(view: Pick<RoomState, "tokens">, ids: readonly string[]): string[] {
+export function fallNamed(view: Names, ids: readonly string[]): string[] {
   const seen = new Set<string>();
   return ids.filter((id) => {
     const holder = holderIdOf(view, id);
@@ -264,9 +287,9 @@ const CARD_NAMES_KEPT = 700;
  * The names a device last read off the creatures its fall and trap cards
  * name, so a card whose creature left the scene shown, as one the DM moved
  * to another scene, still names it (LP46A-FALL-2, D-261126-237). The DM's
- * copy holds the shown scene's tokens alone and no room-wide list of where
- * each one is, so nothing else names it, and after a reload such a card
- * reads "A creature".
+ * projection of a card names those the room holds (`away`, LP53-TRAP-2),
+ * so this memory names only a creature the room no longer holds, as one
+ * deleted, which after a reload reads "A creature".
  */
 export type FallNames = Map<string, { name: string; holder: string }>;
 
@@ -279,11 +302,20 @@ function keepName(known: FallNames, id: string, name: string, holder: string): v
   if (known.size > CARD_NAMES_KEPT) known.delete(known.keys().next().value!);
 }
 
-/** "Giant", "Horse and Thorn": a gone card's names as `known` last read them, a holder named once as the card names it while its tokens are on the scene. */
-function knownNames(known: FallNames | undefined, ids: readonly string[]): { name: string; count: number } | null {
+/** A creature the copy lacks, by the card's `away`, kept in `known` as any name read off a card, else as `known` last read it. */
+function readAway(copy: Names, labels: Labels, known: FallNames | undefined, id: string): { name: string; holder: string } | undefined {
+  const away = copy.away?.[id];
+  if (away === undefined) return known?.get(id);
+  const entry = { name: awayName(away, labels), holder: holderIdOf(copy, id) };
+  if (known) keepName(known, id, entry.name, entry.holder);
+  return entry;
+}
+
+/** "Giant", "Horse and Thorn": the names of a card's creatures the copy lacks, by its `away` or as `known` last read them, a holder named once as the card names it while its tokens are on the scene. */
+function knownNames(copy: Names, labels: Labels, known: FallNames | undefined, ids: readonly string[]): { name: string; count: number } | null {
   const seen = new Set<string>();
   const names = ids.flatMap((id) => {
-    const entry = known?.get(id);
+    const entry = readAway(copy, labels, known, id);
     if (entry === undefined || seen.has(entry.holder)) return [];
     seen.add(entry.holder);
     return [entry.name];
@@ -299,13 +331,15 @@ function knownNames(known: FallNames | undefined, ids: readonly string[]): { nam
  * Bludgeoning, Prone.", with riders "Horse and Thorn fell 10 ft to Ground
  * floor: each 1d6 Bludgeoning, Prone.", under 10 ft "Thorn fell 5 ft to
  * Ground floor: no damage.", "A creature fell 10 ft to Ground floor on
- * Tower." for another scene, and "Giant fell 10 ft to Ground floor and is
- * not on this scene now." for one whose creature left the scene shown,
- * moved to another or gone, by the name `known` last read, else "A
- * creature". No name is stored on the card, so each is read off its
- * creature.
+ * Tower." for another scene, named "Thorn fell 10 ft to Ground floor on
+ * Tower." by the card's `away`, and "Giant fell 10 ft to Ground floor and
+ * is not on this scene now." for one whose creature left the scene shown,
+ * moved to another or gone, by its `away` or the name `known` last read,
+ * else "A creature". No name is stored on the card, so each is read off
+ * its creature, and the DM's projection names those away.
  */
-export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall, shown: string | null, labels: Labels, known?: FallNames): FallRead {
+export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: ProjectedFall, shown: string | null, labels: Labels, known?: FallNames): FallRead {
+  const names = withAway(view, card.away);
   const floor = landedOn(view, card);
   const tokenIds = fallers(view, card);
   if (tokenIds.length > 0) {
@@ -319,12 +353,15 @@ export function fallRead(view: Pick<RoomState, "scenes" | "tokens">, card: Fall,
   const here = shown !== null && sameScene(view, card.sceneId, shown);
   if (here) {
     // A DM's delete takes the card with its creatures (dropGoneCards), so most such cards' creatures were moved to another scene, where Apply works.
-    const left = knownNames(known, [card.tokenId, ...(card.riders ?? [])]);
+    const left = knownNames(names, labels, known, [card.tokenId, ...(card.riders ?? [])]);
     const who = left ? `${left.name} fell ${card.ft} ft to ${floor} and ${left.count > 1 ? "are" : "is"}` : `A creature fell ${card.ft} ft to ${floor} and is`;
     return { kind: "gone", name: left?.name ?? null, tokenIds, dice: 0, line: `${who} not on this scene now.`, region: `Fall: ${left?.name ?? "a creature"}`, whose: left ? `${left.name}'s fall` : "this fall" };
   }
   const scene = ownEntry(view.scenes, card.sceneId)?.name.trim();
-  return { kind: "elsewhere", name: null, tokenIds, dice: 0, line: `A creature fell ${card.ft} ft to ${floor} ${scene ? `on ${scene}` : "on another scene"}.`, region: "Fall: a creature", whose: "this fall" };
+  const where = `${floor} ${scene ? `on ${scene}` : "on another scene"}`;
+  const there = knownNames(names, labels, known, [card.tokenId, ...(card.riders ?? [])]);
+  if (there) return { kind: "elsewhere", name: there.name, tokenIds, dice: 0, line: `${there.name} fell ${card.ft} ft to ${where}.`, region: `Fall: ${there.name}`, whose: `${there.name}'s fall` };
+  return { kind: "elsewhere", name: null, tokenIds, dice: 0, line: `A creature fell ${card.ft} ft to ${where}.`, region: "Fall: a creature", whose: "this fall" };
 }
 
 /** The desk's folded button with fall cards among what it folds, as with traps: "1 fall, Rolls 1/3", or "2 falls" alone. Its name starts with its text. */

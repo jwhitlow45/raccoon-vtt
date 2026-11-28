@@ -7,7 +7,7 @@ import { allKeys } from "./project.ts";
 import { collectionOf, keys, parseKey, readEntity, writeEntity } from "./keys.ts";
 import { FALL_RIDERS_MOST, type RoomState, type Viewer } from "./model.ts";
 import { canApply } from "./permissions.ts";
-import { projectEntity, projectState } from "./project.ts";
+import { projectEntity, projectState, type ProjectedFall } from "./project.ts";
 import { ID_RULES, STAIRS_SIDE_WORDS, opSchema, clientOpSchema, PIT_OR_BELOW, type Op } from "./protocol.ts";
 import { opReads } from "./reads.ts";
 import { applyOp } from "./reducer.ts";
@@ -108,8 +108,10 @@ describe("the fall card's key (4.4, 10.1)", () => {
 
   test("only the DM's projection holds a card, by key and whole", () => {
     const state = withFalls(tower(), fallCard(), fallCard({ made: 121, tokenId: "goblin" }));
-    assert.deepEqual(projectEntity(keys.fall("120:0"), state, DM, { sceneId: null }), fallCard());
-    assert.deepEqual(projectState(state, DM, { sceneId: null }).falls, state.falls);
+    // As stored, with the creatures it names that the DM's copy lacks (`away`, project.away.test.ts) left out.
+    const stored = (card: unknown) => (({ away: _away, ...rest }) => rest)(card as ProjectedFall);
+    assert.deepEqual(stored(projectEntity(keys.fall("120:0"), state, DM, { sceneId: null })), fallCard());
+    assert.deepEqual(Object.fromEntries(Object.entries(projectState(state, DM, { sceneId: null }).falls ?? {}).map(([id, card]) => [id, stored(card)])), state.falls);
     for (const viewer of [ANA, BREE, DISPLAY]) {
       assert.equal(projectEntity(keys.fall("120:0"), state, viewer, { sceneId: null }), null, viewer.memberId);
       const copy = projectState(state, viewer, { sceneId: null });

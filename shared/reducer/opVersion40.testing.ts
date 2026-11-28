@@ -197,13 +197,16 @@ function numberedBefore(state: RoomState, view: ProjectedState): ProjectedState 
 }
 
 /**
- * A DM's copy as the builds before the rows' creatures sent it
- * (D-261128-044): each row as stored. Written out here, since this file
- * runs on the older build too, where it changes nothing.
+ * A DM's copy as the builds before the rows' creatures (D-261128-044) and
+ * the cards' away names (D-261128-037) sent it: each row, trap and fall
+ * card as stored. Written out here, since this file runs on the older
+ * build too, where it changes nothing.
  */
 function dmCopyBefore(view: ProjectedState): ProjectedState {
-  if (!view.encounter) return view;
-  return { ...view, encounter: { ...view.encounter, entries: view.encounter.entries.map((row) => (({ creature: _creature, ...rest }) => rest)(row as typeof row & { creature?: string })) } };
+  type Away = { away?: unknown };
+  const stored = <T extends object>(records: Record<string, T>) => Object.fromEntries(Object.entries(records).map(([id, value]) => [id, (({ away: _away, ...rest }: T & Away) => rest)(value)])) as Record<string, T>;
+  const encounter = view.encounter && { ...view.encounter, entries: view.encounter.entries.map((row) => (({ creature: _creature, ...rest }) => rest)(row as typeof row & { creature?: string })) };
+  return { ...view, encounter, traps: stored(view.traps), ...(view.falls ? { falls: stored(view.falls) } : {}) };
 }
 
 /** A projection reads only the room, so rooms alike have projections alike, worked out once. */

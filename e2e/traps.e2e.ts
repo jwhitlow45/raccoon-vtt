@@ -1514,8 +1514,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
           const there = shown.getByRole("button", { name: title, exact: true });
           if ((await there.getAttribute("aria-expanded")) !== "true") await there.click();
         }
-        // A reload forgets the names this device read, so the one away reads as a creature.
-        await shown.getByText("It hits Brute. It also hits a creature, not on this scene now.", { exact: true }).waitFor();
+        // A reload forgets the names this device read, and the DM's projection of the plate names the one away (LP53-TRAP-2).
+        await shown.getByText("It hits Brute. It also hits Bree, not on this scene now.", { exact: true }).waitFor();
         lines.push(...alignmentLines(await measureAlignment(shown), label));
         const box = await rectOf(shown);
         const words = await rectOf(shown.getByText(/not on this scene now\.$/));
@@ -1587,5 +1587,61 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await card.waitFor({ state: "detached" });
     assert.equal(hpOf(brute), HP - first.amount, "Brute took it once");
     assert.equal(patSocket.received.some((frame) => frame.includes(plateId)), false, "a frame to Pat named the unfound plate");
+  });
+
+  test("dedge-c-1. after a reload of the DM page a card names each creature once, here or away: Rook by the token here, Bree on another scene by name, in the by-line too (LP53-TRAP-2)", async () => {
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[run.trapId] ?? null);
+    await dm.locator(".konvajs-content").first().waitFor();
+    for (const t of Object.values(state(dmSocket)?.traps ?? {})) for (const d of t.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: t.id, due: d.id });
+    const cellar = uuidv7();
+    const rookChar = uuidv7();
+    const breeChar = uuidv7();
+    // Ids made in one millisecond fall in either order, so they are sorted to the order the occurrence keeps.
+    const [rookA, rookB, snik, bree] = [uuidv7(), uuidv7(), uuidv7(), uuidv7()].sort() as [string, string, string, string];
+    const wireId = uuidv7();
+    await ops.send({ t: "scene.create", scene: { id: cellar, name: "Cellar", bounds: BOUNDS } });
+    await ops.send({ t: "character.create", character: { id: rookChar, name: "Rook", size: "medium", ownerIds: [], actor: actor() } });
+    await ops.send({ t: "character.create", character: { id: breeChar, name: "Bree", size: "medium", ownerIds: [], actor: actor() } });
+    for (const [id, name, x, ref] of [
+      [rookA, "Rook", 10, rookChar],
+      [rookB, "Rook", 11, rookChar],
+      [snik, "Snik", 12, null],
+      [bree, "Bree", 13, breeChar],
+    ] as const) {
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: ref ? "pc" : "monster", name, size: "medium", visibility: "all", x, y: 10, disposition: ref ? "ally" : "hostile", actor: ref ? { ref } : { inline: actor() } } });
+    }
+    const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: wireId, sceneId: run.sceneId, name: "Trip Wire", zone: { cells: [{ x: 10, y: 10, w: 4, h: 1 }] }, rig } });
+    await waitFor("the wire and its creatures on the DM's copy", () => (state(dmSocket)?.traps?.[wireId] && token(dmSocket, bree) ? true : null));
+    await ops.send({ t: "trap.spring", trapId: wireId, tokenIds: [rookA, rookB, snik, bree] });
+    const wire = () => state(dmSocket)?.traps?.[wireId];
+    await waitFor("the springing waits", () => ((wire()?.rig?.due?.length ?? 0) > 0 ? true : null));
+    // Rook's second token and Bree go to the Cellar, off the DM's copy.
+    for (const id of [rookB, bree]) await ops.send({ t: "token.update", tokenId: id, patch: { sceneId: cellar } });
+    await waitFor("Rook B and Bree off the DM's copy", () => (token(dmSocket, rookB) === undefined && token(dmSocket, bree) === undefined ? true : null));
+
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot after the reload", () => wire() ?? null);
+    await dm.locator(".konvajs-content").first().waitFor();
+    const title = "Trip Wire went off";
+    const card = dm.getByRole("group", { name: title });
+    const opener = card.getByRole("button", { name: title, exact: true });
+    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    await card.getByText("You set it off for Rook, Snik and Bree.", { exact: true }).waitFor();
+    await card.getByText("It hits Rook and Snik. It also hits Bree, not on this scene now.", { exact: true }).waitFor();
+    const projected = wire() as (Trap & { away?: Record<string, { name: string }> }) | undefined;
+    assert.deepEqual(Object.keys(projected?.away ?? {}).sort(), [bree, rookB].sort(), "the DM's snapshot names the two away");
+    await shots.take(dm, "traps-dedge-c-1-reload");
+
+    // Renamed on her scene, Bree's new name reaches the card with no reload.
+    await ops.send({ t: "token.update", tokenId: bree, patch: { name: "Bree the Bold" } });
+    await card.getByText("It hits Rook and Snik. It also hits Bree the Bold, not on this scene now.", { exact: true }).waitFor();
+    assert.equal(patSocket.received.some((frame) => frame.includes(wireId)), false, "a frame to Pat named the unfound wire");
+    assert.equal(patSocket.received.some((frame) => frame.includes("Bree the Bold")), false, "a frame to Pat named the creature away");
+    await ops.send({ t: "trap.settle", trapId: wireId, due: wire()!.rig!.due![0]!.id });
+    await card.waitFor({ state: "detached" });
   });
 });

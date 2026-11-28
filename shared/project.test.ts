@@ -651,8 +651,8 @@ describe("projection properties over random rooms", () => {
             assert.equal(single, state.encounterHistory.length === 0 ? null : state.encounterHistory);
             continue;
           }
-          // The DM's meta and fight carry derived fields, the rows' creatures built anew each projection (D-261128-044).
-          if (key === keys.meta || key === keys.encounter) assert.deepEqual(single, inState, `seed ${seed} dm derived ${key}`);
+          // The DM's meta, fight and cards carry derived fields built anew each projection: the rows' creatures and the cards' away names (D-261128-044, 037).
+          if (key === keys.meta || key === keys.encounter || key.startsWith("trap:") || key.startsWith("fall:")) assert.deepEqual(single, inState, `seed ${seed} dm derived ${key}`);
           else assert.equal(single, inState === null ? null : inState, `seed ${seed} dm ${key}`);
         }
       }

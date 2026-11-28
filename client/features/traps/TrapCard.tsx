@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { LogEntry, Trap, TrapDue } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import type { ProjectedTrap } from "#shared/project.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -23,14 +24,14 @@ const NO_LOG: LogEntry[] = [];
  * creatures it hits, whose Apply settles those it reached, and Dismiss settles it unapplied. A second DM device's answer
  * that came first is refused, "It was settled meanwhile.", and said here.
  *
- * A creature it hits that is on another scene stays on the card, named as
- * this device last read it, until Apply reaches it there (6.2). With every
+ * A creature it hits that is on another scene stays on the card, named by
+ * the DM's projection of the trap, until Apply reaches it there (6.2). With every
  * one it names away, Save and damage hides, since its page would hold no
  * row, and shows again once one is back. Hidden while it held keyboard
  * focus, as when another device moved the last one away, it hands focus to
  * the card's toggle, so focus never falls to the page.
  */
-export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
+export function TrapCard(props: { trap: Trap & Pick<ProjectedTrap, "away">; due: TrapDue; open: boolean; onToggle(): void; toggleRef(el: HTMLButtonElement | null): void }) {
   const labels = useLabels();
   const { trap, due } = props;
   const view = useRoomView((s) => s.view);
@@ -41,7 +42,8 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
   const [saving, setSaving] = useState(false);
   const saveButton = useRef<HTMLButtonElement | null>(null);
   const toggle = useRef<HTMLButtonElement | null>(null);
-  const who = view ? whoLines(view, due, labels, KNOWN) : null;
+  // The DM's projection names the creatures it hits on another scene or floor (`away`), so a reload keeps their names.
+  const who = view ? whoLines(view, due, labels, KNOWN, trap.away) : null;
   const rig = trap.rig;
   // With no save the page opens on No save, so conditions with no save apply in one tap.
   const effects = rig?.save !== undefined || rig?.damage !== undefined || rig?.conditions !== undefined;
@@ -105,7 +107,7 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
       {props.open ? (
         <>
           {/* Out of the players' sight it is still armed for them, which the DM must weigh: a warning, not muted help. */}
-          {due.hidden ? <Caution>{hiddenLine(view, due, labels)}</Caution> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
+          {due.hidden ? <Caution>{hiddenLine(view, due, labels, trap.away)}</Caution> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
           <span style={{ fontSize: theme.font.small }}>{who.hits}</span>
           {/* What it could not do takes the error's color from the line's own outcome, not from its words. */}
           {did.map((d, i) =>

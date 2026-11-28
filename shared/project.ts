@@ -19,6 +19,7 @@ import {
   type Encounter,
   type EncounterSnapshot,
   type ExploredTile,
+  type Fall,
   type FloorLink,
   type FogDraft,
   type FogTile,
@@ -175,7 +176,23 @@ export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: Project
  * is armed or sprung, its rig or its occurrences: the party saw it go off
  * or it did not.
  */
-export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true };
+export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true; away?: AwayNames };
+
+/**
+ * A creature a DM's trap or fall card names that the DM's copy does not
+ * hold, on another scene or a floor not shown (LP53-TRAP-2, D-261128-037,
+ * 038): its token's name and table number, which the card's words read
+ * with displayName, and its character, whose holder (`character:<ref>`)
+ * names a character with a token here once. Worked out on the server and
+ * never stored, as `sight` is.
+ */
+export type AwayName = { name: string; number?: number; ref?: string };
+
+/** By token id, only where the card names one away: a card naming none carries no `away`. */
+export type AwayNames = Record<string, AwayName>;
+
+/** A fall card as the DM gets it: as stored, with the creatures it names away. */
+export type ProjectedFall = Fall & { away?: AwayNames };
 
 /**
  * The room's clock as a viewer gets it (docs/design/design-v1-calendar.md 6.4):
@@ -185,7 +202,7 @@ export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "
  */
 export type ProjectedClock = Omit<RoomClock, "shown"> & { shown?: boolean };
 
-export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy" | "clock" | "floorLinks"> & {
+export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy" | "clock" | "floorLinks" | "falls"> & {
   meta: RoomMeta & {
     /** DM only, never stored. Retained HP undo records, including lines outside the live projection. */
     hpUndoLogIds?: string[];
@@ -200,6 +217,8 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   traps: Record<string, ProjectedTrap>;
   /** The ends of stairs, ladders and openings, each as stored for the DM and cut for a player (projectFloorLinkCtx), only while the copy holds one. */
   floorLinks?: Record<string, FloorLink | ProjectedFloorLink>;
+  /** The DM's alone, only while the room holds one. */
+  falls?: Record<string, ProjectedFall>;
   characters: Record<string, ProjectedCharacter>;
   templates: Record<string, AreaTemplate>;
   encounter: ProjectedEncounter | null;
@@ -3271,7 +3290,7 @@ export const LINK_FOR_PLAYERS = {
  */
 function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
   if (!ctx.floors.has(trap.sceneId)) return null;
-  if (ctx.viewer.role === "dm") return trap;
+  if (ctx.viewer.role === "dm") return dmTrap(ctx, trap);
   if (!trap.found) return null;
   const zone = trap.zone;
   if ("door" in zone) {
@@ -3297,6 +3316,74 @@ function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
 
 /* A player's trap, kept per trap object, which is replaced and never changed, so a re-projection that changes nothing sends nothing. */
 const playerTraps = new WeakMap<Trap, ProjectedTrap>();
+
+/**
+ * The DM's trap with the creatures its waiting springings name away, so its
+ * card names each one after a reload as before it (LP53-TRAP-2). A trap with
+ * none waiting, or naming no one away, is the stored object itself.
+ */
+function dmTrap(ctx: Ctx, trap: Trap): ProjectedTrap {
+  const due = trap.rig?.due;
+  if (!due || due.length === 0) return trap;
+  const away = awayNamesCtx(ctx, due.flatMap((d) => [...d.by, ...d.hits]));
+  return away ? { ...trap, away } : trap;
+}
+
+/** The DM's fall card with the creatures it names away, else the stored card. */
+function dmFall(ctx: Ctx, card: Fall): ProjectedFall {
+  const away = awayNamesCtx(ctx, [card.tokenId, ...(card.riders ?? [])]);
+  return away ? { ...card, away } : card;
+}
+
+/**
+ * The tokens among `ids` the room holds and the DM's copy does not: those
+ * off the floors it holds. A deleted token is in no room, so its card
+ * reads "a creature" (D-261128-037).
+ */
+function awayNamesCtx(ctx: Ctx, ids: readonly string[]): AwayNames | undefined {
+  let out: AwayNames | undefined;
+  for (const id of [...new Set(ids)].sort()) {
+    const token = ownEntry(ctx.state.tokens, id);
+    if (!token || ctx.floors.has(token.sceneId)) continue;
+    const name: AwayName = { name: token.name };
+    if (token.number !== undefined) name.number = token.number;
+    if ("ref" in token.actor) name.ref = token.actor.ref;
+    (out ??= {})[id] = name;
+  }
+  return out;
+}
+
+/*
+ * The trap and fall keys whose waiting springings or cards name each token
+ * (D-261128-049), built once per `traps` and `falls` object, which every
+ * write replaces, and never kept while a transaction still writes into it,
+ * so a token write finds the cards to project again in one lookup. A trap
+ * with none waiting names no one, so a token write never projects it.
+ */
+const trapsNaming = new WeakMap<object, ReadonlyMap<string, readonly EntityKey[]>>();
+const fallsNaming = new WeakMap<object, ReadonlyMap<string, readonly EntityKey[]>>();
+
+function namingIndex<T>(memo: WeakMap<object, ReadonlyMap<string, readonly EntityKey[]>>, map: Readonly<Record<string, T>>, named: (value: T) => readonly string[], key: (id: string) => EntityKey): ReadonlyMap<string, readonly EntityKey[]> {
+  let index = memo.get(map);
+  if (index) return index;
+  const out = new Map<string, EntityKey[]>();
+  for (const [id, value] of Object.entries(map)) {
+    for (const tokenId of new Set(named(value))) {
+      const list = out.get(tokenId);
+      if (list) list.push(key(id));
+      else out.set(tokenId, [key(id)]);
+    }
+  }
+  if (!isWritable(map)) memo.set(map, out);
+  return out;
+}
+
+/** The DM's trap and fall cards that name the token, which carry its name while it is away. */
+function cardsNaming(state: RoomState, tokenId: string): readonly EntityKey[] {
+  const traps = namingIndex(trapsNaming, state.traps ?? {}, (trap: Trap) => (trap.rig?.due ?? []).flatMap((d) => [...d.by, ...d.hits]), keys.trap).get(tokenId) ?? [];
+  const falls = state.falls ? (namingIndex(fallsNaming, state.falls, (card: Fall) => [card.tokenId, ...(card.riders ?? [])], keys.fall).get(tokenId) ?? []) : [];
+  return falls.length === 0 ? traps : traps.length === 0 ? falls : [...traps, ...falls];
+}
 
 /** A found trap's fields for players (docs/design/design-v1-traps.md 6.2), held to every key of Trap as SCENE_FOR_PLAYERS is. */
 export const TRAP_FOR_PLAYERS = {
@@ -4659,7 +4746,7 @@ function projectEntityKindCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectFloorLinkCtx(ctx, value as FloorLink) : null;
     // A fall card is the DM's alone, its drop and count too (docs/design/design-v1-floors.md phase 4, 10.2).
     case "fall":
-      return ctx.viewer.role === "dm" ? value : null;
+      return ctx.viewer.role === "dm" && value ? dmFall(ctx, value as Fall) : null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
@@ -4921,7 +5008,7 @@ function floorLinksField(ctx: Ctx): Pick<ProjectedState, "floorLinks"> {
 /** The fall cards, the DM's alone, as a field only while it holds one, as keys.ts writeEntity keeps it. */
 function fallsField(ctx: Ctx): Pick<ProjectedState, "falls"> {
   const cards = ctx.state.falls;
-  return ctx.viewer.role === "dm" && cards !== undefined && Object.keys(cards).length > 0 ? { falls: cards } : {};
+  return ctx.viewer.role === "dm" && cards !== undefined && Object.keys(cards).length > 0 ? { falls: projectMap(cards, (card) => dmFall(ctx, card)) } : {};
 }
 
 /** The floors players have reached, the DM's alone, as a field only while it holds a mark, as keys.ts writeEntity keeps it. */
@@ -5478,6 +5565,8 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     const refsRoll = data.type === "dice" && data.rolls.some((r) => (r.tokenId !== undefined && tokenIds.has(r.tokenId)) || (r.characterId !== undefined && characterIds.has(r.characterId)));
     if (refsToken || refsCharacter || refsHandout || refsEncounter || refsTemplate || refsRoll) add(keys.log(entry.id));
   }
+  // A DM's trap or fall card names a creature away by its token (`away`), so the token's write projects the card again.
+  for (const id of tokenIds) for (const key of cardsNaming(state, id)) add(key);
   // A players' trap line names the creatures every player saw, each viewer getting those they see now (projectTrapSeenCtx).
   if (tokenIds.size > 0) {
     for (const entry of state.trapSeen ?? []) if (entry.data?.type === "trapSeen" && entry.data.by.some((id) => tokenIds.has(id))) add(keys.trapSeen(entry.id));

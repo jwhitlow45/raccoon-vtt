@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { LogEntry, TrapDue } from "#shared/model.ts";
+import type { LogEntry, RoomState, TrapDue } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, character, room, token, trap } from "#shared/testutil.ts";
+import { DM, P1, character, room, scene, token, trap } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
 import { dmAlerts, linesAfter, metTrap, offersAfterTrap, playerAlerts, shownAlert, trapMoveWatch, watchOf } from "./alerts.ts";
-import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines, type FallNames } from "./desk.ts";
+import { deskTraps, didLines, fallRead, foldedWithTraps, hiddenLine, lineOf, whoLines, type FallNames } from "./desk.ts";
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
 
@@ -81,6 +81,33 @@ describe("the DM's trap cards (docs/design/design-v1-traps.md 4.3)", () => {
     assert.equal(hits({ hits: ["bree", "m1", "m2"] }, half).hits, "It hits Mira. It also hits Bree, not on this scene now.");
     assert.equal(hits({ hits: ["m1", "m2"] }, half).hits, "It hits Mira.");
     assert.equal(hits({ hits: [], hitsMore: 3 }, left).reaches, true);
+  });
+
+  test("after a reload the DM's projection names the creatures a card names away, a character with a token here once (LP53-TRAP-2)", () => {
+    const state = room({
+      characters: { rook: character("rook", { name: "Rook" }), bree: character("bree", { name: "Bree" }) },
+      tokens: {
+        rookA: token("rookA", { name: "Rook", kind: "pc", actor: { ref: "rook" } }),
+        rookB: token("rookB", { name: "Rook", kind: "pc", sceneId: "s2", actor: { ref: "rook" } }),
+        snik: token("snik", { name: "Snik" }),
+        bree: token("bree", { name: "Bree", kind: "pc", sceneId: "s2", actor: { ref: "bree" } }),
+        gob: token("gob", { name: "Goblin", number: 2, sceneId: "s2" }),
+      },
+      traps: { pit: trap("pit", { rig: { ...trap("x").rig!, due: [due("3:0", { how: "hand", by: ["rookA", "bree"], hits: ["rookA", "rookB", "snik"] })] } }) },
+    });
+    const projected = projectState(state, DM, { sceneId: "s1" });
+    const view = projected as unknown as RoomState;
+    const pit = projected.traps.pit!;
+    assert.deepEqual(pit.away, { bree: { name: "Bree", ref: "bree" }, rookB: { name: "Rook", ref: "rook" } }, "only those the copy lacks");
+    const known: FallNames = new Map();
+    const read = (over: Partial<TrapDue>) => whoLines(view, due("3:0", over), new Map(), known, { ...pit.away, gob: { name: "Goblin", number: 2 } });
+    assert.deepEqual(read(pit.rig!.due![0]!), { by: "You set it off for Rook and Bree.", hits: "It hits Rook and Snik.", reaches: true });
+    assert.equal(read({ hits: ["rookA", "bree", "snik"] }).hits, "It hits Rook and Snik. It also hits Bree, not on this scene now.");
+    assert.equal(read({ hits: ["rookB", "gob"] }).hits, "It hits Rook and Goblin 2, not on this scene now.", "a table number reads as on the board");
+    assert.equal(known.get("bree")?.name, "Bree", "each name read off a card is kept, as before");
+    assert.equal(hiddenLine(view, due("3:0", { by: ["bree", "snik"] }), new Map(), pit.away), "Bree and Snik set it off, out of the players' sight. The trap is still armed for them.");
+    // A token the room no longer holds has no entry, and reads as before.
+    assert.equal(whoLines(view, due("3:0", { hits: ["snik", "ogre"] }), new Map(), new Map(), pit.away).hits, "It hits Snik. It also hits a creature, not on this scene now.");
   });
 
   test("the folded button counts the trap cards it folds, first", () => {
@@ -210,5 +237,43 @@ describe("what a trap going off tells each device", () => {
     watch({ pending: [], refused: [5], trapped: [5, 6] });
     assert.deepEqual(offers.getState().offers.map((o) => o.ns), []);
     assert.equal(notes.getState().note?.n, 6, "its teleport on its way");
+  });
+});
+
+describe("fall cards named after a reload (LP53-TRAP-2, D-261128-037)", () => {
+  /** Tower's two floors and Crypt, with Thorn on Tower's Ground floor and a Giant moved on to Crypt. */
+  function tower() {
+    return room({
+      scenes: {
+        ground: scene("ground", { name: "Tower", floor: { of: "ground", level: 0, name: "Ground floor" } }),
+        upper: scene("upper", { name: "Tower", order: 1, floor: { of: "ground", level: 1, name: "Upper floor" } }),
+        crypt: scene("crypt", { name: "Crypt", order: 2 }),
+      },
+      characters: { thorn: character("thorn", { name: "Thorn" }) },
+      tokens: {
+        thorn: token("thorn", { name: "Thorn", kind: "pc", sceneId: "ground", actor: { ref: "thorn" } }),
+        giant: token("giant", { name: "Giant", sceneId: "crypt" }),
+      },
+      falls: {
+        "120:0": { id: "120:0", rev: 0, tokenId: "thorn", sceneId: "ground", from: "upper", ft: 10, made: 120 },
+        "121:0": { id: "121:0", rev: 0, tokenId: "giant", sceneId: "ground", from: "upper", ft: 10, made: 121 },
+      },
+    });
+  }
+
+  test("a card on another scene names its creature, Show and all", () => {
+    const projected = projectState(tower(), DM, { sceneId: "crypt" });
+    const card = projected.falls!["120:0"]!;
+    assert.deepEqual(card.away, { thorn: { name: "Thorn", ref: "thorn" } });
+    const read = fallRead(projected as unknown as RoomState, card, "crypt", new Map(), new Map());
+    assert.deepEqual([read.kind, read.line, read.region, read.whose], ["elsewhere", "Thorn fell 10 ft to Ground floor on Tower.", "Fall: Thorn", "Thorn's fall"]);
+    assert.equal(projected.falls!["121:0"]!.away, undefined, "the Giant stands in the copy");
+  });
+
+  test("a card whose creature left the scene shown names it with an empty memory", () => {
+    const projected = projectState(tower(), DM, { sceneId: "upper" });
+    const read = fallRead(projected as unknown as RoomState, projected.falls!["121:0"]!, "upper", new Map(), new Map());
+    assert.deepEqual([read.kind, read.line, read.region, read.whose], ["gone", "Giant fell 10 ft to Ground floor and is not on this scene now.", "Fall: Giant", "Giant's fall"]);
+    assert.equal(projected.falls!["120:0"]!.away, undefined, "Thorn stands on a floor the DM's copy holds");
   });
 });
