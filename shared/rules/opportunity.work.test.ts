@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, Token, Viewer } from "../model.ts";
+import { CHUNK_CELLS, type BuildChunk, type PathStop, type RoomState, type Token, type Viewer } from "../model.ts";
 import { room, token } from "../testutil.ts";
 import { footprintRect, occupiedRange, placedOnHex } from "./footprint.ts";
-import { bucketRange, HEX_BOX_UNITS, reachInput, reachScan, SLICE_WORK } from "./opportunity.ts";
+import { bucketRange, DRAG_WORK, HEX_BOX_UNITS, LEG_WORK_CAP, reachInput, reachScan, SLICE_WORK, type ReachLeave } from "./opportunity.ts";
 
 /**
  * What a scan counts as work on hexes, where finding the hexes a creature
@@ -99,5 +99,70 @@ describe("a scan's work on hexes", () => {
         }
       }
     }
+  });
+});
+
+describe("the cover gate's work between big custom creatures (section 5)", () => {
+  /**
+   * Bree, 20 by 20 squares, beside `count` creatures of 20 by 20 standing
+   * on one another, with a wall the length of the side between them, so no
+   * line between their squares is clear and the gate tries every pair it
+   * may. Each reaches `reach` feet.
+   */
+  function giants(count: number, reach: number): { state: RoomState; reaches: number[] } {
+    const tokens: Token[] = [token("bree", { kind: "pc", name: "Bree", disposition: "ally", size: "custom", w: 20, h: 20, x: 10, y: 0 })];
+    for (let i = 0; i < count; i++) tokens.push(token(`g${i}`, { name: `Giant ${i}`, size: "custom", w: 20, h: 20, x: 30, y: 0 }));
+    const state = room({ tokens: Object.fromEntries(tokens.map((t) => [t.id, t])) });
+    state.scenes.s1 = { ...state.scenes.s1!, autoWalls: "off" };
+    // Free walls are at most 8 squares long, so the side's wall is three, each stored in the chunk its middle falls in.
+    [0, 8, 16].forEach((y0, i) => {
+      const y1 = Math.min(y0 + 8, 20);
+      const cx = Math.floor(30 / CHUNK_CELLS);
+      const cy = Math.floor((y0 + y1) / 2 / CHUNK_CELLS);
+      const chunk: BuildChunk = (state.buildChunks[`s1:${cx},${cy}`] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} });
+      (chunk.walls ??= []).push({ id: `w0000000000${i}`, a: [30, y0], b: [30, y1], f: { kind: "wall" } });
+    });
+    return { state, reaches: [reach] };
+  }
+
+  /** The work Bree's walk through `stops` yields at, `slice` units at a time, and what it gives. */
+  function scan(world: { state: RoomState; reaches: number[] }, stops: PathStop[], slice: number): { yields: number[]; out: ReachLeave[] | "over" } {
+    const read = reachInput(world.state, "bree", { turn: 1, stops }, { rolls: {}, monsters: [] }, DM);
+    assert.ok(read);
+    const input = { ...read.input, reactors: read.input.reactors.map((r) => ({ ...r, reaches: world.reaches })) };
+    const run = reachScan(input, { ...read.legs[0]!, provokes: true }, new Set(), slice);
+    const yields: number[] = [];
+    for (let step = run.next(); ; step = run.next()) {
+      if (step.done) return { yields, out: step.value };
+      yields.push(step.value);
+    }
+  }
+
+  /** The most one step of the gate adds past its check: a test between two squares and the one wall a line meets. */
+  const STEP = 64;
+  const gaps = (yields: readonly number[]) => yields.map((n, i) => n - (yields[i - 1] ?? 0));
+
+  test("stepping away from one beside it, the gate tries only the squares on the sides that face each other, well inside a slice", () => {
+    const { yields, out } = scan(giants(1, 5), [{ x: 10, y: 0, elevation: 0 }, { x: 5, y: 0, elevation: 0 }], SLICE_WORK);
+    assert.deepEqual(out, [], "the wall stops every line");
+    assert.deepEqual(yields, [], `20 squares a side, not 400 by 400 pairs in one step: ${yields.join(", ")}`);
+  });
+
+  test("rising straight up beside one with a 120 ft reach, where every square of each is within reach, the gate yields inside its pairs for a slice and for the drag's cap", () => {
+    for (const slice of [SLICE_WORK, DRAG_WORK]) {
+      const { yields, out } = scan(giants(1, 120), [{ x: 10, y: 0, elevation: 0 }, { x: 10, y: 0, elevation: 500 }], slice);
+      assert.deepEqual(out, [], "the wall stops every line");
+      assert.ok(yields.length >= 5, `the gate's pairs took ${yields.length} slices`);
+      for (const gap of gaps(yields)) assert.ok(gap <= slice + STEP, `a slice ran to ${gap} units past its ${slice}: ${yields.join(", ")}`);
+    }
+    // The drag stops at its first yield past DRAG_WORK, so no drag frame runs further.
+    assert.ok(scan(giants(1, 120), [{ x: 10, y: 0, elevation: 0 }, { x: 10, y: 0, elevation: 500 }], DRAG_WORK).yields[0]! <= DRAG_WORK + STEP);
+  });
+
+  test("ten of them stop the scan at LEG_WORK_CAP, inside a gate, never yielding past it", () => {
+    const { yields, out } = scan(giants(10, 120), [{ x: 10, y: 0, elevation: 0 }, { x: 10, y: 0, elevation: 500 }], SLICE_WORK);
+    assert.equal(out, "over");
+    assert.ok(Math.max(...yields) <= LEG_WORK_CAP + STEP, `yielded at ${Math.max(...yields)}`);
+    for (const gap of gaps(yields)) assert.ok(gap <= SLICE_WORK + STEP, `a slice ran to ${gap} units`);
   });
 });

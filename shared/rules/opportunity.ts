@@ -291,8 +291,8 @@ function feetBetween(a: CellBox, b: CellBox, rules: DistanceSettings, work: Work
   return rules.diagonal === "euclid" ? Math.round(ft) : ft;
 }
 
-function cellsUnder(g: Grid, token: FootprintToken, feetPerCell: number): Cell[] {
-  const whole = tokenCellBox(g, token, feetPerCell);
+/** The cells under a creature's box, each with its own box, built from the box the scan already holds. */
+function cellsUnder(whole: CellBox): Cell[] {
   const out: Cell[] = [];
   if (whole.hexes) {
     for (const h of whole.hexes.at) {
@@ -407,14 +407,64 @@ function lineClear(walls: WallSet, g: Grid, px: number, py: number, qx: number, 
   return true;
 }
 
-/** The cover gate (D-261128-056): some pair of cells, one under each creature, within `reach` of each other, with a clear line between their centers. */
-function coverClear(input: ScanInput, moverCells: readonly Cell[], target: Prepared, reach: number, work: Work): boolean {
+/**
+ * Where a scan yields and stops (section 5): at `next` units it yields the
+ * work done so far, and past LEG_WORK_CAP it stops, wherever it is, the
+ * cover gate's loops included.
+ */
+type Pace = { work: Work; slice: number; next: number };
+
+function paceNext(pace: Pace): number {
+  return Math.min(pace.work.n + pace.slice, LEG_WORK_CAP + 1);
+}
+
+/** The spot before, a leave's departure spot: where the mover stood, its box where some creature was near enough to build it, and its cells once the cover gate first needs them. */
+type Departure = { spot: LegSpot; box: CellBox | null; cells: Cell[] | null };
+
+/**
+ * The cells of `cells` within `reach` of the other creature's whole box
+ * (`other`): a pair within reach needs each of its cells within reach of
+ * the other's whole space, since a cell's distance to a box is never more
+ * than to any cell in it, so only these can hold one. A lone cell is its
+ * own test. Yields and stops as the scan does (Pace).
+ */
+function* nearCells(cells: readonly Cell[], other: CellBox, reach: number, rules: DistanceSettings, pace: Pace): Generator<number, readonly Cell[] | "over"> {
+  if (cells.length === 1) return cells;
+  const out: Cell[] = [];
+  for (const c of cells) {
+    if (feetBetween(c.box, other, rules, pace.work) <= reach) out.push(c);
+    if (pace.work.n >= pace.next) {
+      if (pace.work.n > LEG_WORK_CAP) return "over";
+      yield pace.work.n;
+      pace.next = paceNext(pace);
+    }
+  }
+  return out;
+}
+
+/**
+ * The cover gate (D-261128-056): some pair of cells, one under each
+ * creature, within `reach` of each other, with a clear line between their
+ * centers. Two big custom creatures hold up to 400 cells each, so the gate
+ * tries only each side's cells within reach of the other's box first, and
+ * yields and stops inside its loops as the scan does, so no slice and no
+ * drag runs past its work however many pairs are left.
+ */
+function* coverClear(input: ScanInput, from: { box: CellBox; cells: readonly Cell[] }, target: Prepared, targetBox: CellBox, reach: number, pace: Pace): Generator<number, boolean | "over"> {
   const { grid, rules } = input;
-  target.cells ??= cellsUnder(grid, target.reactor.token, rules.feetPerCell);
-  for (const m of moverCells) {
-    for (const c of target.cells) {
-      if (feetBetween(m.box, c.box, rules, work) > reach) continue;
-      if (lineClear(input.walls, grid, m.cx, m.cy, c.cx, c.cy, work)) return true;
+  target.cells ??= cellsUnder(targetBox);
+  const mine = yield* nearCells(from.cells, targetBox, reach, rules, pace);
+  if (mine === "over") return "over";
+  const theirs = yield* nearCells(target.cells, from.box, reach, rules, pace);
+  if (theirs === "over") return "over";
+  for (const m of mine) {
+    for (const c of theirs) {
+      if (feetBetween(m.box, c.box, rules, pace.work) <= reach && lineClear(input.walls, grid, m.cx, m.cy, c.cx, c.cy, pace.work)) return true;
+      if (pace.work.n >= pace.next) {
+        if (pace.work.n > LEG_WORK_CAP) return "over";
+        yield pace.work.n;
+        pace.next = paceNext(pace);
+      }
     }
   }
   return false;
@@ -473,11 +523,12 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
   if (grid.shape === "hex") yield 0;
   const spots = legSpots(grid, input.mover, leg.from, leg.to);
   const work: Work = { n: 0 };
-  let nextYield = slice;
+  const pace: Pace = { work, slice, next: 0 };
+  pace.next = paceNext(pace);
   const stamp = new Uint32Array(prepared.length);
   const left = new Uint8Array(prepared.length);
   let within = new Map<number, number>();
-  let before: { spot: LegSpot; cells: Cell[] | null } | null = null;
+  let before: Departure | null = null;
   for (let k = 0; k < spots.length; k++) {
     const spot = spots[k]!;
     const standing: FootprintToken = input.mover.height === undefined ? spot : { ...spot, height: input.mover.height };
@@ -502,22 +553,26 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
     let box: CellBox | null = null;
     for (const p of candidates) {
       // A spot that first comes near many creatures on hexes builds their boxes over more than one slice.
-      if (work.n >= nextYield) {
+      if (work.n >= pace.next) {
+        if (work.n > LEG_WORK_CAP) return "over";
         yield work.n;
-        nextYield = work.n + slice;
+        pace.next = paceNext(pace);
       }
       if (!box) {
         box = tokenCellBox(grid, standing, fpc);
         if (box.hexes) work.n += HEX_BOX_UNITS;
       }
-      const feet = feetBetween(box, boxOf(p, grid, fpc, work), rules, work);
+      const pBox = boxOf(p, grid, fpc, work);
+      const feet = feetBetween(box, pBox, rules, work);
       const was = spot.jump ? undefined : within.get(p.index);
-      if (was !== undefined && before) {
+      // The spot before stood within reach of this creature, so the scan built its box there.
+      if (was !== undefined && before?.box) {
         for (const reach of p.reactor.reaches) {
           if (!(was <= reach && feet > reach) || !sees(input, p.reactor, was)) continue;
-          const departure: { spot: LegSpot; cells: Cell[] | null } = before;
-          departure.cells ??= cellsUnder(grid, input.mover.height === undefined ? departure.spot : { ...departure.spot, height: input.mover.height }, fpc);
-          if (!coverClear(input, departure.cells, p, reach, work)) continue;
+          before.cells ??= cellsUnder(before.box);
+          const clear = yield* coverClear(input, { box: before.box, cells: before.cells }, p, pBox, reach, pace);
+          if (clear === "over") return "over";
+          if (!clear) continue;
           out.push(p.reactor.extra !== null ? { id: p.reactor.id, spot: k, reach, extra: p.reactor.extra } : { id: p.reactor.id, spot: k, reach });
           left[p.index] = 1;
           break;
@@ -526,11 +581,11 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
       if (!left[p.index] && feet <= p.max) next.set(p.index, feet);
     }
     within = next;
-    before = { spot, cells: null };
-    if (work.n > LEG_WORK_CAP) return "over";
-    if (work.n >= nextYield) {
+    before = { spot, box, cells: null };
+    if (work.n >= pace.next) {
+      if (work.n > LEG_WORK_CAP) return "over";
       yield work.n;
-      nextYield = work.n + slice;
+      pace.next = paceNext(pace);
     }
   }
   return out;
