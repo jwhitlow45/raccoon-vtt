@@ -824,14 +824,16 @@ describe("3D models on token pictures", { concurrency: false }, () => {
     await pat.keyboard.press("Escape");
   });
 
-  test("md-12. Pat's page never asked for the hidden lurker's sheet nor heard its id, while it did fetch the sheets it may see", async () => {
+  test("md-12. Pat's page never asked for the hidden lurker's sheet or picture nor heard their ids or its own, while it did fetch the sheets it may see", async () => {
     await pickView(pat, "isometric");
     await standingAs(pat, run.thorn);
     await standingAs(pat, run.knight);
     const fetched = (id: string) => patRequests.some((url) => url.includes(`/assets/${id}/`));
     assert.ok(fetched(modelOf(patSocket, run.knight)!.assetId), "Pat's page fetched the knight's sheet, so the recording sees sheets");
     assert.equal(fetched(run.lurkerSheet), false, "Pat's page asked for the hidden lurker's sheet");
+    assert.equal(fetched(run.lurkerFace), false, "Pat's page asked for the hidden lurker's picture");
     assert.equal(patSocket.everSaw(run.lurkerSheet), false, "a frame to Pat named the hidden lurker's sheet");
+    assert.equal(patSocket.everSaw(run.lurkerFace), false, "a frame to Pat named the hidden lurker's picture");
     assert.equal(patSocket.everSaw(run.lurker), false, "a frame to Pat named the hidden lurker");
     // The DM's own board draws it: the sheet is there to be asked for.
     await pickView(dm, "isometric");
