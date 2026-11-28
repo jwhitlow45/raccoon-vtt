@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../model.ts";
 import { actor, character, effect, entry, room, token } from "../testutil.ts";
-import { advantageHint, groupKeyFor, nextTurn, placeEntry, scoredValue, sortEntries } from "./initiative.ts";
+import { advantageHint, creatureKey, groupKeyFor, nextTurn, placeEntry, scoredValue, sortEntries } from "./initiative.ts";
 
 function fixture() {
   const state = room();
@@ -100,5 +100,21 @@ describe("reminders and scores", () => {
     assert.equal(groupKeyFor(state, { tokenId: "orc" }), "Orc");
     assert.equal(groupKeyFor(state, { tokenId: "pc" }), undefined);
     assert.equal(groupKeyFor(state, { characterId: "c1" }), undefined);
+  });
+});
+
+describe("one row a creature (D-261128-039)", () => {
+  test("a creature is its character, shared by each of its tokens and its character row, else its own token", () => {
+    const state = fixture();
+    state.tokens.pc2 = token("pc2", { kind: "pc", name: "Ayla", actor: { ref: "c1" } });
+    assert.equal(creatureKey(state, { tokenId: "pc" }), "character:c1");
+    assert.equal(creatureKey(state, { tokenId: "pc2" }), "character:c1", "a character's second token is the same creature");
+    assert.equal(creatureKey(state, { characterId: "c1" }), "character:c1");
+    assert.equal(creatureKey(state, { tokenId: "g1" }), "token:g1");
+    assert.notEqual(creatureKey(state, { tokenId: "g2" }), creatureKey(state, { tokenId: "g1" }), "two goblins are two creatures");
+    // A row's token decides, as rowCharacter reads it, and one the state no longer holds is its own.
+    assert.equal(creatureKey(state, { tokenId: "g1", characterId: "c1" }), "token:g1");
+    assert.equal(creatureKey(state, { tokenId: "gone" }), "token:gone");
+    assert.equal(creatureKey(state, {}), undefined, "a label row is no creature");
   });
 });

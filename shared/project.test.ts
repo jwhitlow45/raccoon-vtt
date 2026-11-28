@@ -24,6 +24,7 @@ import {
   viewerSceneId,
   visibleAssetIds,
   type ProjectedActor,
+  type ProjectedEncounter,
   type ProjectedState,
 } from "./project.ts";
 import { stairMarkAt } from "./heightCodec.ts";
@@ -42,6 +43,11 @@ import { SQUARES } from "./rules/grid.ts";
 
 /** A table display's viewer: a player who owns nothing (docs/design/design-v1-dm-tools.md 3.1). */
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
+
+/** A DM's fight as stored: each row's creature is derived (D-261128-044, project.creature.test.ts). */
+function storedFight(fight: ProjectedEncounter | null | undefined): ProjectedEncounter | null | undefined {
+  return fight && { ...fight, entries: fight.entries.map(({ creature: _creature, ...row }) => row) };
+}
 
 /** Every object nested anywhere in a value, for "this key never appears" checks. */
 function* walk(value: unknown): Generator<Record<string, unknown>> {
@@ -627,7 +633,7 @@ describe("projection properties over random rooms", () => {
           else if (table === t.number) assert.equal(p.tokens[id], t, `seed ${seed} dm token ${id}`);
           else assert.deepEqual(p.tokens[id], (({ number: _stored, ...rest }) => (table === undefined ? rest : { ...rest, number: table }))(t), `seed ${seed} dm token ${id}`);
         }
-        assert.equal(p.encounter, state.encounter);
+        assert.deepEqual(storedFight(p.encounter), state.encounter);
         assert.equal(Object.keys(p.scenes).length, 2);
         assert.equal(Object.keys(p.fogDrafts).length, state.fogDrafts[sceneId] ? 1 : 0);
         // Room-level, so the same whatever scene the DM views.
@@ -645,7 +651,8 @@ describe("projection properties over random rooms", () => {
             assert.equal(single, state.encounterHistory.length === 0 ? null : state.encounterHistory);
             continue;
           }
-          if (key === keys.meta) assert.deepEqual(single, inState, `seed ${seed} dm derived meta`);
+          // The DM's meta and fight carry derived fields, the rows' creatures built anew each projection (D-261128-044).
+          if (key === keys.meta || key === keys.encounter) assert.deepEqual(single, inState, `seed ${seed} dm derived ${key}`);
           else assert.equal(single, inState === null ? null : inState, `seed ${seed} dm ${key}`);
         }
       }
@@ -1037,7 +1044,7 @@ describe("specific rules", () => {
         ["n5", 2],
       ],
     );
-    assert.deepEqual(projectState(state, DM, { sceneId: "s1" }).encounter!.entries, rows, "the DM keeps the stored numbers");
+    assert.deepEqual(storedFight(projectState(state, DM, { sceneId: "s1" }).encounter)!.entries, rows, "the DM keeps the stored numbers");
     assert.equal(state.encounter.entries[2]!.tieOrder, 2, "the room's own rows are untouched");
   });
 
@@ -1444,7 +1451,7 @@ describe("specific rules", () => {
     }
     const dm = projectState(state, DM, { sceneId: "s1" });
     assert.ok(dm.scenes.s1 && dm.tokens.dark && dm.labels.l1 && dm.handouts.h1);
-    assert.equal(dm.encounter, state.encounter);
+    assert.deepEqual(storedFight(dm.encounter), state.encounter);
     assert.equal(dm.log.length, 5);
   });
 

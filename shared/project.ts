@@ -82,7 +82,7 @@ import { chunkHeights, chunkMarks, encodeHeights } from "./rules/heights.ts";
 import { HEX_R, hexAt, hexCenter, hexKey, hexSubcells, sceneHexSpan, type HexGrid } from "./rules/hex.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
-import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
+import { compareEntries, creatureKey, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneFogged, zoneRanges } from "./rules/traps.ts";
 import { linkDir, linkHeight } from "./rules/floorLinks.ts";
@@ -154,7 +154,19 @@ export type ProjectedToken = Omit<Token, "actor" | DmOnlyTokenField> &
 
 export type ProjectedCharacter = Omit<Character, "actor" | "ownerIds"> & Partial<Pick<Character, "ownerIds">> & { actor: ProjectedActor };
 
-export type ProjectedEntry = Omit<InitEntry, "groupKey"> & Partial<Pick<InitEntry, "groupKey">>;
+export type ProjectedEntry = Omit<InitEntry, "groupKey"> &
+  Partial<Pick<InitEntry, "groupKey">> & {
+    /**
+     * DM projections only, derived and never stored (D-261128-044): the
+     * creature the row stands for (rules/initiative.ts creatureKey), read
+     * from the room, since the DM's copy holds the shown floors' tokens
+     * alone and a row's token on another scene or floor is still that
+     * creature, so no way into a fight offers a creature that has a row.
+     * A player's copy holds a row only with its token or character, so its
+     * rows need none.
+     */
+    creature?: string;
+  };
 export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: ProjectedEntry[] };
 
 /**
@@ -3729,7 +3741,7 @@ export function activeRowShownTo(state: RoomState, viewer: Viewer, env: Pick<Env
 function projectEncounterCtx(ctx: Ctx): ProjectedEncounter | null {
   const encounter = ctx.state.encounter;
   if (!encounter) return null;
-  if (ctx.viewer.role === "dm") return encounter;
+  if (ctx.viewer.role === "dm") return dmEncounter(ctx.state, encounter);
   if (ctx.paused) return null;
   const entries: ProjectedEntry[] = [];
   for (const entry of encounter.entries) {
@@ -3751,6 +3763,20 @@ function projectEncounterCtx(ctx: Ctx): ProjectedEncounter | null {
   const turnStart = projectTurnStart(ctx, encounter.turnStart, activeEntryId);
   if (turnStart) out.turnStart = turnStart;
   return out;
+}
+
+/**
+ * The DM's fight with each row's creature. A write of a row's token or
+ * character projects the fight again (`dependents`), so a token linked to
+ * another character or deleted moves its row's creature with it.
+ */
+function dmEncounter(state: RoomState, encounter: Encounter): ProjectedEncounter {
+  const entries = encounter.entries.map((entry): ProjectedEntry => {
+    const creature = creatureKey(state, entry);
+    return creature === undefined ? entry : { ...entry, creature };
+  });
+  // A fight with no creature's row, none yet or labels alone, is the stored one.
+  return entries.some((entry, i) => entry !== encounter.entries[i]) ? { ...encounter, entries } : encounter;
 }
 
 /**

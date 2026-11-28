@@ -82,7 +82,9 @@ function seenBy(state: RoomState, viewer: Viewer, view: ProjectedState): string 
     // Retained undo ids are derived view metadata absent from the historical build.
     // Compare all stored meta fields. Dedicated log tests cover undo retention.
     const { hpUndoLogIds: _undo, ...meta } = view.meta;
-    return stableStringify({ ...view, meta, log: withReminders(state, view.log) });
+    // So are the creatures the DM's rows stand for (D-261128-044).
+    const encounter = view.encounter && { ...view.encounter, entries: view.encounter.entries.map(({ creature: _creature, ...row }) => row) };
+    return stableStringify({ ...view, meta, encounter, log: withReminders(state, view.log) });
   }
   const fogged = (sceneId: string) => state.scenes[sceneId]?.fogEnabled === true;
   const out = { ...view, log: view.log.filter((line) => !onFoggedArea(state, line)) } as Record<string, unknown>;

@@ -57,6 +57,19 @@ export function rowCharacter(state: Pick<RoomState, "tokens">, entry: Pick<InitE
   return entry.characterId;
 }
 
+/**
+ * The creature a token or a row stands for, which takes one row in a fight
+ * (D-261128-039): its character's, shared by every token of it, else its
+ * own token's, in the holder form the DM's cards name creatures by (client
+ * holderOf), so Shade's two tokens are one creature. A row with neither, a
+ * label alone, is no creature.
+ */
+export function creatureKey(state: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">): string | undefined {
+  const characterId = rowCharacter(state, entry);
+  if (characterId !== undefined) return `character:${characterId}`;
+  return entry.tokenId !== undefined ? `token:${entry.tokenId}` : undefined;
+}
+
 export function tieKeyOf(state: RoomState, entry: InitEntry): TieKey {
   const actor = actorOfEntry(state, entry);
   let isPc = false;

@@ -196,6 +196,16 @@ function numberedBefore(state: RoomState, view: ProjectedState): ProjectedState 
   return changed ? { ...view, tokens } : view;
 }
 
+/**
+ * A DM's copy as the builds before the rows' creatures sent it
+ * (D-261128-044): each row as stored. Written out here, since this file
+ * runs on the older build too, where it changes nothing.
+ */
+function dmCopyBefore(view: ProjectedState): ProjectedState {
+  if (!view.encounter) return view;
+  return { ...view, encounter: { ...view.encounter, entries: view.encounter.entries.map((row) => (({ creature: _creature, ...rest }) => rest)(row as typeof row & { creature?: string })) } };
+}
+
 /** A projection reads only the room, so rooms alike have projections alike, worked out once. */
 const viewsByRoom = new Map<string, string[]>();
 
@@ -209,7 +219,7 @@ function viewsOf(state: RoomState): string[] {
     try {
       const view = numberedBefore(state, projectState(state, VIEWERS[who], { sceneId: null }));
       // A player's copy in the form this build sends it, recorded the same way (rankTestutil.ts).
-      return mark + digest(canon(who === "dm1" ? view : storedFogOff(state, asPlayerCopy(view))));
+      return mark + digest(canon(who === "dm1" ? dmCopyBefore(view) : storedFogOff(state, asPlayerCopy(view))));
     } catch (err) {
       return `threw ${(err as Error).message}`;
     }
