@@ -12,14 +12,18 @@ import { ISO_TEST_FLAG } from "../view/choice.ts";
  * so a change of copy mid-play stays inside the larger of the two.
  *
  * Each board's layout asks for the sheets of the creatures it stands, nearest
- * the canvas's middle first, after each commit. A sheet held or loading
- * keeps its place while any board asks for it, and the asks not held take
- * what room is left in turn from every board, nearest first. So a pan that
- * reorders more asks than fit never evicts a sheet a board may draw: the
- * ones past the budget stand as pictures until a held one leaves every
- * board's cull box (D-261127-704). To make room a sheet no board asks for
- * goes first. One board asking for the same sheet for several creatures
- * holds it once.
+ * the canvas's middle first, after each commit. Each board has a share of
+ * the budget, which the boards that ask split evenly. A sheet held or
+ * loading keeps its place in the share that holds it while that board asks
+ * for it, the rest of a share goes to its board's other asks nearest
+ * first, and every other ask takes what room is left in turn from every
+ * board, held or not. So a pan that reorders more asks than fit never
+ * evicts a sheet a board may draw: the ones past the budget stand as
+ * pictures until a held one leaves the cull box (D-261127-704). A second
+ * board that asks takes its share from the sheets the first loaded last
+ * (D-261127-709). To make room
+ * a sheet no board asks for goes first. One board asking for the same sheet
+ * for several creatures holds it once.
  *
  * What the boards draw changes only when their news is told, at most once
  * a frame: a sheet that arrives or goes joins the next snapshot then, so a
@@ -72,8 +76,10 @@ export const SHEET_WEIGHT: Readonly<Record<SheetCopy, number>> = { full: 3, mobi
 /** What a cache has done since it was made: loads begun, sheets evicted, sheets arrived, and news told its boards. For the bench and the tests. */
 export type SheetCounts = { loads: number; evictions: number; arrivals: number; news: number };
 
-type Entry = { url: string; copy: SheetCopy; state: "loading" | "ready" | "failed"; image: SheetImage | null; abort: AbortController | null };
+/** A sheet loading, held or failed, and the boards whose share holds it, by their keys. */
+type Entry = { url: string; copy: SheetCopy; state: "loading" | "ready" | "failed"; image: SheetImage | null; abort: AbortController | null; owners: ReadonlySet<object> };
 type Layout = { copy: SheetCopy; urls: readonly string[]; settled: number };
+const NO_OWNERS: ReadonlySet<object> = new Set();
 
 export class SheetCache {
   readonly #io: SheetIo;
@@ -152,13 +158,19 @@ export class SheetCache {
   }
 
   /**
-   * Every board's asks taken in turn, rank by rank, each sheet once. Those
-   * held or loading are admitted first, as they fit in what the cache holds
-   * now, and the others take the room left in that order, a failed one
-   * weighing nothing. The admitted come back in the asks' order, which is
-   * also how late an asked sheet goes when room is needed.
+   * Every board's asks taken in turn, rank by rank, each sheet once. Each
+   * board's share of the budget, split evenly among the boards that ask,
+   * holds first the held or loading sheets its share held last time, the
+   * longest held first, then its other asks, nearest first, so no board's
+   * sheets keep another's share from it. What is left goes to every other
+   * ask in that order, held or not, a failed one weighing nothing. A share
+   * keeps what it held, not whatever is held, so that what this admits, its
+   * own loads and evictions done, admits the same again: a sheet another
+   * board's share starts never pushes one out of this board's. The
+   * admitted come back in the asks' order, which is also how late an asked
+   * sheet goes when room is needed.
    */
-  #admission(): { admitted: Map<string, SheetCopy>; order: Map<string, number> } {
+  #admission(): { admitted: Map<string, SheetCopy>; order: Map<string, number>; owners: Map<string, Set<object>> } {
     const order = new Map<string, number>();
     const copies = new Map<string, SheetCopy>();
     const lists = [...this.#layouts.values()];
@@ -175,22 +187,45 @@ export class SheetCache {
       const state = this.#entries.get(url)?.state;
       return state === "loading" || state === "ready";
     };
+    const cost = (url: string, copy: SheetCopy) => (this.#entries.get(url)?.state === "failed" ? 0 : SHEET_WEIGHT[copy]);
+    const asking = [...this.#layouts].filter(([, l]) => l.urls.length > 0);
+    const share = SHEET_BUDGET / Math.max(1, asking.length);
+    // Each board's share from its own asks alone, so a sheet two boards ask for counts in both, and the shares together never pass the budget.
     const taken = new Set<string>();
-    let weight = 0;
-    for (const [url, copy] of copies) {
-      if (!held(url)) continue;
-      weight += SHEET_WEIGHT[copy];
-      taken.add(url);
+    const owners = new Map<string, Set<object>>();
+    for (const [board, l] of asking) {
+      const asked = new Set(l.urls);
+      const own = new Set<string>();
+      let w = 0;
+      for (const e of this.#entries.values()) {
+        if (!asked.has(e.url) || !held(e.url) || !e.owners.has(board)) continue;
+        if (w + SHEET_WEIGHT[e.copy] > share) break;
+        w += SHEET_WEIGHT[e.copy];
+        own.add(e.url);
+      }
+      for (const url of l.urls) {
+        if (own.has(url) || w + cost(url, l.copy) > share) continue;
+        w += cost(url, l.copy);
+        own.add(url);
+      }
+      for (const url of own) {
+        taken.add(url);
+        if (!owners.has(url)) owners.set(url, new Set());
+        owners.get(url)!.add(board);
+      }
     }
+    let weight = 0;
+    for (const url of taken) weight += cost(url, copies.get(url)!);
+    // The room left goes by rank, as before the shares, the first that does not fit ending it.
     for (const [url, copy] of copies) {
-      if (held(url)) continue;
-      weight += this.#entries.get(url)?.state === "failed" ? 0 : SHEET_WEIGHT[copy];
-      if (weight > SHEET_BUDGET) break;
+      if (taken.has(url)) continue;
+      if (weight + cost(url, copy) > SHEET_BUDGET) break;
+      weight += cost(url, copy);
       taken.add(url);
     }
     const admitted = new Map<string, SheetCopy>();
     for (const [url, copy] of copies) if (taken.has(url)) admitted.set(url, copy);
-    return { admitted, order };
+    return { admitted, order, owners };
   }
 
   /** The weight of the sheets loading or held. */
@@ -209,7 +244,8 @@ export class SheetCache {
 
   #reconcile(): void {
     this.#freeSettled();
-    const { admitted, order } = this.#admission();
+    const { admitted, order, owners } = this.#admission();
+    for (const e of this.#entries.values()) e.owners = owners.get(e.url) ?? NO_OWNERS;
     for (const [url, e] of [...this.#entries]) {
       // A load no board's admission holds stops, and a failure no board asks for is forgotten, so a later ask tries again.
       if ((e.state === "loading" && !admitted.has(url)) || (e.state === "failed" && !order.has(url))) {
@@ -233,7 +269,7 @@ export class SheetCache {
     // Nearest first, each only once the bitmaps it replaces are closed: a later commit's reconcile starts the rest.
     for (const [url, copy] of missing) {
       if (this.#held() + this.#closing() + SHEET_WEIGHT[copy] > SHEET_BUDGET) break;
-      this.#start(url, copy);
+      this.#start(url, copy, owners.get(url) ?? NO_OWNERS);
     }
   }
 
@@ -252,9 +288,9 @@ export class SheetCache {
     return best;
   }
 
-  #start(url: string, copy: SheetCopy): void {
+  #start(url: string, copy: SheetCopy, owners: ReadonlySet<object>): void {
     const abort = new AbortController();
-    const entry: Entry = { url, copy, state: "loading", image: null, abort };
+    const entry: Entry = { url, copy, state: "loading", image: null, abort, owners };
     this.#entries.set(url, entry);
     this.#counts.loads++;
     this.#io.load(url, abort.signal).then(

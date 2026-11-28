@@ -11,10 +11,14 @@ import { harness } from "./sheets.testutil.ts";
  *
  * - BUDGET: the sheets loading, held and gone but not yet closed never weigh
  *   more than the budget, and neither do the images decoded and not freed.
- * - ADMISSION: every sheet held or loading that a board asks for is
- *   admitted, then the first of every board's other asks taken rank by
- *   rank that fit in the room left, a failed one in its place weighing
- *   nothing, all in the asks' order, and every load running is one of them.
+ * - ADMISSION: the admitted sheets are among the boards' asks, in the
+ *   asks' order rank by rank, weigh no more than the budget, a failed one
+ *   nothing, and every load running is one of them.
+ * - STAYS: a board that commits again with the same asks evicts nothing
+ *   and stops no load: what the cache admits, its own loads and evictions
+ *   done, admits the same again.
+ * - SHARE: once settled, a board holds all it asks for or its share less
+ *   less than one sheet's weight, whichever board asked first.
  * - NEVER-CLOSED: no board's last commit draws a freed sheet, and no
  *   snapshot holds one.
  * - ONCE: no sheet is freed twice.
@@ -29,7 +33,7 @@ import { harness } from "./sheets.testutil.ts";
 type Board = { key: object; copy: SheetCopy; asks: string[]; drawn: Set<SheetImage>; live: boolean };
 
 test("random sequences of asks, commits, hides and answers keep the cache's invariants", async () => {
-  for (let seed = 1; seed <= 300; seed++) {
+  for (let seed = 1; seed <= 1000; seed++) {
     const random = rng(seed);
     const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
     const h = harness();
@@ -53,22 +57,16 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
       assert.ok(held + closing <= SHEET_BUDGET, `BUDGET, seed ${seed}, ${step}: ${held} held and ${closing} closing`);
       const decoded = h.live().reduce((w, image) => w + weighs((image as unknown as { url: string }).url), 0);
       assert.ok(decoded <= SHEET_BUDGET, `BUDGET, seed ${seed}, ${step}: ${decoded} decoded and not freed`);
-      // ADMISSION, against the rule written out again.
+      // ADMISSION: what the boards ask for, in their order, inside the budget, every load running among it.
       const live = order;
       const merged: string[] = [];
       for (let rank = 0; rank < 40; rank++) for (const b of live) if (b.asks[rank] !== undefined && !merged.includes(b.asks[rank]!)) merged.push(b.asks[rank]!);
       const states = h.cache.states();
-      const isHeld = (url: string) => states.get(url) === "loading" || states.get(url) === "ready";
-      const taken = new Set(merged.filter(isHeld));
-      let w = [...taken].reduce((sum, url) => sum + weighs(url), 0);
-      for (const url of merged.filter((u) => !isHeld(u))) {
-        w += states.get(url) === "failed" ? 0 : weighs(url);
-        if (w > SHEET_BUDGET) break;
-        taken.add(url);
-      }
-      const expected = merged.filter((url) => taken.has(url));
-      assert.deepEqual(h.cache.admitted(), expected, `ADMISSION, seed ${seed}, ${step}`);
-      for (const [url, state] of h.cache.states()) if (state === "loading") assert.ok(expected.includes(url), `ADMISSION, a load runs only for an admitted sheet, seed ${seed}, ${step}`);
+      const admitted = h.cache.admitted();
+      assert.deepEqual(admitted, merged.filter((url) => admitted.includes(url)), `ADMISSION, in the asks' order, seed ${seed}, ${step}`);
+      const admittedWeight = admitted.reduce((sum, url) => sum + (states.get(url) === "failed" ? 0 : weighs(url)), 0);
+      assert.ok(admittedWeight <= SHEET_BUDGET, `ADMISSION, ${admittedWeight} admitted, seed ${seed}, ${step}`);
+      for (const [url, state] of states) if (state === "loading") assert.ok(admitted.includes(url), `ADMISSION, a load runs only for an admitted sheet, seed ${seed}, ${step}`);
       const snap = h.cache.snapshot();
       for (const b of live) for (const image of b.drawn) assert.ok(!h.released.includes(image), `NEVER-CLOSED, seed ${seed}, ${step}`);
       for (const url of [...pool("full"), ...pool("mobile")]) {
@@ -124,9 +122,20 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
         what = "wait";
       }
       check(`step ${step} (${what})`);
+      // STAYS: a board committing again with the same asks evicts nothing and stops no load, so what was admitted admits the same again.
+      const again = order.length > 0 ? pick(order) : null;
+      if (again) {
+        const before = h.cache.counts().evictions;
+        const loading = h.pending.filter((p) => !p.signal.aborted);
+        commit(again);
+        assert.equal(h.cache.counts().evictions, before, `STAYS, no eviction, seed ${seed}, step ${step} (${what})`);
+        assert.ok(loading.every((p) => !p.signal.aborted), `STAYS, no load stopped, seed ${seed}, step ${step} (${what})`);
+        check(`step ${step} (${what}) again`);
+      }
     }
-    // SETTLES: every load answers and every board commits, until nothing more starts.
-    for (let round = 0; round < 10 && (round < 2 || h.pending.length > 0); round++) {
+    // SETTLES: every load answers and every board commits, until nothing more starts. A board that joined late takes its share a few sheets a round.
+    const settled = () => h.pending.length === 0 && h.cache.weight().closing === 0 && h.cache.admitted().every((url) => h.cache.states().get(url) === "ready" || h.cache.states().get(url) === "failed");
+    for (let round = 0; round < 60 && (round < 2 || !settled()); round++) {
       while (h.pending.length > 0) await h.finish();
       h.wait();
       h.tell();
@@ -136,6 +145,16 @@ test("random sequences of asks, commits, hides and answers keep the cache's inva
     h.tell();
     for (const b of boards) if (b.live) commit(b);
     check("settled");
+    // SHARE: each board that asks holds all it asks for, or its share less less than one sheet's weight.
+    const asking = order.filter((b) => b.asks.length > 0);
+    const held = h.cache.states();
+    for (const b of asking) {
+      const asked = [...new Set(b.asks)].filter((url) => held.get(url) !== "failed");
+      const want = asked.reduce((w, url) => w + weighs(url), 0);
+      const got = asked.filter((url) => held.get(url) === "ready").reduce((w, url) => w + weighs(url), 0);
+      const share = SHEET_BUDGET / asking.length;
+      assert.ok(got >= Math.min(want, share - 2), `SHARE, seed ${seed}: a board of ${asking.length} holds ${got} of ${want}, its share ${share}`);
+    }
     assert.equal(h.pending.length, 0, `SETTLES, seed ${seed}: loads still waiting`);
     const states = h.cache.states();
     for (const url of h.cache.admitted()) assert.ok(states.get(url) === "ready" || states.get(url) === "failed", `SETTLES, seed ${seed}: ${url} is ${states.get(url)}`);

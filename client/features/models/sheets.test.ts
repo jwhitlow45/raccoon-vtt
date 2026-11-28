@@ -262,6 +262,63 @@ describe("the sheet cache", () => {
     assert.deepEqual(urls(3).map((u) => h.cache.snapshot().get(u) !== null), [false, true, true]);
   });
 
+  test("a second board joining a full cache takes its share from the first's farthest sheets, and then both keep theirs", async () => {
+    const h = harness();
+    const a = {};
+    const b = {};
+    h.cache.layout(a, "full", urls(16, "a"), 0);
+    await h.finish();
+    h.tell();
+    h.cache.layout(a, "full", urls(16, "a"), h.cache.snapshot().version);
+    // B asks for 16 others: each board's share is half the budget, 8 full copies.
+    h.cache.layout(b, "full", urls(16, "b"), h.cache.snapshot().version);
+    assert.deepEqual(new Set(h.cache.admitted()), new Set([...urls(8, "a"), ...urls(8, "b")]));
+    assert.equal(h.cache.counts().evictions, 8, "A's farthest 8 go");
+    h.tell();
+    h.cache.layout(a, "full", urls(16, "a"), h.cache.snapshot().version);
+    h.cache.layout(b, "full", urls(16, "b"), h.cache.snapshot().version);
+    assert.deepEqual(h.pending.map((p) => p.url), urls(8, "b"), "B's nearest 8 start once those are closed");
+    await h.finish();
+    h.tell();
+    // Settled, either board's pan, reordering its asks, evicts and loads nothing.
+    const counts = h.cache.counts();
+    h.cache.layout(a, "full", [...urls(16, "a")].reverse(), h.cache.snapshot().version);
+    h.cache.layout(b, "full", [...urls(16, "b")].reverse(), h.cache.snapshot().version);
+    assert.deepEqual(h.cache.counts(), counts);
+    assert.equal(h.pending.length, 0);
+    // A goes: B takes the whole budget again, its next 8 nearest.
+    h.cache.forget(a);
+    h.cache.layout(b, "full", urls(16, "b"), h.cache.snapshot().version);
+    h.tell();
+    h.cache.layout(b, "full", urls(16, "b"), h.cache.snapshot().version);
+    assert.deepEqual(h.pending.map((p) => p.url), urls(16, "b").slice(8));
+  });
+
+  test("a sheet another board's share holds takes no room in this board's, though both ask for it", async () => {
+    const h = harness();
+    const a = {};
+    const b = {};
+    const settle = async () => {
+      await h.finish();
+      h.tell();
+    };
+    h.cache.layout(a, "full", urls(7, "p"), 0);
+    await settle();
+    h.cache.layout(b, "full", urls(7, "q"), h.cache.snapshot().version);
+    await settle();
+    // Each share is 8 full copies: B's holds its 7 and y, and z takes the room left.
+    h.cache.layout(b, "full", ["y", "z", ...urls(7, "q")], h.cache.snapshot().version);
+    assert.deepEqual(h.pending.map((p) => p.url), ["y", "z"]);
+    // A asks for n, and for y past it: y is B's share's, so A's share still holds n, and z gives up its room.
+    h.cache.layout(a, "full", [...urls(7, "p"), "n", "y"], h.cache.snapshot().version);
+    assert.ok(h.cache.admitted().includes("n"));
+    assert.deepEqual(h.pending.filter((p) => !p.signal.aborted).map((p) => p.url), ["y", "n"]);
+    // Committing again changes nothing.
+    h.cache.layout(a, "full", [...urls(7, "p"), "n", "y"], h.cache.snapshot().version);
+    h.cache.layout(b, "full", ["y", "z", ...urls(7, "q")], h.cache.snapshot().version);
+    assert.deepEqual(h.pending.filter((p) => !p.signal.aborted).map((p) => p.url), ["y", "n"]);
+  });
+
   test("a load that fails frees its room for the next sheet admitted at once, and is not tried again", async () => {
     const h = harness();
     const board = {};
