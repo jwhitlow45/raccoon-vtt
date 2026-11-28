@@ -262,6 +262,27 @@ describe("the sheet cache", () => {
     assert.deepEqual(urls(3).map((u) => h.cache.snapshot().get(u) !== null), [false, true, true]);
   });
 
+  test("a load that fails frees its room for the next sheet admitted at once, and is not tried again", async () => {
+    const h = harness();
+    const board = {};
+    const asked = urls(17);
+    h.cache.layout(board, "full", asked, 0);
+    const last = h.pending.find((p) => p.url === "s15")!;
+    h.pending.splice(h.pending.indexOf(last), 1);
+    await h.finish();
+    // The 15 that came wait for the 16th, then are told once the wait ends, and the board commits.
+    h.wait();
+    h.tell();
+    h.cache.layout(board, "full", asked, h.cache.snapshot().version);
+    assert.equal(h.pending.length, 0);
+    // The 16th fails: with no other layout, the 17th starts in its room.
+    last.reject(new Error("404"));
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(h.pending.map((p) => p.url), ["s16"]);
+    assert.equal(h.cache.states().get("s15"), "failed");
+    assert.equal(h.cache.counts().loads, 17, "the one that failed is not tried again");
+  });
+
   test("a pan that reorders more asks than fit evicts and loads nothing: the sheets held keep their place, and the rest stand as pictures until one leaves", async () => {
     const h = harness();
     const board = {};

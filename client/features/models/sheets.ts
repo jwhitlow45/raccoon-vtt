@@ -36,7 +36,8 @@ import { ISO_TEST_FLAG } from "../view/choice.ts";
  * late, after its board stopped asking, is freed at once and never shown.
  * A sheet that fails, such as one a viewer may no longer read, stays a
  * picture until no board asks for it, and a later ask tries again. It keeps
- * its place in the order but weighs nothing, as it holds no bitmap.
+ * its place in the order but weighs nothing, as it holds no bitmap, and the
+ * room it held goes at once to the next sheet admitted.
  */
 
 /** A decoded sheet a canvas draws: a bitmap where the browser makes them, an image element elsewhere. */
@@ -273,6 +274,8 @@ export class SheetCache {
         entry.state = "failed";
         entry.abort = null;
         if (this.#hold && !this.#loading()) this.#arrived();
+        // The room it held goes to the next sheet admitted, and it is not tried again while asked for (D-261127-709).
+        this.#reconcile();
       },
     );
   }
