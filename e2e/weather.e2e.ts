@@ -133,7 +133,8 @@ async function moving(page: Page, key = "rain heavy strong"): Promise<void> {
   // Said in the log, so a step-down on a machine with a GPU, which this reload would hide, shows there (CIFIX-F3). fu49perfc-1 holds the step-down itself to a cost the test sets.
   run.measured.push(`moving: ${page === dm ? "the DM's" : page === pat ? "Pat's" : "a"} page had stepped down to ${was.level}, opened again`);
   await page.reload();
-  await page.locator(".konvajs-content").first().waitFor();
+  // The visible stage: in Isometric the first in the page is the hidden Top-down tree's.
+  await page.locator(".konvajs-content:visible").first().waitFor();
   const fresh = await shown(page, key);
   assert.equal(fresh.level, "full", "a page opened again starts at the full step");
 }
@@ -741,7 +742,7 @@ describe("weather over the map", { concurrency: false }, () => {
     });
     const lines = await heldStill(async () => {
       const out: string[] = [];
-      for (const k of ZOOM_KINDS) out.push(...(await zoomsHold(k)));
+      for (const k of ZOOM_KINDS) out.push(...(await zoomsHold(k, { view: "isometric", turn: 1 })));
       out.push(...(await fogHolds()));
       return out;
     });
@@ -1052,7 +1053,9 @@ async function zoomHolds(page: Page, what: string, sway: number, act: () => Prom
   const shared = sharedMarks(before, after);
   const center = Math.max(...shared.map((m) => m.center));
   const drawn = Math.max(...shared.map((m) => m.drawn));
-  console.log(`${what}: zoom ${f.toFixed(3)} from ${before.camera[2].toFixed(1)}, ${shared.length} marks, centers ${center.toFixed(3)}, drawn ${drawn.toFixed(2)} of ${bound.toFixed(2)}`);
+  console.log(`${what}: zoom ${f.toFixed(3)} from ${before.camera[2].toFixed(1)}, ${shared.length} marks at the ${before.level} step (${after.level} after), centers ${center.toFixed(3)}, drawn ${drawn.toFixed(2)} of ${bound.toFixed(2)}`);
+  // zoomsHold opens the page at the full step and holds it still, where nothing steps down. The half step keeps half the marks.
+  assert.deepEqual([before.level, after.level], ["full", "full"], `${what}: the weather's step`);
   // Heavy leaves are about 35 marks on a phone, so a zoom keeps only a few of them named in both draws.
   assert.ok(shared.length >= 3, `${what}: ${shared.length} marks named in both draws`);
   assert.ok(center <= 1, `${what}: a center ${center.toFixed(2)} px off its ground`);
@@ -1060,11 +1063,16 @@ async function zoomHolds(page: Page, what: string, sway: number, act: () => Prom
   return `${what}: zoom ${f.toFixed(3)}, ${shared.length} marks, centers within ${center.toFixed(3)} px, drawn within ${drawn.toFixed(2)} of ${bound.toFixed(2)}`;
 }
 
-/** Each kind through a wheel notch at a point and back, a + press and a - press on the DM's computer, and a pinch out and in on Pat's phone. */
-async function zoomsHold(k: (typeof ZOOM_KINDS)[number]): Promise<string[]> {
+/** Each kind through a wheel notch at a point and back, a + press and a - press on the DM's computer, and a pinch out and in on Pat's phone, in `view`. */
+async function zoomsHold(k: (typeof ZOOM_KINDS)[number], view: { view: "topDown" | "isometric"; turn: number } = { view: "topDown", turn: 0 }): Promise<string[]> {
   await setWeather(run.sceneId, k.weather as Weather);
-  await shown(dm, k.key);
-  await shown(pat, k.key);
+  // At the full step: a slow runner's page has halved the marks by now, which left a zoom 2 or 3 named in both draws
+  // where 5 or 6 are usual. Held still, a page reopened there stays there, and it is set to the view under test again.
+  for (const page of [dm, pat]) {
+    const was = (await shown(page, k.key)).level;
+    await moving(page, k.key);
+    if (was !== "full") await viewAs(page, view.view, view.turn);
+  }
   const box = await stageBox(dm);
   const point = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.375 };
   const touches = new Touches(await patContext.newCDPSession(pat));
