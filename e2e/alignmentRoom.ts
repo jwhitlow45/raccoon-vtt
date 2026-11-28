@@ -12210,7 +12210,7 @@ export function qolPanelTests(): void {
  * measured, so the wait shows however fast the worker would answer.
  */
 export function modelSheetTests(): void {
-  test(`md-a. the 3D model sheet empty, reading a file, with its preview and with Remove model armed, and with Isometric view hidden the line in place of 3D model and of the Library's 3D models, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`md-a. the 3D model sheet empty, reading a file, with its preview and with Remove model armed, the picture's buttons on Thorn's page and a monster's, and with Isometric view hidden those with the line in place of 3D model and the Library's 3D models with theirs, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     await freshDm();
     const was = dmSocket.state!.characters[run.ids.thornChar]!.defaultImage;
     const stl = Buffer.from(binaryStl(zUp(figure(24))));
@@ -12224,6 +12224,8 @@ export function modelSheetTests(): void {
     const faceId = await put("token", await sharp({ create: { width: 128, height: 128, channels: 3, background: { r: 60, g: 120, b: 160 } } }).png().toBuffer());
     const stored = { assetId: faceId, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, model: { assetId: sheetId, side: 1.4, anchorY: 0.85, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) } };
     const lines: string[] = [];
+    // The Goblin Warrior wears the same picture and model, so its page's row holds Crop, 3D model and Use the default icon.
+    await ops.send({ t: "monster.setSrdImage", srdId: "goblin-warrior", image: stored });
     try {
       for (const at of FU30_AT) {
         const sweep = new Sweep(`md-${atName(at)}`);
@@ -12235,6 +12237,18 @@ export function modelSheetTests(): void {
         await escapeAll(page);
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: null } });
         const sheet = page.getByRole("dialog", { name: "3D model", exact: true });
+        /** The Goblin Warrior's page in Monsters: its picture with the picture's buttons. */
+        const goblinRow = async () => {
+          const monsters = await openDmPanel(page, "Monsters");
+          const change = monsters.getByRole("button", { name: "Change image", exact: true });
+          if (!(await shows(change))) {
+            await monsters.getByRole("searchbox", { name: "Search monsters" }).fill("goblin warrior");
+            await monsters.getByRole("button", { name: /^Goblin Warrior/ }).first().click();
+          }
+          await change.waitFor();
+          await change.scrollIntoViewIfNeeded();
+          return change.locator("xpath=ancestor::div[2]");
+        };
         const open = async () => {
           const panel = await thornsPage(page);
           await openGroup(panel, "Image");
@@ -12278,6 +12292,21 @@ export function modelSheetTests(): void {
         await sheet.waitFor({ state: "detached" });
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: stored } });
         await waitFor("Thorn's stored model", () => (dmSocket.state?.characters[run.ids.thornChar]?.defaultImage?.model ? true : null));
+        {
+          // The picture's buttons with 3D model among them, the row Isometric view's hiding takes it from below.
+          const thorn = await thornsPage(page);
+          await openGroup(thorn, "Image");
+          const change = thorn.getByRole("button", { name: "Change image", exact: true });
+          await change.scrollIntoViewIfNeeded();
+          await sweep.measure(page, "md-images-shown", change.locator("xpath=ancestor::div[3]"));
+          await shots.take(page, `alignment-${sweep.at}-md-images-shown`);
+          await closeSheets(page);
+          await escapeAll(page);
+          await sweep.measure(page, "md-monster-shown", await goblinRow());
+          await shots.take(page, `alignment-${sweep.at}-md-monster-shown`);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
         await open();
         await sheet.getByRole("button", { name: "Remove model", exact: true }).click();
         await sheet.getByRole("button", { name: /^(Tap|Click) again to remove$/ }).waitFor();
@@ -12298,7 +12327,15 @@ export function modelSheetTests(): void {
             await picture.scrollIntoViewIfNeeded();
             // The picture's buttons with the line under them.
             await sweep.measure(page, "md-images-line", picture.locator("xpath=ancestor::div[2]"));
+            await shots.take(page, `alignment-${sweep.at}-md-images-line`);
           } else await sweep.missing(page, "md-images-line", "Thorn's picture held no line in place of 3D model");
+          await closeSheets(page);
+          await escapeAll(page);
+          const monster = await goblinRow();
+          if (await shows(monster.getByRole("group", { name: "Hidden on this device" }))) {
+            await sweep.measure(page, "md-monster-line", monster);
+            await shots.take(page, `alignment-${sweep.at}-md-monster-line`);
+          } else await sweep.missing(page, "md-monster-line", "the Goblin Warrior's page held no line in place of 3D model");
           await closeSheets(page);
           await escapeAll(page);
           const library = await openDmPanel(page, "Library");
@@ -12319,6 +12356,7 @@ export function modelSheetTests(): void {
       }
     } finally {
       await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { defaultImage: was ?? null } }).catch(() => {});
+      await ops.send({ t: "monster.setSrdImage", srdId: "goblin-warrior", image: null }).catch(() => {});
     }
     assert.deepEqual(lines, [], "the 3D model sheet out of line");
     withinSnapshotBudget("md-a");
