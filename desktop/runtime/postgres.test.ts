@@ -163,6 +163,16 @@ async function until(what: string, ready: () => boolean | Promise<boolean>, ms =
   }
 }
 
+/**
+ * `step`, cut short when `beside` fails first: a watcher that frees the start, or a stop the test waits beside. Awaited
+ * alone, a start the watcher was to free waits on to the test's timeout, and a step that fails first leaves the
+ * watcher's failure with no handler, for a later test or the whole file to take. Each caller still awaits `beside`
+ * after, for a failure that comes once `step` has answered.
+ */
+function besides<T>(step: Promise<T>, beside: Promise<unknown>): Promise<T> {
+  return Promise.race([step, beside.then(() => new Promise<never>(() => undefined))]);
+}
+
 /** Whether the stand-in pg_ctl has launched its postmaster, which it records by writing the postmaster's pid. */
 function launched(file: string): boolean {
   try {
@@ -1089,11 +1099,11 @@ describe("a start", { skip: posixOnly }, () => {
     const stopping = c.stop().then(() => (stopped = true));
     try {
       // A stop that ends early ends each wait too, so a killed postmaster fails on the check that names it.
-      await until("two passes while the file can't be read", () => listing.count() >= 2 || stopped);
+      await besides(until("two passes while the file can't be read", () => listing.count() >= 2 || stopped), stopping);
       assert.equal(isAlive(child), true, "never killed while postmaster.pid can't be read");
       await rmdir(file);
       const seen = listing.count();
-      await until("two passes without the file, and the end unconfirmed", () => (listing.count() >= seen + 2 && unconfirmed.length > 0) || stopped);
+      await besides(until("two passes without the file, and the end unconfirmed", () => (listing.count() >= seen + 2 && unconfirmed.length > 0) || stopped), stopping);
       assert.equal(isAlive(child), true, `nor once it is gone (stop answered: ${stopped}, unconfirmed: ${JSON.stringify(unconfirmed)}, listings: ${listing.count()}, calls: ${JSON.stringify(await calls())})`);
       assert.equal(stopped, false, "the stop holds while it runs");
       assert.deepEqual(unconfirmed, [true]);
@@ -1150,7 +1160,7 @@ describe("a start", { skip: posixOnly }, () => {
     const stopping = c.stop().then(() => (stopped = true));
     try {
       // A stop that ends early ends the wait too, so a killed postmaster fails on the check that names it.
-      await until("three passes", () => listing.count() >= 3 || stopped);
+      await besides(until("three passes", () => listing.count() >= 3 || stopped), stopping);
       assert.equal(isAlive(child), true, "never killed");
     } finally {
       end(child);
@@ -1179,7 +1189,7 @@ describe("a start", { skip: posixOnly }, () => {
       end(child);
     })();
     const vars = { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_DEAF: "1" };
-    const { error } = await startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait" }, abort.signal);
+    const { error } = await besides(startWith(dir, c, { ...vars, RVTT_FAKE_PGCTL: "wait" }, abort.signal), watching);
     await watching;
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(alive, true, "never killed with its file gone");
@@ -1210,7 +1220,7 @@ describe("a start", { skip: posixOnly }, () => {
       alive = isAlive(child);
       end(child);
     })();
-    const { error } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "fail" }, abort.signal);
+    const { error } = await besides(startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "fail" }, abort.signal), watching);
     await watching;
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(alive, true, "never killed with its file gone");
@@ -1238,7 +1248,7 @@ describe("a start", { skip: posixOnly }, () => {
       releasedAt = Date.now();
       await rmdir(file);
     })();
-    const { error, pid } = await startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "10" }, abort.signal);
+    const { error, pid } = await besides(startWith(dir, c, { RVTT_FAKE_CHILD: postmaster, RVTT_FAKE_PGCTL: "wait", RVTT_FAKE_PIDAFTER: "10" }, abort.signal), released);
     await released;
     assert.ok(error instanceof DatabaseFailed && error.logLine === "pg_ctl start was cancelled", String(error));
     assert.equal(alive, true, "not killed while postmaster.pid could not be read");
