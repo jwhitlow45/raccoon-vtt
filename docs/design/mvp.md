@@ -702,7 +702,7 @@ Built in v1 wave 7 (docs/design/design-v1-dice.md), at the project owner's reque
 - **Full character sheet builder.** D&D Beyond does this well. Tokens link to it instead.
 - **D&D Beyond import.** Moved into the features on 2026-10-17 (section 15, stat blocks for player characters), best effort. There is no public API, so the server fetches only on a member's tap, only a character its owner made public, keeps no copy and reads no text, and an operator can turn the link import off.
 - **Macros, scripting and a plugin system.** Plugins are Foundry's biggest pain point. Features are built in instead.
-- **Native phone and tablet apps.** The installable web app covers phones and tablets. A desktop app that runs the server on the DM's own computer is planned instead (ROADMAP.md).
+- **Native phone and tablet apps.** The installable web app covers phones and tablets. A desktop app that runs the server on the DM's own computer came instead, in v0.5.0 (ROADMAP.md).
 - **Non-SRD monsters and art** (Beholder, Mind Flayer and similar). The official sourcebooks are copyrighted and not openly licensed, so there is no legitimate source to ship them from. The project owner chose the custom monster editor (section 15) for monsters from books a group owns. Openly licensed third-party bestiaries (Tome of Beasts and similar) were offered and not chosen.
 
 ## 20. Architecture notes that shape these features

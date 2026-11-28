@@ -15,22 +15,26 @@ software for D&D groups playing the 2024 rules, made for phones first. New
 work favors what a group needs during a session, whether everyone sits
 around one table or some players join from elsewhere.
 
-**Finish the "Later" tier** of [mvp.md](docs/design/mvp.md). All of it
-is built:
+**Build what comes next.** Every feature in the "Later" tier of
+[mvp.md](docs/design/mvp.md) is built, and v0.5.0 added the desktop app.
+These come next:
 
-- Join requests that the DM approves.
-- Animated maps, behind a switch the server's owner turns on.
-- A dungeon generator, on squares and hexes, with five themes, secret doors, lights, dressing, a DM key, edits to single rooms and adding a wing to an existing scene.
-- Weather on the map, with its effect on rolls.
-- Music, background sounds and effects, kept in sync for everyone, behind the server's sound switch.
-- An in-game calendar and clock, with effects that last a length of time and light that follows the time of day.
-- Several floors in one scene: floors with a Floor button and menu, Move to floor for the DM, stairs and ladders that players take themselves, hidden stairs, openings that creatures fall or fly through, trapdoors, light, sight and areas through an opening, floors from Universal VTT files and generated dungeons, and the walking ruler over stairs.
+- A turn alert that reaches a phone whose screen is off or locked, by Web
+  Push, behind a server switch that is off by default.
+- Opportunity attack notices: a note to the DM and the mover when a walk
+  leaves an enemy's reach. The table still decides, so a notice never stops
+  a move or rolls anything.
+- Fixes for a few rare cases where the game state comes out wrong, made
+  together in one update: a squeezed Large creature beside a trapdoor, a
+  trap card that names "a creature" after a reload, and the two Initiative
+  rows of a character shown as two tokens.
+- An automated accessibility check of the app's names, roles and landmarks,
+  and fixes for what a screen reader or keyboard user would meet.
 
-The desktop app below is the one thing left before v0.5.0.
-
-**Offer a desktop app.** A download for Windows, macOS and Linux that runs
-the server on the DM's own computer, so players on the same network join in
-their browsers with nothing to host. Everyone still plays in a web browser.
+**Look after the desktop app.** Since v0.5.0, a download for Windows, macOS
+and Linux runs the server on the DM's own computer, so players on the same
+network join in their browsers with nothing to host. Fixes for what its
+first users report come before new work on it.
 
 **Polish what is already there.** Most of the work in any month is making
 existing features easier and more reliable, from what play sessions turn
