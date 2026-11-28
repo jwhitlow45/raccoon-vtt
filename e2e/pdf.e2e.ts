@@ -542,7 +542,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     ];
     const strays = requests.filter((r) => !r.url.startsWith(`${server.origin}/`) || !allowed.some((a) => a.test(`${r.method} ${r.url.slice(server.origin.length)}`)));
     assert.deepEqual(strays, [], "a request during the upload that is none of the reader's, the decoders' or the pages'");
-    for (const name of ["jbig2_nowasm_fallback.js", "openjpeg_nowasm_fallback.js"]) assert.ok(requests.some((r) => r.url.endsWith(`/pdfjs/6.4.299/${name}`)), `${name} was never loaded`);
+    for (const name of ["jbig2_nowasm_fallback.js", "openjpeg_nowasm_fallback.js"]) assert.ok(requests.some((r) => r.url.endsWith(`/pdfjs/6.5.438/${name}`)), `${name} was never loaded`);
     const violations = await dm.evaluate(() => (globalThis as unknown as { rvttCsp: string[] }).rvttCsp);
     assert.deepEqual(violations, [], "a content security policy violation");
 
