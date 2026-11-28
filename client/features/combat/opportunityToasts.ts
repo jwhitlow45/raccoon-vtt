@@ -9,7 +9,7 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useLabels } from "../../state/labels.ts";
 import { useRoomUi, useRoomView, useRoomYouIfAny } from "../../state/view.ts";
 import { viewAsSlot } from "../dm/viewAs.tsx";
-import { reachTurn, shownLeavesSlot, type ShownLeaves } from "../movement/store.ts";
+import { shownLeavesSlot, type ShownLeaves } from "../movement/store.ts";
 import { answersFor } from "./logic.ts";
 import { useTurnReach, type TurnReach } from "./opportunity.ts";
 
@@ -49,8 +49,9 @@ export class ReachToasts {
     const { reach, view, viewer } = input;
     if (viewer.role !== "dm") return [];
     // The turn itself, not who moved in it: an Undo of a mover's only leg takes its path away, and its next leg is the same turn's.
-    const encounter = view.encounter;
-    const turn = reachTurn(reach.key, encounter, Object.values(reach.movers)[0]?.turn);
+    // It is the jobs' turn, never the view's: a render shows a turn change before the jobs publish its legs, under new
+    // occurrences after a Previous, so a seed read off the view would miss them and their toasts would come again.
+    const turn = reach.turn ?? "";
     if (turn !== this.#turn) {
       // A new turn, a mount, a reload or a late join: what is stored now was the table's before this device looked.
       this.#turn = turn;

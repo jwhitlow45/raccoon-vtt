@@ -12,7 +12,7 @@ import { useRoomView, useRoomYouIfAny } from "../../state/view.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { pathNow } from "../measure/movement.ts";
 import { useModule } from "../modules/Gate.tsx";
-import { NO_TURN_LEAVES, turnLeavesSlot, type TurnChunks, type TurnLeaves } from "../movement/store.ts";
+import { NO_TURN_LEAVES, reachTurn, turnLeavesSlot, type TurnChunks, type TurnLeaves } from "../movement/store.ts";
 import { answersFor } from "./logic.ts";
 
 /*
@@ -66,12 +66,14 @@ export type MoverOut = {
 
 export type TurnReach = {
   key: string | null;
+  /** The turn these movers' legs belong to (store.ts reachTurn), as the jobs last read it, so a reader keeps to the turn the jobs have published. */
+  turn: string | null;
   movers: Readonly<Record<string, MoverOut>>;
   /** Bumped on every publish that brought a row not shown before this turn on this device (the shown set), with those rows. */
   fresh: { seq: number; rows: readonly ReachRow[] };
 };
 
-const EMPTY: TurnReach = { key: null, movers: {}, fresh: { seq: 0, rows: [] } };
+const EMPTY: TurnReach = { key: null, turn: null, movers: {}, fresh: { seq: 0, rows: [] } };
 
 /** What the jobs run on: a timer between frames, the SRD's loaders, the tab's storage for the shown set, and the work a slice does (SLICE_WORK). Tests pass their own. */
 export type LegJobsDeps = {
@@ -212,6 +214,8 @@ export class LegJobs {
   #chunks: TurnChunks = { rolls: null, monsters: null };
   #loading = { rolls: false, monsters: false };
   #freshSeq = 0;
+  /** The turn the last sync read (store.ts reachTurn), published with the legs it read them with. */
+  #turn: string | null = null;
 
   constructor(deps: LegJobsDeps, leaves: StoreApi<TurnLeaves> = createStore<TurnLeaves>(() => NO_TURN_LEAVES)) {
     this.#deps = deps;
@@ -263,6 +267,7 @@ export class LegJobs {
       if (need.rolls) this.#ensure("rolls");
       if (need.monsters) this.#ensure("monsters");
     }
+    this.#turn = reachTurn(input.key, view.encounter, now[0]?.path.turn);
     this.#cancelUnheld();
     this.#publish();
     this.#pump();
@@ -284,6 +289,7 @@ export class LegJobs {
     this.#view = null;
     this.#confirmed = null;
     this.#viewer = null;
+    this.#turn = null;
     if (this.store.getState() !== EMPTY) this.store.setState({ ...EMPTY, key, fresh: this.store.getState().fresh }, true);
     this.leaves.setState({ on: key !== null, key, last: this.#nextId - 1, chunks: this.#chunks, movers: {} }, true);
   }
@@ -405,7 +411,7 @@ export class LegJobs {
       this.#freshSeq++;
       this.#writeShown(turns[0] ?? 0, [...(turns[0] === shown.turn ? shown.ids : []), ...fresh.map((r) => `${r.moverId}|${r.left.id}`)]);
     }
-    this.store.setState({ key: this.#key, movers, fresh: fresh.length > 0 ? { seq: this.#freshSeq, rows: fresh } : this.store.getState().fresh }, true);
+    this.store.setState({ key: this.#key, turn: this.#turn, movers, fresh: fresh.length > 0 ? { seq: this.#freshSeq, rows: fresh } : this.store.getState().fresh }, true);
     this.leaves.setState({ on: true, key: this.#key, last: this.#nextId - 1, chunks: this.#chunks, movers: leaves }, true);
   }
 

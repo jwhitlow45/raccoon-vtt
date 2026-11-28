@@ -39,6 +39,7 @@ function fight(): RoomState {
 function reachOf(moverId: string, rows: { id: string; known?: boolean; extra?: string }[], more: Partial<TurnReach["movers"][string]> = {}): TurnReach {
   return {
     key: "k",
+    turn: "k|t",
     movers: { [moverId]: { turn: 1, legs: [], rows: rows.map((r) => ({ moverId, leg: 1, left: { id: r.id, spot: 1, reach: 5, known: r.known ?? true, ...(r.extra ? { extra: r.extra } : {}) } })), checking: false, over: false, ...more } },
     fresh: { seq: 0, rows: [] },
   };

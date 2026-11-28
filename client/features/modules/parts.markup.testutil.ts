@@ -506,7 +506,7 @@ function Turn(props: { folded: boolean }) {
 function reachSeed(moverId: string, ids: readonly string[]): (scope: RoomScope) => void {
   return (scope) => {
     const rows = ids.map((id) => ({ moverId, leg: 1, left: { id, spot: 1, reach: 5, known: true } }));
-    turnJobs(scope).store.setState({ key: null, movers: { [moverId]: { turn: 1, legs: [], rows, checking: false, over: false } }, fresh: { seq: 0, rows: [] } }, true);
+    turnJobs(scope).store.setState({ key: null, turn: null, movers: { [moverId]: { turn: 1, legs: [], rows, checking: false, over: false } }, fresh: { seq: 0, rows: [] } }, true);
   };
 }
 

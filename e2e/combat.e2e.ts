@@ -2879,9 +2879,14 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.equal(await toastsCounted(dm), 1, "one toast for one leave");
   });
 
-  test("oa-5. Next and Previous bring Bree's walk back: Ana's card lists Grub again, and the DM gets no second toast (R4-02)", async () => {
+  test("oa-5. Next and Previous bring Bree's walk back: Ana's card lists Grub again, and the DM gets no second toast (R4-02, LP62-OA-1)", async () => {
+    // A toast whose words still show is never shown twice, so oa-4's leaves the DM's screen before Previous could repeat it.
+    await dm.locator("[data-toast]").filter({ hasText: "Bree left Grub's reach." }).first().waitFor({ state: "detached", timeout: 15_000 });
     await ops.send({ t: "encounter.next" });
     await waitFor("Cyra's turn", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-cy") ? true : null));
+    await waitFor("Cyra's turn on the DM's page", () => (dmSocket.state?.encounter?.activeEntryId === namedId("oa-cy") ? true : null));
+    // A second between, as a DM leaves between Next and Previous, so the DM's page draws Cyra's turn before Bree's comes back.
+    await dm.waitForTimeout(1_000);
     await ops.send({ t: "encounter.prev" });
     await waitFor("Bree's turn again", () => (anaSocket.state?.encounter?.activeEntryId === namedId("oa-bree") ? true : null));
     await ana.getByRole("group", { name: "Bree's turn" }).getByRole("group", { name: "Opportunity Attacks" }).getByText("Grub (5 ft counted)").waitFor();

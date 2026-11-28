@@ -47,11 +47,20 @@ function dmDevice(opts: { loaded?: boolean } = {}) {
   const jobs = new LegJobs({ later: (r) => (timers.push(r), () => {}), load: { rolls: () => rolls.promise, monsters: () => monsters.promise }, storage: null });
   const toasts = new ReachToasts();
   const said: string[] = [];
-  /** `confirmed`: the server's copy under `state`, left out the same. */
+  /**
+   * A new room read as the board's controller reads it (opportunityToasts.ts
+   * Toasts): the jobs sync in their effect, the toasts' effect then reads the
+   * jobs as the render held them, from before that sync, and reads again
+   * once the jobs' publish renders. `confirmed`: the server's copy under
+   * `state`, left out the same.
+   */
   const see = (state: RoomState, more: { confirmed?: RoomState | null; previewing?: boolean; shown?: ShownLeaves[] } = {}) => {
+    const rendered = jobs.store.getState();
     jobs.sync({ key: "room|dm", view: state, confirmed: more.confirmed === undefined ? state : more.confirmed, viewer: DM, on: true });
+    const read = (reach: typeof rendered) => said.push(...toasts.step({ reach, view: state, viewer: DM, previewing: more.previewing ?? false, shown: more.shown ?? [], labels: new Map() }));
+    read(rendered);
     for (let i = 0; i < 10_000 && timers.length > 0; i++) timers.shift()!();
-    said.push(...toasts.step({ reach: jobs.store.getState(), view: state, viewer: DM, previewing: more.previewing ?? false, shown: more.shown ?? [], labels: new Map() }));
+    read(jobs.store.getState());
   };
   const load = async () => {
     rolls.resolve(await loadSrdRolls());
@@ -268,6 +277,36 @@ describe("the DM's Opportunity Attack toast", () => {
     assert.deepEqual(late.said, [], "Previous brings the turn back seeded");
     late.see(move(back, "thorn", 12, 5));
     assert.deepEqual(late.said, ["Thorn left Wolf's reach."], "a leg after it still toasts");
+  });
+
+  test("Next, a rendered gap and Previous bring Thorn's walk back past four goblins with no toast again, though the jobs publish the restored legs after the turn shows (LP62-OA-1)", () => {
+    const goblins = [
+      ["grub", "Grub", 6, 5],
+      ["snag", "Snag", 9, 6],
+      ["nix", "Nix", 12, 6],
+      ["mog", "Mog", 15, 6],
+    ] as const;
+    let state = onTurn(world({ blockMovement: false, tokens: [thorn({ x: 5, y: 5 }), ...goblins.map(([id, name, x, y]) => token(id, { name, x, y }))] }), "thorn");
+    const dm = dmDevice();
+    dm.see(state);
+    // Each leg ends beside the next goblin and leaves the one before.
+    for (const x of [8, 11, 14, 17]) {
+      state = move(state, "thorn", x, 5);
+      dm.see(state);
+    }
+    const four = ["Thorn left Grub's reach.", "Thorn left Snag's reach.", "Thorn left Nix's reach.", "Thorn left Mog's reach."];
+    assert.deepEqual(dm.said, four);
+    const next = apply(state, { t: "encounter.next" } as Op);
+    dm.see(next);
+    const back = apply(next, { t: "encounter.prev" } as Op);
+    assert.equal(back.tokens.thorn!.path!.stops.length, 5, "Previous put the walk back");
+    dm.see(back);
+    dm.see(back);
+    assert.deepEqual(dm.said, four, "no toast again");
+    // A second DM device that first reads the turn now, in the same order, says nothing either.
+    const late = dmDevice();
+    late.see(back);
+    assert.deepEqual(late.said, []);
   });
 
   test("while the DM views as a player it says nothing, and what lands then is seeded", () => {
