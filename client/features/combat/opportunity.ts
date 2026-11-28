@@ -415,8 +415,7 @@ export function turnJobs(scope: Pick<RoomScope, "get">): LegJobs {
 
 /** Whether notices run on this page: the part shows on this device, the room's switch is on, and this is no table display's page. */
 export function noticesOn(input: { shown: boolean; room: { display: boolean } | null; view: Pick<ReachView, "meta"> | null }): boolean {
-  // TEMP(doac): the cast goes once lane B's RoomSettings field lands under this stack.
-  return input.shown && input.room !== null && !input.room.display && input.view !== null && opportunityNoticesOn(input.view.meta.settings as { opportunityNotices?: boolean });
+  return input.shown && input.room !== null && !input.room.display && input.view !== null && opportunityNoticesOn(input.view.meta.settings);
 }
 
 /**

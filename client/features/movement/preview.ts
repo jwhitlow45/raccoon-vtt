@@ -166,8 +166,7 @@ let lastLeaves: { key: string; reads: readonly unknown[]; out: DragLeaves | null
 export function dragLeaves(input: { view: DropView; token: Token; landed: Token; corners: readonly Point[]; reach: DragReach; labels: Labels; role: Role; /** The work cap, DRAG_WORK but in tests. */ cap?: number }): DragLeaves | null {
   const { view, token, landed, reach, role } = input;
   const encounter = view.encounter;
-  // TEMP(doac): the cast goes once lane B's RoomSettings field lands under this stack.
-  if (!reach.shown || !opportunityNoticesOn(view.meta.settings as { opportunityNotices?: boolean }) || !encounter) return null;
+  if (!reach.shown || !opportunityNoticesOn(view.meta.settings) || !encounter) return null;
   const fighting = encounter.started ?? encounter.activeEntryId !== null;
   if (!fighting || turnMover(view, token, role) !== token.id) return null;
   // The turn's own creature, whose answerer this is: a controlled mount walks for its rider (docs/design/design-v1-attach.md 7.2).
