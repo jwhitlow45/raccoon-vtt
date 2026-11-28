@@ -30,8 +30,7 @@ const SLICE_MS = 8;
 const SKIP = process.env.CI ? "the phone benchmark runs on demand, not in CI" : false;
 
 let browser: Browser;
-let page: Page;
-let cdp: CDPSession;
+let code = "";
 const measured: string[] = [];
 
 /** A fight to time: the room after its walk, with drags on from its end, and the room at the turn's start, with first drags that skip no one. */
@@ -103,19 +102,12 @@ describe("the Opportunity Attacks phone benchmark", { skip: SKIP, timeout: 600_0
       build: { write: false, minify: true, lib: { entry: "client/features/combat/opportunity.bench.ts", formats: ["iife"], name: "RvttBench", fileName: "bench" } },
     });
     const outputs = (Array.isArray(bundle) ? bundle : [bundle]).flatMap((b) => ("output" in b ? b.output : []));
-    const code = outputs.find((o) => o.type === "chunk")?.code;
+    code = outputs.find((o) => o.type === "chunk")?.code ?? "";
     assert.ok(code, "the bench bundle built");
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
-    page = await context.newPage();
-    await page.setContent("<!doctype html><title>bench</title>");
-    await page.addScriptTag({ content: code });
-    cdp = await context.newCDPSession(page);
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
   });
 
   after(async () => {
-    await cdp?.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
     await browser?.close();
     console.log(`\nOpportunity Attacks phone benchmark, ${THROTTLE}x CPU throttle at 390 x 844 (drag cap ${DRAG_WORK} units, slices of ${SLICE_WORK}):\n${measured.map((l) => `  ${l}`).join("\n")}`);
   });
@@ -124,18 +116,26 @@ describe("the Opportunity Attacks phone benchmark", { skip: SKIP, timeout: 600_0
     const fixture = make();
     test(`${fixture.name}: a drag answer's scan within ${DRAG_MEDIAN_MS} ms median of 20, every slice within ${SLICE_MS} ms`, async () => {
       type Bench = { sliceTimes(room: unknown, viewer: unknown): { slices: number[] }; dragTimes(room: unknown, viewer: unknown, moverId: string, targets: unknown): { ms: number[]; said: string[] } };
+      // A page of its own, so its first scans run cold, as the first card after a load does.
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+      const page: Page = await context.newPage();
+      await page.setContent("<!doctype html><title>bench</title>");
+      await page.addScriptTag({ content: code });
+      const cdp: CDPSession = await context.newCDPSession(page);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
       const slices = await page.evaluate(([room, viewer]) => (globalThis as unknown as { RvttBench: Bench }).RvttBench.sliceTimes(room, viewer).slices, [fixture.room, DM] as const);
       const warm = await page.evaluate(([room, viewer]) => (globalThis as unknown as { RvttBench: Bench }).RvttBench.sliceTimes(room, viewer).slices, [fixture.room, DM] as const);
       const drag = await page.evaluate(([room, viewer, targets]) => (globalThis as unknown as { RvttBench: Bench }).RvttBench.dragTimes(room, viewer, "thorn", targets), [fixture.room, DM, fixture.targets] as const);
       const first = await page.evaluate(([room, viewer, targets]) => (globalThis as unknown as { RvttBench: Bench }).RvttBench.dragTimes(room, viewer, "thorn", targets), [fixture.start, DM, fixture.firstTargets] as const);
       const dragMedian = Math.max(median(drag.ms), median(first.ms));
       const sliceMax = Math.max(0, ...slices);
+      await context.close();
       const lines = (said: readonly string[]) => [...new Set(said)].join(", ");
       measured.push(
-        `${fixture.name}: drags on from the walk's end median ${round(median(drag.ms))} ms, max ${round(Math.max(...drag.ms))} ms (creatures named: ${lines(drag.said)}); the turn's first drags median ${round(median(first.ms))} ms, max ${round(Math.max(...first.ms))} ms (named: ${lines(first.said)}); ${slices.length} slices on a fresh scan, median ${round(median(slices))} ms, max ${round(sliceMax)} ms, and again warm, max ${round(Math.max(0, ...warm))} ms`,
+        `${fixture.name}: drags on from the walk's end median ${round(median(drag.ms))} ms, max ${round(Math.max(...drag.ms))} ms (creatures named: ${lines(drag.said)}); the turn's first drags median ${round(median(first.ms))} ms, max ${round(Math.max(...first.ms))} ms (named: ${lines(first.said)}); ${slices.length} slices cold on a fresh page, median ${round(median(slices))} ms, max ${round(sliceMax)} ms; ${warm.length} warm, median ${round(median(warm))} ms, max ${round(Math.max(0, ...warm))} ms`,
       );
       assert.equal(drag.ms.length, 20);
-      assert.ok(first.said.some((s) => s !== "none" && s !== "over"), "a first drag that names someone, so the scan is timed doing its work");
+      assert.ok(first.said.some((s) => s !== "none"), "a first drag that names someone or reaches the drag's cap, so the scan is timed doing its work");
       assert.ok(slices.length >= (fixture.room.tokens.thorn?.path?.stops.length ?? 1) - 1, "a slice or more for each leg");
       assert.ok(dragMedian <= DRAG_MEDIAN_MS, `a drag answer's scan took ${round(dragMedian)} ms, median of 20, over ${DRAG_MEDIAN_MS} ms`);
       assert.ok(sliceMax <= SLICE_MS, `a slice took ${round(sliceMax)} ms, over ${SLICE_MS} ms: ${JSON.stringify(slices.map(round))}`);
