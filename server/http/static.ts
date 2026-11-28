@@ -17,6 +17,13 @@ export const IMMUTABLE = "public, max-age=31536000, immutable";
 const FONT_FILE = /[/\\]fonts[/\\][^/\\]+-[0-9a-f]{8}\.woff2$/;
 
 /**
+ * A build file Vite names for its hash, such as assets/room-Bt3UaMHt.js: 8
+ * characters of base64url before the extension, in the build's assets folder
+ * alone. A new build is a new name, so the file under one name never changes.
+ */
+const BUILD_FILE = /[/\\]assets[/\\][^/\\]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9.]+$/;
+
+/**
  * The built SPA from `dist`. Client-side routes such as /r/K7QH-2MXA all
  * load the same page, except under /api/, /ws, /game-icons/ and /starter/:
  * an icon key the build does not know answers 404, so the client draws
@@ -34,7 +41,10 @@ const FONT_FILE = /[/\\]fonts[/\\][^/\\]+-[0-9a-f]{8}\.woff2$/;
  * The interface font's files are cached for good too: each name holds its
  * content's hash (client/lib/interFont.ts). Revalidated, a reload's preload
  * of the font asked the server again while the page drew from the copy the
- * browser held, and Chrome warned that the preload went unused.
+ * browser held, and Chrome warned that the preload went unused. The build's
+ * hashed files under /assets/ are cached the same way, so a load no longer
+ * asks again for every script and style. index.html and any file without a
+ * hash keep revalidating, since they name the hashed files.
  */
 export async function registerStatic(app: FastifyInstance, dist: string): Promise<void> {
   await app.register(fastifyStatic, {
@@ -42,7 +52,7 @@ export async function registerStatic(app: FastifyInstance, dist: string): Promis
     wildcard: false,
     globIgnore: ["game-icons/**", "starter/**"],
     setHeaders(reply, path) {
-      if (FONT_FILE.test(path)) reply.header("cache-control", IMMUTABLE);
+      if (FONT_FILE.test(path) || BUILD_FILE.test(path)) reply.header("cache-control", IMMUTABLE);
     },
   });
   await app.register(fastifyStatic, {

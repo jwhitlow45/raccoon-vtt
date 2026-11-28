@@ -20,6 +20,10 @@ describe("the built SPA", () => {
     await mkdir(join(dist, "fonts"));
     await writeFile(join(dist, "fonts", "InterVariable-8a540aa8.woff2"), "wOF2");
     await writeFile(join(dist, "fonts", "Inter-LICENSE.txt"), "SIL Open Font License");
+    await mkdir(join(dist, "assets"));
+    await writeFile(join(dist, "assets", "room-Bt3UaMHt.js"), "export {};");
+    await writeFile(join(dist, "assets", "index-B_x-9Zq1.css"), "body{}");
+    await writeFile(join(dist, "assets", "readme.txt"), "no hash");
     await mkdir(join(dist, "starter", "test-pack", "thumbs"), { recursive: true });
     await writeFile(join(dist, "starter", "test-pack", "knight.webp"), "RIFF knight");
     await writeFile(join(dist, "starter", "test-pack", "thumbs", "knight.webp"), "RIFF thumb");
@@ -46,8 +50,16 @@ describe("the built SPA", () => {
     assert.equal(res.headers["cache-control"], IMMUTABLE);
   });
 
+  test("the build's hashed files under /assets/ are cached for good, ASSET-CACHE", async () => {
+    for (const url of ["/assets/room-Bt3UaMHt.js", "/assets/index-B_x-9Zq1.css"]) {
+      const res = await app.inject({ method: "GET", url });
+      assert.equal(res.statusCode, 200, url);
+      assert.equal(res.headers["cache-control"], IMMUTABLE, url);
+    }
+  });
+
   test("other files keep the default revalidation", async () => {
-    for (const url of ["/app.js", "/fonts/Inter-LICENSE.txt"]) {
+    for (const url of ["/app.js", "/index.html", "/assets/readme.txt", "/fonts/Inter-LICENSE.txt"]) {
       const res = await app.inject({ method: "GET", url });
       assert.equal(res.statusCode, 200, url);
       assert.notEqual(res.headers["cache-control"], IMMUTABLE, url);
