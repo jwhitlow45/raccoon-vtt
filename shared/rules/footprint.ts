@@ -177,6 +177,35 @@ export function rangeAtInto(out: CellRange, w: number, h: number, x: number, y: 
   return out;
 }
 
+/**
+ * The squares wholly inside an unsqueezed `w` by `h` footprint at x, y,
+ * unsnapped, written into `out`: what a squeezing walk reads between its
+ * ends (traps.ts `Walk.whole`). Snapping rounds a space half a square off
+ * the grid up, onto squares past a corridor's south or east wall, so on
+ * each axis this reads the squares the space covers whole: one column for a
+ * Large creature half a square off, two for a Huge one, the same as
+ * `rangeAtInto` for a space on whole squares, and a fractional custom
+ * side's part square dropped. An axis that holds no whole square, as a
+ * Medium creature's half a square off does, keeps `rangeAtInto`'s span.
+ */
+export function wholeRangeInto(out: CellRange, w: number, h: number, x: number, y: number): CellRange {
+  // Adding 0 turns the -0 that Math.ceil gives for a space half a square past the scene's top or left edge into 0.
+  const x0 = Math.ceil(x - EDGE_SLACK) + 0;
+  const y0 = Math.ceil(y - EDGE_SLACK) + 0;
+  const x1 = Math.floor(x + w + EDGE_SLACK);
+  const y1 = Math.floor(y + h + EDGE_SLACK);
+  if (x1 <= x0 || y1 <= y0) rangeAtInto(out, w, h, x, y);
+  if (x1 > x0) {
+    out.x0 = x0;
+    out.x1 = x1;
+  }
+  if (y1 > y0) {
+    out.y0 = y0;
+    out.y1 = y1;
+  }
+  return out;
+}
+
 function rectRange(x: number, y: number, w: number, h: number): CellRange {
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
