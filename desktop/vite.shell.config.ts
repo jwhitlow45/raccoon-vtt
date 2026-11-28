@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
       ssr: entry,
       outDir: `out/${mode}`,
       emptyOutDir: true,
-      // Electron 44 runs Node 24 in its main process.
+      // Electron 45 runs Node 24 in its main process.
       target: "node24",
       minify: false,
       sourcemap: false,
