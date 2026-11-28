@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Children, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isAssetImage, keepModel } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -28,6 +28,29 @@ export const PAIR_BUTTON: CSSProperties = { paddingLeft: theme.space(2), padding
 
 /** The tallest preview the pair beside it centers on. */
 const FIRST_LINE_MAX = 64;
+
+const PAIR_ROW = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
+
+/**
+ * A row's buttons grouped so a wrap never leaves one alone under two or
+ * more, as the alignment sweep reads a wrapped row (LP59-ALIGN-1): up to
+ * two stand as they are, three keep the last two together and four wrap
+ * as two pairs. A picture's buttons are two to four, with Isometric view
+ * shown or hidden, so each count lays out whole at any width.
+ */
+export function inPairs(items: readonly ReactNode[]): ReactNode {
+  const shown = Children.toArray(items);
+  if (shown.length <= 2) return shown;
+  const groups: ReactNode[] = shown.length % 2 === 1 ? [shown[0]] : [];
+  for (let i = shown.length % 2; i < shown.length; i += 2) {
+    groups.push(
+      <div key={`pair-${i}`} style={PAIR_ROW}>
+        {shown.slice(i, i + 2)}
+      </div>,
+    );
+  }
+  return groups;
+}
 
 /**
  * A token's or character's image: a preview in its shape, and buttons to
@@ -92,34 +115,31 @@ export function ImageField(props: {
       {set ? "Change image" : "Add image"}
     </Button>
   );
-  const fix = (
-    <>
-      {value ? (
-        <Button size="sm" icon="crop" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
-          Crop
-        </Button>
-      ) : null}
-      {/*
-       * Isometric view's: a model stands only there, so a device that hides it hides the button, and its way back stands under the buttons (D-261127-692).
-       * The button carries the part's mark itself, since a wrapper around it would be a box the row's measures read in place of the button.
-       */}
-      {modelShown ? (
-        <Button ref={modelButton} size="sm" icon="viewIsometric" {...partMark("isometric")} onClick={() => setStep({ kind: "model" })}>
-          3D model
-        </Button>
-      ) : null}
-      {set && hasModel ? (
-        // The model goes with its picture and cannot be rebuilt from the room, so this asks twice (D-261127-388).
-        <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => each(() => null)}>
-          Remove
-        </ConfirmButton>
-      ) : set ? (
-        <Button size="sm" variant="danger" icon="delete" onClick={() => each(() => null)}>
-          Remove
-        </Button>
-      ) : null}
-    </>
-  );
+  const crop = value ? (
+    <Button size="sm" icon="crop" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
+      Crop
+    </Button>
+  ) : null;
+  /*
+   * Isometric view's: a model stands only there, so a device that hides it hides the button, and its way back stands under the buttons (D-261127-692).
+   * The button carries the part's mark itself, since a wrapper around it would be a box the row's measures read in place of the button.
+   */
+  const model = modelShown ? (
+    <Button ref={modelButton} size="sm" icon="viewIsometric" {...partMark("isometric")} onClick={() => setStep({ kind: "model" })}>
+      3D model
+    </Button>
+  ) : null;
+  const remove =
+    set && hasModel ? (
+      // The model goes with its picture and cannot be rebuilt from the room, so this asks twice (D-261127-388).
+      <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => each(() => null)}>
+        Remove
+      </ConfirmButton>
+    ) : set ? (
+      <Button size="sm" variant="danger" icon="delete" onClick={() => each(() => null)}>
+        Remove
+      </Button>
+    ) : null;
   const removeLine = set && hasModel && props.canEdit ? <Help id={removeHelp}>Removes the picture and its 3D model.</Help> : null;
   // A row of its own after Remove's help, and only while a part hides here, so the column keeps its gaps.
   const hiddenHere = useHiddenHere("images").length > 0;
@@ -155,7 +175,7 @@ export function ImageField(props: {
               {change}
               {props.extra.beside}
             </div>
-            <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{fix}</div>
+            <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{inPairs([crop, model, remove])}</div>
             {removeLine ? <div style={{ width: 0, minWidth: "100%" }}>{removeLine}</div> : null}
             {/* Always drawn, a box only while it holds the line, so a Show's focus still finds the button from the line's place once the line goes (ShowFocus.tsx). */}
             <div style={{ display: hiddenLine ? "block" : "contents", width: 0, minWidth: "100%" }}>{hiddenLine}</div>
@@ -163,11 +183,7 @@ export function ImageField(props: {
           </div>
         ) : props.canEdit ? (
           <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-            <div style={buttons}>
-              {change}
-              {/* Isometric view hidden leaves three buttons, and Remove would wrap alone under the other two: Crop and Remove wrap as one, so the row breaks after Change image. */}
-              {modelShown || !set ? fix : <div style={buttons}>{fix}</div>}
-            </div>
+            <div style={buttons}>{inPairs([change, crop, model, remove])}</div>
             {removeLine}
             {hiddenLine}
           </div>

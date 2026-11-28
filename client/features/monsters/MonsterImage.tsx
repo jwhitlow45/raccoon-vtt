@@ -11,6 +11,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { DEFAULT_CROP, type Crop } from "../images/crop.ts";
 import { CropEditor } from "../images/CropEditor.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
+import { inPairs } from "../images/ImageField.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
 import { iconCredit } from "../images/icons.ts";
 import { ModelSheet } from "../models/ModelSheet.tsx";
@@ -89,25 +90,20 @@ export function MonsterImageField(props: {
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
       <ImagePreview image={shown} shape="circle" aspect={1} width={64} ring={theme.color.hostile} initials={initials(props.name)} />
       <div style={row}>
-        <Button size="sm" onClick={() => setStep({ kind: "pick" })}>
-          {shown ? "Change image" : "Set image"}
-        </Button>
-        {modelShown ? (
-          <>
-            {crop}
-            {/* Isometric view's, marked on the button itself as beside a token's picture, with the way back at the row's end (D-261127-692). */}
+        {/* In pairs as beside a token's picture, so no button wraps alone under two (ImageField.tsx inPairs). */}
+        {inPairs([
+          <Button size="sm" onClick={() => setStep({ kind: "pick" })}>
+            {shown ? "Change image" : "Set image"}
+          </Button>,
+          crop,
+          // Isometric view's, marked on the button itself as beside a token's picture, with the way back at the row's end (D-261127-692).
+          modelShown ? (
             <Button ref={modelButton} size="sm" icon="viewIsometric" {...partMark("isometric")} onClick={() => setStep({ kind: "model" })}>
               3D model
             </Button>
-            {remove}
-          </>
-        ) : crop || remove ? (
-          // Hidden, Crop and the picture's removal wrap as one, so the last of three never wraps alone under the other two.
-          <div style={row}>
-            {crop}
-            {remove}
-          </div>
-        ) : null}
+          ) : null,
+          remove,
+        ])}
         {twoTaps ? (
           <Help id={removeHelp} style={{ flexBasis: "100%" }}>
             Removes the picture and its 3D model.
