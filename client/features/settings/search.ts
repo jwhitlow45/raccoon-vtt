@@ -47,6 +47,7 @@ const NAMES: Partial<Record<SettingField["key"], readonly string[]>> = {
   playersSeeOrder: ["turn order", "initiative order"],
   critRule: ["crit", "critical hits"],
   turnTimerSec: ["timer"],
+  opportunityNotices: ["opportunity attacks", "attacks of opportunity", "OA", "reach"],
   feetPerCell: ["grid scale"],
   diagonal: ["diagonals"],
   newScenes: ["grid shape", "squares"],

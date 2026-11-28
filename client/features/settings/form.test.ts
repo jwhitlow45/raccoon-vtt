@@ -5,11 +5,13 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { roomHasHexes } from "../grid/words.ts";
 import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, newScenesChoice, newScenesOptions, newScenesShape, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingGroups, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
 
+// Settings a room may lack, which read as a default when absent, so DEFAULT_SETTINGS leaves them out.
+const OPTIONAL: (keyof RoomSettings)[] = ["playersDraw", "newScenePlayers", "newScenes", "opportunityNotices"];
+
 describe("settings form", () => {
   test("lists every room setting exactly once", () => {
     const keys = allFields().map((f) => f.key).sort();
-    // Settings a room may lack, which read as a default when absent, so DEFAULT_SETTINGS leaves them out.
-    const optional: (keyof RoomSettings)[] = ["playersDraw", "newScenePlayers", "newScenes"];
+    const optional = OPTIONAL;
     assert.deepEqual(keys, [...(Object.keys(DEFAULT_SETTINGS) as (keyof RoomSettings)[]), ...optional].sort());
   });
 
@@ -122,6 +124,20 @@ describe("settings form", () => {
     assert.equal(clientOpSchema.safeParse({ t: "room.update", settings: { playersSeeOrder: "monsters" } }).success, false);
   });
 
+  test("Opportunity Attack notices is Combat's last row, on in a room that never set it, and off sends false (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+    const combat = SETTING_GROUPS.find((g) => g.heading === "Combat")!;
+    const field = combat.fields.at(-1)!;
+    assert.equal(field.key, "opportunityNotices");
+    assert.equal(field.kind, "toggle");
+    assert.equal(field.label, "Opportunity Attack notices");
+    assert.equal(field.help, "Tell the DM and the mover when a creature's move in a fight leaves an enemy's reach. Nothing rolls, and no move is stopped.");
+    assert.equal(toggleOn(DEFAULT_SETTINGS, "opportunityNotices"), true, "absent reads on");
+    assert.equal(toggleOn({ ...DEFAULT_SETTINGS, opportunityNotices: false }, "opportunityNotices"), false);
+    assert.equal(toggleOn({ ...DEFAULT_SETTINGS, opportunityNotices: true }, "opportunityNotices"), true);
+    assert.deepEqual(settingsOp(DEFAULT_SETTINGS, { opportunityNotices: false }), { t: "room.update", settings: { opportunityNotices: false } });
+    assert.deepEqual(settingsOp({ ...DEFAULT_SETTINGS, opportunityNotices: false }, { opportunityNotices: true }), { t: "room.update", settings: { opportunityNotices: true } });
+  });
+
   test("Skip defeated says what Next passes over: any dead creature, a player character's row included", () => {
     const field = allFields().find((f) => f.key === "skipDefeated")!;
     assert.equal(field.label, "Skip defeated creatures");
@@ -132,7 +148,7 @@ describe("settings form", () => {
   test("each control matches its setting's type, and every choice is a valid value", () => {
     for (const field of allFields()) {
       const value = DEFAULT_SETTINGS[field.key];
-      if (field.kind === "toggle") assert.equal(typeof value, "boolean", field.key);
+      if (field.kind === "toggle") assert.equal(typeof value, OPTIONAL.includes(field.key) ? "undefined" : "boolean", field.key);
       if (field.kind === "number") assert.equal(typeof value, "number", field.key);
       if (field.kind === "seconds") {
         assert.ok(field.options.some((o) => o.value === value), `${field.key} offers its default`);

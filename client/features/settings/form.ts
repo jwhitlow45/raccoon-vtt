@@ -4,6 +4,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { playersTypeTotals } from "#shared/permissions.ts";
 import { orderRevealOf } from "#shared/rules/initiative.ts";
+import { opportunityNoticesOn } from "#shared/rules/opportunity.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
 import { NEW_SCENES_HELP, shapeChoice, type ShapeChoice } from "../grid/words.ts";
@@ -169,6 +170,12 @@ export const SETTING_GROUPS: SettingGroup[] = [
         label: "Turn timer",
         help: "Counts each turn down where everyone can see it, and nudges whoever acts when it runs out. It never ends a turn. Off by default.",
         options: [...TIMER_CHOICES],
+      },
+      {
+        kind: "toggle",
+        key: "opportunityNotices",
+        label: "Opportunity Attack notices",
+        help: "Tell the DM and the mover when a creature's move in a fight leaves an enemy's reach. Nothing rolls, and no move is stopped.",
       },
     ],
   },
@@ -356,6 +363,7 @@ export function drawersOf(settings: Pick<RoomSettings, "playersDraw">): WhichPla
 export function toggleOn(settings: RoomSettings, key: BoolKey): boolean {
   if (key === "healRevives") return healRevivesDead(settings);
   if (key === "playersTypeTotals") return playersTypeTotals(settings);
+  if (key === "opportunityNotices") return opportunityNoticesOn(settings);
   return settings[key] === true;
 }
 

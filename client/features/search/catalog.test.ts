@@ -462,6 +462,17 @@ describe("what an entry offers and says now (design-v1-qol.md 5, The results)", 
     assert.ok(DM_CATALOG.entries.find((e) => e.id === "setting:menu.room-settings.grid-and-distance.feet-per-cell")?.names?.includes("Feet per square or hex"), "a room with hexes reads its own label");
   });
 
+  test("Opportunity Attack notices is found by its other names, On in a room that never set it and Off once the DM turns it off", () => {
+    const id = "setting:menu.room-settings.combat.opportunity-notices";
+    const entry = DM_CATALOG.entries.find((e) => e.id === id);
+    assert.equal(entry?.title, "Opportunity Attack notices");
+    for (const name of ["opportunity attacks", "attacks of opportunity", "OA", "reach"]) assert.ok(entry?.names?.includes(name), name);
+    const room = seededRoom();
+    assert.equal(entry?.valueNow?.(ctxOf(viewOf(room, DM))), "On");
+    room.meta.settings = { ...room.meta.settings, opportunityNotices: false };
+    assert.equal(entry?.valueNow?.(ctxOf(viewOf(room, DM))), "Off");
+  });
+
   test("Include sounds while the room holds sounds, Party sight on a scene with party vision", () => {
     const room = seededRoom();
     assert.ok(offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:menu.room-settings.backup.sounds"));
