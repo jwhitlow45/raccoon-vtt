@@ -181,8 +181,8 @@ const TAB_RULES = {
   "tab-leaves-dialog": { impact: "serious", help: "Tab takes focus out of an open modal dialog" },
 } as const;
 
-/** What has focus: Chrome's role and name for it, and where it stands. */
-async function focusNow(page: Page, cdp: CDPSession): Promise<{ key: string; html: string; body: boolean; ignored: boolean; name: string; hidden: boolean; shown: boolean; inModal: boolean | null } | null> {
+/** What has focus: the node itself (`id`), Chrome's role and name for it, and where it stands. */
+async function focusNow(page: Page, cdp: CDPSession): Promise<{ id: number; key: string; html: string; body: boolean; ignored: boolean; name: string; hidden: boolean; shown: boolean; inModal: boolean | null } | null> {
   const { result } = await cdp.send("Runtime.evaluate", { expression: "document.activeElement" });
   if (!result.objectId) return null;
   const { node } = await cdp.send("DOM.describeNode", { objectId: result.objectId });
@@ -207,7 +207,7 @@ async function focusNow(page: Page, cdp: CDPSession): Promise<{ key: string; htm
   });
   const role = String(a?.role?.value ?? "none");
   const name = String(a?.name?.value ?? "");
-  return { key: `${role} "${name.slice(0, 60)}"`, html: where.html, body: where.body, ignored: a?.ignored === true, name, hidden: where.hidden, shown: where.shown, inModal: where.inModal };
+  return { id: node.backendNodeId, key: `${role} "${name.slice(0, 60)}"`, html: where.html, body: where.body, ignored: a?.ignored === true, name, hidden: where.hidden, shown: where.shown, inModal: where.inModal };
 }
 
 /**
@@ -229,6 +229,8 @@ async function tabWalk(page: Page, surface: string, kind: "page" | "dialog", ste
         body.removeAttribute("tabindex");
       });
     const keys: string[] = [];
+    // The walk's first stop, by the node itself: two controls can share a role and a name, as a dialog's Next and one behind it do.
+    let first: number | null = null;
     for (let i = 0; i < steps; i++) {
       await page.keyboard.press("Tab");
       const f = await focusNow(page, cdp);
@@ -236,13 +238,15 @@ async function tabWalk(page: Page, surface: string, kind: "page" | "dialog", ste
         if (kind === "dialog") record("tab-leaves-dialog", TAB_RULES["tab-leaves-dialog"].impact, TAB_RULES["tab-leaves-dialog"].help, { target: "the page itself", html: `after ${keys.at(-1) ?? "the start"}` }, surface);
         break;
       }
-      if (kind === "dialog" && keys.length > 0 && f.key === keys[0]) break;
-      keys.push(f.key);
+      // Every stop is filed before the walk can end on it.
       const n = { target: f.key, html: f.html };
       if (f.name.trim() === "" && !f.hidden) record("tab-no-name", TAB_RULES["tab-no-name"].impact, TAB_RULES["tab-no-name"].help, n, surface);
       if (f.hidden || f.ignored) record("tab-in-hidden", TAB_RULES["tab-in-hidden"].impact, TAB_RULES["tab-in-hidden"].help, n, surface);
       if (!f.shown) record("tab-not-shown", TAB_RULES["tab-not-shown"].impact, TAB_RULES["tab-not-shown"].help, n, surface);
       if (kind === "dialog" && f.inModal === false) record("tab-leaves-dialog", TAB_RULES["tab-leaves-dialog"].impact, TAB_RULES["tab-leaves-dialog"].help, n, surface);
+      if (kind === "dialog" && f.id === first) break;
+      first ??= f.id;
+      keys.push(f.key);
     }
     walked.push({ surface, stops: keys });
   } finally {
@@ -697,12 +701,22 @@ describe("the accessibility sweep", { skip: SKIP, timeout: 1_400_000 }, () => {
       </main></body></html>`);
       await page.getByRole("button", { name: "Inside" }).focus();
       await tabWalk(page, "drawn: dialog", "dialog");
+      // A Next inside and a Next behind the dialog share a role and a name, so only the node itself tells the walk it has not come round.
+      await page.setContent(`<!doctype html><html lang="en"><head><title>Drawn</title></head><body><main>
+        <div role="dialog" aria-modal="true" aria-label="Steps"><button>Back</button><button>Next</button></div>
+        <button>Next</button>
+      </main></body></html>`);
+      await page.getByRole("button", { name: "Back" }).focus();
+      await tabWalk(page, "drawn: same names", "dialog");
       const found = (rule: string) => [...(seen.get(rule)?.nodes.keys() ?? [])];
       assert.equal(found("button-name").length, 1, "axe found the button with no name");
       assert.deepEqual(found("tab-no-name"), ['button ""']);
       assert.deepEqual(found("tab-in-hidden"), ['button "Hidden"']);
       assert.deepEqual(found("tab-not-shown"), ['button "Tiny"']);
-      assert.deepEqual(found("tab-leaves-dialog"), ['button "Outside"']);
+      // Past the last control Chrome may wrap to the first or leave the page, which files "the page itself" too, so each walk's own stop is read.
+      const leftFrom = (walk: string) => [...(seen.get("tab-leaves-dialog")?.nodes ?? new Map()).entries()].filter(([, n]) => n.surfaces.has(walk)).map(([k]) => k);
+      assert.ok(leftFrom("drawn: dialog").includes('button "Outside"'), "the walk filed Outside, behind the dialog");
+      assert.ok(leftFrom("drawn: same names").includes('button "Next"'), "the walk filed the Next behind the dialog, though one inside shares its name");
     } finally {
       seen = kept;
       scanned.length = 0;
