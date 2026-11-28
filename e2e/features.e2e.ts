@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import { uuidv7 } from "#shared/ids.ts";
 import type { Character } from "#shared/model.ts";
 import { modulesFor, type ModuleId } from "../client/features/modules/registry.ts";
-import { ConsoleWatch, diceFoldsOpen, openSideTab, OpSocket, pagePoint, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, openSideTab, OpSocket, pagePoint, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -403,6 +403,56 @@ async function toastWords(page: Page, words: string | RegExp): Promise<string> {
   return (await toast.innerText()).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Pat's finger on Thorn and down the board to `toY`, held there while
+ * `held` reads the drag, then lifted: the Opportunity Attack steps' walk
+ * (docs/design/design-v1-opportunity-attacks.md 2).
+ */
+async function holdThorn(fromY: number, toY: number, held: () => Promise<void>): Promise<void> {
+  await closeSheets(player);
+  const from = await pagePoint(player, BOUNDS, { x: THORN_AT.x + 0.5, y: fromY + 0.5 });
+  const to = await pagePoint(player, BOUNDS, { x: THORN_AT.x + 0.5, y: toY + 0.5 });
+  const touches = new Touches(playerCdp);
+  await touches.start([from]);
+  for (let i = 1; i <= 12; i++) await touches.move([{ x: from.x + ((to.x - from.x) * i) / 12, y: from.y + ((to.y - from.y) * i) / 12 }], 16);
+  try {
+    await held();
+  } finally {
+    await touches.end([], 16);
+  }
+  await waitFor(`Thorn on row ${toY}`, () => (thornToken()?.y === toY ? true : null));
+}
+
+/** The words on the board's canvas, as Konva holds them. */
+function boardTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { text(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages.flatMap((s) => s.find("Text")).filter((t) => t.isVisible()).map((t) => t.text());
+  });
+}
+
+/** Opens Room settings from the Menu's side tab, as a DM on a computer does. */
+async function openRoomSettings(page: Page): Promise<Locator> {
+  await openSideTab(page, "Menu");
+  const menu = page.getByRole("tabpanel", { name: /^Menu/ });
+  const back = page.getByRole("button", { name: /^Back to Menu/ });
+  if ((await back.count()) > 0 && (await back.first().isVisible())) await back.first().click();
+  await menu.getByRole("button", { name: /^Room settings/ }).click();
+  await menu.getByRole("heading", { name: "Combat", exact: true }).waitFor();
+  return menu;
+}
+
+/** What a page's board says of Opportunity Attacks now: a drag label's leaves line, and how many reach rings it draws. */
+function boardLeaves(page: Page): Promise<{ lines: string[]; rings: number }> {
+  return page.evaluate(() => {
+    type Node = { text?(): string; isVisible(): boolean };
+    const stages = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva.stages;
+    const lines = stages.flatMap((s) => s.find("Text")).filter((t) => t.isVisible()).map((t) => t.text?.() ?? "").filter((t) => /\nLeaves |checked after the drop/.test(t));
+    return { lines, rings: stages.flatMap((s) => s.find(".reach-ring")).filter((n) => n.isVisible()).length };
+  });
+}
+
 /** Every toast holding `words` dismissed by a press on its words, so the twin's next run reads its own. */
 async function dismissToasts(page: Page, words: string | RegExp): Promise<void> {
   const toasts = page.locator("[data-toast]").filter({ hasText: words });
@@ -581,7 +631,7 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
     menu = await openFeatures(dm, false);
     await menu.getByText("For your DM rooms on this device.").waitFor();
     assert.deepEqual(await menu.locator("[data-group-name]").allTextContents(), ["Characters", "Tools", "Maps", "Panels", "Visuals", "Always shown"]);
-    assert.equal(await menu.getByRole("switch").count(), 23);
+    assert.equal(await menu.getByRole("switch").count(), 24);
     assert.deepEqual(alignmentLines(await measureAlignment(menu), "the Features page on a computer"), []);
     await shots.take(dm, "ft-1-features-computer");
     await ownerShot(dm, "features-computer");
@@ -1249,6 +1299,58 @@ describe("raccoon-vtt parts hidden on this device", { timeout: 600_000 }, () => 
       await player.evaluate(`localStorage.removeItem("rvtt.lowPower")`);
       await setChoices(player, null);
       await closeSheets(player);
+    }
+  });
+
+  test("ft-oa-1. Opportunity Attacks hidden on Pat's phone: his walk out of the priest's reach shows no leaves line, ring or card notice there, and the DM's toast still comes", async () => {
+    await ops!.send({ t: "encounter.end" }).catch(() => {});
+    await ops!.send({ t: "token.update", tokenId: run.priest, patch: { x: THORN_AT.x + 1, y: THORN_AT.y } });
+    const entry = uuidv7();
+    await ops!.send({ t: "encounter.start", entries: [{ id: entry, tokenId: run.thornToken, value: 15 }, { id: uuidv7(), tokenId: run.priest, value: 5 }] });
+    await ops!.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn on Pat's phone", () => (playerSocket.state?.encounter?.activeEntryId === entry && playerSocket.state.tokens[run.priest]?.x === THORN_AT.x + 1 ? true : null));
+    await setChoices(player, { player: { opportunity: false } });
+    try {
+      await holdThorn(THORN_AT.y, THORN_AT.y + 3, async () => {
+        await waitFor("the drag's label", async () => ((await boardTexts(player)).some((t) => / ft left/.test(t)) ? true : null));
+        await sleep(300);
+        assert.deepEqual(await boardLeaves(player), { lines: [], rings: 0 }, "the hidden part drew its notice");
+      });
+      // The DM's device shows the part, so the walk is told there.
+      await toastWords(dm, "Thorn left Goblin Priest's reach.");
+      await sleep(500);
+      const card = player.locator('[data-alert="turn"]');
+      assert.doesNotMatch((await card.allInnerTexts()).join("\n"), /reach|Opportunity Attacks/, "Pat's card spoke of the walk");
+      await dismissToasts(dm, "Thorn left Goblin Priest's reach.");
+    } finally {
+      await setChoices(player, null);
+    }
+  });
+
+  test("ft-oa-2. the room's switch, on in a room that never set it, turned off in the DM's Room settings: Thorn's next walk out of the priest's reach shows nothing on either device", async () => {
+    // Beside Thorn again, so the walk back up leaves its reach.
+    await ops!.send({ t: "token.update", tokenId: run.priest, patch: { x: THORN_AT.x + 1, y: THORN_AT.y + 3 } });
+    await waitFor("the priest beside Thorn", () => (playerSocket.state?.tokens[run.priest]?.y === THORN_AT.y + 3 ? true : null));
+    const settings = await openRoomSettings(dm);
+    const row = settings.getByRole("switch", { name: "Opportunity Attack notices" });
+    assert.equal(await row.getAttribute("aria-checked"), "true", "on in a room that never set it");
+    await row.click();
+    await waitFor("the switch off in Pat's copy", () => (playerSocket.state?.meta.settings.opportunityNotices === false ? true : null));
+    await closeSheets(dm);
+    try {
+      await holdThorn(THORN_AT.y + 3, THORN_AT.y + 1, async () => {
+        await waitFor("the drag's label", async () => ((await boardTexts(player)).some((t) => / ft left/.test(t)) ? true : null));
+        await sleep(300);
+        assert.deepEqual(await boardLeaves(player), { lines: [], rings: 0 }, "the room's switch off, Pat's board drew a notice");
+      });
+      await sleep(800);
+      assert.equal(await dm.locator("[data-toast]").filter({ hasText: "left Goblin Priest's reach" }).count(), 0, "the room's switch off, the DM got a toast");
+      assert.doesNotMatch((await player.locator('[data-alert="turn"]').allInnerTexts()).join("\n"), /reach|Opportunity Attacks/, "the room's switch off, Pat's card spoke of the walk");
+    } finally {
+      await ops!.send({ t: "room.update", settings: { opportunityNotices: true } });
+      await ops!.send({ t: "encounter.end" }).catch(() => {});
+      await ops!.send({ t: "token.update", tokenId: run.priest, patch: { x: 3, y: 7 } });
+      await thornBack(null);
     }
   });
 
