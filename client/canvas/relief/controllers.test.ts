@@ -130,6 +130,7 @@ describe("the board's controllers mount once", () => {
   test("the scan follows hooks a layer imports: the trap alerts' toasts and sound, the teleport toasts, and each controller's effects", () => {
     assert.ok(effectsReached("features/traps/useTrapAlerts.ts").length > 0);
     assert.ok(effectsReached("features/movement/toasts.ts").length > 0);
+    assert.ok(effectsReached("features/combat/opportunityToasts.ts").length > 0, "the Opportunity Attack toasts and the leg jobs they feed");
     // What each controller lifted out of its layer (ISO-3): the scan reaches it there, so it would reach it in a layer that took it back.
     // Each is called from the controller itself, the component the board mounts.
     const reaches = (file: string, controller: string, hook: string) => {
@@ -161,7 +162,7 @@ describe("the board's controllers mount once", () => {
     const { layers, controllers } = registry();
     assert.deepEqual(
       controllers.map((c) => c.id),
-      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts", "pings", "pins", "rulers", "areas", "tethers", "weather", "animmap", "openingWindows"],
+      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts", "opportunity-toasts", "pings", "pins", "rulers", "areas", "tethers", "weather", "animmap", "openingWindows"],
     );
     for (const id of ["dm-camera", "scene-thumbnails"]) assert.ok(!layers.some((l) => l.id === id), `${id} drawn in a tree`);
     assert.doesNotMatch(read("features/dm/CameraLayer.tsx"), /getStage\(|react-konva/, "the camera controller reads the camera it is given, not a stage");

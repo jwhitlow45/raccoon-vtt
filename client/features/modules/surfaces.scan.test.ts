@@ -26,6 +26,7 @@ const RUNTIME_GATES = [
   "client/features/sound/engine/SoundHost.tsx",
   "client/features/sound/engine/useSoundAsk.ts",
   "client/features/clock/useClockToasts.ts",
+  "client/features/combat/opportunityToasts.ts",
   "client/features/dice/throw/useThrows.ts",
   "client/features/dice/throw/hooks.ts",
   "client/features/view/store.ts",

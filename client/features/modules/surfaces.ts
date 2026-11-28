@@ -267,6 +267,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/sound/engine/SoundHost.tsx", sites: 0, kind: "runtime", test: "sound/engine/SoundHost.test.ts: hidden Sound plays nothing here and the playing page yields", covers: ["sound"] },
   { file: "client/features/sound/engine/useSoundAsk.ts", sites: 0, kind: "runtime", test: "sound/engine/SoundHost.test.ts: hidden Sound never asks to play here", covers: ["sound"] },
   { file: "client/features/clock/useClockToasts.ts", sites: 0, kind: "runtime", test: "useClockToasts.test.ts: hidden Date and time shows no clock toast", covers: ["time"] },
+  { file: "client/features/combat/opportunityToasts.ts", sites: 0, kind: "runtime", test: "combat/opportunityToasts.test.ts: hidden Opportunity Attacks runs no job and shows no toast", covers: ["opportunity"] },
   { file: "client/features/dice/throw/useThrows.ts", sites: 0, kind: "runtime", test: "dice/throw/useThrows.test.ts with throw/store.test.ts, and ft-3: a throw in the air ends as Dice animation hides", covers: ["diceAnimation"] },
   { file: "client/features/dice/throw/hooks.ts", sites: 0, kind: "runtime", test: "ft-3: hidden Dice animation loads no dice chunk and throws nothing", covers: ["diceAnimation"] },
   { file: "client/features/view/store.ts", sites: 0, kind: "runtime", test: "view/store.test.ts: hidden Isometric view draws Top-down and keeps the stored view", covers: ["isometric"] },

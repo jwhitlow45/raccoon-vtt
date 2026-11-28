@@ -27,6 +27,7 @@ import { OpeningWindow } from "./floors/OpeningWindow.tsx";
 import { OpeningCrops } from "./floors/OpeningCrops.tsx";
 import { TrapAlerts } from "./traps/useTrapAlerts.ts";
 import { TeleportToasts } from "./movement/toasts.ts";
+import { OpportunityToasts } from "./combat/opportunityToasts.ts";
 import { PingController } from "./pings/PingController.ts";
 import { PinController } from "./pins/PinController.ts";
 import { RulerController } from "./measure/RulerController.ts";
@@ -190,6 +191,8 @@ export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "scene-thumbnails", Component: ThumbnailLayer },
   { id: "trap-alerts", Component: TrapAlerts },
   { id: "teleport-toasts", Component: TeleportToasts },
+  // The turn's leg jobs and the DM's Opportunity Attack toasts, fed once for the drag, the turn card and the toast (docs/design/design-v1-opportunity-attacks.md 4).
+  { id: "opportunity-toasts", Component: OpportunityToasts },
   { id: "pings", Component: PingController },
   { id: "pins", Component: PinController },
   { id: "rulers", Component: RulerController },
