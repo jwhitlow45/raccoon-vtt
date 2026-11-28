@@ -224,7 +224,8 @@ describe("scoped history through the room actor", () => {
             while (client.conn.opRate.allow()) { /* Spend only this connection's burst. */ }
             const n = ++client.n;
             await h.actor.op(client.conn, n, command);
-            assert.ok(client.sent.some((m) => m.t === "retry" && m.n === n && m.code === "busy"));
+            // Answered in the op's turn of the queue, after `op` returned.
+            await until(() => client.sent.find((m) => m.t === "retry" && m.n === n && m.code === "busy"), "the busy answer");
             unchanged(before, h.actor.committed.state);
             assert.deepEqual(client.history().play, histories.play);
             assert.deepEqual(client.history().setup, histories.setup);
