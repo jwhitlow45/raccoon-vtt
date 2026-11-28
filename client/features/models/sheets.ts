@@ -337,7 +337,15 @@ export class SheetCache {
  * (canvas/useImage.ts loadMap): an image element's first draw would decode
  * it again on the main thread, mid-pan. A browser without createImageBitmap
  * keeps the element.
+ *
+ * A bitmap's first draw still costs the frame that draws it: on the bench's
+ * phone page, 24 sheets drawn first in one repaint of the relief took 65 ms
+ * of its canvas's `restore`. So each sheet draws a 4 px corner onto a small
+ * canvas of its own as it arrives, and the board's repaint finds it ready
+ * (D-261127-706). The canvas is 256 px a side: on a 1 px OffscreenCanvas
+ * the bench's worst arrival frame stayed where it was.
  */
+let warmCanvas: CanvasRenderingContext2D | null | undefined;
 const BROWSER_IO: SheetIo = {
   async load(url, signal) {
     if (typeof createImageBitmap !== "function") {
@@ -349,7 +357,10 @@ const BROWSER_IO: SheetIo = {
     }
     const res = await fetch(url, { signal, credentials: "same-origin" });
     if (!res.ok) throw new Error(`The model sheet answered ${res.status}`);
-    return createImageBitmap(await res.blob());
+    const bitmap = await createImageBitmap(await res.blob());
+    warmCanvas ??= Object.assign(document.createElement("canvas"), { width: 256, height: 256 }).getContext("2d");
+    warmCanvas?.drawImage(bitmap, 0, 0, 4, 4, 0, 0, 4, 4);
+    return bitmap;
   },
   release(image) {
     if ("close" in image) image.close();
