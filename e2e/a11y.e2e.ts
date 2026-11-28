@@ -114,7 +114,8 @@ const run = {
 };
 
 type Node = { target: string; html: string };
-type Seen = { impact: string; help: string; nodes: Map<string, { html: string; surfaces: Set<string> }>; surfaces: Set<string> };
+type Found = { target: string; html: string; surfaces: Set<string> };
+type Seen = { impact: string; help: string; nodes: Map<string, Found>; surfaces: Set<string> };
 /** What the scans and walks found. The drawn page's check swaps in a map of its own. */
 let seen = new Map<string, Seen>();
 const scanned: string[] = [];
@@ -161,13 +162,24 @@ async function scan(page: Page, surface: string): Promise<void> {
   for (const v of found) for (const n of v.nodes as Node[]) record(v.id, v.impact, v.help, n, surface);
 }
 
+/**
+ * Files a node under its rule, keyed by its selector and its words
+ * together: two nodes can share a selector, and each is judged by its own
+ * words, or an exempt one would lend its exemption to the other.
+ */
 function record(rule: string, impact: string, help: string, n: Node, surface: string): void {
   const entry = seen.get(rule) ?? { impact, help, nodes: new Map(), surfaces: new Set<string>() };
   entry.surfaces.add(surface);
-  const node = entry.nodes.get(n.target) ?? { html: n.html, surfaces: new Set<string>() };
+  const key = `${n.target}\n${n.html}`;
+  const node = entry.nodes.get(key) ?? { target: n.target, html: n.html, surfaces: new Set<string>() };
   node.surfaces.add(surface);
-  entry.nodes.set(n.target, node);
+  entry.nodes.set(key, node);
   seen.set(rule, entry);
+}
+
+/** The KNOWN entry that exempts a node: its rule, every surface it was seen on, and its own selector and words. */
+function knownFor(rule: string, node: Found, known: readonly (typeof KNOWN)[number][] = KNOWN): (typeof KNOWN)[number] | undefined {
+  return known.find((k) => k.rule === rule && (!k.surface || [...node.surfaces].every((s) => k.surface!.test(s))) && (!k.node || k.node.test(`${node.target} ${node.html}`)));
 }
 
 /**
@@ -708,15 +720,23 @@ describe("the accessibility sweep", { skip: SKIP, timeout: 1_400_000 }, () => {
       </main></body></html>`);
       await page.getByRole("button", { name: "Back" }).focus();
       await tabWalk(page, "drawn: same names", "dialog");
-      const found = (rule: string) => [...(seen.get(rule)?.nodes.keys() ?? [])];
+      const found = (rule: string) => [...new Set([...(seen.get(rule)?.nodes.values() ?? [])].map((n) => n.target))];
       assert.equal(found("button-name").length, 1, "axe found the button with no name");
       assert.deepEqual(found("tab-no-name"), ['button ""']);
       assert.deepEqual(found("tab-in-hidden"), ['button "Hidden"']);
       assert.deepEqual(found("tab-not-shown"), ['button "Tiny"']);
       // Past the last control Chrome may wrap to the first or leave the page, which files "the page itself" too, so each walk's own stop is read.
-      const leftFrom = (walk: string) => [...(seen.get("tab-leaves-dialog")?.nodes ?? new Map()).entries()].filter(([, n]) => n.surfaces.has(walk)).map(([k]) => k);
+      const leftFrom = (walk: string) => [...(seen.get("tab-leaves-dialog")?.nodes.values() ?? [])].filter((n) => n.surfaces.has(walk)).map((n) => n.target);
       assert.ok(leftFrom("drawn: dialog").includes('button "Outside"'), "the walk filed Outside, behind the dialog");
       assert.ok(leftFrom("drawn: same names").includes('button "Next"'), "the walk filed the Next behind the dialog, though one inside shares its name");
+
+      // Two nodes at one selector, the first exempt by its words: the second is judged by its own and stays unknown.
+      seen = new Map();
+      const exempt = [{ rule: "drawn-rule", node: /named "Exempt"/, reason: "the drawn exemption" }];
+      record("drawn-rule", "minor", "drawn", { target: "div > button", html: '<button> named "Exempt"' }, "drawn: page");
+      record("drawn-rule", "minor", "drawn", { target: "div > button", html: '<button> named "Other"' }, "drawn: page");
+      const judged = [...(seen.get("drawn-rule")?.nodes.values() ?? [])].map((n) => [n.html, knownFor("drawn-rule", n, exempt) !== undefined]);
+      assert.deepEqual(judged, [['<button> named "Exempt"', true], ['<button> named "Other"', false]], "each node at a shared selector judged by its own words");
     } finally {
       seen = kept;
       scanned.length = 0;
@@ -840,10 +860,11 @@ describe("the accessibility sweep", { skip: SKIP, timeout: 1_400_000 }, () => {
     const used = new Set<(typeof KNOWN)[number]>();
     const lines: string[] = [];
     for (const [rule, v] of [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      out[rule] = { impact: v.impact, help: v.help, surfaces: [...v.surfaces], nodes: [...v.nodes.entries()].map(([target, n]) => ({ target, html: n.html, surfaces: [...n.surfaces] })) };
+      out[rule] = { impact: v.impact, help: v.help, surfaces: [...v.surfaces], nodes: [...v.nodes.values()].map((n) => ({ target: n.target, html: n.html, surfaces: [...n.surfaces] })) };
       lines.push(`${rule} (${v.impact}, ${v.nodes.size} nodes): ${v.help}`);
-      for (const [target, n] of v.nodes) {
-        const known = KNOWN.find((k) => k.rule === rule && (!k.surface || [...n.surfaces].every((s) => k.surface!.test(s))) && (!k.node || k.node.test(`${target} ${n.html}`)));
+      for (const n of v.nodes.values()) {
+        const target = n.target;
+        const known = knownFor(rule, n);
         if (known) used.add(known);
         lines.push(`  ${known ? "known" : "NEW  "} ${target}  [${[...n.surfaces].slice(0, 4).join("; ")}${n.surfaces.size > 4 ? `; +${n.surfaces.size - 4}` : ""}]\n        ${n.html.replace(/\s+/g, " ").slice(0, 200)}`);
         if (!known) unknown.push(`${rule} at ${target} on ${[...n.surfaces][0]}`);
