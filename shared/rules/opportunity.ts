@@ -231,8 +231,22 @@ type Cell = { cx: number; cy: number; box: CellBox };
 
 type Prepared = { reactor: Reactor; index: number; box: CellBox; max: number; cells: Cell[] | null };
 
-/** Work done, in units (section 5): a distance test between two boxes is 1 on squares and one per hex pair on hexes, a piece a gate line meets 1. */
+/**
+ * Work done, in units (section 5): a distance test between two boxes is 1 on
+ * squares and one per hex pair on hexes, a piece a gate line meets 1, and a
+ * box built on hexes HEX_BOX_UNITS.
+ */
 type Work = { n: number };
+
+/**
+ * What building one creature's box on hexes costs, in units: finding the
+ * hexes it covers (distance.ts occupiedHexes) costs about as much as this
+ * many square tests, and a scan builds one for every creature it reads and
+ * every spot of the walk. Calibrated on the phone benchmark's cold first
+ * pass of 200 creatures on hexes, so a slice stays under 8 ms there
+ * (D-261128-099). A box on squares is a few sums, which the units leave out.
+ */
+export const HEX_BOX_UNITS = 300;
 
 /** How far past a gate line's box a piece on hexes may end and still meet the line at a hex corner, which rounds to the 1/64 lattice (hex.ts cornerAt). */
 const HEX_PAD = 1 / 64;
@@ -414,10 +428,19 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
   if (!leg.provokes) return [];
   const { grid, rules } = input;
   const fpc = rules.feetPerCell;
+  const work: Work = { n: 0 };
+  let nextYield = slice;
   const prepared: Prepared[] = [];
   for (const reactor of input.reactors) {
     if (skip.has(reactor.id) || reactor.reaches.length === 0) continue;
-    prepared.push({ reactor, index: prepared.length, box: tokenCellBox(grid, reactor.token, fpc), max: Math.max(...reactor.reaches), cells: null });
+    const box = tokenCellBox(grid, reactor.token, fpc);
+    if (box.hexes) work.n += HEX_BOX_UNITS;
+    prepared.push({ reactor, index: prepared.length, box, max: Math.max(...reactor.reaches), cells: null });
+    // Many creatures on hexes take a slice or more to read before the walk does.
+    if (work.n >= nextYield) {
+      yield work.n;
+      nextYield = work.n + slice;
+    }
   }
   const out: ReachLeave[] = [];
   if (prepared.length === 0) return out;
@@ -434,8 +457,11 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
     }
   }
   const spots = legSpots(grid, input.mover, leg.from, leg.to);
-  const work: Work = { n: 0 };
-  let nextYield = slice;
+  // A walk read cold costs a slice of its own, so one that follows a long read of the creatures starts a fresh slice.
+  if (work.n - (nextYield - slice) >= slice / 2) {
+    yield work.n;
+    nextYield = work.n + slice;
+  }
   const stamp = new Uint32Array(prepared.length);
   const left = new Uint8Array(prepared.length);
   let within = new Map<number, number>();
@@ -444,6 +470,7 @@ export function* reachScan(input: ScanInput, leg: ReachLeg, skip: ReadonlySet<st
     const spot = spots[k]!;
     const standing: FootprintToken = input.mover.height === undefined ? spot : { ...spot, height: input.mover.height };
     const box = tokenCellBox(grid, standing, fpc);
+    if (box.hexes) work.n += HEX_BOX_UNITS;
     const candidates: Prepared[] = [];
     for (const i of within.keys()) {
       stamp[i] = k + 1;
