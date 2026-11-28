@@ -679,6 +679,15 @@ newest first.
 
 **Since v0.5.0**
 
+- **Opportunity Attack notices** ([design](design/design-v1-opportunity-attacks.md)):
+  change format 70, room format 53. Back up the database just before the
+  update, and reload DM pages first, then every other open page, since the
+  change format rises and a page from before works by the older one until
+  it reloads. After a clean stop an older build refuses any room this
+  version saved a snapshot of, and after a crash or a forced stop any room
+  with changes at format 70 after its last snapshot, so going back needs
+  the backup taken just before the update for those rooms. A room only
+  opened and left untouched needs nothing.
 - **3D models on token pictures** ([design](design/design-v1-token-models.md)):
   change format 69, room format 52. Back up the database just before the
   update, and reload DM pages first, then every other open page, since the
