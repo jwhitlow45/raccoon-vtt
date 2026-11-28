@@ -638,7 +638,12 @@ export function dragStops(deps: DragDeps): DragStops {
                   }
                 : undefined;
             placed(now, namedFollower(now, labelsOf(store.getState()), cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account, inTheWay), walkersFor(now, token.id, role), nowMode), searched));
-            keptLine = null;
+            // A landing that never reached send (the board put the token back, or the plan had no moves) leaves a line no leg will bind.
+            if (keptLine) {
+              const gone = keptLine;
+              keptLine = null;
+              shownLeaves.setState((s) => ({ shown: s.shown.filter((l) => l !== gone) }));
+            }
           });
         });
         // Still searching: the drop waits at the ghost, which says so.
