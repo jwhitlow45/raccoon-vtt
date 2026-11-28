@@ -833,7 +833,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - A drag that ends squeezed takes the holder's own way when each of them can follow it there in single file, on hexes when each of them every player sees is Medium or smaller.
   - With no such way the drag reads "No way through", the group stops where its holder, or one of those creatures, meets a wall, on a spot where no wall passes through the footprint of the holder or of a creature it drags, and the note names the one that cannot follow when the holder alone could go ("Goblin can't follow through there.").
 - Hidden stays hidden: a hidden imp on a villain's shoulder never reaches players, and no stop, cost, refusal or undo depends on a token or link they cannot see. A visible torch held by an invisible creature floats along with it, as at the table.
-- A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
+- A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a holder moves at most 20 tokens with it, counting itself and everything it carries.
 - On a hex scene a link reads hexes.
   - A rider or passenger sits on its holder's hexes, on the one nearest where it stood, and a move that leaves it beside them, off its holder's hexes, lets go.
   - 5 ft is one hex step from the holder's hexes, for the Attach list and a drag alike.
