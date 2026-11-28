@@ -5,12 +5,12 @@ import { boxGround } from "../../canvas/isoPlace.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { TokenGhost } from "../../canvas/TokenNode.tsx";
 import { boardSizes } from "../../lib/boardScale.ts";
-import { footprint, type ViewToken } from "../../lib/scene.ts";
+import { drawnAt, footprint, type ViewToken } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { LayerProps } from "../layers.ts";
 import { holdLabel, type Point } from "./drop.ts";
-import { holdSlot, stopNoteSlot } from "./store.ts";
+import { holdSlot, reachSlot, stopNoteSlot, type ReachMarks as Reach } from "./store.ts";
 
 /**
  * Walls and ledges on the overlay layer (docs/design/design-v1-maps-vision.md
@@ -24,6 +24,11 @@ import { holdSlot, stopNoteSlot } from "./store.ts";
  * height under the token, the label standing over the ring
  * (docs/design/design-v1-isometric-view.md 5.3).
  *
+ * While a drag's walk leaves enemies' reach, each of them gets a dashed
+ * amber ring for the drag's length (docs/design/design-v1-opportunity-attacks.md
+ * 1), named only on a device that may read the notice, so it too may draw
+ * above the fog: the creatures named are ones this viewer's copy holds.
+ *
  * The DM's teleport toasts (toasts.ts) run as one of the board's
  * controllers, mounted once whichever view shows.
  */
@@ -32,6 +37,7 @@ export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
   const note = useTreeShownStore(useScoped(stopNoteSlot), (s) => s.note);
   const held = useTreeShownView((s) => (hold ? s.floorView?.tokens[hold.tokenId] : undefined));
   const ghosted = useTreeShownView((s) => (note ? s.floorView?.tokens[note.tokenId] : undefined));
+  const reach = useTreeShownStore(useScoped(reachSlot), (s) => s.reach);
   const iso = useIsoGround();
   return (
     <>
@@ -42,10 +48,53 @@ export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
           </Group>
         </Lift>
       ) : null}
+      {reach ? <ReachRings reach={reach} sceneId={props.scene.id} scale={props.scale} iso={iso} /> : null}
       {hold && held && held.sceneId === props.scene.id ? <HoldMark token={held} at={hold.at} scale={props.scale} text={holdLabel(hold.blocker, hold.noWay === true)} iso={iso} /> : null}
     </>
   );
 });
+
+/** The dash of a reach ring, in screen px: long enough to read as a dashed line at the ring's least 3 px, never as the hold mark's solid red ring or the Dash band's yellow. */
+export function reachDash(ringPx: number): [number, number] {
+  return [ringPx * 3, ringPx * 2];
+}
+
+/**
+ * The dashed amber rings round the creatures whose reach the drag's walk
+ * leaves, each where the creature stands, sized as the hold mark's ring is.
+ * In Isometric each lies on the ground under its creature, as the hold
+ * mark's does.
+ */
+function ReachRings(props: { reach: Reach; sceneId: string; scale: number; iso: IsoGround | null }) {
+  const tokens = useTreeShownView((s) => s.floorView?.tokens);
+  const sizes = holdMarkSizes(props.scale);
+  const gap = sizes.gapPx / props.scale;
+  return (
+    <Group listening={false}>
+      {props.reach.ids.map((id) => {
+        const token = tokens?.[id];
+        if (!token || token.sceneId !== props.sceneId) return null;
+        const { w, h } = footprint(token);
+        const at = drawnAt(null, token);
+        return (
+          <Lift key={id} z={props.iso ? groundUnder(props.iso, token, at) : 0}>
+            <Ellipse
+              x={at.x + w / 2}
+              y={at.y + h / 2}
+              radiusX={w / 2 + gap}
+              radiusY={h / 2 + gap}
+              stroke={boardTheme.color.warning}
+              strokeWidth={sizes.ringPx}
+              strokeScaleEnabled={false}
+              dash={reachDash(sizes.ringPx)}
+              name={`reach-ring reach-${id}`}
+            />
+          </Lift>
+        );
+      })}
+    </Group>
+  );
+}
 
 /**
  * The hold mark's ring and label in screen px at a zoom. The ring is drawn
