@@ -37,8 +37,8 @@ const BUILDER_OPTIONS: Placement = { kind: "drawn", surface: "Builder options", 
 const ROOM_PANELS: Placement = { kind: "drawn", surface: "Time, Sound, Initiative, Log, Members", covers: ["time", "sound", "classResources", "spellSlots"] };
 /** A page with classes, slots, resources and companions, its stat block row, the Rest section with the Short Rest card open. */
 const CHARACTERS: Placement = { kind: "drawn", surface: "Characters", covers: ["spellSlots", "hitDice", "classResources", "companions", "ddb"] };
-/** A character's token, a companion token, a monster with Make a companion open. */
-const TOKEN_PANEL: Placement = { kind: "drawn", surface: "Token panel", covers: ["companions", "classResources"] };
+/** A character's token, a companion token, a monster with Make a companion open, and a picture carrying a 3D model, whose 3D model button is Isometric view's (D-261127-692). */
+const TOKEN_PANEL: Placement = { kind: "drawn", surface: "Token panel", covers: ["companions", "classResources", "isometric"] };
 /** The drawer and the strip's folded form. */
 const ACTION_BAR_USES: Placement = { kind: "drawn", surface: "Action bar Uses", covers: ["classResources", "spellSlots"] };
 /**
@@ -82,6 +82,17 @@ const WING: Placement = { kind: "probe", probe: "ft-2 and ft-3: the builder's Wi
 const DUNGEON: Placement = { kind: "probe", probe: "ft-2: the generated dungeon dialog, its choices and the room pane", covers: ["dungeon"] };
 const ENCOUNTERS: Placement = { kind: "probe", probe: "ft-2: the Encounters panel", covers: ["encounters"] };
 const OUTLINER: Placement = { kind: "probe", probe: "ft-2: the Outliner panel", covers: ["outliner"] };
+
+/*
+ * e2e probes in models.e2e.ts for Isometric view's 3D models (D-261127-692):
+ * the sheet reads a file in a worker and draws its views, and the monster
+ * page and the Library wait on the room's monsters and the server's
+ * listing, none of which a drawing to markup holds.
+ */
+
+const MODEL_SHEET: Placement = { kind: "probe", probe: "md-1 to md-11 and md-18: the 3D model sheet and its preview in every state, and none with Isometric view hidden", covers: ["isometric"] };
+const MONSTER_MODEL: Placement = { kind: "probe", probe: "md-7 and md-18: a monster page's 3D model button, gone with Isometric view hidden and back by its Show", covers: ["isometric"] };
+const LIBRARY_MODELS: Placement = { kind: "probe", probe: "md-18: the Library's 3D models, gone with Isometric view hidden and back by its Show", covers: ["isometric"] };
 
 /* Core-exempt, each with its reason from section 2's core list. */
 
@@ -144,6 +155,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/combat/UsesSection.tsx", sites: 12, ...TOKEN_PANEL },
   { file: "client/features/tokens/CompanionBlocks.tsx", sites: 18, ...TOKEN_PANEL },
   { file: "client/panels/TokenPanel.tsx", sites: 73, ...TOKEN_PANEL },
+  { file: "client/features/images/ImageField.tsx", sites: 10, ...TOKEN_PANEL },
   // Action bar Uses
   { file: "client/canvas/TokenActionBar.tsx", sites: 90, ...ACTION_BAR_USES },
   { file: "client/features/combat/CombatUses.tsx", sites: 9, ...ACTION_BAR_USES },
@@ -245,6 +257,11 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/encounters/PartyEditor.tsx", sites: 7, ...ENCOUNTERS },
   // ft-2: the Outliner panel
   { file: "client/features/outliner/OutlinerPanel.tsx", sites: 7, ...OUTLINER },
+  // models.e2e.ts: the 3D model sheet, a monster page's 3D model button and the Library's 3D models
+  { file: "client/features/models/ModelPreview.tsx", sites: 3, ...MODEL_SHEET },
+  { file: "client/features/models/ModelSheet.tsx", sites: 23, ...MODEL_SHEET },
+  { file: "client/features/monsters/MonsterImage.tsx", sites: 14, ...MONSTER_MODEL },
+  { file: "client/features/images/LibraryGrid.tsx", sites: 25, ...LIBRARY_MODELS },
   // Runtime gates that draw no control of their own (check 6, D-261127-422).
   { file: "client/features/pings/PingController.ts", sites: 0, kind: "runtime", test: "pings/PingController.test.ts and ft-3: hold to ping sends no ping while Ping hides (D-261127-392)", covers: ["ping"] },
   { file: "client/features/sound/engine/SoundHost.tsx", sites: 0, kind: "runtime", test: "sound/engine/SoundHost.test.ts: hidden Sound plays nothing here and the playing page yields", covers: ["sound"] },
@@ -368,15 +385,12 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/images/CreditLine.tsx", sites: 2, ...CHARACTERS_CORE },
   { file: "client/features/images/CropEditor.tsx", sites: 5, ...CHARACTERS_CORE },
   { file: "client/features/images/IconsTab.tsx", sites: 8, ...CHARACTERS_CORE },
-  { file: "client/features/images/ImageField.tsx", sites: 6, ...CHARACTERS_CORE },
   { file: "client/features/images/ImagePicker.tsx", sites: 22, ...CHARACTERS_CORE },
-  { file: "client/features/images/LibraryGrid.tsx", sites: 24, ...CHARACTERS_CORE },
   { file: "client/features/images/Modal.tsx", sites: 1, ...CHARACTERS_CORE },
   { file: "client/features/images/PasteImage.tsx", sites: 4, ...CHARACTERS_CORE },
   { file: "client/features/monsters/AbilityGrid.tsx", sites: 3, ...CHARACTERS_CORE },
   { file: "client/features/monsters/EditorHost.tsx", sites: 1, ...CHARACTERS_CORE },
   { file: "client/features/monsters/MonsterEditor.tsx", sites: 63, ...CHARACTERS_CORE },
-  { file: "client/features/monsters/MonsterImage.tsx", sites: 10, ...CHARACTERS_CORE },
   { file: "client/features/monsters/MonsterList.tsx", sites: 2, ...CHARACTERS_CORE },
   { file: "client/features/monsters/MonsterPicker.tsx", sites: 14, ...CHARACTERS_CORE },
   { file: "client/features/monsters/SrdLoadFailed.tsx", sites: 3, ...CHARACTERS_CORE },
@@ -913,6 +927,13 @@ export const PRIMITIVES: readonly string[] = [
   "client/features/measure/controls.tsx#PopoverSwatches",
   "client/features/measure/controls.tsx#Stepper",
   "client/features/measure/controls.tsx#ValueChip",
+  "client/features/models/ModelPreview.tsx#ModelPreview",
+  "client/features/models/ModelSheet.tsx#FrontView",
+  "client/features/models/ModelSheet.tsx#ModelSheet",
+  "client/features/models/ModelSheet.tsx#OpenSheet",
+  "client/features/models/ModelSheet.tsx#OptionButton",
+  "client/features/models/ModelSheet.tsx#RemoveModel",
+  "client/features/models/ModelSheet.tsx#RoomModels",
   "client/features/modules/FeaturesPage.tsx#FeaturesPage",
   "client/features/modules/FeaturesPage.tsx#FeaturesRow",
   "client/features/modules/FeaturesPage.tsx#PartSwitch",

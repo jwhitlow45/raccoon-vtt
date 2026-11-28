@@ -60,11 +60,13 @@ export const MODULE_GROUPS: readonly { id: ModuleGroup; name: string }[] = [
  * Where a hidden part's way back stands (design section 6): a quiet
  * "Hidden on this device:" line where the part lived. The creature homes
  * (uses, rest, companions, statBlock) name a part only where the creature
- * holds it (`holds`, D-261127-391).
+ * holds it (`holds`, D-261127-391). `images` stands beside a picture's
+ * buttons, where 3D model stood, and in the Library where its 3D models
+ * stood (docs/design/design-v1-token-models.md 13, D-261127-692).
  */
-export type Home = "uses" | "rest" | "companions" | "statBlock" | "tools" | "panels" | "menu" | "sceneSettings" | "newScene" | "dmPanel" | "thisDevice";
+export type Home = "uses" | "rest" | "companions" | "statBlock" | "tools" | "panels" | "menu" | "sceneSettings" | "newScene" | "dmPanel" | "thisDevice" | "images";
 
-export const HOMES: readonly Home[] = ["uses", "rest", "companions", "statBlock", "tools", "panels", "menu", "sceneSettings", "newScene", "dmPanel", "thisDevice"];
+export const HOMES: readonly Home[] = ["uses", "rest", "companions", "statBlock", "tools", "panels", "menu", "sceneSettings", "newScene", "dmPanel", "thisDevice", "images"];
 
 /** The homes on a creature's surface, where `holds` decides. */
 export const CREATURE_HOMES: ReadonlySet<Home> = new Set<Home>(["uses", "rest", "companions", "statBlock"]);
@@ -439,15 +441,18 @@ export const MODULES: readonly ModuleDef[] = [
     name: "Isometric view",
     help: "Tilt the map and stand creatures up. Hidden, the map stays top-down.",
     group: "visuals",
-    roles: BOTH(["menu"], NEITHER),
+    // A 3D model stands only in Isometric, so its button, its sheet and the Library's 3D models are this part's, and hiding them sends nothing (D-261127-692).
+    roles: BOTH(["menu", "images"], NEITHER),
     display: "menu",
-    names: ["iso", "3d view", "tilt", "standees"],
+    names: ["iso", "3d view", "tilt", "standees", "3d model"],
     claims: [
       { kind: "topBar", id: "view" },
       { kind: "shortcut", id: "view" },
       { kind: "shortcut", id: "turnLeft" },
       { kind: "shortcut", id: "turnRight" },
       { kind: "behavior", id: "tapAgain" },
+      { kind: "behavior", id: "modelPreviewTurn" },
+      { kind: "surface", id: "3D model preview" },
     ],
   },
   {

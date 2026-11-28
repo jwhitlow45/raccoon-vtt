@@ -14,6 +14,7 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
 import { iconCredit } from "../images/icons.ts";
 import { ModelSheet } from "../models/ModelSheet.tsx";
+import { HiddenHere, Module } from "../modules/Gate.tsx";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { applyOps, optInCount, optInLabel, planApply, sameImage, type MonsterRef } from "./images.ts";
 import { isAssetImage, keepModel } from "#shared/imageRef.ts";
@@ -75,9 +76,12 @@ export function MonsterImageField(props: {
             Crop
           </Button>
         ) : null}
-        <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
-          3D model
-        </Button>
+        {/* Isometric view's, as beside a token's picture, with the way back at the row's end (D-261127-692). */}
+        <Module id="isometric">
+          <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
+            3D model
+          </Button>
+        </Module>
         {twoTaps ? (
           <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => props.onChange(null)}>
             {props.fallback ? "Use the default icon" : "Remove image"}
@@ -96,6 +100,7 @@ export function MonsterImageField(props: {
             Removes the picture and its 3D model.
           </Help>
         ) : null}
+        <HiddenHere home="images" />
       </div>
       {step?.kind === "pick" ? (
         <ImagePicker

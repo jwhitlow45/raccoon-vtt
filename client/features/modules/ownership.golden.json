@@ -113,6 +113,7 @@
     "initSeveral": "core",
     "linkMove": "builder",
     "linkResize": "builder",
+    "modelPreviewTurn": "isometric",
     "musicDragEscape": "core",
     "musicEnds": "core",
     "musicMove": "core",
@@ -174,6 +175,7 @@
     "wingJoin": "dungeon"
   },
   "surface": {
+    "3D model preview": "isometric",
     "Dialogs": "core",
     "Dice": "core",
     "Handout viewer": "core",

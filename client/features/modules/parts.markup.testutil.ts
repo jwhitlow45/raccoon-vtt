@@ -55,6 +55,8 @@ const { TokenActionBar } = await import("../../canvas/TokenActionBar.tsx");
 const { AttachBlockDialog, CharacterBlocksPage } = await import("../tokens/CompanionBlocks.tsx");
 const { ResourceSheet } = await import("../resources/ResourceSheet.tsx");
 const { PcStatsEditor } = await import("../pcstats/PcStatsEditor.tsx");
+const { ImageField } = await import("../images/ImageField.tsx");
+const { ModelSheet } = await import("../models/ModelSheet.tsx");
 const { RoomPasteHost } = await import("../images/RoomPaste.tsx");
 const { PlayerOptions } = await import("../dice/RollOptions.tsx");
 const { default: DicePanel } = await import("../dice/DicePanel.tsx");
@@ -217,6 +219,9 @@ export function readDrawing(html: string, surface: string, inner: readonly Inner
 // ------------------------------------------------------------ drawing
 
 const noop = () => {};
+
+/** A picture wearing a 3D model, its sheet's 8 boxes all one. */
+const MODELLED = { assetId: "a-sheet-picture", crop: { cx: 0.5, cy: 0.5, zoom: 1 }, model: { assetId: "a-model-sheet", side: 1.4, anchorY: 0.82, boxes: Array.from({ length: 8 }, () => [20, 10, 80, 95] as [number, number, number, number]) } };
 /** The room's actions and setters, every one a no-op a drawing never calls. */
 const ACTIONS = new Proxy({ dispatch: () => 1, newId: () => "x" } as Record<string, unknown>, { get: (t, k) => (typeof k === "string" && k in t ? t[k] : noop) });
 const UI = new Proxy({} as Record<string, unknown>, { get: () => noop });
@@ -586,7 +591,7 @@ export const FIXTURES: readonly Fixture[] = [
     surface: "Characters",
     name: "Bree's page",
     roles: ["dm", "player"],
-    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
+    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }, { home: "images" }],
     draw: () => createElement(CharacterPage, { character: bree(), close: noop, onAddCompanion: noop, onBlocks: noop, onDelete: () => null }),
   },
   {
@@ -594,7 +599,7 @@ export const FIXTURES: readonly Fixture[] = [
     name: "Bree's page, her stat block linked to D&D Beyond and never synced",
     roles: ["dm", "player"],
     room: linkedRoom,
-    homes: [{ home: "uses", holder: BREE_LINKED_HOLDS }, { home: "rest", holder: BREE_LINKED_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_LINKED_HOLDS }],
+    homes: [{ home: "uses", holder: BREE_LINKED_HOLDS }, { home: "rest", holder: BREE_LINKED_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_LINKED_HOLDS }, { home: "images" }],
     draw: () => createElement(CharacterPage, { character: linkedRoom().characters.bree!, close: noop, onAddCompanion: noop, onBlocks: noop, onDelete: () => null }),
   },
   { surface: "Characters", name: "the Characters panel's list", roles: ["dm"], draw: () => createElement(CharactersPanel as never, PANEL as never) },
@@ -602,7 +607,7 @@ export const FIXTURES: readonly Fixture[] = [
     surface: "Characters",
     name: "the Characters panel at a player's own page",
     roles: ["player"],
-    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }],
+    homes: [{ home: "uses", holder: BREE_HOLDS }, { home: "rest", holder: BREE_HOLDS }, { home: "companions" }, { home: "statBlock", holder: BREE_HOLDS }, { home: "images" }],
     draw: () => createElement(CharactersPanel as never, PANEL as never),
   },
   {
@@ -617,8 +622,8 @@ export const FIXTURES: readonly Fixture[] = [
   },
   { surface: "Characters", name: "Re-sync from D&D Beyond, getting it", roles: ["dm", "player"], draw: () => createElement(ResyncDialog, { characterId: "bree", onClose: noop }) },
 
-  { surface: "Token panel", name: "Bree's token", roles: ["dm", "player"], homes: [{ home: "uses", holder: BREE_TOKEN_HOLDS }, { home: "rest", holder: BREE_TOKEN_HOLDS }], local: { selectedId: "tbree", selectedIds: ["tbree"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "tbree" } as never) },
-  { surface: "Token panel", name: "the owl, Bree's companion", roles: ["dm", "player"], homes: [{ home: "companions" }], local: { selectedId: "owl", selectedIds: ["owl"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "owl" } as never) },
+  { surface: "Token panel", name: "Bree's token", roles: ["dm", "player"], homes: [{ home: "uses", holder: BREE_TOKEN_HOLDS }, { home: "rest", holder: BREE_TOKEN_HOLDS }, { home: "images" }], local: { selectedId: "tbree", selectedIds: ["tbree"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "tbree" } as never) },
+  { surface: "Token panel", name: "the owl, Bree's companion", roles: ["dm", "player"], homes: [{ home: "companions" }, { home: "images" }], local: { selectedId: "owl", selectedIds: ["owl"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "owl" } as never) },
   { surface: "Token panel", name: "Bree's companion stat blocks", roles: ["dm", "player"], draw: () => createElement(CharacterBlocksPage, { character: { id: "bree", name: "Bree" }, onBack: noop }) },
   {
     surface: "Token panel",
@@ -626,7 +631,9 @@ export const FIXTURES: readonly Fixture[] = [
     roles: ["dm", "player"],
     draw: () => createElement(AttachBlockDialog, { token: tableRoom().tokens.owl!, actor: tableRoom().tokens.owl!.actor && "inline" in tableRoom().tokens.owl!.actor ? (tableRoom().tokens.owl!.actor as { inline: object }).inline : undefined, character: { id: "bree", name: "Bree" }, access: { dm: true, owner: true }, onClose: noop }),
   },
-  { surface: "Token panel", name: "a goblin", roles: ["dm"], local: { selectedId: "g1", selectedIds: ["g1"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "g1" } as never) },
+  { surface: "Token panel", name: "a goblin", roles: ["dm"], homes: [{ home: "images" }], local: { selectedId: "g1", selectedIds: ["g1"] }, draw: () => createElement(TokenPanel as never, { ...PANEL, selectedTokenId: "g1" } as never) },
+  // A picture with a model asks twice before Remove takes both, a branch no token of the table room draws.
+  { surface: "Token panel", name: "a picture carrying a 3D model", roles: ["dm", "player"], homes: [{ home: "images" }], draw: () => createElement(ImageField, { value: MODELLED, onChange: noop, shape: "circle", aspect: 1, canEdit: true }) },
   {
     surface: "Token panel",
     name: "a goblin's Make a companion open",
@@ -659,6 +666,9 @@ export const FIXTURES: readonly Fixture[] = [
       scope.get(pasteSlot).room?.(new File([new Uint8Array(8)], "map.png", { type: "image/png" }), 1);
     }, { effects: true }),
   },
+  // The sheet's states that draw without a file read in its worker. Reading and the drawn views are models.e2e.ts's (surfaces.ts MODEL_SHEET).
+  { surface: "Dialogs and sheets", name: "the 3D model sheet with no model yet", roles: ["dm", "player"], draw: () => createElement(ModelSheet, { wearers: [undefined], onCommit: noop, onClose: noop, opener: { current: null } }) },
+  { surface: "Dialogs and sheets", name: "the 3D model sheet with its stored model", roles: ["dm", "player"], draw: () => createElement(ModelSheet, { wearers: [MODELLED], onCommit: noop, onClose: noop, opener: { current: null } }) },
 
   {
     surface: "Dice",

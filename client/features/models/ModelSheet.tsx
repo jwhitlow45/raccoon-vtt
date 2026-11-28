@@ -9,6 +9,7 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { useDiscard } from "../clock/useDiscard.ts";
+import { Module, useModule } from "../modules/Gate.tsx";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import { ConfirmButton, FieldRow, Select, Stepper } from "../tokens/ui.tsx";
 import type { DrawOptions } from "./client.ts";
@@ -52,13 +53,34 @@ const PICTURE_COLOR = { value: "picture" as const, label: "Picture's color" };
 const STAGE_WORDS = { reading: "Reading the file…", drawing: "Drawing its 8 views…" } as const;
 const STAGE_SAID = { reading: "Reading the file.", drawing: "Drawing its views." } as const;
 
-export function ModelSheet(props: {
+type SheetProps = {
   wearers: readonly (ImageRef | undefined)[];
   onCommit(change: (current: ImageRef | undefined) => ImageRef | null): void;
   onClose(): void;
   opener: RefObject<HTMLElement | null>;
   ring?: string;
-}) {
+};
+
+/**
+ * Isometric view's, wherever it opens (D-261127-692): the sheet draws only
+ * while the part shows on this device, and closes for good once it hides,
+ * here or in another window, as an open ResourceSheet does. Its session
+ * closes with it, so a file read or a save under way sends nothing.
+ */
+export function ModelSheet(props: SheetProps) {
+  const shown = useModule("isometric");
+  const { onClose } = props;
+  useEffect(() => {
+    if (!shown) onClose();
+  }, [shown, onClose]);
+  return (
+    <Module id="isometric">
+      <OpenSheet {...props} />
+    </Module>
+  );
+}
+
+function OpenSheet(props: SheetProps) {
   const roomId = useRoomView((s) => s.roomId);
   const view = useRoomView((s) => s.view);
   const assets = useAssets();

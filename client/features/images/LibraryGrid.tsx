@@ -20,6 +20,7 @@ import { FilmStrip } from "../animmap/MapVideoRow.tsx";
 import { videoLength } from "../animmap/words.ts";
 import { HandoutViewer, type ViewerPage } from "../handouts/HandoutViewer.tsx";
 import { pageCountText, pageName } from "../handouts/handouts.ts";
+import { HiddenHere, useModule } from "../modules/Gate.tsx";
 import { formatBytes } from "../settings/backup.ts";
 import { CreditLine } from "./CreditLine.tsx";
 import { deleteRunning, docDeleteNote, docDeleteSlot, retryDocDelete, startDocDelete, type DocDelete } from "./docDelete.ts";
@@ -239,6 +240,8 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const byId = useMemo(() => (rows ? new Map(rows.map((r) => [r.id, r])) : null), [rows]);
   const apart = useMemo(() => (rows ? apartFromStarter(rows, (r) => r) : null), [rows]);
   const unused = rows ? notInUse(rows, held) : [];
+  // The 3D models are Isometric view's, so a device that hides it lists none. Cleanup still counts them: hiding never changes what a delete sends (D-261127-692).
+  const modelsShown = useModule("isometric");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   // The last images going take Cleanup's button with them, and focus goes to its section, which then says what the delete did.
@@ -327,12 +330,13 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
       after: flows.map((flow) => <DeleteNote key={flow.docId} flow={flow} onRetry={() => deletes.retry(flow.docId)} />),
     },
     ...(apart
-      ? SECTIONS.map((section) => ({
-          id: section.kind,
-          heading: section.heading,
-          label: `${section.heading} in this room`,
-          tiles: apart.own.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row)),
-        }))
+      ? SECTIONS.map((section) => {
+          const tiles = apart.own.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row));
+          const own = { id: section.kind, heading: section.heading, label: `${section.heading} in this room` };
+          // Where the room has models, their heading stays with the way back under it.
+          if (section.kind === "model" && !modelsShown) return { ...own, tiles: [], keep: tiles.length > 0, after: <HiddenHere home="images" /> };
+          return { ...own, tiles };
+        })
       : [{ id: "unlisted", label: "Token images in this room", tiles: props.unlisted.map((id) => imageTileOf(id, undefined)) }]),
     ...(apart
       ? [
@@ -347,7 +351,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
             id: `starter-${section.kind}`,
             heading: section.heading,
             label: `${section.heading} from starter packs`,
-            tiles: apart.starter.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row)),
+            tiles: section.kind === "model" && !modelsShown ? [] : apart.starter.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row)),
             starter: true,
           })),
         ]

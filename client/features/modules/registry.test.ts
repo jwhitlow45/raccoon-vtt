@@ -38,6 +38,12 @@ describe("the parts registry", () => {
     }
   });
 
+  test("every home is some part's, so a line placed in the app has a part to name", () => {
+    // A home no part lists draws nothing anywhere, and the parts markup test, which reads its Show buttons from the registry, would want none.
+    const used = new Set(MODULES.flatMap((m) => ROLES.flatMap((role) => m.roles[role]?.homes ?? [])));
+    assert.deepEqual(HOMES.filter((h) => !used.has(h)), []);
+  });
+
   test("needs name parts, end, and stay within each role the part has", () => {
     for (const m of MODULES) {
       for (const n of m.needs ?? []) assert.ok(MODULE_IDS.includes(n), `${m.id} needs ${n}`);

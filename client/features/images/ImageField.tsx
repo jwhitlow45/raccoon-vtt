@@ -7,6 +7,7 @@ import { theme } from "../../lib/theme.ts";
 import type { Initials } from "../../lib/tokenView.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ModelSheet } from "../models/ModelSheet.tsx";
+import { HiddenHere, Module, useHiddenHere } from "../modules/Gate.tsx";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { DEFAULT_CROP, type Crop } from "./crop.ts";
 import { CreditLine } from "./CreditLine.tsx";
@@ -96,9 +97,12 @@ export function ImageField(props: {
           Crop
         </Button>
       ) : null}
-      <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
-        3D model
-      </Button>
+      {/* Isometric view's: a model stands only there, so a device that hides it hides the button, and its way back stands under the buttons (D-261127-692). */}
+      <Module id="isometric">
+        <Button ref={modelButton} size="sm" icon="viewIsometric" onClick={() => setStep({ kind: "model" })}>
+          3D model
+        </Button>
+      </Module>
       {set && hasModel ? (
         // The model goes with its picture and cannot be rebuilt from the room, so this asks twice (D-261127-388).
         <ConfirmButton icon="delete" confirm="Remove both?" describedBy={removeHelp} onConfirm={() => each(() => null)}>
@@ -112,6 +116,9 @@ export function ImageField(props: {
     </>
   );
   const removeLine = set && hasModel && props.canEdit ? <Help id={removeHelp}>Removes the picture and its 3D model.</Help> : null;
+  // A row of its own after Remove's help, and only while a part hides here, so the column keeps its gaps.
+  const hiddenHere = useHiddenHere("images").length > 0;
+  const hiddenLine = props.canEdit && hiddenHere ? <HiddenHere home="images" /> : null;
   const buttons = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
   const width = props.previewSize ?? 64;
   const preview = <ImagePreview image={props.value} shape={props.shape} aspect={props.aspect} width={width} ring={props.ring} initials={props.initials} />;
@@ -145,6 +152,7 @@ export function ImageField(props: {
             </div>
             <div style={{ ...buttons, width: 0, minWidth: "100%" }}>{fix}</div>
             {removeLine ? <div style={{ width: 0, minWidth: "100%" }}>{removeLine}</div> : null}
+            {hiddenLine ? <div style={{ width: 0, minWidth: "100%" }}>{hiddenLine}</div> : null}
             {props.extra.below ? <div style={{ width: 0, minWidth: "100%" }}>{props.extra.below}</div> : null}
           </div>
         ) : props.canEdit ? (
@@ -154,6 +162,7 @@ export function ImageField(props: {
               {fix}
             </div>
             {removeLine}
+            {hiddenLine}
           </div>
         ) : null}
         {step?.kind === "pick" ? (

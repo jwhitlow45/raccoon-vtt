@@ -400,6 +400,7 @@
     "textarea \"Note for DMs only\"": "core",
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "input[text] \"Character name\"": "core",
     "select \"Size\"": "core",
@@ -470,6 +471,7 @@
     "textarea \"Card notes\"": "core",
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "input[text] \"Character name\"": "core",
     "input[text] \"Character level\"": "core",
@@ -530,6 +532,7 @@
     "textarea \"Note for DMs only\"": "core",
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "input[text] \"Character name\"": "core",
     "select \"Size\"": "core",
@@ -600,6 +603,7 @@
     "textarea \"Card notes\"": "core",
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "input[text] \"Character name\"": "core",
     "input[text] \"Character level\"": "core",
@@ -663,6 +667,7 @@
     "textarea \"Card notes\"": "core",
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "input[text] \"Character name\"": "core",
     "input[text] \"Character level\"": "core",
@@ -772,6 +777,7 @@
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
     "button \"Add another image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "select \"Size\"": "core",
     "input[text] \"Armor Class\"": "core",
@@ -870,6 +876,7 @@
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
     "button \"Add another image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "select \"Size\"": "core",
     "input[text] \"Armor Class\"": "core",
@@ -923,6 +930,7 @@
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
     "button \"Add another image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "select \"Size\"": "core",
     "input[text] \"Armor Class\"": "core",
@@ -1002,6 +1010,7 @@
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
     "button \"Add another image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "select \"Size\"": "core",
     "input[text] \"Armor Class\"": "core",
@@ -1081,6 +1090,7 @@
     "button \"Image\"": "core",
     "button \"Add image\"": "core",
     "button \"Add another image\"": "core",
+    "button \"3D model\"": "isometric",
     "button \"Stats\"": "core",
     "select \"Size\"": "core",
     "input[text] \"Armor Class\"": "core",
@@ -1121,6 +1131,18 @@
     "button \"View as Sam\"": "core",
     "input[checkbox] \"DM (DM)\"": "core",
     "button \"Delete this token\"": "core"
+  },
+  "Token panel / a picture carrying a 3D model / dm": {
+    "button \"Change image\"": "core",
+    "button \"Crop\"": "core",
+    "button \"3D model\"": "isometric",
+    "button \"Remove\"": "core"
+  },
+  "Token panel / a picture carrying a 3D model / player": {
+    "button \"Change image\"": "core",
+    "button \"Crop\"": "core",
+    "button \"3D model\"": "isometric",
+    "button \"Remove\"": "core"
   },
   "Token panel / a goblin's Make a companion open / dm": {
     "select \"Belongs to\"": "companions",
@@ -1442,6 +1464,34 @@
     "button \"New scene\"": "core",
     "button \"Stamp\"": "builder",
     "button \"Handout\"": "core"
+  },
+  "Dialogs and sheets / the 3D model sheet with no model yet / dm": {
+    "button \"Close 3D model\"": "isometric",
+    "input[file] \"\"": "isometric",
+    "button \"Choose a file\"": "isometric"
+  },
+  "Dialogs and sheets / the 3D model sheet with no model yet / player": {
+    "button \"Close 3D model\"": "isometric",
+    "input[file] \"\"": "isometric",
+    "button \"Choose a file\"": "isometric"
+  },
+  "Dialogs and sheets / the 3D model sheet with its stored model / dm": {
+    "button \"Close 3D model\"": "isometric",
+    "input[file] \"\"": "isometric",
+    "canvas[role=img] \"The model, seen from the front\"": "isometric",
+    "button \"Turn left\"": "isometric",
+    "button \"Turn right\"": "isometric",
+    "button \"Choose another file\"": "isometric",
+    "button \"Remove model\"": "isometric"
+  },
+  "Dialogs and sheets / the 3D model sheet with its stored model / player": {
+    "button \"Close 3D model\"": "isometric",
+    "input[file] \"\"": "isometric",
+    "canvas[role=img] \"The model, seen from the front\"": "isometric",
+    "button \"Turn left\"": "isometric",
+    "button \"Turn right\"": "isometric",
+    "button \"Choose another file\"": "isometric",
+    "button \"Remove model\"": "isometric"
   },
   "Dice / a cast block, its area to place / player": {
     "button \"Initiative\"": "core",
