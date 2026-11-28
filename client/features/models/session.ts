@@ -48,9 +48,10 @@ export type SessionState = {
   /** The file being drawn, or null before a pick, after a cancel and after a refusal. */
   file: File | null;
   options: SheetOptions;
-  /** The newest finished drawing of `file`, at `drawnFor`. */
+  /** The newest finished drawing of `file`, at `drawnFor`, in `drawnColor`: the color its draw used, which Save keys it by, since the pictures can change after it (D-261127-695). */
   drawn: DrawnSheet | null;
   drawnFor: SheetOptions | null;
+  drawnColor: ModelColor | null;
   /** A draw in flight: "reading", then "drawing". */
   stage: ModelStage | null;
   saving: boolean;
@@ -148,7 +149,7 @@ export class ModelSession {
   #gen = 0;
   #draw: AbortController | null = null;
   #save: AbortController | null = null;
-  #state: SessionState = { file: null, options: START_OPTIONS, drawn: null, drawnFor: null, stage: null, saving: false, error: null, reuse: null, closed: false };
+  #state: SessionState = { file: null, options: START_OPTIONS, drawn: null, drawnFor: null, drawnColor: null, stage: null, saving: false, error: null, reuse: null, closed: false };
 
   constructor(deps: SessionDeps, wearers: readonly (ImageRef | undefined)[]) {
     this.#deps = deps;
@@ -167,6 +168,8 @@ export class ModelSession {
   /** The images worn now, which can change while the sheet is open (another member, or a remove here). */
   setWearers(wearers: readonly (ImageRef | undefined)[]): void {
     this.#wearers = wearers;
+    // Picture's color needs a picture on every wearer, at most 6: a change that leaves it unusable draws in Stone, as setOptions would refuse it.
+    if (this.#state.options.color === "picture" && !pictureColorOffer(wearers).usable) this.setOptions({ color: "stone" });
   }
 
   #set(patch: Partial<SessionState>): void {
@@ -182,7 +185,7 @@ export class ModelSession {
 
   pick(file: File): void {
     if (this.#state.closed || this.#state.saving) return;
-    this.#set({ file, options: START_OPTIONS, drawn: null, drawnFor: null, error: null, reuse: null });
+    this.#set({ file, options: START_OPTIONS, drawn: null, drawnFor: null, drawnColor: null, error: null, reuse: null });
     this.#start("reading");
   }
 
@@ -200,7 +203,7 @@ export class ModelSession {
   useRoomModel(choice: RoomModel): void {
     if (this.#state.closed || this.#state.saving) return;
     this.#stopDraw();
-    this.#set({ file: null, drawn: null, drawnFor: null, stage: null, error: null, reuse: choice, options: START_OPTIONS });
+    this.#set({ file: null, drawn: null, drawnFor: null, drawnColor: null, stage: null, error: null, reuse: choice, options: START_OPTIONS });
   }
 
   /** The Cancel shown while reading or drawing: a redraw goes back to the last drawing, a first read back to the start. */
@@ -243,13 +246,13 @@ export class ModelSession {
         // The Size stepper stops at the model's cap, and the drawing has already been clamped to it.
         const size = Math.min(options.size, drawn.maxSize);
         const shown = size === options.size ? options : { ...options, size };
-        this.#set({ drawn, drawnFor: shown, options: shown, stage: null });
+        this.#set({ drawn, drawnFor: shown, drawnColor: color, options: shown, stage: null });
       } catch (err) {
         if (gen !== this.#gen) return;
         this.#draw = null;
         if (aborted(err)) return;
         // A refusal ends the worker, so the file is chosen again.
-        this.#set({ stage: null, file: null, drawn: null, drawnFor: null, error: err instanceof Error ? err.message : String(err) });
+        this.#set({ stage: null, file: null, drawn: null, drawnFor: null, drawnColor: null, error: err instanceof Error ? err.message : String(err) });
       }
     })();
   }
@@ -277,7 +280,7 @@ export class ModelSession {
     const live = () => gen === this.#gen && !this.#state.closed;
     void (async () => {
       try {
-        const change = s.reuse ? this.#reuseChange(s.reuse) : await this.#drawnChange(s.file!, s.drawn!, s.drawnFor!, controller.signal, live);
+        const change = s.reuse ? this.#reuseChange(s.reuse) : await this.#drawnChange(s.file!, s.drawn!, s.drawnFor!, s.drawnColor!, controller.signal, live);
         if (!change || !live()) return;
         this.#save = null;
         this.#deps.commit(change);
@@ -301,53 +304,71 @@ export class ModelSession {
 
   /**
    * Uploads one sheet per different color the wearers need, the drawing
-   * shown as one of them, and the front view once where a wearer has no
-   * picture, then answers the change each wearer takes.
+   * shown as the one in the color it was drawn in, and the front view once
+   * where a wearer has no picture, then answers the change each wearer
+   * takes. Another device can change a picture while the sheet is open or
+   * while this uploads, so each pass reads the wearers again and draws any
+   * color they need that it has not, until a pass finds them as it left
+   * them (D-261127-695).
    */
   async #drawnChange(
     file: File,
     drawn: DrawnSheet,
     drawnFor: SheetOptions,
+    drawnColor: ModelColor,
     signal: AbortSignal,
     live: () => boolean,
   ): Promise<((current: ImageRef | undefined) => ImageRef | null) | null> {
-    const wearers = this.#wearers;
-    const colors = new Map<string, ModelColor>();
-    const pictures = drawnFor.color === "picture" ? (distinctPictures(wearers) ?? []) : [];
-    for (const picture of pictures) {
-      colors.set(pictureKey(picture), await this.#colorFor("picture", picture));
-      if (!live()) return null;
-    }
-    const shownColor = drawn.colorable ? await this.#colorFor(drawnFor.color, wearers[0]) : null;
-    if (!live()) return null;
-    const sheets = new Map<ModelColor | "", Omit<ModelRef, "assetId"> & { sheet: Blob }>();
-    sheets.set(shownColor ?? "", { ...drawn.meta, sheet: drawn.sheet });
     // A file with no plain part draws the same whatever the color, so it needs one sheet.
-    const needed: (ModelColor | "")[] = drawn.colorable && drawnFor.color === "picture" ? [...new Set(colors.values())] : [];
-    if (needed.length === 0) needed.push(shownColor ?? "");
-    for (const color of needed) {
-      if (sheets.has(color)) continue;
-      const other = await this.#deps.draw(file, { up: drawnFor.up, front: drawnFor.front, size: drawnFor.size, color: color as ModelColor, signal }).catch((err: unknown) => {
-        throw aborted(err) ? err : new DrawRefused(err instanceof Error ? err.message : String(err));
-      });
-      if (!live()) return null;
-      sheets.set(color, { ...other.meta, sheet: other.sheet });
-    }
+    const byPicture = drawn.colorable && drawnFor.color === "picture";
+    const shownKey: ModelColor | "" = drawn.colorable ? drawnColor : "";
+    const sheets = new Map<ModelColor | "", Omit<ModelRef, "assetId"> & { sheet: Blob }>([[shownKey, { ...drawn.meta, sheet: drawn.sheet }]]);
+    /** Each picture's color, by pictureKey, under Picture's color. */
+    const colors = new Map<string, ModelColor>();
     const models = new Map<ModelColor | "", ModelRef>();
-    for (const color of needed) {
-      const { sheet, ...meta } = sheets.get(color)!;
-      const assetId = await this.#deps.upload("model", sheet, signal);
-      if (!live()) return null;
-      models.set(color, { assetId, ...meta });
-    }
     let front: ImageRef | null = null;
-    if (wearers.some((w) => w === undefined)) {
-      front = { assetId: await this.#deps.upload("token", drawn.front, signal), crop: FRONT_CROP };
-      if (!live()) return null;
+    for (;;) {
+      const wearers = this.#wearers;
+      // A wearer with no picture wears the drawing shown, with the front view as its picture.
+      const needed = new Set<ModelColor | "">();
+      for (const wearer of wearers) {
+        if (!byPicture || !wearer) {
+          needed.add(shownKey);
+          continue;
+        }
+        const key = pictureKey(wearer);
+        if (!colors.has(key)) {
+          colors.set(key, await this.#colorFor("picture", wearer));
+          if (!live()) return null;
+        }
+        needed.add(colors.get(key)!);
+      }
+      for (const color of needed) {
+        if (models.has(color)) continue;
+        let sheet = sheets.get(color);
+        if (!sheet) {
+          const other = await this.#deps.draw(file, { up: drawnFor.up, front: drawnFor.front, size: drawnFor.size, color: color as ModelColor, signal }).catch((err: unknown) => {
+            throw aborted(err) ? err : new DrawRefused(err instanceof Error ? err.message : String(err));
+          });
+          if (!live()) return null;
+          sheet = { ...other.meta, sheet: other.sheet };
+          sheets.set(color, sheet);
+        }
+        const { sheet: blob, ...meta } = sheet;
+        const assetId = await this.#deps.upload("model", blob, signal);
+        if (!live()) return null;
+        models.set(color, { assetId, ...meta });
+      }
+      if (!front && wearers.some((w) => w === undefined)) {
+        front = { assetId: await this.#deps.upload("token", drawn.front, signal), crop: FRONT_CROP };
+        if (!live()) return null;
+      }
+      if (this.#wearers === wearers) break;
     }
-    const fallback = models.get(needed[0]!)!;
+    // Every wearer read in the last pass has its color's sheet. Any other image stands in the drawing shown, or else the first sheet.
+    const fallback = models.get(shownKey) ?? models.values().next().value!;
     return (current) => {
-      const color = current && drawnFor.color === "picture" && drawn.colorable ? colors.get(pictureKey(current)) : undefined;
+      const color = current && byPicture ? colors.get(pictureKey(current)) : shownKey;
       return wearing(current, (color !== undefined ? models.get(color) : undefined) ?? fallback, front);
     };
   }
