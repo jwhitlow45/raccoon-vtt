@@ -1,4 +1,6 @@
 import { createStore } from "zustand/vanilla";
+import type { SrdRolls } from "#shared/dice/bonus.ts";
+import type { SrdBlocks } from "#shared/rules/opportunity.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import type { DragRead } from "../measure/movement.ts";
 import type { Point, StopBlocker } from "./drop.ts";
@@ -57,3 +59,47 @@ export type DragRoute = {
 };
 
 export const routeSlot = scopeSlot(() => createStore<{ route: DragRoute | null }>(() => ({ route: null })));
+
+/**
+ * The creatures whose reach a lone drag's walk leaves, for their dashed
+ * amber rings (docs/design/design-v1-opportunity-attacks.md 1): written with
+ * the route, and cleared at the drop, a cancel or the drag's end.
+ */
+export type ReachMarks = { tokenId: string; ids: readonly string[] };
+
+export const reachSlot = scopeSlot(() => createStore<{ reach: ReachMarks | null }>(() => ({ reach: null })));
+
+/**
+ * The creatures a drop's line named, by the token and the spot it was
+ * dropped at, so the DM's toast skips a leg this device's own line already
+ * showed (section 1, The DM's toast). Only a line that named creatures is
+ * kept, and only the last few drops.
+ */
+export type ShownLeaves = { tokenId: string; x: number; y: number; ids: readonly string[] };
+
+export const shownLeavesSlot = scopeSlot(() => createStore<{ shown: readonly ShownLeaves[] }>(() => ({ shown: [] })));
+
+/** How many drops' lines the toast's skip remembers: more than a turn's drops can land before it reads them. */
+export const SHOWN_LEAVES_KEPT = 8;
+
+/** Remembers what a drop's line named. */
+export function rememberShown(shown: readonly ShownLeaves[], next: ShownLeaves): ShownLeaves[] {
+  return [...shown.filter((s) => s.tokenId !== next.tokenId || s.x !== next.x || s.y !== next.y), next].slice(-SHOWN_LEAVES_KEPT);
+}
+
+/** A chunk of the SRD's data the turn's scans read: loaded, failed, or still on its way (null). */
+export type TurnChunks = { rolls: SrdRolls | "failed" | null; monsters: SrdBlocks | "failed" | null };
+
+/**
+ * What the turn's leg jobs (combat/opportunity.ts) tell a drag, so its line
+ * skips the creatures earlier legs left: whether notices run on this page
+ * (the room's switch and this device's part), the SRD chunks they loaded,
+ * and for each mover of the turn its turn's seq, the creatures its stored
+ * legs left, and whether every one of that turn's jobs has finished. Until
+ * they have, the drag names no one (section 4, Leg jobs).
+ */
+export type TurnLeaves = { on: boolean; chunks: TurnChunks; movers: Readonly<Record<string, { turn: number; skip: ReadonlySet<string>; settled: boolean }>> };
+
+export const NO_TURN_LEAVES: TurnLeaves = { on: false, chunks: { rolls: null, monsters: null }, movers: {} };
+
+export const turnLeavesSlot = scopeSlot(() => createStore<TurnLeaves>(() => NO_TURN_LEAVES));

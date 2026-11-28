@@ -754,3 +754,26 @@ describe("the turn's feet across floors (docs/design/design-v1-floors.md phase 2
     assert.deepEqual([owner.movedFt, owner.usedFt, owner.diagonals], [15, 20, { h: 2, v: 0 }]);
   });
 });
+
+describe("the drag's Opportunity Attacks line (docs/design/design-v1-opportunity-attacks.md 1)", () => {
+  const read = { dragFt: 15, diag: [0, 0] as [number, number], left: { kind: "walk" as const, speed: 30, leftFt: 15, band: "walk" as const } };
+
+  test("under the cost lines, naming up to three creatures, a player's 5 ft said where every one was counted so", () => {
+    assert.equal(dragLabel({ ...read, leaves: { names: ["Goblin 2"], fiveFt: false } }), "15 ft · 15 ft left\nLeaves Goblin 2's reach");
+    assert.equal(dragLabel({ ...read, leaves: { names: ["Goblin 2", "Goblin 3"], fiveFt: false } }), "15 ft · 15 ft left\nLeaves the reach of Goblin 2 and Goblin 3");
+    assert.equal(dragLabel({ ...read, leaves: { names: ["Goblin 2", "Goblin 3", "Goblin 4"], fiveFt: false } }), "15 ft · 15 ft left\nLeaves the reach of Goblin 2, Goblin 3 and Goblin 4");
+    assert.equal(dragLabel({ ...read, leaves: { names: ["Goblin 2", "Goblin 3", "Goblin 4", "Goblin 5"], fiveFt: false } }), "15 ft · 15 ft left\nLeaves the reach of Goblin 2, Goblin 3 and 2 more");
+    assert.equal(dragLabel({ ...read, leaves: { names: ["Goblin 2"], fiveFt: true } }), "15 ft · 15 ft left\nLeaves 5 ft of Goblin 2");
+    // After what cost extra and the Half Speed area, before a fall's words.
+    assert.equal(
+      dragLabel({ ...read, extra: { ft: 5, words: "+5 ft for difficult terrain" }, halfSpeed: "Web", leaves: { names: ["Goblin 2"], fiveFt: false } }),
+      "15 ft · 15 ft left\n+5 ft for difficult terrain\nHalf Speed in Web\nLeaves Goblin 2's reach",
+    );
+  });
+
+  test("a scan past its cap, or one that waits, says the drop checks it, and no creature left adds no line", () => {
+    assert.equal(dragLabel({ ...read, leaves: "over" }), "15 ft · 15 ft left\nOpportunity Attacks are checked after the drop.");
+    assert.equal(dragLabel({ ...read, leaves: { names: [], fiveFt: false } }), "15 ft · 15 ft left");
+    assert.equal(dragLabel(read), "15 ft · 15 ft left");
+  });
+});

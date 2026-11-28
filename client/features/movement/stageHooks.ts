@@ -17,14 +17,14 @@ import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
 import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, groupOffsetOnScene, heldShortOfCreature, keptOnScene, keyStep, ledgeHold, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
-import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
+import { frameFields as routeFrame, groupReading, walkPreview, type DragReach } from "./preview.ts";
 import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { meetsCreature, RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
-import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
+import { holdSlot, reachSlot, rememberShown, routeSlot, sameHold, shownLeavesSlot, stopNoteSlot, turnLeavesSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
 import { labelsOf } from "../../state/labels.ts";
 
 /** Where a drag's preview is held, and what holds it. */
@@ -184,6 +184,9 @@ export function dragStops(deps: DragDeps): DragStops {
   const holds = scope.get(holdSlot);
   const notes = scope.get(stopNoteSlot);
   const routes = scope.get(routeSlot);
+  const reaches = scope.get(reachSlot);
+  const shownLeaves = scope.get(shownLeavesSlot);
+  const turnLeaves = scope.get(turnLeavesSlot);
   const drags = scope.get(localDragSlot);
   /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot, with the pressed token's middle when it sits on the lead. */
   let raw: ({ tokenId: string } & Aim) | null = null;
@@ -230,6 +233,18 @@ export function dragStops(deps: DragDeps): DragStops {
   };
   const setRoute = (next: DragRoute | null) => {
     if (routes.getState().route !== next) routes.setState({ route: next });
+  };
+  /** The rings of the creatures whose reach the walk leaves, written only when they change. */
+  const setReach = (tokenId: string, ids: readonly string[]) => {
+    const was = reaches.getState().reach;
+    if (ids.length === 0 ? was === null : was?.tokenId === tokenId && was.ids.length === ids.length && was.ids.every((id, i) => id === ids[i])) return;
+    reaches.setState({ reach: ids.length === 0 ? null : { tokenId, ids } });
+  };
+  /** What the drag's line reads of Opportunity Attacks: this viewer, and what the turn's leg jobs have told it, whether they run on this page among it. */
+  const reachNow = (): DragReach | null => {
+    const you = store.getState().you;
+    const turn = turnLeaves.getState();
+    return you ? { viewer: { memberId: you.memberId, role: you.role }, shown: turn.on, turn } : null;
   };
   /**
    * The lead's landing for what follows it (state/localDrags.ts): where its
@@ -294,6 +309,7 @@ export function dragStops(deps: DragDeps): DragStops {
     walk = null;
     setHold(null);
     setRoute(null);
+    if (reaches.getState().reach !== null) reaches.setState({ reach: null });
   };
 
   /** The last answer `shown` read, kept while the room and the token are the same, since the picture reads it every frame. */
@@ -320,8 +336,10 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!view || !w.target || walk !== w) return;
     const { answer, target } = shown(view, w.token, w.target, w.drag.answer);
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-    const route: DragRoute = { tokenId: w.token.id, ...walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting };
+    const { leaving, ...walked } = walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight, reach: reachNow() });
+    const route: DragRoute = { tokenId: w.token.id, ...walked, searching: answer.kind === "searching", waiting: w.waiting };
     setRoute(route);
+    setReach(route.tokenId, leaving);
     setLanding(route.tokenId, { ...route.to, ...(route.squeeze ? { squeeze: true } : {}) });
   };
 
@@ -577,7 +595,12 @@ export function dragStops(deps: DragDeps): DragStops {
             const now = seenView(store.getState().floorView) ?? view;
             goStraight(w, null);
             if (walk === w) walk = null;
+            // What the line named at the drop, so the DM's toast skips the leg it lands (docs/design/design-v1-opportunity-attacks.md 1).
+            const shown = routes.getState().route;
+            const marks = reaches.getState().reach;
+            if (shown?.tokenId === token.id && marks?.tokenId === token.id) shownLeaves.setState((s) => ({ shown: rememberShown(s.shown, { tokenId: token.id, x: shown.to.x, y: shown.to.y, ids: marks.ids }) }));
             setRoute(null);
+            if (marks !== null) reaches.setState({ reach: null });
             const world = w.world;
             const account = world
               ? (to: Point) => {

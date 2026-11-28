@@ -1,16 +1,18 @@
-import type { RoomState, Token } from "#shared/model.ts";
+import type { PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
-import { footprintSize, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
+import { footprintSize, isSqueezed, stopFootprint, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
+import { chunksNeeded, DRAG_WORK, opportunityNoticesOn, reachInput, reachScan, type Chunks, type ReachLeave, type ScanInput } from "#shared/rules/opportunity.ts";
 import { placedOnTrace, routePoints, routeWalkers, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
 import { dragReading, pathNow, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
+import { answersFor } from "../combat/logic.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
 import { cutPieces, dropGrid, dropLanding, fallLabel, fallsAt, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
-import type { DragRoute } from "./store.ts";
+import type { DragRoute, TurnLeaves } from "./store.ts";
 import type { Labels } from "../../lib/labels.ts";
 
 /**
@@ -132,6 +134,90 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
 }
 
 /**
+ * What a lone drag's line reads of the turn's Opportunity Attack notices
+ * (docs/design/design-v1-opportunity-attacks.md 1, 4): this viewer, whether
+ * the part shows on this device, and what the turn's leg jobs have told the
+ * drag (store.ts turnLeavesSlot).
+ */
+export type DragReach = { viewer: Viewer; shown: boolean; turn: TurnLeaves };
+
+/** A drag's reading of the enemies its walk leaves: the line, and every creature it names, for their rings. */
+export type DragLeaves = { leaves: NonNullable<DragRead["leaves"]>; ids: readonly string[] };
+
+const LATER: DragLeaves = { leaves: "over", ids: [] };
+const NO_ONE: ReadonlySet<string> = new Set();
+
+/** The last scan a drag ran, kept while nothing it read changed, since the drag reads it again for every quarter cell the finger crosses. */
+let lastLeaves: { key: string; reads: readonly unknown[]; out: DragLeaves | null } | null = null;
+
+/**
+ * The enemies whose reach a lone drag's walk would leave, read as the drop
+ * stores its leg so the line, the card and the toast agree
+ * (DRAG-EQUALS-CARD): from where the creature stands to where it lands,
+ * through the route's corners, the creature at the size it lands with and
+ * its start at the size it has now (shared/reducer/tokens.ts fills a
+ * reshape's earlier stops so). Only on the creature's own turn in a fight,
+ * on a DM device or the turn's answerer's, with the room's notices and
+ * this device's part on (D-261128-051). The scan stops at DRAG_WORK and the
+ * line says the drop will check it, as it does while the turn's earlier
+ * legs or the SRD data the scan reads are on their way, so the creatures
+ * those legs left are always skipped.
+ */
+export function dragLeaves(input: { view: DropView; token: Token; landed: Token; corners: readonly Point[]; reach: DragReach; labels: Labels; role: Role; /** The work cap, DRAG_WORK but in tests. */ cap?: number }): DragLeaves | null {
+  const { view, token, landed, reach, role } = input;
+  const encounter = view.encounter;
+  // TEMP(doac): the cast goes once lane B's RoomSettings field lands under this stack.
+  if (!reach.shown || !opportunityNoticesOn(view.meta.settings as { opportunityNotices?: boolean }) || !encounter) return null;
+  const fighting = encounter.started ?? encounter.activeEntryId !== null;
+  if (!fighting || turnMover(view, token, role) !== token.id) return null;
+  // The turn's own creature, whose answerer this is: a controlled mount walks for its rider (docs/design/design-v1-attach.md 7.2).
+  const creature = encounter.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? token.id;
+  if (reach.viewer.role !== "dm" && !answersFor(view, reach.viewer, { tokenId: creature })) return null;
+  const path = pathNow(encounter, token, role);
+  const mover = reach.turn.movers[token.id];
+  const earlier = path !== null && path.stops.length > 1;
+  if (earlier && (!mover || mover.turn !== path.turn || !mover.settled)) return LATER;
+  const skip = earlier && mover ? mover.skip : NO_ONE;
+  const need = chunksNeeded(view, token.id);
+  const { rolls, monsters } = reach.turn.chunks;
+  if ((need.rolls && rolls === null) || (need.monsters && monsters === null)) return LATER;
+  // A chunk the walk does not need is never read, so either word stands for it.
+  const chunks: Chunks = { rolls: rolls ?? "failed", monsters: monsters ?? "failed" };
+  const from: PathStop = { x: token.x, y: token.y, elevation: token.elevation, ...(isSqueezed(token) !== isSqueezed(landed) ? { footprint: stopFootprint(token) } : {}) };
+  const to: PathStop = { x: landed.x, y: landed.y, elevation: landed.elevation, ...(input.corners.length > 0 ? { via: input.corners.flatMap((c) => [c.x, c.y]) } : {}) };
+  const cap = input.cap ?? DRAG_WORK;
+  const key = JSON.stringify([token.id, from, to, isSqueezed(landed), reach.viewer, role, cap]);
+  const reads = [view.tokens, view.encounter, view.buildChunks, view.scenes, view.meta, view.characters, view.monsters, view.companionBlocks, rolls, monsters, skip, input.labels];
+  if (lastLeaves && lastLeaves.key === key && lastLeaves.reads.every((r, i) => r === reads[i])) return lastLeaves.out;
+  const out = scanDrag(view, token.id, path?.turn ?? 0, from, to, landed, chunks, skip, reach.viewer, input.labels, cap);
+  lastLeaves = { key, reads, out };
+  return out;
+}
+
+function scanDrag(view: DropView, moverId: string, turn: number, from: PathStop, to: PathStop, landed: Token, chunks: Chunks, skip: ReadonlySet<string>, viewer: Viewer, labels: Labels, cap: number): DragLeaves | null {
+  const built = reachInput(view, moverId, { turn, stops: [from, to] }, chunks, viewer);
+  const leg = built?.legs[built.legs.length - 1];
+  if (!built || !leg || !leg.provokes) return null;
+  const input: ScanInput = { ...built.input, mover: landed };
+  const run = reachScan(input, leg, skip, cap);
+  let step = run.next();
+  while (!step.done) {
+    if (step.value >= cap) return LATER;
+    step = run.next();
+  }
+  if (step.value === "over") return LATER;
+  const left: readonly ReachLeave[] = step.value;
+  if (left.length === 0) return null;
+  const names = left.flatMap((l) => {
+    const t = view.tokens[l.id];
+    return t ? [displayName(t, labels)] : [];
+  });
+  // Only a player's device lacks blocks, so only its line says the 5 ft it counted (D-261128-055).
+  const fiveFt = viewer.role === "player" && left.every((l) => input.reactors.find((r) => r.id === l.id)?.known === false);
+  return { leaves: { names, fiveFt }, ids: left.map((l) => l.id) };
+}
+
+/**
  * The board's picture of a lone drag's walk (docs/design/design-v1-movement.md
  * 3.1): the line, its corners and the label, for where the drop would land
  * now. The walk is the one the drop lands with (`routeLanding`): a route
@@ -144,7 +230,20 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
  * holder's walk held where a creature it drags would meet a wall
  * (`walkers`, docs/design/design-v1-attach.md 4.2) is drawn and read to there.
  */
-export function walkPreview(input: { labels: Labels; view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: {
+  labels: Labels;
+  view: DropView;
+  token: Token;
+  target: Point & { squeeze?: boolean };
+  answer: RouteAnswer;
+  held: Pose | null;
+  walkers?: WalkersCut | null;
+  world: PublicWorld | null;
+  role: Role;
+  straight?: { to: Pose; pieces: readonly RoutePiece[] } | null;
+  /** What the line reads of Opportunity Attacks. Left out, it reads none. */
+  reach?: DragReach | null;
+}): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> & { leaving: readonly string[] } {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
@@ -208,13 +307,18 @@ export function walkPreview(input: { labels: Labels; view: DropView; token: Toke
         }
       : {}),
   });
+  const corners = pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [];
+  const fallen = withFall(view, token, to, end.elevation, read);
+  // A drop through an opening folds its leg into the floor it leaves, which no notice reads (section 2), so its line names no one.
+  const leaves = input.reach && !fallen.falls ? dragLeaves({ view, token, landed, corners, reach: input.reach, labels: input.labels, role }) : null;
   return {
     to: { x: to.x, y: to.y },
     // For what reads the box it lands in mid-drag (state/localDrags.ts, SNAPBUILD-ASTRA-04).
     ...(to.squeeze === true ? { squeeze: true as const } : {}),
     cut: walk?.cut === true,
-    corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
-    read: withFall(view, token, to, end.elevation, read),
+    corners,
+    read: leaves ? { ...fallen, leaves: leaves.leaves } : fallen,
     endsIn: world ? endsIn(view, world, token, points[points.length - 1]!, input.labels) : null,
+    leaving: leaves?.ids ?? [],
   };
 }

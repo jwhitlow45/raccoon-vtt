@@ -3,6 +3,7 @@ import type { BuildState } from "#shared/ruleHooks.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { canSqueeze, footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
+import { reachWords } from "#shared/rules/opportunity.ts";
 import { legGeometry, legTaken, pathThisTurn, priorDiag, priorSeenDiag, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
 import { onSqueezedLattice, ownWalk, previewSqueezed, walkEnds, type Walker } from "#shared/rules/movement.ts";
@@ -319,7 +320,23 @@ export type DragRead = {
   diag: [number, number];
   /** Where the drop would fall through an opening, the drag's own words for it (movement/drop.ts fallLabel, docs/design/design-v1-floors.md phase 4, 12). */
   falls?: string;
+  /**
+   * The enemies whose reach the leg leaves, by the names this viewer sees,
+   * and whether every one was counted at 5 ft for want of its block, or
+   * "over" where the drag cannot tell them yet and the drop's own check will
+   * (docs/design/design-v1-opportunity-attacks.md 1). Absent, it says nothing.
+   */
+  leaves?: { names: string[]; fiveFt: boolean } | "over";
 };
+
+/** The drag's line when it cannot name the creatures yet: its scan passed its cap, or the turn's earlier legs or the data it reads are still on their way. */
+export const LEAVES_LATER = "Opportunity Attacks are checked after the drop.";
+
+/** The drag's line for the creatures whose reach the leg leaves, three names at most: "Leaves Goblin 2's reach". */
+export function leavesLine(leaves: NonNullable<DragRead["leaves"]>): string | null {
+  if (leaves === "over") return LEAVES_LATER;
+  return leaves.names.length > 0 ? reachWords(leaves.names, "Leaves", leaves.fiveFt, 3) : null;
+}
 
 const BAND_ORDER: readonly SpeedLeft["band"][] = ["walk", "dash", "over"];
 
@@ -597,10 +614,10 @@ function straightSteps(start: Walker, points: readonly RoutePoint[]): Point[][] 
   return out;
 }
 
-/** The label's lines (docs/design/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, the Half Speed area it would end in, and a fall through an opening there. */
+/** The label's lines (docs/design/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, the Half Speed area it would end in, the enemies' reach it leaves, and a fall through an opening there. */
 export function dragLabel(read: DragRead): string {
   const first = read.left ? `${formatFeet(read.dragFt)} · ${leftText(read.left)}` : formatFeet(read.dragFt);
-  return [first, read.extra?.words, read.halfSpeed ? `Half Speed in ${read.halfSpeed}` : null, read.falls].filter((l): l is string => !!l).join("\n");
+  return [first, read.extra?.words, read.halfSpeed ? `Half Speed in ${read.halfSpeed}` : null, read.leaves ? leavesLine(read.leaves) : null, read.falls].filter((l): l is string => !!l).join("\n");
 }
 
 /** "a", "a and b", "a, b and c". */
