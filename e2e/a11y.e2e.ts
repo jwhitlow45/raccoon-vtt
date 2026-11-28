@@ -61,27 +61,54 @@ const KNOWN: { rule: string; surface?: RegExp; node?: RegExp; reason: string }[]
   },
   {
     rule: "region",
+    surface: /^(dm|player) /,
     node: /touch-action: none|role=img> named "Map"|role=toolbar> named "[A-Za-z ]+ options"/,
     reason: "Follow-up: the map, its focus target and the tool options that float on it stand outside every landmark, since the room has no main. The top bar must stay the banner, so the fix is a main around the map's own layers.",
   },
   {
     rule: "heading-order",
-    surface: /1440x900: /,
+    surface: /^(dm|player) 1440x900: /,
     reason: "Follow-up: the side panel names a panel by its tab, not a heading, so the panel's h3 sections follow the room's h1. A phone's sheet header is the h2 there.",
   },
   {
     rule: "label-content-name-mismatch",
-    reason: "Follow-up, one class: a name that does not start with the words shown (Adv for Advantage, STR d20 for Strength save, a fold's summary after its name, a key hint), which speech input users say to press it.",
+    surface: /^(dm|player) /,
+    node: new RegExp(
+      [
+        // The Dice panel's modes: Adv, Dis and Secret, which is Hide from players for the DM and Only the DM sees it for a player.
+        'named "(Advantage|Disadvantage|Hide from players|Only the DM sees it)" showing "(Adv|Dis|Secret)"',
+        // A roll's button by its ability's abbreviation: STR d20 for Strength save, and Initiative +2.
+        'named "(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) (save|check)" showing "(STR|DEX|CON|INT|WIS|CHA) ',
+        'named "Initiative" showing "Initiative [+−-]?\\d',
+        // A fold named by its group's name, which shows its summary after it.
+        'named "by [^:"]+: (?<fold>[^"]+)" showing "\\k<fold>[^"]',
+        // A key hint after the words, or alone: Search ⌘K, and Esc for Close search.
+        'named "Search" showing "Search(⌘K|Ctrl ?K)"|named "Close search" showing "Esc"',
+        // A party or tracker row, which shows the portrait's initials before the name.
+        'named "(?<who>[A-Z][a-z]+)[:,.][^"]*Show it on the map[^"]*" showing "[A-Z][a-z]?\\k<who>',
+        // A tray's roll line, which shows the dice and the total.
+        'named "Show this roll in Recent rolls" showing "[0-9]',
+      ].join("|"),
+    ),
+    reason: "Follow-up F1, one class: a name that does not start with the words shown, which speech input users say to press it. Adv, Dis and Secret, STR d20 for Strength save, Initiative +2, a fold's summary after its name, a key hint, a row's portrait initials and a roll line's dice.",
+  },
+  {
+    rule: "label-content-name-mismatch",
+    surface: /^(visitor|dm) [0-9x]+: home( with a room)?$/,
+    node: /named "Suggest another password" showing "New"/,
+    reason: "Follow-up F1 too: Home's New beside the player password is named Suggest another password, which a speech input user cannot say as New. The name is held in three places and controls.golden.json, so it moves with the class.",
   },
   {
     rule: "label-title-only",
+    surface: /: Room settings$/,
     node: /Feet per square/,
     reason: "False positive: Room settings scrolls this row below its panel's edge, and axe reads a label cut off by a scroll box as not shown. The field is named by its setting's words, which show once it is scrolled to.",
   },
   {
     rule: "scrollable-region-focusable",
     surface: /: search$/,
-    reason: "False positive: the results are a listbox the search field drives with aria-activedescendant, so the arrow keys move through them and scroll the active row into view.",
+    node: /holding a listbox its combobox drives/,
+    reason: "False positive: the results are a listbox the search field drives as a combobox with aria-activedescendant, so the arrow keys move through them and scroll the active row into view.",
   },
 ];
 
@@ -148,13 +175,17 @@ async function scan(page: Page, surface: string): Promise<void> {
     type Result = { id: string; impact: string | null; help: string; nodes: { target: unknown[]; html: string }[] };
     const axe = (globalThis as unknown as { axe: { run(ctx: unknown, opts: unknown): Promise<{ violations: Result[] }> } }).axe;
     const r = await axe.run((globalThis as unknown as { document: unknown }).document, { runOnly: { type: "tag", values: tags }, resultTypes: ["violations"] });
-    const doc = (globalThis as unknown as { document: { querySelector(s: string): { tagName: string; textContent: string | null; getAttribute(n: string): string | null } | null } }).document;
+    type El = { tagName: string; textContent: string | null; getAttribute(n: string): string | null; querySelector(s: string): El | null };
+    const doc = (globalThis as unknown as { document: { querySelector(s: string): El | null } }).document;
     // What each node says and shows, which its HTML, cut short, often leaves out.
     const words = (target: unknown[]) => {
       const el = target.length === 1 ? doc.querySelector(String(target[0])) : null;
       if (!el) return "";
       const label = el.getAttribute("aria-label") ?? (el.getAttribute("aria-labelledby") ? `by ${el.getAttribute("aria-labelledby")}: ${(el.getAttribute("aria-labelledby") ?? "").split(" ").map((id) => doc.querySelector(`[id="${id}"]`)?.textContent ?? "(none)").join(" ")}` : null);
-      return `<${el.tagName.toLowerCase()}${el.getAttribute("role") ? ` role=${el.getAttribute("role")}` : ""}>${label === null ? "" : ` named "${label}"`} showing "${(el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}"`;
+      // A scroll box of results says whether a combobox drives its listbox, which is how the keys reach them.
+      const listbox = el.getAttribute("role") === "listbox" ? el : el.querySelector('[role="listbox"]');
+      const driven = listbox?.getAttribute("id") ? doc.querySelector(`[role="combobox"][aria-controls="${listbox.getAttribute("id")}"]`) !== null : false;
+      return `<${el.tagName.toLowerCase()}${el.getAttribute("role") ? ` role=${el.getAttribute("role")}` : ""}>${label === null ? "" : ` named "${label}"`} showing "${(el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}"${driven ? " holding a listbox its combobox drives" : ""}`;
     };
     return r.violations.map((v) => ({ id: v.id, impact: v.impact ?? "", help: v.help, nodes: v.nodes.map((n) => ({ target: n.target.map(String).join(" "), html: `${words(n.target)} ${n.html.slice(0, 200)}` })) }));
   }, TAGS);
@@ -737,6 +768,30 @@ describe("the accessibility sweep", { skip: SKIP, timeout: 1_400_000 }, () => {
       record("drawn-rule", "minor", "drawn", { target: "div > button", html: '<button> named "Other"' }, "drawn: page");
       const judged = [...(seen.get("drawn-rule")?.nodes.values() ?? [])].map((n) => [n.html, knownFor("drawn-rule", n, exempt) !== undefined]);
       assert.deepEqual(judged, [['<button> named "Exempt"', true], ['<button> named "Other"', false]], "each node at a shared selector judged by its own words");
+
+      // Each KNOWN entry holds only on the surfaces and nodes its reason names: what the sweep sees there stays known, and the same rule elsewhere does not.
+      const cases: [rule: string, surface: string, html: string, known: boolean][] = [
+        ["heading-order", "dm 1440x900: Initiative panel", '<h3> showing "New fight"', true],
+        ["heading-order", "visitor 1440x900: DM guide", '<h3> showing "Quick start"', false],
+        ["label-content-name-mismatch", "dm 1440x900: Dice panel", '<button> named "Advantage" showing "Adv"', true],
+        ["label-content-name-mismatch", "player 1440x900: Dice panel", '<button> named "Strength save" showing "STR d20"', true],
+        ["label-content-name-mismatch", "player 390x844: dice tray", '<button> named "Only the DM sees it" showing "Secret"', true],
+        ["label-content-name-mismatch", "dm 390x844: This device", '<button> named "by _r_1a_: Theme" showing "ThemeDark"', true],
+        ["label-content-name-mismatch", "dm 1440x900: board", '<button> named "Search" showing "Search⌘K"', true],
+        ["label-content-name-mismatch", "dm 1440x900: Initiative in a fight", '<button> named "Snag, acting now. Show it on the map with its actions" showing "SnSnag15, HP 7/7"', true],
+        ["label-content-name-mismatch", "visitor 390x844: home", '<button> named "Suggest another password" showing "New"', true],
+        ["label-content-name-mismatch", "dm 1440x900: Dice panel", '<button> named "Roll" showing "Throw"', false],
+        ["label-content-name-mismatch", "dm 390x844: This device", '<button> named "by _r_1a_: Theme" showing "Sound"', false],
+        ["label-content-name-mismatch", "visitor 390x844: Docs", '<button> named "Advantage" showing "Adv"', false],
+        ["region", "player 390x844: board", '<div role=img> named "Map" showing ""', true],
+        ["region", "visitor 390x844: home", '<div> showing "" <div style="touch-action: none;">', false],
+        ["scrollable-region-focusable", "dm 1440x900: search", '<div> showing "Dice" holding a listbox its combobox drives', true],
+        ["scrollable-region-focusable", "dm 1440x900: search", '<div> showing "Dice" <div style="overflow-y: auto">', false],
+        ["label-title-only", "dm 1440x900: Room settings", '<input> named "by _r_5e_: Feet per square" showing ""', true],
+        ["label-title-only", "dm 1440x900: This device", '<input> named "by _r_5e_: Feet per square" showing ""', false],
+      ];
+      const misjudged = cases.filter(([rule, surface, html, known]) => (knownFor(rule, { target: "x", html, surfaces: new Set([surface]) }) !== undefined) !== known);
+      assert.deepEqual(misjudged, [], "known entries that hold where their reasons do not, or fail where they do");
     } finally {
       seen = kept;
       scanned.length = 0;
