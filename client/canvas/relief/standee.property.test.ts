@@ -5,7 +5,7 @@ import { COVER_INSET } from "../../features/attach/groups.ts";
 import { MAX_SCALE } from "../../lib/camera.ts";
 import type { Turn } from "../../lib/view.ts";
 import type { VBox } from "./pieces.ts";
-import { ON_GROUND, standeeShape, type Seat, type StandeeModel } from "./standee.ts";
+import { ON_GROUND, standeeParts, standeeShape, type Seat, type StandeeModel } from "./standee.ts";
 
 /*
  * A standee's bounds are what culls it and what a scroll repaints it by
@@ -69,6 +69,9 @@ test("a standee's decor frame is its footprint's size, never reaches below its f
         assert.ok(shape.frame.y0 <= shape.drawnBox.y0 + 1e-9, "the frame's top, where the name and chips sit, at or over the drawn top");
         assert.ok(Math.abs(shape.frame.y1 - shape.frame.y0 - box.h) < 1e-9 && Math.abs(shape.frame.x1 - shape.frame.x0 - box.w) < 1e-9, "the footprint's size");
         assert.ok(Math.abs((shape.frame.x0 + shape.frame.x1) / 2 - (shape.ring.x0 + shape.ring.x1) / 2) < 1e-9, "centered on the ring, however off-center the model draws");
+        // A dragged token carries its decor in its own group (standeeParts), which must land on the still layout's frame (review SOL-MC-06).
+        const parts = standeeParts(turn, shape.drawnBase, ground, box, s, m);
+        assert.ok(Math.abs(shape.base.x + parts.decor.x - shape.frame.x0) < 1e-6 && Math.abs(shape.base.y + parts.decor.y - shape.frame.y0) < 1e-6, "the dragged decor on the still frame");
       },
     ),
     { numRuns: 2000 },

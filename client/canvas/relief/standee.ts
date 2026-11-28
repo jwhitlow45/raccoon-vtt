@@ -136,7 +136,7 @@ export function standeeShape(
   if (model) {
     art = modelArtBox(model, longer(box) * seat.inset, { x: at.x, y: foot });
     drawnBox = modelDrawnBox(art, model.box);
-    const top = Math.min(drawnBox.y0, foot - box.h);
+    const top = modelDecorTop(drawnBox.y0, foot, box.h);
     frame = { x0: at.x - box.w / 2, x1: at.x + box.w / 2, y0: top, y1: top + box.h };
   } else {
     art = { x0: at.x - (box.w * seat.inset) / 2, x1: at.x + (box.w * seat.inset) / 2, y0: foot - box.h * seat.inset, y1: foot };
@@ -181,6 +181,18 @@ export function cappedBase(base: number, ground: number, scale: number, canvasHe
 }
 
 /**
+ * The top of a model's decor frame, `h` tall, from its drawn top and its
+ * foot in one frame of reference: hung from the drawn top, or for a model
+ * lower than its footprint standing on its foot as a picture's does, so the
+ * decor never hangs below the foot (D-261127-716). The still layout
+ * (standeeShape) and a dragged model's own decor (standeeParts) both read
+ * it, so starting a drag never moves the decor.
+ */
+export function modelDecorTop(drawnTop: number, foot: number, h: number): number {
+  return Math.min(drawnTop, foot - h);
+}
+
+/**
  * Where a model draws in the art's group, before the art's scale: its
  * frame's drawn box alone, the only part of the frame that paints, so the
  * image takes a press there and nowhere else in its frame (D-261127-379).
@@ -218,5 +230,6 @@ export function standeeParts(
   const k = side / 100;
   const [x0, y0, x1, y1] = model.box;
   const art = { x: (-side * seat.inset) / 2, y: -seat.rise - model.anchorY * side * seat.inset, scale: seat.inset };
-  return { ...parts, art, decor: { x: -size.w / 2, y: art.y + y0 * k * seat.inset }, model: { drawn: { x: x0 * k, y: y0 * k, w: (x1 - x0) * k, h: (y1 - y0) * k } } };
+  // The upright group stands at the ring's middle, so the foot is the seat's rise up it.
+  return { ...parts, art, decor: { x: -size.w / 2, y: modelDecorTop(art.y + y0 * k * seat.inset, -seat.rise, size.h) }, model: { drawn: { x: x0 * k, y: y0 * k, w: (x1 - x0) * k, h: (y1 - y0) * k } } };
 }

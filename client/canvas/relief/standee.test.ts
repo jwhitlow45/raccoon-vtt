@@ -219,21 +219,25 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
     }
   });
 
-  test("the drawing's corner, the box it draws and takes presses on, and its decor's corner are the layout's art, drawn box and frame, at every turn and seat", () => {
-    for (const turn of [0, 1, 2, 3] as Turn[]) {
-      for (const seat of [ON_GROUND, { rise: 0.7, inset: 1 }, { rise: 1, inset: COVER_INSET }]) {
-        for (const [base, ground] of [[0, 0], [2, 0], [400, 10]] as const) {
-          const box = { x: 3, y: 4, w: 2, h: 1 };
-          const shape = standeeShape(turn, box, base, ground, 40, 800, seat, KNIGHT);
-          const parts = standeeParts(turn, shape.drawnBase, ground, box, seat, KNIGHT);
-          const m = parts.model!;
-          const k = parts.art.scale;
-          // The art's group stands at the ring's middle in view units (the upright group), scaled by the seat's inset.
-          const corner = { x: shape.base.x + parts.art.x, y: shape.base.y + parts.art.y };
-          assert.ok(near(corner.x, shape.art.x0) && near(corner.y, shape.art.y0), `art at turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
-          const drawn = { x0: corner.x + m.drawn.x * k, y0: corner.y + m.drawn.y * k, x1: corner.x + (m.drawn.x + m.drawn.w) * k, y1: corner.y + (m.drawn.y + m.drawn.h) * k };
-          assert.ok(sameBox(drawn, shape.drawnBox), "it draws, and takes a press, on the drawn box alone");
-          assert.ok(near(shape.base.x + parts.decor.x, shape.frame.x0) && near(shape.base.y + parts.decor.y, shape.frame.y0), "a dragged model's decor on its frame");
+  test("the drawing's corner, the box it draws and takes presses on, and its decor's corner are the layout's art, drawn box and frame, at every turn and seat, tall or low (review SOL-MC-06)", () => {
+    // LP59's slab, a quarter cell tall on a Gargantuan footprint, whose frame stands on its foot rather than hanging from its drawn top.
+    const slab: StandeeModel = { side: 1, anchorY: 0.6, box: [0, 52, 100, 60] };
+    const cases: [StandeeModel, { x: number; y: number; w: number; h: number }][] = [[KNIGHT, { x: 3, y: 4, w: 2, h: 1 }], [slab, { x: 3, y: 4, w: 4, h: 4 }], [slab, { x: 3, y: 4, w: 3, h: 1 }]];
+    for (const [model, box] of cases) {
+      for (const turn of [0, 1, 2, 3] as Turn[]) {
+        for (const seat of [ON_GROUND, { rise: 0.7, inset: 1 }, { rise: 1, inset: COVER_INSET }]) {
+          for (const [base, ground] of [[0, 0], [2, 0], [400, 10]] as const) {
+            const shape = standeeShape(turn, box, base, ground, 40, 800, seat, model);
+            const parts = standeeParts(turn, shape.drawnBase, ground, box, seat, model);
+            const m = parts.model!;
+            const k = parts.art.scale;
+            // The art's group stands at the ring's middle in view units (the upright group), scaled by the seat's inset.
+            const corner = { x: shape.base.x + parts.art.x, y: shape.base.y + parts.art.y };
+            assert.ok(near(corner.x, shape.art.x0) && near(corner.y, shape.art.y0), `art at turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
+            const drawn = { x0: corner.x + m.drawn.x * k, y0: corner.y + m.drawn.y * k, x1: corner.x + (m.drawn.x + m.drawn.w) * k, y1: corner.y + (m.drawn.y + m.drawn.h) * k };
+            assert.ok(sameBox(drawn, shape.drawnBox), "it draws, and takes a press, on the drawn box alone");
+            assert.ok(near(shape.base.x + parts.decor.x, shape.frame.x0) && near(shape.base.y + parts.decor.y, shape.frame.y0), `a dragged model's decor on its frame, box ${JSON.stringify(box)}, turn ${turn}, seat ${JSON.stringify(seat)}, base ${base}`);
+          }
         }
       }
     }
