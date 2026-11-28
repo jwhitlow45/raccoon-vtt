@@ -242,7 +242,7 @@ export function walkPreview(input: {
   straight?: { to: Pose; pieces: readonly RoutePiece[] } | null;
   /** What the line reads of Opportunity Attacks. Left out, it reads none. */
   reach?: DragReach | null;
-}): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> & { leaving: readonly string[] } {
+}): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> & { leaving: readonly string[]; lands: number } {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
@@ -319,5 +319,7 @@ export function walkPreview(input: {
     read: leaves ? { ...fallen, leaves: leaves.leaves } : fallen,
     endsIn: world ? endsIn(view, world, token, points[points.length - 1]!, input.labels) : null,
     leaving: leaves?.ids ?? [],
+    // The height it lands at, which the DM's toast matches the drop's own line by (store.ts ShownLeaves).
+    lands: end.elevation,
   };
 }

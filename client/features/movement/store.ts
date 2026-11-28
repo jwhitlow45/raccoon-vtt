@@ -63,28 +63,42 @@ export const routeSlot = scopeSlot(() => createStore<{ route: DragRoute | null }
 /**
  * The creatures whose reach a lone drag's walk leaves, for their dashed
  * amber rings (docs/design/design-v1-opportunity-attacks.md 1): written with
- * the route, and cleared at the drop, a cancel or the drag's end.
+ * the route, and cleared at the drop, a cancel or the drag's end. With the
+ * height the walk lands at, which a drop's kept line matches its leg by.
  */
-export type ReachMarks = { tokenId: string; ids: readonly string[] };
+export type ReachMarks = { tokenId: string; ids: readonly string[]; elevation: number };
 
 export const reachSlot = scopeSlot(() => createStore<{ reach: ReachMarks | null }>(() => ({ reach: null })));
 
 /**
- * The creatures a drop's line named, by the token and the spot it was
- * dropped at, so the DM's toast skips a leg this device's own line already
- * showed (section 1, The DM's toast). Only a line that named creatures is
- * kept, and only the last few drops.
+ * The creatures a drop's line named, so the DM's toast skips the leg that
+ * drop lands, which this device's own line already showed (section 1, The
+ * DM's toast). Kept for its turn (`turn`, as reachTurn names it) and for
+ * the token's first leg since the drop that ends where it was dropped, x,
+ * y and height: a leg whose occurrence is past `after`, the last the turn's
+ * jobs had given at the drop (TurnLeaves). So an earlier leg to the same
+ * spot, a later turn's, or one at another height is never skipped. Only a
+ * line that named creatures is kept, and only the last few drops.
  */
-export type ShownLeaves = { tokenId: string; x: number; y: number; ids: readonly string[] };
+export type ShownLeaves = { tokenId: string; turn: string; after: number; x: number; y: number; elevation: number; ids: readonly string[] };
 
 export const shownLeavesSlot = scopeSlot(() => createStore<{ shown: readonly ShownLeaves[] }>(() => ({ shown: [] })));
 
 /** How many drops' lines the toast's skip remembers: more than a turn's drops can land before it reads them. */
 export const SHOWN_LEAVES_KEPT = 8;
 
-/** Remembers what a drop's line named. */
+/** Remembers what a drop's line named. Two drops to one spot are two legs, so each is kept. */
 export function rememberShown(shown: readonly ShownLeaves[], next: ShownLeaves): ShownLeaves[] {
-  return [...shown.filter((s) => s.tokenId !== next.tokenId || s.x !== next.x || s.y !== next.y), next].slice(-SHOWN_LEAVES_KEPT);
+  return [...shown, next].slice(-SHOWN_LEAVES_KEPT);
+}
+
+/**
+ * The turn the DM's toasts read and a drop's line is kept for: the jobs'
+ * room and view (`key`), and the turn's row, round and seq. A room from
+ * before turns carried a seq reads the turn of the paths its jobs hold.
+ */
+export function reachTurn(key: string | null, encounter: { activeEntryId: string | null; round?: number; turnStart?: { seq?: number } } | null | undefined, pathTurn: number | undefined): string {
+  return `${key ?? ""}|${encounter?.activeEntryId ?? ""}|${encounter?.round ?? ""}|${encounter?.turnStart?.seq ?? pathTurn ?? ""}`;
 }
 
 /** A chunk of the SRD's data the turn's scans read: loaded, failed, or still on its way (null). */
@@ -96,10 +110,18 @@ export type TurnChunks = { rolls: SrdRolls | "failed" | null; monsters: SrdBlock
  * (the room's switch and this device's part), the SRD chunks they loaded,
  * and for each mover of the turn its turn's seq, the creatures its stored
  * legs left, and whether every one of that turn's jobs has finished. Until
- * they have, the drag names no one (section 4, Leg jobs).
+ * they have, the drag names no one (section 4, Leg jobs). `key` names the
+ * jobs' room and view, and `last` is the last occurrence id they gave, for
+ * the line a drop keeps (ShownLeaves).
  */
-export type TurnLeaves = { on: boolean; chunks: TurnChunks; movers: Readonly<Record<string, { turn: number; skip: ReadonlySet<string>; settled: boolean }>> };
+export type TurnLeaves = {
+  on: boolean;
+  key: string | null;
+  last: number;
+  chunks: TurnChunks;
+  movers: Readonly<Record<string, { turn: number; skip: ReadonlySet<string>; settled: boolean }>>;
+};
 
-export const NO_TURN_LEAVES: TurnLeaves = { on: false, chunks: { rolls: null, monsters: null }, movers: {} };
+export const NO_TURN_LEAVES: TurnLeaves = { on: false, key: null, last: 0, chunks: { rolls: null, monsters: null }, movers: {} };
 
 export const turnLeavesSlot = scopeSlot(() => createStore<TurnLeaves>(() => NO_TURN_LEAVES));

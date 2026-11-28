@@ -9,7 +9,7 @@ import type { SrdBlocks } from "#shared/rules/opportunity.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import { actor, DM, env, token } from "#shared/testutil.ts";
-import type { ShownLeaves } from "../movement/store.ts";
+import { reachTurn, type ShownLeaves } from "../movement/store.ts";
 import { onTurn, thorn, world } from "../movement/testing.ts";
 
 const { LegJobs, noticesOn } = await import("./opportunity.ts");
@@ -58,8 +58,13 @@ function dmDevice(opts: { loaded?: boolean } = {}) {
     monsters.resolve(await loadMonsters());
     await settle();
   };
+  /** The line a drop of Thorn at `at` keeps, as the drag's drop writes it from the room before the move lands (movement/stageHooks.ts). */
+  const line = (before: RoomState, at: { x: number; y: number }, ids: string[]): ShownLeaves => {
+    const leaves = jobs.leaves.getState();
+    return { tokenId: "thorn", turn: reachTurn(leaves.key, before.encounter, Object.values(leaves.movers)[0]?.turn), after: leaves.last, ...at, elevation: 0, ids };
+  };
   void opts;
-  return { jobs, see, said, load };
+  return { jobs, see, said, load, line };
 }
 
 /** Thorn, p1's, on his turn beside a goblin. */
@@ -125,12 +130,71 @@ describe("the DM's Opportunity Attack toast", () => {
     const start = beside([token("g2", { name: "Goblin", number: 2, x: 6, y: 4 })]);
     dm.see(start);
     const state = move(start, "thorn", 9, 5);
-    dm.see(state, { shown: [{ tokenId: "thorn", x: 9, y: 5, ids: ["goblin", "g2"] }] });
+    dm.see(state, { shown: [dm.line(start, { x: 9, y: 5 }, ["goblin", "g2"])] });
     assert.deepEqual(dm.said, []);
     const other = dmDevice();
     other.see(start);
-    other.see(state, { shown: [{ tokenId: "thorn", x: 9, y: 5, ids: ["goblin"] }] });
+    other.see(state, { shown: [other.line(start, { x: 9, y: 5 }, ["goblin"])] });
     assert.deepEqual(other.said, ["Thorn left the reach of Goblin and Goblin 2."]);
+  });
+
+  test("a drop's line skips its own leg alone: never a later turn's walk to the same square", () => {
+    const dm = dmDevice();
+    const start = beside();
+    dm.see(start);
+    // Round 1: the DM's drag to 8,5 names the goblin, so its leg is not toasted.
+    const lines = [dm.line(start, { x: 8, y: 5 }, ["goblin"])];
+    const dropped = move(start, "thorn", 8, 5);
+    dm.see(dropped, { shown: lines });
+    assert.deepEqual(dm.said, []);
+    // Round 2, Thorn's turn again: back beside the goblin, then to 8,5 again by the arrow keys.
+    let next = apply(dropped, { t: "encounter.next" } as Op);
+    dm.see(next, { shown: lines });
+    next = move(next, "thorn", 5, 5);
+    dm.see(next, { shown: lines });
+    next = move(next, "thorn", 8, 5);
+    dm.see(next, { shown: lines });
+    assert.deepEqual(dm.said, ["Thorn left Goblin's reach."], "last round's line says nothing of this round's leg");
+  });
+
+  test("a line whose move the server refused never claims a later turn's leg to its square", () => {
+    const dm = dmDevice();
+    const start = beside();
+    dm.see(start);
+    const refused = [dm.line(start, { x: 8, y: 5 }, ["goblin"])];
+    dm.see(start, { shown: refused });
+    let next = apply(start, { t: "encounter.next" } as Op);
+    dm.see(next, { shown: refused });
+    next = move(next, "thorn", 8, 5);
+    dm.see(next, { shown: refused });
+    assert.deepEqual(dm.said, ["Thorn left Goblin's reach."]);
+  });
+
+  test("a line kept at one height never skips a leg to the same square at another", () => {
+    const dm = dmDevice();
+    const start = beside();
+    dm.see(start);
+    // A drop over 8,5 at 30 ft, which the walk on the ground there is not.
+    const high = { ...dm.line(start, { x: 8, y: 5 }, ["goblin"]), elevation: 30 };
+    dm.see(move(start, "thorn", 8, 5), { shown: [high] });
+    assert.deepEqual(dm.said, ["Thorn left Goblin's reach."]);
+  });
+
+  test("a line binds to the leg its drop landed, not an earlier leg to the same square still waiting for the server", () => {
+    const dm = dmDevice();
+    const start = beside();
+    dm.see(start);
+    // A to B by the arrow keys and back, both still on their way to the server.
+    const there = move(start, "thorn", 8, 5);
+    dm.see(there, { confirmed: start });
+    const back = move(there, "thorn", 5, 5);
+    dm.see(back, { confirmed: start });
+    // Then a drop A to B whose line names the goblin.
+    const lines = [dm.line(back, { x: 8, y: 5 }, ["goblin"])];
+    const again = move(back, "thorn", 8, 5);
+    dm.see(again, { confirmed: start, shown: lines });
+    dm.see(again, { confirmed: again, shown: lines });
+    assert.deepEqual(dm.said, ["Thorn left Goblin's reach."], "the first A to B, which no line named");
   });
 
   test("a leg first seen pending toasts once, when the server confirms it", () => {

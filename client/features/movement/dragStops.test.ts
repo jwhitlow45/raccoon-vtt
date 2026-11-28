@@ -15,7 +15,7 @@ import { dragSpots, withSpots } from "../areas/liveTokens.ts";
 import type { DropPlan } from "./drop.ts";
 import { RouteWork, type Frames, type RouteJob } from "./routeWork.ts";
 import { dragStops, type DragDeps } from "./stageHooks.ts";
-import { routeSlot } from "./store.ts";
+import { reachSlot, reachTurn, routeSlot, shownLeavesSlot, turnLeavesSlot } from "./store.ts";
 import { line, onTurn, recordedCost, thorn, world } from "./testing.ts";
 
 /**
@@ -50,17 +50,17 @@ class Hand implements Frames {
   }
 }
 
-function board(view: RoomState) {
+function board(view: RoomState, role: DragDeps["role"] = "player", you?: { memberId: string; role: "dm" | "player" }) {
   const frames = new Hand();
   const work = new RouteWork(frames, () => new WorkBudget({ limit: 1000 }));
   const sent: ClientOp[] = [];
   let n = 0;
   const deps: DragDeps = {
-    store: { getState: () => ({ view, floorView: view }) } as unknown as DragDeps["store"],
+    store: { getState: () => ({ view, floorView: view, you }) } as unknown as DragDeps["store"],
     actions: { dispatch: (op: ClientOp) => (sent.push(op), ++n), newId: () => `id${++n}` } as unknown as DragDeps["actions"],
     ui: { notify: () => {}, showActions: () => {} } as unknown as DragDeps["ui"],
     scope: new RoomScope(),
-    role: "player",
+    role,
     work,
   };
   const stops = dragStops(deps);
@@ -251,5 +251,25 @@ describe("the drag's stops", () => {
     assert.equal(b.sent.length, 2, "a new drag lands what waits first");
     b.frames.frame();
     assert.equal(b.sent.length, 2, "and only once");
+  });
+
+  test("a DM's drop whose line names a creature keeps it for this turn and the leg it lands: the jobs' last occurrence and the height it lands at", () => {
+    const view = onTurn(world({ blockMovement: false, tokens: [thorn({ x: 5, y: 5 }), token("goblin", { name: "Goblin", x: 6, y: 5 })] }), "thorn");
+    const hero = view.tokens.thorn!;
+    const b = board(view, "dm", { memberId: "dm1", role: "dm" });
+    b.scope.get(turnLeavesSlot).setState({ on: true, key: "room|dm|dm1", last: 7, chunks: { rolls: "failed", monsters: "failed" }, movers: {} }, true);
+    b.frames.frame();
+    b.stops.start(hero.id);
+    const finger = node(hero, 3);
+    for (let k = 0; k < 50; k++) {
+      b.stops.frame(finger, hero);
+      b.frames.frame();
+    }
+    assert.deepEqual(b.scope.get(reachSlot).getState().reach, { tokenId: "thorn", ids: ["goblin"], elevation: 0 }, "the line names the goblin");
+    let landed: DropPlan | null = null;
+    b.stops.drop(finger, hero, [hero], (plan) => (landed = plan));
+    for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
+    assert.ok(landed);
+    assert.deepEqual(b.scope.get(shownLeavesSlot).getState().shown, [{ tokenId: "thorn", turn: reachTurn("room|dm|dm1", view.encounter, undefined), after: 7, x: 8, y: 5, elevation: 0, ids: ["goblin"] }]);
   });
 });

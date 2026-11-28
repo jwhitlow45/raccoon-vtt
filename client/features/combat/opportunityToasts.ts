@@ -2,13 +2,14 @@ import { createElement, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { reachWords } from "#shared/rules/opportunity.ts";
+import { sameSpot } from "#shared/rules/path.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useLabels } from "../../state/labels.ts";
 import { useRoomUi, useRoomView, useRoomYouIfAny } from "../../state/view.ts";
 import { viewAsSlot } from "../dm/viewAs.tsx";
-import { shownLeavesSlot, type ShownLeaves } from "../movement/store.ts";
+import { reachTurn, shownLeavesSlot, type ShownLeaves } from "../movement/store.ts";
 import { answersFor } from "./logic.ts";
 import { useTurnReach, type TurnReach } from "./opportunity.ts";
 
@@ -35,12 +36,13 @@ export type ToastInput = {
   labels: Labels;
 };
 
-/** The toasts' memory on this device: the turn it seeded for, the legs it has read, and the creatures it named. */
+/** The toasts' memory on this device: the turn it seeded for, the legs it has read, the creatures it named, and the leg each drop's kept line belongs to. */
 export class ReachToasts {
   #turn: string | null = null;
   #read = new Set<number>();
   #seeded = new Set<number>();
   #named = new Set<string>();
+  #lines = new WeakMap<ShownLeaves, number>();
 
   /** The toasts this read brings, each once. */
   step(input: ToastInput): string[] {
@@ -48,7 +50,7 @@ export class ReachToasts {
     if (viewer.role !== "dm") return [];
     // The turn itself, not who moved in it: an Undo of a mover's only leg takes its path away, and its next leg is the same turn's.
     const encounter = view.encounter;
-    const turn = `${reach.key ?? ""}|${encounter?.activeEntryId ?? ""}|${encounter?.round ?? ""}|${encounter?.turnStart?.seq ?? Object.values(reach.movers)[0]?.turn ?? ""}`;
+    const turn = reachTurn(reach.key, encounter, Object.values(reach.movers)[0]?.turn);
     if (turn !== this.#turn) {
       // A new turn, a mount, a reload or a late join: what is stored now was the table's before this device looked.
       this.#turn = turn;
@@ -56,6 +58,7 @@ export class ReachToasts {
       this.#named.clear();
       this.#seeded = new Set(Object.values(reach.movers).flatMap((m) => m.legs.flatMap((l) => l.parts.map((p) => p.id))));
     }
+    this.#bindLines(input.shown, turn, reach);
     const out: string[] = [];
     for (const [moverId, mover] of Object.entries(reach.movers)) {
       const creature = turnCreature(view);
@@ -81,8 +84,8 @@ export class ReachToasts {
           const fresh = part.leaves.filter((l) => rows.has(l.id) && !this.#named.has(`${moverId}|${l.id}`));
           for (const left of fresh) this.#named.add(`${moverId}|${left.id}`);
           if (fresh.length === 0) continue;
-          // This device's own drag line already named them at the drop.
-          const line = input.shown.find((s) => s.tokenId === moverId && s.x === part.to.x && s.y === part.to.y);
+          // This device's own drag line already named them at the drop that landed this very leg.
+          const line = input.shown.find((s) => this.#lines.get(s) === part.id);
           if (line && fresh.every((l) => line.ids.includes(l.id))) continue;
           const mover = view.tokens[moverId];
           const names = fresh.flatMap((l) => {
@@ -94,6 +97,23 @@ export class ReachToasts {
       }
     }
     return out;
+  }
+
+  /**
+   * Binds each drop's kept line of this turn to the leg its drop landed:
+   * the token's first occurrence past the line's `after` that ends where it
+   * was dropped. Once bound it speaks for that leg alone, so a later leg to
+   * the same spot, even after an Undo of its own, is never skipped by it.
+   */
+  #bindLines(shown: readonly ShownLeaves[], turn: string, reach: TurnReach): void {
+    for (const line of shown) {
+      if (line.turn !== turn || this.#lines.has(line)) continue;
+      let first: number | undefined;
+      for (const leg of reach.movers[line.tokenId]?.legs ?? []) {
+        for (const part of leg.parts) if (part.id > line.after && sameSpot(part.to, line) && (first === undefined || part.id < first)) first = part.id;
+      }
+      if (first !== undefined) this.#lines.set(line, first);
+    }
   }
 }
 

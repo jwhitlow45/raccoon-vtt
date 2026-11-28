@@ -285,7 +285,7 @@ export class LegJobs {
     this.#confirmed = null;
     this.#viewer = null;
     if (this.store.getState() !== EMPTY) this.store.setState({ ...EMPTY, key, fresh: this.store.getState().fresh }, true);
-    this.leaves.setState({ on: key !== null, chunks: this.#chunks, movers: {} }, true);
+    this.leaves.setState({ on: key !== null, key, last: this.#nextId - 1, chunks: this.#chunks, movers: {} }, true);
   }
 
   #dropMover(id: string): void {
@@ -406,7 +406,7 @@ export class LegJobs {
       this.#writeShown(turns[0] ?? 0, [...(turns[0] === shown.turn ? shown.ids : []), ...fresh.map((r) => `${r.moverId}|${r.left.id}`)]);
     }
     this.store.setState({ key: this.#key, movers, fresh: fresh.length > 0 ? { seq: this.#freshSeq, rows: fresh } : this.store.getState().fresh }, true);
-    this.leaves.setState({ on: true, chunks: this.#chunks, movers: leaves }, true);
+    this.leaves.setState({ on: true, key: this.#key, last: this.#nextId - 1, chunks: this.#chunks, movers: leaves }, true);
   }
 
   /**

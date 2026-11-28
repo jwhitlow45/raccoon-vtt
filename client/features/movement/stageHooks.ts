@@ -24,7 +24,7 @@ import { meetsCreature, RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
-import { holdSlot, reachSlot, rememberShown, routeSlot, sameHold, shownLeavesSlot, stopNoteSlot, turnLeavesSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
+import { holdSlot, reachSlot, reachTurn, rememberShown, routeSlot, sameHold, shownLeavesSlot, stopNoteSlot, turnLeavesSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
 import { labelsOf } from "../../state/labels.ts";
 
 /** Where a drag's preview is held, and what holds it. */
@@ -234,11 +234,11 @@ export function dragStops(deps: DragDeps): DragStops {
   const setRoute = (next: DragRoute | null) => {
     if (routes.getState().route !== next) routes.setState({ route: next });
   };
-  /** The rings of the creatures whose reach the walk leaves, written only when they change. */
-  const setReach = (tokenId: string, ids: readonly string[]) => {
+  /** The rings of the creatures whose reach the walk leaves, and the height it lands at, written only when they change. */
+  const setReach = (tokenId: string, ids: readonly string[], elevation: number) => {
     const was = reaches.getState().reach;
-    if (ids.length === 0 ? was === null : was?.tokenId === tokenId && was.ids.length === ids.length && was.ids.every((id, i) => id === ids[i])) return;
-    reaches.setState({ reach: ids.length === 0 ? null : { tokenId, ids } });
+    if (ids.length === 0 ? was === null : was?.tokenId === tokenId && was.elevation === elevation && was.ids.length === ids.length && was.ids.every((id, i) => id === ids[i])) return;
+    reaches.setState({ reach: ids.length === 0 ? null : { tokenId, ids, elevation } });
   };
   /** What the drag's line reads of Opportunity Attacks: this viewer, and what the turn's leg jobs have told it, whether they run on this page among it. */
   const reachNow = (): DragReach | null => {
@@ -336,10 +336,10 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!view || !w.target || walk !== w) return;
     const { answer, target } = shown(view, w.token, w.target, w.drag.answer);
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-    const { leaving, ...walked } = walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight, reach: reachNow() });
+    const { leaving, lands, ...walked } = walkPreview({ labels: labelsOf(store.getState()), view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight, reach: reachNow() });
     const route: DragRoute = { tokenId: w.token.id, ...walked, searching: answer.kind === "searching", waiting: w.waiting };
     setRoute(route);
-    setReach(route.tokenId, leaving);
+    setReach(route.tokenId, leaving, lands);
     setLanding(route.tokenId, { ...route.to, ...(route.squeeze ? { squeeze: true } : {}) });
   };
 
@@ -595,10 +595,15 @@ export function dragStops(deps: DragDeps): DragStops {
             const now = seenView(store.getState().floorView) ?? view;
             goStraight(w, null);
             if (walk === w) walk = null;
-            // What the line named at the drop, so the DM's toast skips the leg it lands (docs/design/design-v1-opportunity-attacks.md 1).
+            // What the line named at the drop, kept for this turn and the leg it lands, so the DM's toast skips that leg (docs/design/design-v1-opportunity-attacks.md 1).
             const shown = routes.getState().route;
             const marks = reaches.getState().reach;
-            if (shown?.tokenId === token.id && marks?.tokenId === token.id) shownLeaves.setState((s) => ({ shown: rememberShown(s.shown, { tokenId: token.id, x: shown.to.x, y: shown.to.y, ids: marks.ids }) }));
+            if (shown?.tokenId === token.id && marks?.tokenId === token.id) {
+              const jobs = turnLeaves.getState();
+              const turn = reachTurn(jobs.key, now.encounter, Object.values(jobs.movers)[0]?.turn);
+              const line = { tokenId: token.id, turn, after: jobs.last, x: shown.to.x, y: shown.to.y, elevation: marks.elevation, ids: marks.ids };
+              shownLeaves.setState((s) => ({ shown: rememberShown(s.shown, line) }));
+            }
             setRoute(null);
             if (marks !== null) reaches.setState({ reach: null });
             const world = w.world;
