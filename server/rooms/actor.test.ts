@@ -2236,7 +2236,7 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
   });
 
   for (const rate of ["socket's", "room's"] as const) {
-    test(`a walk over its ${rate} rate is answered busy and forces no commit`, async () => {
+    test(`a walk over its ${rate} rate is answered busy and forces no commit`, async (t) => {
       const dm = member("DM", "dm");
       const player = member("Ayla", "player");
       const { state, pcId, goblinId } = darkRoom(dm, player);
@@ -2252,13 +2252,19 @@ describe("a walk on the scene where traps go off runs the steps of the batch sta
         const laptop = connect(actor, dm);
         await hello(actor, table.conn, { clientId: "c1", resumeFrom: 1 });
         await hello(actor, laptop.conn, { clientId: "c2", resumeFrom: 1 });
+        // The batch timer is the only mocked one, from here on, so it fires only when the test moves it.
+        t.mock.timers.enable({ apis: ["setTimeout"] });
         void actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 20, y: 2 });
         void actor.op(laptop.conn, 1, { t: "log.chat", text: "hi" });
         if (rate === "socket's") while (table.conn.opRate.wouldAllow()) table.conn.opRate.allow();
         void actor.op(table.conn, 2, { t: "token.move", tokenId: goblinId, x: 6, y: 2 });
-        assert.notEqual(await retryTo(table.sent, 2), "stuck", "the walk is answered busy");
-        await new Promise((r) => setTimeout(r, 100));
+        // Event-loop turns alone, with a real deadline that fires only on a hang.
+        const deadline = Date.now() + 10_000;
+        while (!table.sent.some((m) => m.t === "retry" && m.n === 2 && m.code === "busy") && Date.now() < deadline) await new Promise((r) => setImmediate(r));
+        assert.ok(table.sent.some((m) => m.t === "retry" && m.n === 2 && m.code === "busy"), "the walk is answered busy");
         assert.deepEqual(commits, [], "nothing committed before the batch's own timer");
+        t.mock.timers.tick(400);
+        t.mock.timers.reset();
         assert.notEqual(await answerTo(table.sent, 1), "stuck");
         const batches = batchesOf(db, commits);
         assert.equal(batchOf(batches, "log.chat"), batchOf(batches, "token.move", pcId), "the eye's step and the chat share one batch");
