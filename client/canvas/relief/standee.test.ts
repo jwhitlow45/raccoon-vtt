@@ -205,9 +205,10 @@ describe("standing as a 3D model (docs/design/design-v1-token-models.md 4.4 and 
     assert.ok(s.bounds.y0 <= s.drawnBox.y0 - DECOR_REACH_PX.top * k + 1e-9, "its chips over the drawn top");
     assert.ok(s.bounds.x1 >= s.drawnBox.x1 + DECOR_REACH_PX.side * k - 1e-9, "a wing past the footprint");
     assert.ok(s.bounds.x0 <= s.ring.x0 && s.bounds.y1 >= s.ring.y1 + DECOR_REACH_PX.bottom * k - 1e-9);
-    // A short one's decor frame reaches past its ring's bottom, and the bounds keep it.
+    // A model lower than its footprint keeps a picture's frame, standing on its foot, so its name, badges and bar never hang under it (review LP59-ISO-1).
     const flat = standeeShape(0, box, 0, 0, 40, 800, ON_GROUND, { side: 1, anchorY: 0.6, box: [10, 40, 90, 70] });
-    assert.ok(flat.frame.y1 > flat.ring.y1 && flat.bounds.y1 >= flat.frame.y1 + DECOR_REACH_PX.bottom * k - 1e-9);
+    assert.deepEqual(flat.frame, standeeShape(0, box, 0, 0, 40, 800).frame);
+    assert.ok(flat.frame.y0 <= flat.drawnBox.y0 && flat.bounds.y1 >= flat.ring.y1 + DECOR_REACH_PX.bottom * k - 1e-9);
   });
 
   test("a picture keeps its shape, its drawn box its art", () => {

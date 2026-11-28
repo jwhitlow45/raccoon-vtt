@@ -5,7 +5,7 @@ import { COVER_INSET } from "../../features/attach/groups.ts";
 import { MAX_SCALE } from "../../lib/camera.ts";
 import type { Turn } from "../../lib/view.ts";
 import type { VBox } from "./pieces.ts";
-import { standeeShape, type Seat, type StandeeModel } from "./standee.ts";
+import { ON_GROUND, standeeShape, type Seat, type StandeeModel } from "./standee.ts";
 
 /*
  * A standee's bounds are what culls it and what a scroll repaints it by
@@ -49,6 +49,38 @@ test("everything a standee paints lies inside its bounds, a model's included, at
     ),
     { numRuns: 2000 },
   );
+});
+
+test("a standee's decor frame is its footprint's size, never reaches below its foot, and starts at or above its drawn top, for every model, footprint, turn and seat", () => {
+  fc.assert(
+    fc.property(
+      fc.constantFrom<Turn>(0, 1, 2, 3),
+      fc.record({ x: fc.double({ min: -50, max: 50, noNaN: true }), y: fc.double({ min: -50, max: 50, noNaN: true }), w: fc.double({ min: 0.5, max: 20, noNaN: true }), h: fc.double({ min: 0.5, max: 20, noNaN: true }) }),
+      fc.double({ min: -20, max: 40, noNaN: true }),
+      fc.double({ min: 0, max: 30, noNaN: true }),
+      fc.double({ min: 1, max: MAX_SCALE, noNaN: true }),
+      seat,
+      fc.option(model, { nil: null }),
+      (turn, box, ground, height, scale, s, m) => {
+        const shape = standeeShape(turn, box, ground + height, ground, scale, 800, s, m);
+        // The ring's middle is the base, and the foot the seat's rise up it.
+        const foot = (shape.ring.y0 + shape.ring.y1) / 2 - s.rise;
+        assert.ok(shape.frame.y1 <= foot + 1e-9, "the frame's bottom, where the bar and badges sit, never under the foot");
+        assert.ok(shape.frame.y0 <= shape.drawnBox.y0 + 1e-9, "the frame's top, where the name and chips sit, at or over the drawn top");
+        assert.ok(Math.abs(shape.frame.y1 - shape.frame.y0 - box.h) < 1e-9 && Math.abs(shape.frame.x1 - shape.frame.x0 - box.w) < 1e-9, "the footprint's size");
+        assert.ok(Math.abs((shape.frame.x0 + shape.frame.x1) / 2 - (shape.ring.x0 + shape.ring.x1) / 2) < 1e-9, "centered on the ring, however off-center the model draws");
+      },
+    ),
+    { numRuns: 2000 },
+  );
+});
+
+test("a low, wide model on a Gargantuan footprint keeps its decor on its foot at every turn (review LP59-ISO-1's slab)", () => {
+  const slab: StandeeModel = { side: 1, anchorY: 0.6, box: [0, 52, 100, 60] };
+  for (const turn of [0, 1, 2, 3] as Turn[]) {
+    const s = standeeShape(turn, { x: 10, y: 10, w: 4, h: 4 }, 0, 0, 40, 800, ON_GROUND, slab);
+    assert.deepEqual(s.frame, standeeShape(turn, { x: 10, y: 10, w: 4, h: 4 }, 0, 0, 40, 800).frame, `turn ${turn}`);
+  }
 });
 
 test("a flat model on a Gargantuan footprint keeps its ring top inside its bounds at every zoom (review MODELC-O-1's case)", () => {

@@ -40,7 +40,9 @@ export type StandeeShape = {
   /**
    * The footprint-sized box the decor lays out on: bottom-aligned with a
    * picture, as Top-down's decor lays out on the token's box around its
-   * inset face, and hung from a model's drawn top.
+   * inset face, and hung from a model's drawn top, or for a model lower than
+   * its footprint standing on its foot as a picture's does, so the decor
+   * never hangs below the foot (D-261127-716).
    */
   frame: VBox;
   ring: VBox;
@@ -134,7 +136,8 @@ export function standeeShape(
   if (model) {
     art = modelArtBox(model, longer(box) * seat.inset, { x: at.x, y: foot });
     drawnBox = modelDrawnBox(art, model.box);
-    frame = { x0: at.x - box.w / 2, x1: at.x + box.w / 2, y0: drawnBox.y0, y1: drawnBox.y0 + box.h };
+    const top = Math.min(drawnBox.y0, foot - box.h);
+    frame = { x0: at.x - box.w / 2, x1: at.x + box.w / 2, y0: top, y1: top + box.h };
   } else {
     art = { x0: at.x - (box.w * seat.inset) / 2, x1: at.x + (box.w * seat.inset) / 2, y0: foot - box.h * seat.inset, y1: foot };
     drawnBox = art;
@@ -152,9 +155,9 @@ export function standeeShape(
   };
   /*
    * The decor's reach round the frame it lays out on and the ring under it,
-   * with everything the standee paints: a flat or low model's decor frame
-   * starts at its drawn top, below its ring's top, and at a close zoom the
-   * outlines and facing tick reach past the decor's reach of a few pixels.
+   * with everything the standee paints: a flat or low model's drawn top lies
+   * below its ring's top, and at a close zoom the outlines and facing tick
+   * reach past the decor's reach of a few pixels.
    */
   const bounds = {
     x0: Math.min(Math.min(frame.x0, ring.x0, drawnBox.x0) - DECOR_REACH_PX.side * k, paints.x0),
