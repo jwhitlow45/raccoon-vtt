@@ -82,6 +82,19 @@ describe("roomStateSchema", () => {
     assert.equal(off.ok && off.state.meta.settings.playersTypeTotals, false, "off stays off");
   });
 
+  test("Opportunity Attack notices: a stored room from before them reads on, off stays off, and only off is stored (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+    const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
+    assert.equal("opportunityNotices" in fresh.meta.settings, false, "a new room has them on, as no setting");
+    const stored = JSON.parse(JSON.stringify(fresh));
+    const parsed = parseRoomState(stored);
+    assert.equal(parsed.ok && "opportunityNotices" in parsed.state.meta.settings, false);
+    stored.meta.settings.opportunityNotices = false;
+    const off = parseRoomState(stored);
+    assert.equal(off.ok && off.state.meta.settings.opportunityNotices, false, "off stays off");
+    stored.meta.settings.opportunityNotices = true;
+    assert.equal(parseRoomState(stored).ok, false, "on is never stored");
+  });
+
   test("a fresh room and random rooms parse after a JSON round trip", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(fresh))).ok);

@@ -373,6 +373,15 @@ describe("the clock's undo labels (docs/design/design-v1-calendar.md 6.5)", () =
   });
 });
 
+describe("the Opportunity Attack notices switch's undo labels (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+  test("the switch alone names itself, and with other settings it is a change of room settings", () => {
+    const s = room();
+    assert.equal(describeOp({ t: "room.update", settings: { opportunityNotices: false } }, s), "turning off Opportunity Attack notices");
+    assert.equal(describeOp({ t: "room.update", settings: { opportunityNotices: true } }, s), "turning on Opportunity Attack notices");
+    assert.equal(describeOp({ t: "room.update", settings: { opportunityNotices: false, skipDefeated: true } }, s), "changing room settings");
+  });
+});
+
 describe("placements between squares (docs/design/design-v1-snap-off.md 5.5)", () => {
   test("name a placement in place and Snap to grid, and a free move as a move", () => {
     const s = room({ tokens: { bree: token("bree", { name: "Bree", kind: "pc" }) } });

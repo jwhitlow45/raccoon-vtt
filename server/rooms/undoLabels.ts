@@ -42,6 +42,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (op.name === undefined && op.settings?.soundDmOnly !== undefined && Object.keys(op.settings).length === 1) {
         return op.settings.soundDmOnly ? "turning on Only DM devices play" : "turning off Only DM devices play";
       }
+      // As does Room settings' Opportunity Attack notices switch (docs/design/design-v1-opportunity-attacks.md 4).
+      if (op.name === undefined && op.settings?.opportunityNotices !== undefined && Object.keys(op.settings).length === 1) {
+        return op.settings.opportunityNotices ? "turning on Opportunity Attack notices" : "turning off Opportunity Attack notices";
+      }
       return op.settings ? "changing room settings" : "renaming the room";
     case "room.setPlayerScene":
       return `moving players to ${scene(op.sceneId)}`;

@@ -127,6 +127,8 @@ const settings = z.strictObject({
   soundNames: z.literal(true).optional(),
   // Backups from before it have none, which reads as off (docs/design/design-v1-sound-dm-only.md 8).
   soundDmOnly: z.literal(true).optional(),
+  // Only off is stored, and backups from before it have none, which reads as on (docs/design/design-v1-opportunity-attacks.md 4).
+  opportunityNotices: z.literal(false).optional(),
 });
 
 const meta = z.strictObject({
