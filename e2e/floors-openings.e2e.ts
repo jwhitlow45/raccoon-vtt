@@ -41,8 +41,8 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   the three sizes and both scales. Apply opens the group save on Ground
  *   floor with no save, its Apply hurts Bree, lays her Prone and removes the
  *   card.
- * - fl4o-5: a fall on a scene the DM is not showing toasts "A creature
- *   fell 10 ft to Ground floor on Tower." with Show, which goes there, and
+ * - fl4o-5: a fall on a scene the DM is not showing toasts "Rat fell
+ *   10 ft to Ground floor on Tower." with Show, which goes there, and
  *   the card then names the rat and is dismissed.
  * - LP46FIX-1: a pony with a kobold riding it walks onto the hole, and the
  *   card naming both applies: Apply's group save hurts both and removes the
@@ -545,11 +545,11 @@ describe("openings between floors, falls, Fly up and Fly down, a trapdoor and hi
     await dm.getByRole("region", { name: "Fall: Bree" }).waitFor({ state: "detached" });
   });
 
-  test("fl4o-5. a fall on a scene the DM is not showing toasts A creature fell 10 ft to Ground floor on Tower with Show, which goes there, and its card is dismissed", async () => {
+  test("fl4o-5. a fall on a scene the DM is not showing toasts Rat fell 10 ft to Ground floor on Tower with Show, which goes there, and its card is dismissed", async () => {
     // The DM looks at Cave, and the rat walks onto the hole upstairs.
     await showScene(dm, "Cave", run.cave);
     await ops.send({ t: "token.move", tokenId: run.rat, x: HOLE.x, y: HOLE.y });
-    const note = toast(dm, "A creature fell 10 ft to Ground floor on Tower.");
+    const note = toast(dm, "Rat fell 10 ft to Ground floor on Tower.");
     await note.waitFor();
     await shots.take(dm, "fl4o-5-toast-other-scene");
     await note.getByRole("button", { name: "Show" }).click();

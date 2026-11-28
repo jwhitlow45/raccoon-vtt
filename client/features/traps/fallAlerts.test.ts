@@ -42,6 +42,12 @@ describe("the DM's toast for a new fall card", () => {
     assert.deepEqual(fallsAfter(falls, -1).map((c) => c.id), ["120:0", "125:0", "125:1"]);
   });
 
+  test("a fall on another scene names the creature by the card's away name, as the DM's fall card does (DEDGE-TOAST)", () => {
+    const away = { imp7: { name: "Imp", number: 2 } };
+    const fell = { ...card({ tokenId: "imp7", sceneId: "crypt" }), away };
+    assert.deepEqual(fallAlerts([fell], view(), "upper", NO_LABELS), [{ text: "Imp 2 fell 10 ft to Vault on Crypt.", show: { sceneId: "crypt" } }]);
+  });
+
   test("Show where the floor it names is not the one shown, and for another scene", () => {
     assert.deepEqual(fallAlerts([card()], view(), "upper", NO_LABELS), [{ text: "Thorn fell 10 ft to Ground floor.", show: { sceneId: "ground" } }]);
     assert.deepEqual(fallAlerts([card()], view(), "ground", NO_LABELS), [{ text: "Thorn fell 10 ft to Ground floor." }], "the floor is shown already");

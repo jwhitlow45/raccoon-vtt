@@ -8,7 +8,8 @@ import { LIMITS } from "#shared/limits.ts";
 import { ownEntry } from "#shared/records.ts";
 import { sameScene } from "#shared/rules/floors.ts";
 import { byFallAge } from "#shared/rules/fallCards.ts";
-import { fallers, fallNamed, fallNames, holderIdOf } from "./desk.ts";
+import type { ProjectedFall } from "#shared/project.ts";
+import { fallers, fallNamed, fallNames, fallRead, holderIdOf, KNOWN } from "./desk.ts";
 import { placeName } from "../floors/words.ts";
 
 /*
@@ -95,15 +96,16 @@ export type FallAlert = { text: string; show?: { sceneId: string } };
 /**
  * The DM's toasts for new fall cards (4.4): "Thorn fell 10 ft to Ground
  * floor.", "Horse and Thorn fell 10 ft to Ground floor." with riders, with
- * Show where that floor is not the one shown, and "A creature fell 10 ft to
+ * Show where that floor is not the one shown, and "Thorn fell 10 ft to
  * Ground floor on Tower." with Show for another scene, whose creatures the
- * DM's copy does not hold. No name is stored on the card, so each is read
- * off the creature the copy holds. One op that drops more than
+ * DM's copy does not hold, named as the DM's fall card names them (the
+ * card's `away`, then KNOWN, else "A creature"). No name is stored on the
+ * card, so each is read off the creature the copy holds. One op that drops more than
  * FALL_TOASTS_MOST cards, as an opening placed under a crowd, toasts once
  * for them all: "4 creatures fell to Ground floor.", "10 or more creatures
  * fell to Ground floor." once its cards fill the room (LP46A polish).
  */
-export function fallAlerts(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
+export function fallAlerts(cards: readonly ProjectedFall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
   const byOp = new Map<number, Fall[]>();
   for (const card of cards) byOp.set(card.made, [...(byOp.get(card.made) ?? []), card]);
   return [...byOp.values()].flatMap((op) => (op.length > FALL_TOASTS_MOST ? [crowdAlert(op, state, viewing)] : eachAlert(op, state, viewing, labels)));
@@ -126,7 +128,7 @@ function crowdAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "t
   return { text: `${count} fell to ${scene.floor?.name ?? scene.name}${away}.`, ...(sceneId !== viewing ? { show: { sceneId } } : {}) };
 }
 
-function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
+function eachAlert(cards: readonly ProjectedFall[], state: Pick<RoomState, "scenes" | "tokens">, viewing: string | null, labels: Labels): FallAlert[] {
   return cards.map((card) => {
     const scene = ownEntry(state.scenes, card.sceneId);
     const floor = scene?.floor?.name ?? scene?.name ?? "another floor";
@@ -135,7 +137,8 @@ function eachAlert(cards: readonly Fall[], state: Pick<RoomState, "scenes" | "to
     if (ids.length > 0) return { text: `${fallNames(state, fallNamed(state, ids), labels)} fell ${card.ft} ft to ${floor}.`, ...show };
     // The copy holds every floor of the scene shown, so a creature missing from it is no longer on the map there.
     if (viewing !== null && sameScene(state, card.sceneId, viewing)) return { text: `A creature no longer on the map fell ${card.ft} ft to ${floor}.` };
-    return { text: `A creature fell ${card.ft} ft to ${floor} ${scene?.name.trim() ? `on ${scene.name.trim()}` : "on another scene"}.`, ...show };
+    // Named as the DM's fall card names it: by the card's `away` word for the creature, else the device's memory (KNOWN), else "A creature".
+    return { text: fallRead(state, card, viewing, labels, KNOWN).line, ...show };
   });
 }
 
