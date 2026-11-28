@@ -1403,8 +1403,11 @@ function forPlayer(op: Op, c: Check): Decision {
         const row: InitEntry = { id: entry.id, value: null, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, ...(entry.tokenId !== undefined ? { tokenId: entry.tokenId } : {}), ...(entry.characterId !== undefined ? { characterId: entry.characterId } : {}) };
         if (typedInitiative(c, row, entry.value ?? null, entry.roll)) return refuse("forbidden", NO_TYPED_INITIATIVE);
       }
-      // Only the rows their copy holds, so a row the DM hides never refuses their add, nor says it exists (D-261128-041).
-      return oneRowEach(c, op.entries, c.visibleEncounter()?.entries ?? []);
+      // The rows their copy holds, so a row the DM hides never refuses their add, nor says it exists (D-261128-041), and
+      // every row the DM has not hidden of a creature they own, on any scene or floor (D-261128-170): their copy drops a
+      // row whose token stands where they are not, and that row tells them nothing of their own creature they do not know.
+      const own = c.state.encounter.entries.filter((e) => !e.hidden && c.ownsEntry(e));
+      return oneRowEach(c, op.entries, [...(c.visibleEncounter()?.entries ?? []), ...own]);
     }
     case "encounter.remove": {
       for (const id of op.entryIds) {
