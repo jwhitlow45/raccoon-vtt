@@ -6,12 +6,12 @@ import type { SrdMonster, StatBlockMonster } from "../srd/monsters.ts";
 import { monsterView, statBlockOf } from "../statBlock.ts";
 import { carriedGroup, holderOf } from "./attach.ts";
 import { legFeet, stepsBetween, tokenCellBox, type CellBox, type DistanceSettings } from "./distance.ts";
-import { stopFootprint, type FootprintToken, type PlacedToken } from "./footprint.ts";
+import type { FootprintToken, PlacedToken } from "./footprint.ts";
 import { sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexNeighbors, type HexGrid } from "./hex.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 import { rowCharacter } from "./initiative.ts";
-import { legSpots, reshapeLeg, type LegSpot, type Spot } from "./path.ts";
+import { legSpots, type LegSpot, type Spot } from "./path.ts";
 import { APART, AREAS, PIECE, contact, onSegment, orient } from "./segments.ts";
 import { parseSenses } from "./vision.ts";
 import { pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
@@ -679,8 +679,9 @@ export function chunksNeeded(view: ReachView, moverId: string): { rolls: boolean
  * there is nothing to scan: no mover, no scene or no path. Each leg's `id`
  * here is the index of its end stop in `path.stops`, which the caller maps
  * to the leg's occurrence id. A leg provokes unless it does not count
- * (Teleport, "Doesn't count"), was carried, or only changed the creature's
- * footprint where it stood. A creature whose Reaction is used is left out
+ * (Teleport, "Doesn't count", and a resize or a squeeze where the creature
+ * stands, which the reducer stores as not counting) or was carried. A
+ * creature whose Reaction is used is left out
  * unless its block grants more. A player's projection already holds only
  * what they may read, so the scan reads the view whole.
  */
@@ -708,12 +709,11 @@ export function reachInput(view: ReachView, moverId: string, path: TokenPath | n
       extra,
     });
   }
-  const now = stopFootprint(mover);
   const legs: ReachLeg[] = [];
   for (let i = 1; i < path.stops.length; i++) {
     const from = path.stops[i - 1]!;
     const to = path.stops[i]!;
-    legs.push({ id: i, from, to, provokes: to.uncounted !== true && to.carried !== true && !reshapeLeg(from, to, now) });
+    legs.push({ id: i, from, to, provokes: to.uncounted !== true && to.carried !== true });
   }
   const placed: ScanInput["mover"] = { size: mover.size, x: mover.x, y: mover.y };
   if (mover.w !== undefined) placed.w = mover.w;

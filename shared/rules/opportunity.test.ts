@@ -139,9 +139,14 @@ describe("a leave is a step from within a reach to beyond it", () => {
     assert.deepEqual(left(state, "bree", [stop(2, 2), stop(2, 2, 10)]), ["g2"]);
   });
 
-  test("a resize where the creature stands is no move", () => {
-    const state = world([bree({ size: "large" }), gob("g2", 4, 2)]);
-    assert.deepEqual(left(state, "bree", [stop(2, 2, 0, { footprint: { w: 1, h: 1 } }), stop(2, 2)]), []);
+  test("a resize where the creature stands, which the reducer stores as not counting, is no move", () => {
+    // Large, Bree stood beside the goblin. Medium now, her square is 10 ft from it, yet she never moved.
+    const shrunk = world([bree(), gob("g2", 4, 2)]);
+    assert.deepEqual(left(shrunk, "bree", [stop(2, 2, 0, { footprint: { w: 2, h: 2 } }), stop(2, 2, 0, { uncounted: true })]), []);
+    // Legs joined across a resize once the path is full are movement, and provoke.
+    const read = reachInput(shrunk, "bree", { turn: 1, stops: [stop(2, 2, 0, { footprint: { w: 2, h: 2 } }), stop(2, 6)] }, NONE, DM)!;
+    assert.equal(read.legs[0]!.provokes, true);
+    assert.deepEqual(left(shrunk, "bree", [stop(2, 2, 0, { footprint: { w: 2, h: 2 } }), stop(2, 6)]), ["g2"]);
   });
 });
 
@@ -179,6 +184,12 @@ describe("who can make one", () => {
     state.encounter.entries[1]!.reactionUsed = true;
     assert.equal(rowStands(state, leave, DM), false, "the row leaves on the press");
     assert.equal(rowStands({ ...state, tokens: { bree: state.tokens.bree! } }, leave, DM), false, "and when the creature leaves the copy");
+    state.encounter.entries[1]!.reactionUsed = false;
+    const g2 = state.tokens.g2!;
+    for (const more of [{ life: "dead" as const }, { life: "dying" as const }, { effects: [effect("s", { key: "stunned" })] }]) {
+      const later = { ...state, tokens: { ...state.tokens, g2: { ...g2, actor: { inline: actor(more) } } } };
+      assert.equal(rowStands(later, leave, DM), false, `and when it is ${JSON.stringify(more)}`);
+    }
   });
 
   test("a companion sharing its character's turn counts its own Reaction, by its mark", () => {
@@ -492,6 +503,27 @@ describe("occurrences: reconcileLegs (D-261128-057)", () => {
     assert.ok(inner, "the second join holds the first");
     assert.deepEqual(flat([first]), [101, 102, 103]);
     assert.equal(r.added.length, 2);
+  });
+
+  test("a path short of full never joins: A to B to C read as A to C is a new leg", () => {
+    const next = ids();
+    const a = reconcileLegs([], legsOf([stop(0, 0), stop(1, 0), stop(2, 0)]), next);
+    const b = reconcileLegs(a.legs, legsOf([stop(0, 0), stop(2, 0)]), next);
+    assert.deepEqual([b.removed.map((l) => l.id), b.added.length, b.legs[0]!.parts], [[101, 102], 1, undefined]);
+  });
+
+  test("a join that holds as it was keeps its id through later updates", () => {
+    const next = ids();
+    let path = { turn: 1, stops: [stop(0, 0)] };
+    for (let i = 1; i < MAX_PATH_STOPS; i++) path = withStop(path, stop(i % 2 === 0 ? 0 : 1, i));
+    const full = reconcileLegs([], legsOf(path.stops), next);
+    path = withStop(path, stop(5, 5));
+    const joined = reconcileLegs(full.legs, legsOf(path.stops), next);
+    const join = joined.legs[0]!;
+    // A resize's footprints filled in, and a mark changed: the join stands, its id with it.
+    const marked = reconcileLegs(joined.legs, legsOf(path.stops.map((s) => ({ ...s, footprint: { w: 1, h: 1 } }))), next);
+    assert.equal(marked.legs[0], join);
+    assert.deepEqual([marked.added, marked.removed], [[], []]);
   });
 
   test("a path past 100 corners drops the oldest corners and keeps every id", () => {

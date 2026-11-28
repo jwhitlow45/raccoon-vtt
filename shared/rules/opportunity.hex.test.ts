@@ -4,7 +4,7 @@ import type { FreeWall, GridShape, RoomState, Token, Viewer } from "../model.ts"
 import { actor, customMonster } from "../testutil.ts";
 import { hexCenter, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 import { COLUMNS, ROWS, hexWallRoom, onHex, sideWall } from "./hexWalls.testkit.ts";
-import { reachInput, turnReach, type ReachLeave } from "./opportunity.ts";
+import { reachInput, reachScan, turnReach, type ReachLeave } from "./opportunity.ts";
 import { orient } from "./segments.ts";
 
 /**
@@ -100,6 +100,51 @@ for (const [name, g, shape] of [
       assert.ok(oneSide && twoSides, `sides at ${signs.join(", ")}`);
       assert.deepEqual(walkOn(fight([all[oneSide[0]]!, all[oneSide[1]]!]), g, "bree", away).map((l) => l.id), ["lash"]);
       assert.deepEqual(walkOn(fight([all[twoSides[0]]!, all[twoSides[1]]!]), g, "bree", away), []);
+    });
+
+    test("a line along a wall on a hex side is stopped, as a line along any wall is", () => {
+      // From A to the hex past its east and south-east neighbors, the line runs along the side between them.
+      const far = step(g, step(g, A, E), SE);
+      const along = (walls: readonly FreeWall[]) => {
+        const state = placed(hexWallRoom(shape, 30, 30, walls), [onHex(g, "bree", "medium", A, { kind: "pc", disposition: "ally" }), onHex(g, "lash", "medium", far, { actor: { inline: actor({ monsterId: "m1" }) } })]);
+        state.monsters = { m1: reacher(10) };
+        return walkOn(state, g, "bree", [{ hex: A }, { hex: step(g, A, W, 2) }]).map((l) => l.id);
+      };
+      assert.deepEqual(along([]), ["lash"]);
+      assert.deepEqual(along([sideWall(g, step(g, A, E), SW)]), []);
+    });
+
+    test("a part joined across a resize walks at both sizes, the second walk starting again, which is no step", () => {
+      // Walked toward the goblin at both sizes: the step from the first walk's end back to the part's start leaves nothing.
+      const goblin = step(g, A, E, 6);
+      const state = placed(hexWallRoom(shape, 30, 30, []), [onHex(g, "bree", "large", A, { kind: "pc", disposition: "ally" }), onHex(g, "g2", "medium", goblin, { actor: { inline: actor({ monsterId: "m1" }) } })]);
+      // 15 ft, so the first walk ends within its reach and the second starts beyond it.
+      state.monsters = { m1: reacher(15) };
+      const from = onHex(g, "x", "medium", A);
+      const to = onHex(g, "x", "large", step(g, goblin, W, 2));
+      const read = reachInput(state, "bree", { turn: 1, stops: [{ x: from.x, y: from.y, elevation: 0, footprint: { w: 1, h: 1 } }, { x: to.x, y: to.y, elevation: 0 }] }, NONE, DM)!;
+      assert.deepEqual(turnReach(read.input, read.legs).flatMap((l) => (l.leaves === "over" ? ["over"] : l.leaves.map((x) => x.id))), []);
+    });
+
+    test("a leg past the hard cap stops with over, and its slices report the work done", () => {
+      const tokens = [onHex(g, "bree", "gargantuan", { col: 6, row: 10 }, { kind: "pc", disposition: "ally" })];
+      for (let i = 0; i < 200; i++) tokens.push(onHex(g, `g${i}`, "gargantuan", { col: 10 + (i % 4), row: 10 + (Math.floor(i / 4) % 4) }, { actor: { inline: actor({ monsterId: "m1" }) } }));
+      const state = placed(hexWallRoom(shape, 60, 60, []), tokens);
+      state.monsters = { m1: reacher(30) };
+      const start = state.tokens.bree!;
+      // A walk back and forth within 30 ft of all of them, so none leaves and every spot tests every one.
+      const via: number[] = [];
+      for (let k = 0; k < 16; k++) via.push(start.x + (k % 2 ? 0 : 8), start.y + (k % 4) - 2);
+      const read = reachInput(state, "bree", { turn: 1, stops: [{ x: start.x, y: start.y, elevation: 0 }, { x: start.x + 8, y: start.y, elevation: 0, via }] }, NONE, DM)!;
+      const scan = reachScan(read.input, read.legs[0]!, new Set());
+      let slices = 0;
+      let step = scan.next();
+      while (!step.done) {
+        slices++;
+        step = scan.next();
+      }
+      assert.equal(step.value, "over");
+      assert.ok(slices >= 50, `about 100 slices of 20,000 units before 2,000,000 (${slices})`);
     });
 
     test("a neighbor on 10 ft hexes is 10 ft, beyond a 5 ft reach, so stepping away is no leave", () => {
