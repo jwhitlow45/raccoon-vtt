@@ -317,6 +317,18 @@
   "Time, Sound, Initiative, Log, Members / the turn card, folded / player": {
     "button \"Show Bree's turn\"": "core"
   },
+  "Time, Sound, Initiative, Log, Members / the turn card with Opportunity Attacks / player": {
+    "button \"Collapse Bree's turn\"": "core",
+    "button \"Dismiss Bree's turn\"": "core",
+    "button \"Use Rage, 2 of 3 left\"": "classResources",
+    "button \"Use Lay on Hands, 25 of 25 left\"": "classResources",
+    "button \"Use a slot…\"": "spellSlots"
+  },
+  "Time, Sound, Initiative, Log, Members / the goblin's turn card with Opportunity Attacks and Reaction used / dm": {
+    "button \"Collapse Goblin 1's turn\"": "core",
+    "button \"Dismiss Goblin 1's turn\"": "core",
+    "button \"Reaction used: Bree\"": "opportunity"
+  },
   "Time, Sound, Initiative, Log, Members / the Log / dm": {
     "button \"Show older\"": "core",
     "button \"Export\"": "core",

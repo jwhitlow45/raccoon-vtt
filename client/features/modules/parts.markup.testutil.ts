@@ -43,6 +43,7 @@ const { default: LogPanel } = await import("../../panels/LogPanel.tsx");
 const { default: MembersPanel } = await import("../../panels/MembersPanel.tsx");
 const { TurnCard } = await import("../combat/TurnCard.tsx");
 const { useCombatAlerts } = await import("../combat/alerts.ts");
+const { turnJobs } = await import("../combat/opportunity.ts");
 const { CharacterPage } = await import("../tokens/CharacterCard.tsx");
 const { RestSection } = await import("../tokens/RestSection.tsx");
 const { ClassesSheet } = await import("../slots/ClassesSheet.tsx");
@@ -497,6 +498,25 @@ function Turn(props: { folded: boolean }) {
   return alerts.turn ? createElement(TurnCard, { model: alerts.turn, folded: props.folded, foldable: true, onShow: noop, onDismiss: noop }) : createElement("p", null, "No turn card");
 }
 
+/**
+ * The turn's Opportunity Attack rows as its jobs would publish them, seeded
+ * before the drawing, since a render to markup runs no job: `moverId`'s walk
+ * left the reach of `ids` (combat/opportunity.ts).
+ */
+function reachSeed(moverId: string, ids: readonly string[]): (scope: RoomScope) => void {
+  return (scope) => {
+    const rows = ids.map((id) => ({ moverId, leg: 1, left: { id, spot: 1, reach: 5, known: true } }));
+    turnJobs(scope).store.setState({ key: null, movers: { [moverId]: { turn: 1, legs: [], rows, checking: false, over: false } }, fresh: { seq: 0, rows: [] } }, true);
+  };
+}
+
+/** The table on the goblin's turn, which the DM answers for, so its card's rows offer Reaction used. */
+function goblinsTurn(): RoomState {
+  const state = tableRoom();
+  state.encounter = { ...state.encounter!, activeEntryId: "e2" };
+  return state;
+}
+
 const DM_FOLDS = ["handouts", "screens", "check", "link", "display"] as const;
 const SCENE_FOLDS = ["floors", "light", "sound", "players", "map", "walls", "scene"] as const;
 
@@ -584,6 +604,8 @@ export const FIXTURES: readonly Fixture[] = [
   { surface: "Time, Sound, Initiative, Log, Members", name: "Initiative in a fight", roles: ["dm", "player"], draw: () => createElement(TrackerPanel as never, PANEL as never) },
   { surface: "Time, Sound, Initiative, Log, Members", name: "the turn card, full", roles: ["player"], draw: () => createElement(Turn, { folded: false }) },
   { surface: "Time, Sound, Initiative, Log, Members", name: "the turn card, folded", roles: ["player"], draw: () => createElement(Turn, { folded: true }) },
+  { surface: "Time, Sound, Initiative, Log, Members", name: "the turn card with Opportunity Attacks", roles: ["player"], seed: reachSeed("tbree", ["g1"]), draw: () => createElement(Turn, { folded: false }) },
+  { surface: "Time, Sound, Initiative, Log, Members", name: "the goblin's turn card with Opportunity Attacks and Reaction used", roles: ["dm"], room: goblinsTurn, seed: reachSeed("g1", ["tbree"]), draw: () => createElement(Turn, { folded: false }) },
   { surface: "Time, Sound, Initiative, Log, Members", name: "the Log", roles: ["dm", "player"], draw: () => createElement(LogPanel as never, PANEL as never) },
   { surface: "Time, Sound, Initiative, Log, Members", name: "Members", roles: ["dm", "player"], draw: () => createElement(MembersPanel as never, PANEL as never) },
 

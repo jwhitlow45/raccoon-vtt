@@ -33,8 +33,8 @@ const SCENE_SETTINGS: Placement = { kind: "drawn", surface: "Scene settings", co
 const NEW_SCENE: Placement = { kind: "drawn", surface: "New scene", covers: ["builder", "dungeon"] };
 /** Each mode, Wing included. */
 const BUILDER_OPTIONS: Placement = { kind: "drawn", surface: "Builder options", covers: ["builder", "dungeon"] };
-/** Open, a fight with a turn card holding full and folded Uses. The Initiative rows and the turn card mount the Uses list. */
-const ROOM_PANELS: Placement = { kind: "drawn", surface: "Time, Sound, Initiative, Log, Members", covers: ["time", "sound", "classResources", "spellSlots"] };
+/** Open, a fight with a turn card holding full and folded Uses, and its Opportunity Attacks. The Initiative rows and the turn card mount the Uses list. */
+const ROOM_PANELS: Placement = { kind: "drawn", surface: "Time, Sound, Initiative, Log, Members", covers: ["time", "sound", "classResources", "spellSlots", "opportunity"] };
 /** A page with classes, slots, resources and companions, its stat block row, the Rest section with the Short Rest card open. */
 const CHARACTERS: Placement = { kind: "drawn", surface: "Characters", covers: ["spellSlots", "hitDice", "classResources", "companions", "ddb"] };
 /** A character's token, a companion token, a monster with Make a companion open, and a picture carrying a 3D model, whose 3D model button is Isometric view's (D-261127-692). */
@@ -130,7 +130,7 @@ export const SURFACES: readonly SurfaceEntry[] = [
   { file: "client/features/builder/Options.tsx", sites: 29, ...BUILDER_OPTIONS },
   // Time, Sound, Initiative, Log, Members
   { file: "client/features/clock/TimePanel.tsx", sites: 12, ...ROOM_PANELS },
-  { file: "client/features/combat/TurnCard.tsx", sites: 5, ...ROOM_PANELS },
+  { file: "client/features/combat/TurnCard.tsx", sites: 8, ...ROOM_PANELS },
   { file: "client/features/encounter/Row.tsx", sites: 37, ...ROOM_PANELS },
   { file: "client/features/sound/panel/EffectsBoard.tsx", sites: 8, ...ROOM_PANELS },
   { file: "client/features/sound/panel/LoopsSection.tsx", sites: 5, ...ROOM_PANELS },
@@ -647,6 +647,8 @@ export const PRIMITIVES: readonly string[] = [
   "client/features/combat/CombatUses.tsx#UsesDrawer",
   "client/features/combat/DeathSaveCard.tsx#DeathSaveCard",
   "client/features/combat/RegenerationCard.tsx#RegenerationCard",
+  "client/features/combat/TurnCard.tsx#ReachBlock",
+  "client/features/combat/TurnCard.tsx#ReachRow",
   "client/features/combat/TurnCard.tsx#TurnCard",
   "client/features/combat/UsesSection.tsx#OpenerButton",
   "client/features/combat/UsesSection.tsx#PencilButton",

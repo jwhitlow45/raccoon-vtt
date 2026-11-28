@@ -1,12 +1,18 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { LimitedUse } from "#shared/dice/uses.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
+import type { ActorTarget } from "#shared/protocol.ts";
+import { avoidTrait, reachWords } from "#shared/rules/opportunity.ts";
+import { displayName } from "../../lib/scene.ts";
+import { useRoomScope } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
-import { creatureRolls } from "../dice/creature.ts";
+import { creatureBlock, creatureRolls } from "../dice/creature.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { entryName, playerOwnedEntry } from "../encounter/logic.ts";
+import { reactionFor } from "../encounter/ReactionSection.tsx";
+import type { ReactionTarget } from "../encounter/ready.ts";
 import { hiddenModules } from "../modules/gate.ts";
 import { useFeaturesHere } from "../modules/Gate.tsx";
 import type { ModuleId } from "../modules/registry.ts";
@@ -25,7 +31,8 @@ import {
   type RegenerationPrompt,
 } from "./logic.ts";
 import { slotCount } from "../slots/logic.ts";
-import { promptId, regenerationIn, turnId, useCreaturesUses, useDismissed } from "./state.ts";
+import { useTurnReach, type MoverOut, type TurnReach } from "./opportunity.ts";
+import { combatLocalSlot, promptId, regenerationIn, turnId, useCreaturesUses, useDismissed } from "./state.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { useLabels } from "../../state/labels.ts";
 
@@ -47,12 +54,33 @@ export function cardAttacks(named: readonly NamedRoll[]): NamedRoll[] {
 
 export type PromptCard<P> = { id: string; participant: Participant; record: number; prompt: P };
 
+/**
+ * A row of a block's Opportunity Attacks (docs/design/design-v1-opportunity-attacks.md
+ * 1): the creature whose reach the turn's walk left, by the name this
+ * viewer reads, whether a player's device counted it at 5 ft, the trait
+ * that grants it more Reactions, and its Reaction where this viewer may
+ * mark it used, while it is free.
+ */
+export type ReachRowModel = { id: string; name: string; fiveFt: boolean; trait: string | null; mark: ReactionTarget | null };
+
+/**
+ * A block's Opportunity Attacks: its rows, a job still checking, a leg past
+ * the cap, the mover unseen, a trait of its block that may avoid them, and
+ * what its live region says of the rows new on this device ("Left Goblin
+ * 2's reach.").
+ */
+export type BlockReach = { rows: readonly ReachRowModel[]; checking: boolean; over: boolean; unseen: boolean; avoid: string | null; announce?: string };
+
+export const NO_REACH: BlockReach = { rows: [], checking: false, over: false, unseen: false, avoid: null };
+
 export type TurnCardModel = {
   id: string;
   /** Whose turn it is: the landing row's creature, or its row's name when only other creatures of the turn are this viewer's. */
   name: string;
-  /** Each creature of the turn this viewer answers for: its uses, their count, and how many attacks it lists (cardAttacks). */
-  blocks: { participant: Participant; uses: readonly LimitedUse[] | null; count: number; attacks: number }[];
+  /** Each creature of the turn this viewer answers for: its uses, their count, how many attacks it lists (cardAttacks), and its Opportunity Attacks. */
+  blocks: { participant: Participant; uses: readonly LimitedUse[] | null; count: number; attacks: number; reach: BlockReach }[];
+  /** The names of every block's Opportunity Attack rows, for the folded row's words. */
+  left: readonly string[];
   count: number;
   /** The attacks of every block, for the folded row's words. */
   attacks: number;
@@ -101,7 +129,12 @@ export function useCombatAlerts(): CombatAlerts {
   // The attacks need the SRD's rolls table as well as its blocks, which the uses alone never wait on.
   const rolls = useDiceView(targets);
   const attacks = useMemo(() => targets.map((t) => (rolls.dice ? (creatureRolls(rolls.dice, t)?.named ?? null) : null)), [targets, rolls.dice]);
-  if (!view || !you || shown.length === 0) return NONE;
+  const turnReach = useTurnReach();
+  const movers = useMemo(() => Object.keys(turnReach.movers).map((id): ActorTarget => ({ tokenId: id })), [turnReach.movers]);
+  const moverDice = useDiceView(movers);
+  const reach = useMemo(() => (view && you ? reachByMover(view, you, labels, turnReach, (id) => (moverDice.dice ? creatureBlock(moverDice.dice, { tokenId: id }) : null)) : {}), [view, you, labels, turnReach, moverDice.dice]);
+  useReachReturns(turnReach, view, you);
+  if (!view || !you || (shown.length === 0 && Object.keys(reach).length === 0)) return NONE;
   return combatAlerts({
     labels,
     view,
@@ -112,7 +145,73 @@ export function useCombatAlerts(): CombatAlerts {
     ...cardLoad(read, rolls),
     dismissed: local.dismissed,
     hidden,
+    reach,
   });
+}
+
+/**
+ * Each mover's Opportunity Attacks as its block shows them, by the mover's
+ * token: the rows of the turn's jobs (opportunity.ts), named as this viewer
+ * reads them, with the Reaction used each row may mark.
+ */
+export function reachByMover(
+  view: Pick<RoomState, "tokens" | "characters" | "encounter">,
+  you: You,
+  labels: Labels,
+  reach: Pick<TurnReach, "movers" | "fresh">,
+  blockOf: (moverId: string) => Parameters<typeof avoidTrait>[0] | null,
+): Record<string, BlockReach> {
+  const out: Record<string, BlockReach> = {};
+  for (const [moverId, mover] of Object.entries(reach.movers)) {
+    const block = moverBlock(view, you, labels, moverId, mover, blockOf(moverId));
+    if (!block) continue;
+    const fresh = reach.fresh.rows.filter((r) => r.moverId === moverId).flatMap((r) => block.rows.filter((m) => m.id === r.left.id).map((m) => m.name));
+    out[moverId] = fresh.length > 0 ? { ...block, announce: `${capitalized(reachWords(fresh, "left", false, 3))}.` } : block;
+  }
+  return out;
+}
+
+function moverBlock(view: Pick<RoomState, "tokens" | "characters" | "encounter">, you: You, labels: Labels, moverId: string, mover: MoverOut, block: Parameters<typeof avoidTrait>[0] | null): BlockReach | null {
+  if (mover.rows.length === 0 && !mover.checking && !mover.over) return null;
+  const rows = mover.rows.flatMap((row): ReachRowModel[] => {
+    const token = view.tokens[row.left.id];
+    if (!token) return [];
+    const entry = view.encounter?.entries.find((e) => e.tokenId === token.id);
+    const used = token.companion?.turn !== undefined && token.companion.turn !== "own" ? token.companion.reactionUsed === true : entry?.reactionUsed === true;
+    const mark = used ? null : reactionFor(view, you, { tokenId: token.id });
+    return [{ id: token.id, name: displayName(token, labels), fiveFt: you.role === "player" && !row.left.known, trait: row.left.extra ? `${displayName(token, labels)}: ${row.left.extra}` : null, mark }];
+  });
+  const actor = actorOf(view, { tokenId: moverId });
+  const unseen = actor?.effects?.some((e) => e.key === "invisible" || e.key === "hidden") === true;
+  return { rows, checking: mover.checking, over: mover.over, unseen, avoid: block ? avoidTrait(block) : null };
+}
+
+/**
+ * A row this device had not shown this turn brings a dismissed turn card
+ * back, folded where it folds (D-261128-060): its dismissal and its
+ * unfolding on this device go. The jobs' shown set decides what is new, so
+ * a reload brings back no old row.
+ */
+/** The turn card's dismissal and unfolding on this device without `id`'s, or null where neither holds it. */
+export function returned(local: { dismissed: ReadonlySet<string>; shown: ReadonlySet<string> }, id: string): { dismissed: ReadonlySet<string>; shown: ReadonlySet<string> } | null {
+  if (!local.dismissed.has(id) && !local.shown.has(id)) return null;
+  return { dismissed: new Set([...local.dismissed].filter((d) => d !== id)), shown: new Set([...local.shown].filter((d) => d !== id)) };
+}
+
+function useReachReturns(reach: TurnReach, view: Pick<RoomState, "encounter" | "tokens" | "characters"> | null, you: You | null): void {
+  const scope = useRoomScope();
+  const seq = reach.fresh.seq;
+  const encounter = view?.encounter;
+  useEffect(() => {
+    const creature = view ? activeTarget(view) : null;
+    // A DM's rows of a player's creature are the DM's toast's, on no card of this device.
+    if (seq === 0 || !encounter?.activeEntryId || !you || !view || !creature || !answersFor(view, you, creature)) return;
+    const local = scope.get(combatLocalSlot);
+    const back = returned(local.getState(), turnId(encounter.activeEntryId, encounter.round));
+    if (back) local.setState(back);
+    // Only a new row's publish brings it back, never a later change of the turn's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seq, scope]);
 }
 
 /**
@@ -152,10 +251,13 @@ export function combatAlerts(input: {
   dismissed: ReadonlySet<string>;
   /** The parts hidden on this device, whose uses neither count nor admit a card (docs/design/design-v1-features.md 3). Left out, none. */
   hidden?: ReadonlySet<ModuleId>;
+  /** Each mover's Opportunity Attacks, by its token (reachByMover). Left out, none. */
+  reach?: Readonly<Record<string, BlockReach>>;
 }): CombatAlerts {
   const { view, you, dismissed } = input;
   const out: CombatAlerts = { regenerations: [], deathSaves: [], recharges: [], turn: null, revives: healRevivesDead(view.meta.settings) };
   const blocks: TurnCardModel["blocks"] = [];
+  const placed = new Set<string>();
   input.participants.forEach((p, i) => {
     const uses = input.uses[i] ?? null;
     const actor = actorOf(view, p.target);
@@ -184,8 +286,20 @@ export function combatAlerts(input: {
     const attacks = input.attacks?.[i] ?? 0;
     // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands. One whose table failed keeps it with the failure and its reload.
     const attacksUnknown = input.attacks !== undefined && input.attacks[i] === null && (input.loading || input.failed);
-    if (count > 0 || skipped || attacks > 0 || attacksUnknown || (uses === null && (input.loading || input.failed))) blocks.push({ participant: p, uses, count, attacks });
+    const mover = moverOf(view, p.target);
+    const reach = (mover !== null ? input.reach?.[mover] : undefined) ?? NO_REACH;
+    if (mover !== null) placed.add(mover);
+    // A creature whose walk left an enemy's reach gets the card for its rows alone (docs/design/design-v1-opportunity-attacks.md 1).
+    if (count > 0 || skipped || attacks > 0 || attacksUnknown || (uses === null && (input.loading || input.failed)) || reach.rows.length > 0 || reach.over) blocks.push({ participant: p, uses, count, attacks, reach });
   });
+  // A controlled mount sharing the turn, with no record of its own, still gets a block for the rows its walk left, for whoever answers for the turn.
+  const turnCreature = activeTarget(view);
+  for (const [moverId, reach] of Object.entries(input.reach ?? {})) {
+    if (placed.has(moverId) || (reach.rows.length === 0 && !reach.over) || !turnCreature || !answersFor(view, you, turnCreature)) continue;
+    const token = view.tokens[moverId];
+    if (!token) continue;
+    blocks.push({ participant: { target: { tokenId: moverId }, holder: `t:${moverId}`, name: entryName(view, { tokenId: moverId }, input.labels), record: null, landing: false }, uses: null, count: 0, attacks: 0, reach });
+  }
   const encounter = view.encounter;
   if (blocks.length > 0 && encounter?.activeEntryId) {
     const id = turnId(encounter.activeEntryId, encounter.round);
@@ -194,8 +308,28 @@ export function combatAlerts(input: {
       const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
       const name = landing?.name ?? (entry ? entryName(view, entry, input.labels) : "This");
       const since = turnSince(view, input.participants) ?? Number.POSITIVE_INFINITY;
-      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
+      const left = blocks.flatMap((b) => b.reach.rows.map((r) => r.name));
+      out.turn = { id, name, blocks, left, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
     }
   }
   return out;
+}
+
+/** The token a block's creature walks as: its own, or its character's token on the scene, for the turn's jobs keyed by token. */
+function moverOf(view: Pick<RoomState, "tokens">, target: ActorTarget): string | null {
+  if ("tokenId" in target) return target.tokenId;
+  for (const t of Object.values(view.tokens)) if ("ref" in t.actor && t.actor.ref === target.characterId) return t.id;
+  return null;
+}
+
+/** The turn's own creature, whose answerer reads a shared mount's rows. */
+function activeTarget(view: Pick<RoomState, "encounter">): ActorTarget | null {
+  const encounter = view.encounter;
+  const entry = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
+  if (!entry) return null;
+  return entry.tokenId !== undefined ? { tokenId: entry.tokenId } : entry.characterId !== undefined ? { characterId: entry.characterId } : null;
+}
+
+function capitalized(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
