@@ -8,10 +8,11 @@
  * art (client/features/models/fixtures.testutil.ts), read as an STL through
  * the 3D model sheet as a DM would: a Medium knight in Stone, another in
  * Bronze turned to face east, and a Large one in Iron, with a goblin that
- * keeps its icon.
+ * keeps its icon. models-sheet.webp is the Bronze knight's 3D model sheet,
+ * its file read and its color picked, before Save.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes a
- * room, writes docs/dm-guide/models-isometric.webp at 1280 x 800, as the
+ * room, writes docs/dm-guide/models-isometric.webp and models-sheet.webp at 1280 x 800, as the
  * guide's other pictures are, and deletes the room:
  *
  *   DATABASE_URL=postgres://... GUIDE_PORT=3198 node scripts/guide-models.ts
@@ -106,6 +107,24 @@ try {
     if (k.color !== "stone") {
       await sheet.getByRole("combobox", { name: "Color" }).selectOption(k.color);
       await waitFor("the drawing in its color", async () => ((await sheet.getByRole("button", { name: "Save", exact: true }).isEnabled()) ? true : null));
+    }
+    // The sheet itself, read and colored but not yet saved, for the guide's picture of its choices.
+    if (k.name === "Bronze knight") {
+      // The Stone knight's "Saved." toast left to go by itself, and the sheet scrolled to its foot so Size shows whole.
+      await dm.locator("[data-toast]").first().waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+      await sheet.evaluate((el) => {
+        type Box = { scrollHeight: number; clientHeight: number; scrollTop: number };
+        const g = globalThis as unknown as { getComputedStyle(b: Box): { overflowY: string }; scrollTo(x: number, y: number): void; document: { scrollingElement: Box | null } };
+        const body = Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<Box> }).querySelectorAll("*")).find(
+          (b) => b.scrollHeight > b.clientHeight + 4 && /(auto|scroll)/.test(g.getComputedStyle(b).overflowY),
+        );
+        if (body) body.scrollTop = body.scrollHeight;
+        // Only the sheet's own body scrolls: the room under it stays framed as it was.
+        g.scrollTo(0, 0);
+        if (g.document.scrollingElement) g.document.scrollingElement.scrollTop = 0;
+      });
+      await dm.mouse.move(0, WINDOW.height / 2);
+      await picture(dm, "models-sheet");
     }
     await sheet.getByRole("button", { name: "Save", exact: true }).click();
     await sheet.waitFor({ state: "detached" });

@@ -9,7 +9,7 @@
  *   floors-fly-strip.webp, floors-fly-up.webp, floors-fall-card.webp,
  *   floors-trapdoor-pane.webp, floors-line-up.webp, floors-outliner-other.webp,
  *   floors-opening-isometric.webp, floors-fight-every-floor.webp,
- *   floors-export-every.webp and floors-several-files.webp.
+ *   floors-export-every.webp, uvtt-export.webp and floors-several-files.webp.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes a
  * room, writes the pictures to docs/dm-guide/ at 1280 x 800 for the
@@ -325,6 +325,26 @@ try {
   await section.evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "center" }));
   await quiet(dm);
   await picture(dm, "floors-export-every");
+
+  // Shot 8b: Export as VTT file on Every floor, the DM view, once the file is made.
+  await section.getByRole("button", { name: "Close", exact: true }).click();
+  await section.getByRole("button", { name: "Export as VTT file", exact: true }).click();
+  await section.getByRole("radiogroup", { name: "Floors", exact: true }).getByRole("radio", { name: "Every floor", exact: true }).check();
+  await section.getByRole("radiogroup", { name: "Version", exact: true }).getByRole("radio", { name: "DM view", exact: true }).check();
+  await section.getByRole("button", { name: "Make the file", exact: true }).click();
+  const download = section.getByRole("link", { name: "Download", exact: true });
+  await download.waitFor({ timeout: 30_000 });
+  // The made file's line and Download sit at the section's foot, so the panel shows them with a margin under them.
+  await download.evaluate((el) => {
+    type Box = { scrollTop: number; scrollHeight: number; clientHeight: number; parentElement: Box | null; getBoundingClientRect(): { bottom: number } };
+    const link = el as unknown as Box;
+    let box = link.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight + 4)) box = box.parentElement;
+    if (box) box.scrollTop += link.getBoundingClientRect().bottom - box.getBoundingClientRect().bottom + 24;
+  });
+  await quiet(dm);
+  await picture(dm, "uvtt-export");
+  await section.getByRole("button", { name: "Close", exact: true }).click();
 
   // Shot 9: New scene from 3 files.
   const p = (x: number, y: number) => ({ x, y });
