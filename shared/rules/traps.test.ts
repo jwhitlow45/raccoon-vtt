@@ -97,10 +97,12 @@ describe("the footprint a walk has (route.ts onTrace, as an area's sweep reads i
     assert.deepEqual(summary(plan(world([ogre({ elevation: 10, squeeze: undefined, x: 4, y: 4 })], [trap("plate", square(5, 5))]), land).springings), ["plate:enter:public:ogre"], "full size, it lands on the plate");
   });
 
-  test("a walk that starts squeezed is squeezed on its first piece only: at that piece's end it stands full size, as its trace has it", () => {
-    // Down to the corner 3.5, 6.5 and back west: only the full footprint at the corner covers square 5,7.
+  test("a walk that starts squeezed is squeezed on its first piece only: at that piece's end it stands full size, as its trace has it, which from change format 70 reads only the squares its space wholly covers", () => {
+    // Down to the corner 3.5, 6.5 and back west: only the full footprint at the corner, rounded half a square up, covers square 5,7.
     const op: Op = { t: "token.move", tokenId: "ogre", x: 0.5, y: 6.5, route: [[3.5, 6.5, 0, 0], [0.5, 6.5, 0, 0]] };
-    assert.deepEqual(summary(plan(world([ogre()], [trap("plate", square(5, 7))]), op).springings), ["plate:enter:public:ogre"]);
+    const state = world([ogre()], [trap("plate", square(5, 7))]);
+    assert.deepEqual(summary(planTrapMove(op, state, DM, { opVersion: 69 }).springings), ["plate:enter:public:ogre"], "stored at 69, the rounded-up corner reaches it");
+    assert.deepEqual(summary(plan(state, op).springings), [], "from 70 the corner reads square 4,7 alone, the one its space wholly covers (traps.ts squeezeWalksWhole)");
     assert.deepEqual(summary(plan(world([ogre()], [trap("plate", square(5, 5))]), op).springings), [], "squeezed down its first piece, it never reaches column 5");
   });
 
@@ -439,7 +441,7 @@ describe("stops (5.5)", () => {
     assert.equal(plan(state, op).op, op);
   });
 
-  test("a stop squeezed in a corridor lands on the ground under its squeezed footprint, not the raised ground its full one would cover, at op version 35 and from 37 with the fog off, and at 36 the walk goes on to its end", () => {
+  test("a stop squeezed in a corridor lands on the ground under its squeezed footprint, not the raised ground its full one would cover, at op version 35 and from 37 with the fog off, at 36 the walk goes on to its end, and from 70 it stops on the snare", () => {
     // A one-square corridor along row 5, walled above and below, with the row south of it raised 10 ft past x = 3.
     const ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 5 });
     const heights = new Array(256).fill(0);
@@ -470,9 +472,14 @@ describe("stops (5.5)", () => {
     assert.deepEqual(summary(at36.springings), ["snare:enter:public:ogre"]);
     assert.equal(at36.op, op, "no stand before the walk's end, so no stop");
     // From 37 the ground every player sees takes op 35's stand, squeezes included (migrate.ts stopsOnPublicGround), and with the fog off that is every cell.
+    const at69 = planTrapMove(op, state, DM, { opVersion: 69 });
+    assert.deepEqual(summary(at69.springings), ["snare:enter:public:ogre"]);
+    assert.deepEqual(at69.op.t === "token.move" ? [at69.op.x, at69.op.y, at69.op.squeeze, at69.op.elevation] : null, [3.5, 4.5, true, 0]);
+    // From 70 the walk, which ends squeezed, reads only the squares its space wholly covers (traps.ts squeezeWalksWhole), so it
+    // first reaches the snare a square on, standing squeezed on it, on the corridor's ground.
     const live = plan(state, op);
     assert.deepEqual(summary(live.springings), ["snare:enter:public:ogre"]);
-    assert.deepEqual(live.op.t === "token.move" ? [live.op.x, live.op.y, live.op.squeeze, live.op.elevation] : null, [3.5, 4.5, true, 0]);
+    assert.deepEqual(live.op.t === "token.move" ? [live.op.x, live.op.y, live.op.squeeze, live.op.elevation] : null, [4.5, 4.5, true, 0]);
   });
 
   test("a trap that does not stop leaves the move as it is", () => {

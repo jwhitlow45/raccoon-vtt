@@ -7,7 +7,7 @@ import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, linkHolds, onHolder, seatHolds, walkerFor } from "./attach.ts";
 import type { Rect } from "./geom.ts";
-import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, placedOnHex, rangeAtInto, sizeCategory, tokenRefHex, wholeRangeInto, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { pendingGround } from "./held.ts";
 import { dragEnd, planWalks, walkedIn, wayOf, withTrapCut, type HolderEnd, type MovedToken } from "./moveLeg.ts";
@@ -541,6 +541,31 @@ export function compareProgress(a: Progress, b: Progress): number {
 // ---------------------------------------------------------------------------
 // Walks
 
+/**
+ * The first change format whose squeezing walks read whole squares between
+ * their ends on squares (`Walk.whole`). It is the first op version deployed
+ * with that rule, so it never names a version a build without it wrote:
+ * ops stored at such a version would replay under the new rule, with other
+ * springings and stops than they made. It shares op 70 with Opportunity
+ * Attack notices (migrate.ts OPPORTUNITY_OP_VERSION), since both ship in one
+ * deploy.
+ */
+export const WHOLE_SQUARES_OP_VERSION = 70;
+
+/**
+ * Whether a walk that starts or ends squeezed reads, at each spot between
+ * its ends, only the squares wholly inside the creature's space there
+ * (`Walk.whole`), so a Large creature squeezing into a corridor one square
+ * wide sets off no trap behind the corridor's south or east wall and no
+ * trapdoor beside it along the map's edge, where rounding its space half a
+ * square up reached them. Ops stored before version 70 read the full space
+ * rounded up, and replay so. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function squeezeWalksWhole(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < WHOLE_SQUARES_OP_VERSION);
+}
+
 /** A footprint at one spot, as the cells and the floor rule read it: no more than that, so a walk of 500 tokens copies none. */
 type Light = { sceneId: string; size: Token["size"]; w?: number; h?: number; x: number; y: number; squeeze?: true; elevation: number };
 
@@ -598,6 +623,15 @@ type Walk = {
   squeezeAtEnd: boolean;
   /** Whether its footprint is squeezed at spot `j`, as its walk's trace has it there (route.ts onTrace). */
   squeezedAt: (j: number) => boolean;
+  /**
+   * From change format 70 (`squeezeWalksWhole`), whether it starts
+   * squeezed by its own trace or ends squeezed as the move leaves it, so on
+   * squares, at each spot between its ends where it walks full size, it
+   * reads only the squares wholly inside its space (footprint.ts
+   * wholeRangeInto). Both are public parts of the move, so the flag reads
+   * nothing hidden.
+   */
+  whole: boolean;
   /** Its full footprint's size in cells (footprintSize). */
   size: { w: number; h: number };
   /** The scene's grid, which the footprint at each spot is read on. */
@@ -801,12 +835,17 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         teleport: e.how === "teleport",
         squeezeAtEnd: e === head && squeeze,
         squeezedAt: () => false,
+        whole: false,
         size: footprintSize(token),
         grid,
         elevation: () => 0,
         arrives: e.carried !== undefined && dragsEndClear(opVersion),
       };
-      walk.squeezedAt = squeezeRule(walk, endsAs(op, token, e === head && squeeze));
+      const leaves = endsAs(op, token, e === head && squeeze);
+      walk.squeezedAt = squeezeRule(walk, leaves);
+      // Its own trace's start, not the token: a creature its holder drags walks as itself and never squeezed (route.ts
+      // followerTrace). Only squares read it: on hexes each spot reads its own hexes and squeeze (route.ts hexPiece).
+      walk.whole = squeezeWalksWhole(opVersion) && (isSqueezed(e.trace[0]!) || isSqueezed(leaves));
       walk.elevation = elevationRule(walk, before, shared);
       if (walk.ownProgress && holder && inFile(walk)) walk.heightAt = (j, up) => fileElevation(walk, holder, before, j, walk.spots[j]!, up);
       all.push(walk);
@@ -987,11 +1026,19 @@ function lightAt(walk: Walk, j: number): Light {
   return out;
 }
 
-/** The cells a walk's footprint covers at spot `j` (lightAt), written into `out` where it walks full size between its ends. On hexes, the cells its hexes' sub-cells lie in. */
-function cellsAt(walk: Walk, j: number, out: CellRange): CellRange {
+/**
+ * The cells a walk's footprint covers at spot `j` (lightAt), written into
+ * `out` where it walks full size between its ends: on a squeezing walk
+ * (`Walk.whole`) the squares wholly inside its space, unless `full` asks
+ * for the whole space, as the floor rule's ground does. On hexes, the cells
+ * its hexes' sub-cells lie in.
+ */
+function cellsAt(walk: Walk, j: number, out: CellRange, full = false): CellRange {
   // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
   if (isHex(walk.grid) || j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(walk.grid, lightAt(walk, j));
-  return rangeAtInto(out, walk.size.w, walk.size.h, walk.spots[j]!.x + walk.ox, walk.spots[j]!.y + walk.oy);
+  const x = walk.spots[j]!.x + walk.ox;
+  const y = walk.spots[j]!.y + walk.oy;
+  return walk.whole && !full ? wholeRangeInto(out, walk.size.w, walk.size.h, x, y) : rangeAtInto(out, walk.size.w, walk.size.h, x, y);
 }
 
 /** The token as it stands at spot `j`, for a moment. */
@@ -1203,12 +1250,15 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   // One range for every spot between the ends, which no reader keeps past the spot.
   const scratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
   const rangeOf = (j: number): CellRange => cellsAt(walk, j, scratch);
+  // A squeezing walk's ground is under its full space, as route.ts gives the spot its height by (D-261128-034), so a corridor
+  // beside raised ground never reads the walker in the air. Its own range, since `r` may be the scratch range still read.
+  const groundScratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
   const floorAt = (j: number, r: CellRange): boolean => {
     if (walk.carriedOn) return false;
     if (holder && insideHolder(walk.grid, lightAt(walk, j), holder)) return false;
     // On hexes a footprint is its hexes, whose ground no range of cells reads (H3).
     if (isHex(walk.grid)) return standing(walk.elevation(j), footprintGround(before.buildChunks, lightAt(walk, j))) === "ground";
-    return standing(walk.elevation(j), cache.ground(r)) === "ground";
+    return standing(walk.elevation(j), cache.ground(walk.whole ? cellsAt(walk, j, groundScratch, true) : r)) === "ground";
   };
   const marks = new Int32Array(traps.length);
   let stamp = 0;
