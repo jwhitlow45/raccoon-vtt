@@ -807,10 +807,25 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [hidden, standees, ghostWants, cullKey, cam.x, cam.y, cam.scale, size.width, size.height, clear.left, clear.right, clear.top, clear.bottom, assets, copy]);
   // After each commit, so the cache frees a sheet only once this board no longer draws it.
   const [board] = useState(() => ({}));
+  /*
+   * The render that shows the board or turns it still has the camera of
+   * before: Stage.tsx holds the view still in a layout effect after it, so
+   * that render's cull box lies elsewhere, and its asks could evict sheets
+   * the board draws a moment later (D-261127-707). Its asks wait a frame,
+   * and go then as the latest render's.
+   */
+  const asksRef = useRef({ copy, asks: sheetAsks, version: sheets.version });
+  asksRef.current = { copy, asks: sheetAsks, version: sheets.version };
+  const viewOf = hidden ? null : turn;
+  const askedViewRef = useRef<Turn | null | undefined>(undefined);
   useLayoutEffect(() => {
-    if (hidden) sheetCache.forget(board);
-    else sheetCache.layout(board, copy, sheetAsks, sheets.version);
-  }, [hidden, board, copy, sheetAsks, sheets.version]);
+    const moved = askedViewRef.current !== viewOf;
+    askedViewRef.current = viewOf;
+    if (hidden) return sheetCache.forget(board);
+    if (!moved) return sheetCache.layout(board, copy, sheetAsks, sheets.version);
+    const frame = requestAnimationFrame(() => sheetCache.layout(board, asksRef.current.copy, asksRef.current.asks, asksRef.current.version));
+    return () => cancelAnimationFrame(frame);
+  }, [hidden, board, copy, sheetAsks, sheets.version, viewOf]);
   useLayoutEffect(() => () => sheetCache.forget(board), [board]);
 
   // The ground stage's layers cull by the layout's box, a step past the view, so a pan between steps finds them drawn. Its pills keep their points (5.8).

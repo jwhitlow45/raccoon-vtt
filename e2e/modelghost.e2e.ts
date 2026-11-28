@@ -34,11 +34,11 @@ const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 /** Where the DM's board opens, and where the drag brings the creature. */
 const HOME = { x: 10, y: 10 };
 /**
- * Where the creature stands, 100 cells down each axis at 40 px a cell. It
- * lies past the cull box of the board as it opens and of any camera the
- * switch to Isometric passes through on the way.
+ * Where the creature stands, 40 cells down each axis at 40 px a cell: past
+ * the board's cull box, and inside the one Top-down's camera would give the
+ * render that switches to Isometric, which asks for nothing (D-261127-707).
  */
-const FAR = { x: 110, y: 110 };
+const FAR = { x: 50, y: 50 };
 
 let server: Server;
 let browser: Browser;
@@ -118,7 +118,7 @@ describe("raccoon-vtt a ghost's model", { timeout: 300_000 }, () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  test("MG-1. a DM's room with a wolf wearing a model 100 cells down each axis from where the board opens, fog off", async () => {
+  test("MG-1. a DM's room with a wolf wearing a model 40 cells down each axis from where the board opens, fog off", async () => {
     dm = await dmContext.newPage();
     await dmSocket.attach(dmContext, dm);
     console_.attach(dm);
@@ -137,7 +137,7 @@ describe("raccoon-vtt a ghost's model", { timeout: 300_000 }, () => {
     run.sceneId = dmSocket.state!.meta.playerSceneId!;
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
-    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { bounds: { w: 120, h: 120 }, fogEnabled: false, defaultView: { ...HOME, zoom: 40 } } });
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { bounds: { w: 60, h: 60 }, fogEnabled: false, defaultView: { ...HOME, zoom: 40 } } });
     const picture = await upload("token", await sharp({ create: { width: 256, height: 256, channels: 3, background: { r: 150, g: 90, b: 60 } } }).png().toBuffer());
     run.sheetId = await upload("model", await sheet());
     const model = { assetId: run.sheetId, side: 1.6, anchorY: 0.8, boxes: Array.from({ length: 8 }, () => [30, 20, 70, 90]) };
@@ -149,7 +149,7 @@ describe("raccoon-vtt a ghost's model", { timeout: 300_000 }, () => {
     await dm.close();
   });
 
-  test("MG-2. the DM's isometric board opens away from the wolf and asks for no sheet", async () => {
+  test("MG-2. the DM's isometric board opens away from the wolf and asks for no sheet, the render that switches to it included", async () => {
     dm = await dmContext.newPage();
     console_.attach(dm);
     dm.on("request", (r) => {
