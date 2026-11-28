@@ -36,6 +36,15 @@ describe("rolls.json", () => {
     assert.equal(rolls["goblin-warrior"]!.spellDc, undefined);
   });
 
+  test("holds each creature's distinct melee reaches when one passes 5 ft (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+    assert.deepEqual(rolls["barbed-devil"]!.reaches, [5, 10], "a 5 ft Claw and a 10 ft Tail");
+    assert.equal(rolls["goblin-warrior"]!.reaches, undefined, "5 ft is the default");
+    const longest = new Map<number, number>();
+    for (const numbers of Object.values(rolls)) if (numbers.reaches) longest.set(Math.max(...numbers.reaches), (longest.get(Math.max(...numbers.reaches)) ?? 0) + 1);
+    assert.deepEqual([...longest].sort((a, b) => a[0] - b[0]), [[10, 73], [15, 14], [30, 3], [60, 1]], "91 of the 330 reach past 5 ft");
+    assert.equal(Object.values(rolls).filter((n) => (n.reaches?.length ?? 0) > 1).length, 13, "13 with two distinct reaches");
+  });
+
   test("loads once a page", async () => {
     assert.equal(await loadSrdRolls(), rolls);
   });

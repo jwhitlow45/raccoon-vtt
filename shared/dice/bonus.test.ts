@@ -64,6 +64,18 @@ describe("a stat block's numbers", () => {
     assert.equal(numbers.spellAttack, 5);
     assert.equal(blockRollNumbers(customMonster("plain")).spellDc, undefined);
   });
+
+  test("the distinct reaches of its melee attacks, ascending, written only when one passes 5 ft (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+    const reaches = (...texts: string[]) => blockRollNumbers(customMonster("m", { actions: texts.map((text, i) => ({ name: `Attack ${i}`, text })) })).reaches;
+    assert.deepEqual(reaches("Melee Attack Roll: +6, reach 10 ft. Hit: 13 (2d8 + 4) Bludgeoning damage."), [10], "2024 words");
+    assert.deepEqual(reaches("Melee Weapon Attack: +4 to hit, reach 15 ft., one target. Hit: 6 (1d8 + 2) piercing damage."), [15], "2014 words");
+    assert.deepEqual(reaches("Melee or Ranged Attack Roll: +6, reach 10 ft. or range 30/120 ft. Hit: 11 (2d6 + 4) Piercing damage."), [10], "melee or ranged");
+    assert.deepEqual(reaches("Melee Attack Roll: +6, reach 5 ft. Hit: 10 (2d6 + 3) Piercing damage.", "Melee Attack Roll: +6, reach 10 ft. Hit: 14 (2d10 + 3) Slashing damage."), [5, 10], "a Barbed Devil's Claw and Tail");
+    assert.deepEqual(reaches("Melee Attack Roll: +6, reach 10 feet. Hit: 5.", "Melee Weapon Attack: +4 to hit, one target. Hit: 4."), [5, 10], "feet spelled out, and an attack naming no reach at 5 ft");
+    assert.equal(reaches("Melee Attack Roll: +6, reach 5 ft. Hit: 13."), undefined, "5 ft alone is the default");
+    assert.equal(reaches("Ranged Attack Roll: +6, range 150/600 ft. Hit: 8.", "Ranged Weapon Attack: +5 to hit, range 80/320 ft., reach 10 ft. sweep"), undefined, "a ranged attack has no reach");
+    assert.equal(blockRollNumbers(customMonster("m", { traits: [{ name: "Long Arms", text: "Melee Attack Roll: +6, reach 10 ft." }] })).reaches, undefined, "only Actions count");
+  });
 });
 
 describe("a creature's numbers and bonus", () => {
