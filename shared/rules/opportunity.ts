@@ -123,8 +123,8 @@ function leaves(record: LegRecord): LegRecord[] {
  *
  * A walk that comes back to where it was can match more than one way, so
  * the match is the one that keeps the most occurrences for the fewest new
- * joins, then matches the most legs, and on a tie reads a join at the
- * oldest legs and a removal at the newest. What it
+ * joins, and on a tie reads a join at the oldest legs and a removal at the
+ * newest. What it
  * cannot match is removed records and new legs, never a known leg scanned
  * again. `added` and `removed` list leaf records only: a join is neither
  * added nor removed, and a join gone is its parts removed.
@@ -149,12 +149,10 @@ export function reconcileLegs(prev: readonly LegRecord[], next: readonly Pick<Re
   const full = m >= MAX_PATH_STOPS - 1;
   const w = m + 1;
   // For the leaves from a and the legs from b, the best match: the most leaves kept less the new joins it needs (a join
-  // of k leaves keeps k for k - 1 joins, so it beats k removed and one new leg, and never beats a split back as it was),
-  // then the most legs matched. A tie takes the first choice offered here, the shortest match, then a removal, then a
-  // new leg, so a tie reads a join at the oldest legs, where withStop joins, and a removal at the newest, where an Undo
-  // takes a leg back.
+  // of k leaves keeps k for k - 1 joins, so it beats k removed and one new leg, and never beats a split back as it was).
+  // A tie takes the first choice offered here, the shortest match, then a removal, then a new leg, so a tie reads a join
+  // at the oldest legs, where withStop joins, and a removal at the newest, where an Undo takes a leg back.
   const score = new Int32Array((n + 1) * w);
-  const matched = new Int32Array((n + 1) * w);
   const choice = new Int32Array((n + 1) * w);
   const DELETE = -1;
   const INSERT = -2;
@@ -163,32 +161,28 @@ export function reconcileLegs(prev: readonly LegRecord[], next: readonly Pick<Re
       const at = a * w + b;
       if (a === n && b === m) continue;
       let best = -Infinity;
-      let bestLegs = -1;
       let pick = 0;
-      const offer = (sc: number, legs: number, c: number) => {
-        if (sc > best || (sc === best && legs > bestLegs)) {
+      const offer = (sc: number, c: number) => {
+        if (sc > best) {
           best = sc;
-          bestLegs = legs;
           pick = c;
         }
       };
       if (a < n && b < m && same(all[a]!.from, next[b]!.from)) {
         let whole = 0;
+        // The leaves are the previous path's legs, end to end, so any run of them chains.
         for (let c = a; c < n; c++) {
-          if (c > a && !same(all[c]!.from, all[c - 1]!.to)) break;
           for (const lo of joinsEndingAt[c]!) if (lo >= a) whole++;
           if (same(all[c]!.to, next[b]!.to)) {
             const fresh = c - a - whole;
-            const rest = (c + 1) * w + b + 1;
-            offer(c - a + 1 - fresh + score[rest]!, 1 + matched[rest]!, c);
+            offer(c - a + 1 - fresh + score[(c + 1) * w + b + 1]!, c);
           }
           if (!full) break;
         }
       }
-      if (a < n) offer(score[(a + 1) * w + b]!, matched[(a + 1) * w + b]!, DELETE);
-      if (b < m) offer(score[a * w + b + 1]!, matched[a * w + b + 1]!, INSERT);
+      if (a < n) offer(score[(a + 1) * w + b]!, DELETE);
+      if (b < m) offer(score[a * w + b + 1]!, INSERT);
       score[at] = best;
-      matched[at] = bestLegs;
       choice[at] = pick;
     }
   }
