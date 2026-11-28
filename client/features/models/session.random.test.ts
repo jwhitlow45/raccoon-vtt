@@ -13,14 +13,16 @@ import { ModelSession, PICTURE_COLORS_MAX, distinctPictures, pictureColorOffer, 
  * and failures, on fakes that answer only when a step says so. Its
  * invariants hold over every order:
  *
- * - ONE: a save uploads at most one sheet per different picture (one for
- *   all without Picture's color) and at most one front view, only where a
- *   wearer has no picture.
+ * - ONE: a save uploads at most one sheet per different picture it saw
+ *   (one for all without Picture's color) and at most one front view, only
+ *   where a wearer has no picture.
  * - QUIET: nothing is sent after a close (the footer's Cancel closes too),
  *   or from a save a close superseded, and at most one change per save.
  * - OWN: each wearer keeps its own picture, takes a sheet this save
  *   uploaded, drawn from the picked file in its own picture's color under
  *   Picture's color, and a wearer with no picture wears the front view.
+ *   The wearers are those when the change is sent, since another device
+ *   can change a picture after the preview or while Save uploads.
  * - ENDED: a close ends the worker, and no draw starts after it.
  * - CLEAR: once every answer is in, nothing reads as reading, drawing or saving.
  * - BUSY: after each step, reading, drawing or saving only while an answer is on its way.
@@ -101,6 +103,7 @@ type Step =
   | { t: "cancelDraw" }
   | { t: "reuse" }
   | { t: "remove" }
+  | { t: "wearers"; set: number }
   | { t: "close" };
 
 // Weighted so most runs reach a save, often under Picture's color, with every other step still common.
@@ -124,6 +127,8 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   { arbitrary: fc.constant({ t: "reuse" as const }), weight: 1 },
   { arbitrary: fc.constant({ t: "remove" as const }), weight: 2 },
   { arbitrary: fc.constant({ t: "close" as const }), weight: 2 },
+  // Another device changes the pictures: after the preview, while Save uploads, or any time.
+  { arbitrary: fc.record({ t: fc.constant("wearers" as const), set: fc.nat(WEARERS.length - 1) }), weight: 3 },
 );
 
 /** Half the runs start with a file drawn under Picture's color, so a save of one sheet per picture is common, not only possible. */
@@ -138,7 +143,11 @@ class Rig {
   readonly draws: { file: File; options: DrawOptions; d: Deferred<DrawnSheet>; after: boolean }[] = [];
   readonly colors: { image: ImageRef; d: Deferred<string | null> }[] = [];
   readonly uploads: { kind: "model" | "token"; blob: Blob; d: Deferred<string>; save: number }[] = [];
-  readonly commits: { change: (current: ImageRef | undefined) => ImageRef | null; save: number; saving: boolean; color: ColorChoice | undefined; file: string | undefined; afterClose: boolean }[] = [];
+  readonly commits: { change: (current: ImageRef | undefined) => ImageRef | null; save: number; saving: boolean; color: ColorChoice | undefined; file: string | undefined; afterClose: boolean; wearers: readonly (ImageRef | undefined)[] }[] = [];
+  /** What each save attempt saw: its Color, its file, and the wearers when it started and as they changed while it ran. */
+  readonly saves = new Map<number, { color: ColorChoice | undefined; file: string | undefined; sets: (readonly (ImageRef | undefined)[])[] }>();
+  /** Whether the wearers ever changed, after which a Color chosen before may stand where it is no longer offered. */
+  swapped = false;
   readonly uploaded = new Map<string, Blob>();
   ends = 0;
   closed = false;
@@ -146,7 +155,7 @@ class Rig {
   save = 0;
   faults: string[] = [];
   readonly session: ModelSession;
-  readonly wearers: (ImageRef | undefined)[];
+  wearers: readonly (ImageRef | undefined)[];
 
   /** A worker and a server that answer what they were told to drop: the sheet or the upload still comes, late, and must be ignored. */
   readonly late: boolean;
@@ -185,7 +194,7 @@ class Rig {
       },
       commit: (change) => {
         const state = this.session.state;
-        this.commits.push({ change, save: this.save, saving: state.saving, color: state.drawnFor?.color, file: state.file?.name, afterClose: this.closed || state.closed });
+        this.commits.push({ change, save: this.save, saving: state.saving, color: state.drawnFor?.color, file: state.file?.name, afterClose: this.closed || state.closed, wearers: this.wearers });
       },
       uploadWords: () => "The upload failed.",
     };
@@ -229,6 +238,24 @@ class Rig {
     u.d.resolve(id);
   }
 
+  /** Save as the footer's button does, counting an attempt only where it starts one. */
+  pressSave(): void {
+    const s = this.session.state;
+    if (this.session.canSave) {
+      this.save++;
+      this.saves.set(this.save, { color: s.drawnFor?.color, file: s.file?.name, sets: [this.wearers] });
+    }
+    this.session.save();
+  }
+
+  /** Another device changes the pictures, as the field's effect hands them to the session. */
+  swap(wearers: readonly (ImageRef | undefined)[]): void {
+    this.wearers = wearers;
+    this.swapped = true;
+    if (this.session.state.saving) this.saves.get(this.save)?.sets.push(wearers);
+    this.session.setWearers(wearers);
+  }
+
   pendingCount(): number {
     return this.draws.filter((x) => !x.d.settled).length + this.colors.filter((x) => !x.d.settled).length + this.uploads.filter((x) => !x.d.settled).length;
   }
@@ -249,10 +276,9 @@ async function play(rig: Rig, steps: readonly Step[]): Promise<void> {
     } else if (st.t === "draw") rig.answerDraw(st.ok, st.stage);
     else if (st.t === "color") rig.answerColor();
     else if (st.t === "upload") rig.answerUpload(st.ok);
-    else if (st.t === "save") {
-      if (s.canSave) rig.save++;
-      s.save();
-    } else if (st.t === "cancelDraw") s.cancelDraw();
+    else if (st.t === "save") rig.pressSave();
+    else if (st.t === "wearers") rig.swap(WEARERS[st.set]!);
+    else if (st.t === "cancelDraw") s.cancelDraw();
     else if (st.t === "reuse") s.useRoomModel(ROOM);
     else if (st.t === "remove") s.remove();
     else {
@@ -291,20 +317,22 @@ function check(rig: Rig): void {
   assert.equal(new Set(saves.map((c) => c.save)).size, saves.length, "QUIET: one save sent twice");
   assert.ok(saves.length <= 1, "QUIET: the sheet closes on its save, so it sends one");
 
-  const pictures = distinctPictures(rig.wearers);
-  const pictureless = rig.wearers.some((w) => w === undefined);
   for (let attempt = 1; attempt <= rig.save; attempt++) {
     const ups = rig.uploads.filter((u) => u.save === attempt);
     const sheets = ups.filter((u) => u.kind === "model").length;
     const fronts = ups.filter((u) => u.kind === "token").length;
-    // ONE, and never past the six pictures Picture's color works for.
-    assert.ok(sheets <= Math.min(PICTURE_COLORS_MAX, Math.max(1, pictures?.length ?? 1)), `ONE: save ${attempt} uploaded ${sheets} sheets`);
+    const seen = rig.saves.get(attempt)!;
+    const pictures = new Set(seen.sets.flatMap((set) => set.flatMap((w) => (w ? [pictureKey(w)] : []))));
+    const pictureless = seen.sets.some((set) => set.some((w) => w === undefined));
+    // ONE: a sheet per different picture the save saw, the drawing shown for those with none, and never past the six pictures Picture's color works for where they never changed.
+    const most = seen.color === "picture" ? pictures.size + (pictureless ? 1 : 0) : 1;
+    assert.ok(sheets <= (seen.sets.length === 1 ? Math.min(PICTURE_COLORS_MAX, Math.max(1, most)) : Math.max(1, most)), `ONE: save ${attempt} uploaded ${sheets} sheets`);
     assert.ok(fronts <= (pictureless ? 1 : 0), `ONE: save ${attempt} uploaded ${fronts} front views`);
   }
   // OWN
   for (const c of saves) {
-    const results = rig.wearers.map((w) => c.change(w));
-    rig.wearers.forEach((w, i) => {
+    const results = c.wearers.map((w) => c.change(w));
+    c.wearers.forEach((w, i) => {
       const out = results[i];
       assert.ok(out?.model, `OWN: wearer ${i} took no model`);
       if (w) {
@@ -325,7 +353,7 @@ function check(rig: Rig): void {
       if (!w) {
         assert.ok("assetId" in out && rig.uploaded.has(out.assetId) && tagOf.get(rig.uploaded.get(out.assetId)!)?.kind === "front", "OWN: a wearer with no picture wears the front view");
       }
-      assert.ok(c.color !== "picture" || pictureColorOffer(rig.wearers).usable, "OWN: Picture's color saved where it is not offered");
+      assert.ok(c.color !== "picture" || rig.swapped || pictureColorOffer(c.wearers).usable, "OWN: Picture's color saved where it is not offered");
       if (c.color === "picture" && tag.file !== "textured.glb" && w) {
         const want = colorOfPicture(w) ?? "stone";
         assert.equal(tag.color.toLowerCase(), want.toLowerCase(), `OWN: wearer ${i} wears another picture's color`);
@@ -333,7 +361,7 @@ function check(rig: Rig): void {
     });
     // Two wearers of one picture wear one model.
     const byPicture = new Map<string, string>();
-    rig.wearers.forEach((w, i) => {
+    c.wearers.forEach((w, i) => {
       if (!w) return;
       const key = pictureKey(w);
       const id = results[i]!.model!.assetId;
@@ -359,8 +387,7 @@ describe("the 3D model sheet's state", () => {
     await flush();
     rig.answerDraw(true, false);
     await flush();
-    rig.save++;
-    rig.session.save();
+    rig.pressSave();
     await play(rig, []);
     check(rig);
     const sheets = rig.uploads.filter((u) => u.kind === "model").map((u) => tagOf.get(u.blob)!.color);
@@ -379,8 +406,7 @@ describe("the 3D model sheet's state", () => {
     await flush();
     rig.answerDraw(true, false);
     await flush();
-    rig.save++;
-    rig.session.save();
+    rig.pressSave();
     await play(rig, []);
     check(rig);
     assert.deepEqual(rig.uploads.map((u) => u.kind), ["model", "token"]);
@@ -404,8 +430,7 @@ describe("the 3D model sheet's state", () => {
     await flush();
     saving.answerDraw(true, false);
     await flush();
-    saving.save++;
-    saving.session.save();
+    saving.pressSave();
     await flush();
     assert.equal(saving.session.state.saving, true);
     saving.session.close();
@@ -445,8 +470,7 @@ describe("the 3D model sheet's state", () => {
     await flush();
     rig.answerDraw(true, false);
     await flush();
-    rig.save++;
-    rig.session.save();
+    rig.pressSave();
     await play(rig, []);
     check(rig);
     assert.equal(rig.commits.length, 1);
@@ -458,19 +482,78 @@ describe("the 3D model sheet's state", () => {
     await flush();
     rig.answerDraw(true, false);
     await flush();
-    rig.save++;
-    rig.session.save();
+    rig.pressSave();
     rig.session.save();
     await flush();
     rig.answerUpload(false);
     await flush();
     assert.deepEqual([rig.session.state.saving, rig.session.state.error], [false, "The upload failed."]);
     assert.equal(rig.uploads.length, 1, "a second tap on Save sends nothing more");
-    rig.save++;
-    rig.session.save();
+    rig.pressSave();
     await play(rig, []);
     check(rig);
     assert.equal(rig.commits.length, 1);
+  });
+
+  /** A drawing under Picture's color of the first wearer, its color answered, ready to save. */
+  async function previewByPicture(rig: Rig): Promise<void> {
+    rig.session.pick(FILES[0]!);
+    await flush();
+    rig.answerDraw(true, false);
+    await flush();
+    rig.session.setOptions({ color: "picture" });
+    await flush();
+    rig.answerColor();
+    await flush();
+    rig.answerDraw(true, false);
+    await flush();
+  }
+  const sheetColor = (rig: Rig, image: ImageRef) => tagOf.get(rig.uploaded.get(rig.commits[0]!.change(image)!.model!.assetId)!)!.color;
+
+  test("a picture another device changed after the preview takes a sheet in its own color, drawn again at Save, never the preview's", async () => {
+    const blue = icon("#3366ff");
+    const red = icon("#ee2211");
+    const rig = new Rig([blue]);
+    await previewByPicture(rig);
+    assert.equal(rig.draws.at(-1)!.options.color, "#3366ff", "the preview drew in the blue icon's color");
+    rig.swap([red]);
+    rig.pressSave();
+    await play(rig, []);
+    check(rig);
+    assert.equal(sheetColor(rig, red), "#ee2211");
+    assert.deepEqual(rig.uploads.filter((u) => u.kind === "model").map((u) => tagOf.get(u.blob)!.color), ["#ee2211"], "the blue drawing no red picture needs is not uploaded");
+  });
+
+  test("a picture another device changed while Save uploads takes its own color before the change is sent", async () => {
+    const a = icon("#aa0000");
+    const b = icon("#00bb00");
+    const c = icon("#0000cc");
+    const rig = new Rig([a, b]);
+    await previewByPicture(rig);
+    rig.pressSave();
+    await flush();
+    rig.answerColor();
+    await flush();
+    rig.answerColor();
+    await flush();
+    rig.answerDraw(true, false);
+    await flush();
+    rig.answerUpload(true);
+    await flush();
+    rig.swap([a, c]);
+    await play(rig, []);
+    check(rig);
+    assert.deepEqual([sheetColor(rig, a), sheetColor(rig, c)], ["#aa0000", "#0000cc"]);
+  });
+
+  test("a wearer change that leaves Picture's color unusable draws in Stone, as the option would refuse it", async () => {
+    const rig = new Rig([icon("#3366ff")]);
+    await previewByPicture(rig);
+    rig.swap([undefined]);
+    await flush();
+    assert.deepEqual([rig.session.state.options.color, rig.session.state.stage], ["stone", "drawing"]);
+    await play(rig, []);
+    assert.equal(rig.session.state.drawnFor?.color, "stone");
   });
 
   test("holds ONE, QUIET, OWN, ENDED, CLEAR and BUSY over random sequences of picks, draws, options, cancels, closes, saves and uploads", async () => {
