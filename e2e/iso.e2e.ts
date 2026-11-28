@@ -311,6 +311,27 @@ function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
   }, auraColor);
 }
 
+/**
+ * A drag's dashed reach rings (movement/MoveLayer.tsx ReachRings) on the
+ * visible main stage, each by its creature's id with the page box it covers.
+ */
+function reachRings(page: Page): Promise<{ id: string; x: number; y: number; width: number; height: number }[]> {
+  return page.evaluate(() => {
+    type Node = { name(): string; isVisible(): boolean; getClientRect(): { x: number; y: number; width: number; height: number } };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; find(s: string): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } };
+    const main = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    if (!main) return [];
+    const c = main.container().getBoundingClientRect();
+    return main
+      .find(".reach-ring")
+      .filter((n) => n.isVisible())
+      .map((n) => {
+        const r = n.getClientRect();
+        return { id: n.name().split(" ").find((part) => part.startsWith("reach-") && part !== "reach-ring")!.slice("reach-".length), x: c.left + r.x, y: c.top + r.y, width: r.width, height: r.height };
+      });
+  });
+}
+
 /** Whether a frame a page received ends another member's drag of `tokenId`, at its drop or by its cancel. */
 function endsDrag(frame: string, tokenId: string): boolean {
   try {
@@ -1501,6 +1522,58 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 600_000 }, () => {
     });
     await pat.keyboard.press("+");
     await waitFor("the plus key zooming the idle board", async () => (JSON.stringify(await isoCamera(pat)) !== JSON.stringify(wheeled) ? true : null));
+  });
+
+  test("ISO-31b. on Bree's turn Pat's drag in Isometric away from the goblin beside her reads Leaves 5 ft of Goblin, and its ring lies on the ground at the goblin's feet (docs/design/design-v1-opportunity-attacks.md 1)", async () => {
+    const was = { bree: { ...patSocket.state!.tokens[hall.bree]! }, goblin: { ...dmSocket.state!.tokens[hall.goblin]! } };
+    const entry = uuidv7();
+    await ops.send({ t: "token.update", tokenId: hall.bree, patch: { x: 4, y: 6 } });
+    await ops.send({ t: "token.update", tokenId: hall.goblin, patch: { x: 3, y: 6 } });
+    await ops.send({ t: "encounter.start", entries: [{ id: entry, tokenId: hall.bree, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Bree's turn on Pat's phone", () => (patSocket.state?.encounter?.activeEntryId === entry && patSocket.state.tokens[hall.goblin]?.x === 3 ? true : null));
+    await pat.bringToFront();
+    try {
+      await waitFor("Bree's standee beside the goblin's", async () => {
+        const [b, g] = [await standeeAt(pat, hall.bree), await standeeAt(pat, hall.goblin)];
+        return Math.hypot(b.x - g.x, b.y - g.y) > 4 ? true : null;
+      });
+      const bree = await standeeAt(pat, hall.bree);
+      const goblin = await standeeAt(pat, hall.goblin);
+      // Straight on from the goblin through Bree on screen is straight on in the world too, as the view is a flat projection of the ground.
+      const len = Math.hypot(bree.x - goblin.x, bree.y - goblin.y);
+      const step = (3 * (await boardScale(pat))) / len;
+      const to = { x: bree.x + (bree.x - goblin.x) * step, y: bree.y + (bree.y - goblin.y) * step };
+      await pat.mouse.move(bree.x, bree.y);
+      await pat.mouse.down();
+      await pat.mouse.move(bree.x + (to.x - bree.x) * 0.1, bree.y + (to.y - bree.y) * 0.1, { steps: 3 });
+      await pat.mouse.move(to.x, to.y, { steps: 12 });
+      try {
+        const label = await waitFor("Pat's leaves line", async () => {
+          const m = await isoMarks(pat, AURA);
+          return [...(m?.drag.texts ?? []), ...(m?.overlay.texts ?? [])].find((t) => t.includes("\nLeaves ")) ?? null;
+        }, 5_000);
+        assert.match(label, /\nLeaves 5 ft of Goblin$/);
+        const rings = await reachRings(pat);
+        assert.deepEqual(rings.map((r) => r.id), [hall.goblin]);
+        const ring = rings[0]!;
+        const feet = await standeeAt(pat, hall.goblin);
+        // The goblin's standee rises from the ring: the ring's middle under the standee's, not round its head.
+        assert.ok(Math.abs(ring.x + ring.width / 2 - feet.x) < ring.width / 2, `the ring at ${ring.x + ring.width / 2}, the goblin at ${feet.x}`);
+        assert.ok(ring.y + ring.height / 2 > feet.y, `the ring's middle ${ring.y + ring.height / 2} above the standee's ${feet.y}`);
+        await shots.take(pat, "iso-pat-drag-leaves-goblin");
+      } finally {
+        // Back onto her own square before the drop, so the walk stays where the later steps expect her.
+        await pat.mouse.move(bree.x, bree.y, { steps: 8 });
+        await pat.mouse.up();
+      }
+      await waitFor("the ring gone with the drag", async () => ((await reachRings(pat)).length === 0 ? true : null));
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "token.update", tokenId: hall.bree, patch: { x: was.bree.x, y: was.bree.y } });
+      await ops.send({ t: "token.update", tokenId: hall.goblin, patch: { x: was.goblin.x, y: was.goblin.y } });
+      await waitFor("Bree and the goblin back", () => (patSocket.state?.tokens[hall.bree]?.x === was.bree.x && patSocket.state.tokens[hall.goblin]?.x === was.goblin.x ? true : null));
+    }
   });
 
   test("ISO-32. Pat measures in Isometric: the ruler's line and its distance draw in the drag layer, the distance standing upright", async () => {
