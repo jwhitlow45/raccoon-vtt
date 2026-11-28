@@ -42,7 +42,7 @@ describe("PDF_OPTIONS (docs/design/design-v1-pdf-handouts.md 4.2.4)", () => {
 
 describe("IMAGE_FAILURES (docs/design/design-v1-pdf-handouts.md 4.2.1)", () => {
   test("each matches a warning the pinned pdf.js writes, in its built worker as shipped", () => {
-    const texts = ["Unable to decode image", "Unable to decode inline image", "#getJsModule: ", "#instantiateWasm: ", "Image exceeded maximum allowed size and was removed."];
+    const texts = ["Unable to decode image", "Unable to decode inline image", "#getJsInstance: ", "#getWasmInstance: ", "Image exceeded maximum allowed size and was removed."];
     for (const file of ["build/pdf.worker.mjs", "build/pdf.worker.min.mjs"]) {
       const source = read(file);
       for (const text of texts) assert.ok(source.includes(text), `${file}: ${text}`);
@@ -77,7 +77,7 @@ describe("IMAGE_FAILURES (docs/design/design-v1-pdf-handouts.md 4.2.1)", () => {
     assert.match(failures(broken)[0]!, /^Warning: Unable to decode image/);
     // A decoder that cannot load, then the image it should have decoded.
     const missing = await warnings(imagePdf("JBIG2Decode", new TextEncoder().encode("bits")), { wasmUrl: "/nowhere/" });
-    assert.deepEqual(failures(missing).map((line) => line.slice(0, 25)), ["Warning: #getJsModule: Er", "Warning: Unable to decode"]);
+    assert.deepEqual(failures(missing).map((line) => line.slice(0, 25)), ["Warning: #getJsInstance: ", "Warning: Unable to decode"]);
     // An image larger than maxImageSize, dropped.
     const large = await warnings(imagePdf(null, new Uint8Array(100).fill(128)), { maxImageSize: 50 });
     assert.deepEqual(failures(large), ["Warning: Image exceeded maximum allowed size and was removed."]);

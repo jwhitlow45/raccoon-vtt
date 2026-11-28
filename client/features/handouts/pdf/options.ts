@@ -64,8 +64,8 @@ export const PDF_OPTIONS = {
  */
 export const IMAGE_FAILURES: readonly RegExp[] = [
   /^Warning: Unable to decode (inline )?image\b/,
-  /^Warning: #getJsModule: /,
-  /^Warning: #instantiateWasm: /,
+  /^Warning: #getJsInstance: /,
+  /^Warning: #getWasmInstance: /,
   /^Warning: Image exceeded maximum allowed size and was removed\./,
 ];
 

@@ -537,7 +537,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       new RegExp(`^GET /api/assets/${saved?.pages[0]?.assetId}/thumb$`),
       /^GET \/assets\/pdfjs-[\w-]+\.js$/,
       /^GET \/assets\/(pdf\.)?worker-[\w-]+\.js$/,
-      /^GET \/pdfjs\/6\.4\.299\/(jbig2|openjpeg)_nowasm_fallback\.js$/,
+      /^GET \/pdfjs\/6\.5\.438\/(jbig2|openjpeg)_nowasm_fallback\.js$/,
       /^PUT \/api\/rooms\/\w+\/assets\?kind=handout$/,
     ];
     const strays = requests.filter((r) => !r.url.startsWith(`${server.origin}/`) || !allowed.some((a) => a.test(`${r.method} ${r.url.slice(server.origin.length)}`)));
@@ -615,7 +615,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.equal(await dm.evaluate(() => "pdfjsWorker" in globalThis), false, "pdf.js set up its fallback worker on the page's thread");
 
     // A decoder blocked: the job stops when the file opens, not partway.
-    const decoder = /\/pdfjs\/6\.4\.299\/openjpeg_nowasm_fallback\.js$/;
+    const decoder = /\/pdfjs\/6\.5\.438\/openjpeg_nowasm_fallback\.js$/;
     asked.length = 0;
     await dm.route(decoder, (route) => route.abort("blockedbyclient"));
     await pickFile(letter);

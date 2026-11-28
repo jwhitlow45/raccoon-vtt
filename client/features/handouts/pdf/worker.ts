@@ -41,11 +41,18 @@ function detail(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * What the decoders' plain JavaScript builds are given when they are only
+ * built here, not used. Since pdf.js 6.5 each reads its imports at start, and
+ * none of them runs before a page decodes an image, so any function serves.
+ */
+const BUILD_ONLY_IMPORTS = { a: new Proxy({}, { get: () => () => 0 }) };
+
 async function start(): Promise<void> {
   for (const name of DECODERS) {
     try {
-      const module = (await import(/* @vite-ignore */ `${PDFJS_FOLDER}${name}`)) as { default: () => unknown };
-      await module.default();
+      const module = (await import(/* @vite-ignore */ `${PDFJS_FOLDER}${name}`)) as { default: (imports: object) => unknown };
+      await module.default(BUILD_ONLY_IMPORTS);
     } catch (err) {
       scope.postMessage({ rvtt: "failed", step: "decoder", detail: `${name}: ${detail(err)}` });
       return;
