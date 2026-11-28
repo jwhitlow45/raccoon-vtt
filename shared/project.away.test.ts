@@ -5,7 +5,7 @@ import type { RoomState, TrapDue, Viewer } from "./model.ts";
 import { dependents, diffProjection, heldOf, projectEntity, projectState, type ProjectedFall, type ProjectedTrap } from "./project.ts";
 import type { Change, Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
-import { DM, P1, P2, character, env, room, token, trap } from "./testutil.ts";
+import { DM, P1, P2, character, env, numbered, room, token, trap } from "./testutil.ts";
 
 /*
  * The DM's trap and fall cards name the creatures they name that the DM's
@@ -18,9 +18,9 @@ const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["rookA"], hits: ["rookA"], ...over });
 
-/** Rook with a token on each scene, Bree away on s2, Snik here, a found pit waiting on Rook and Bree, a found net with none waiting, and a fall card for Bree. */
+/** Rook with a token on each scene, Bree away on s2, Snik here, a found pit waiting on Rook and Bree, a found net with none waiting, and a fall card for Bree. Snik and the Ogre hold the numbers their names gave them. */
 function rooms(): RoomState {
-  return room({
+  return numbered(room({
     characters: { rook: character("rook", { name: "Rook", ownerIds: ["p1"] }), bree: character("bree", { name: "Bree", ownerIds: ["p2"] }) },
     tokens: {
       rookA: token("rookA", { name: "Rook", kind: "pc", ownerIds: ["p1"], actor: { ref: "rook" } }),
@@ -34,7 +34,7 @@ function rooms(): RoomState {
       net: trap("net", { name: "Falling Net", found: true, zone: { cells: [{ x: 20, y: 20, w: 1, h: 1 }] } }),
     },
     falls: { "120:0": { id: "120:0", rev: 0, tokenId: "bree", riders: ["ogre"], sceneId: "s2", from: "s1", ft: 10, made: 120 } },
-  });
+  }));
 }
 
 const dmTrap = (state: RoomState, id: string, sceneId = "s1") => projectEntity(keys.trap(id), state, DM, { sceneId }) as ProjectedTrap | null;
@@ -99,11 +99,27 @@ describe("away names on the DM's cards (LP53-TRAP-2)", () => {
     assert.equal((fall.value as ProjectedFall).away?.ogre?.name, "Ogre Chief");
   });
 
+  test("an away creature carries the table's number, never a stored one its name no longer gives, and a rename sends the cards without it", () => {
+    const state = rooms();
+    // A number from before numbers were given by the table, or copied, is no member's: the table reads none.
+    state.tokens.ogre = { ...state.tokens.ogre!, met: undefined };
+    assert.deepEqual(dmTrap(state, "pit")!.away?.ogre, { name: "Ogre" }, "its token's own copy reads no number either");
+    const { changes } = sent(rooms(), { t: "token.update", tokenId: "ogre", patch: { name: "Troll" } }, DM, "s1");
+    const pit = changes.find((c) => c.key === keys.trap("pit"));
+    const fall = changes.find((c) => c.key === keys.fall("120:0"));
+    assert.ok(pit && "value" in pit && fall && "value" in fall, "both cards naming it are sent");
+    assert.deepEqual((pit.value as ProjectedTrap).away?.ogre, { name: "Troll" }, "the stored 2 was the Ogres' number, not the Troll's");
+    assert.deepEqual((fall.value as ProjectedFall).away?.ogre, { name: "Troll" });
+  });
+
   test("a creature that leaves the DM's copy is named away at once, and one back in it drops out", () => {
     const left = sent(rooms(), { t: "token.update", tokenId: "snik", patch: { sceneId: "s2" } }, DM, "s1");
     const pit = left.changes.find((c) => c.key === keys.trap("pit"));
     assert.ok(pit && "value" in pit);
-    assert.deepEqual((pit.value as ProjectedTrap).away?.snik, { name: "Snik", number: 3 });
+    // Its 3 was given on s1, which s2's numbers do not hold, so it reads plain there, as its label does.
+    assert.deepEqual((pit.value as ProjectedTrap).away?.snik, { name: "Snik" });
+    const label = projectEntity(keys.token("snik"), left.state, DM, { sceneId: "s2" }) as { number?: number } | null;
+    assert.ok(label && label.number === undefined, "its own copy on s2 carries no number");
     const back = sent(left.state, { t: "token.update", tokenId: "snik", patch: { sceneId: "s1" } }, DM, "s1");
     const again = back.changes.find((c) => c.key === keys.trap("pit"));
     assert.ok(again && "value" in again);

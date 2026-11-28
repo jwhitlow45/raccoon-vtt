@@ -3338,7 +3338,11 @@ function dmFall(ctx: Ctx, card: Fall): ProjectedFall {
 /**
  * The tokens among `ids` the room holds and the DM's copy does not: those
  * off the floors it holds. A deleted token is in no room, so its card
- * reads "a creature" (D-261128-037).
+ * reads "a creature" (D-261128-037). Each carries the table's number, as
+ * its token's own copy does (dmCopy), never a stored one its name or scene
+ * no longer gives. That number changes only with a write of the token,
+ * which the cards naming it follow (cardsNaming), or with members,
+ * owners or floors, which project everything again.
  */
 function awayNamesCtx(ctx: Ctx, ids: readonly string[]): AwayNames | undefined {
   let out: AwayNames | undefined;
@@ -3346,7 +3350,8 @@ function awayNamesCtx(ctx: Ctx, ids: readonly string[]): AwayNames | undefined {
     const token = ownEntry(ctx.state.tokens, id);
     if (!token || ctx.floors.has(token.sceneId)) continue;
     const name: AwayName = { name: token.name };
-    if (token.number !== undefined) name.number = token.number;
+    const number = tableNumber(ctx.state, token);
+    if (number !== undefined) name.number = number;
     if ("ref" in token.actor) name.ref = token.actor.ref;
     (out ??= {})[id] = name;
   }
