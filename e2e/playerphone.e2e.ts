@@ -249,6 +249,15 @@ async function touch(points: { x: number; y: number }[], holdMs = 0): Promise<vo
   await touches.end([], after);
 }
 
+/** The words on the board's canvas, as Konva holds them. */
+function boardTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { text(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages.flatMap((s) => s.find("Text")).filter((t) => t.isVisible()).map((t) => t.text());
+  });
+}
+
 /** A line of points from one to the other, as a finger moves. */
 function along(from: { x: number; y: number }, to: { x: number; y: number }, steps = 10): { x: number; y: number }[] {
   return Array.from({ length: steps + 1 }, (_, i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
@@ -1960,6 +1969,50 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     } finally {
       await ops.send({ t: "encounter.end" }).catch(() => {});
       await ops.send({ t: "room.update", settings: { playersApplyDamage: false } }).catch(() => {});
+    }
+  });
+
+  test("oa-pp. on Thorn's turn at 390 x 844 his drag away from Goblin 1 reads Leaves 5 ft of Goblin 1, the folded card says left Goblin 1's reach, the DM's toast names the hidden Lurker too, and no frame of Pat's carries the Lurker (docs/design/design-v1-opportunity-attacks.md 1, 3 and 7)", async () => {
+    const lurker = uuidv7();
+    // A room takes a row's id once, and the steps before ended fights under these.
+    newEntryIds();
+    const frames = { received: playerSocket.received.length, sent: playerSocket.sent.length };
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 6 });
+    await ops.send({ t: "token.move", tokenId: run.goblin.id, x: 9, y: 6 });
+    // Beside Thorn's start on the other side, seen by the DM alone.
+    await ops.send({ t: "token.create", token: { id: lurker, sceneId: run.sceneId, kind: "monster", name: "Lurker", size: "medium", x: 7, y: 6, visibility: "dm", disposition: "hostile", actor: { inline: actor(7) } } });
+    await ops.send({ t: "encounter.start", entries: [{ id: run.thorn.entryId, tokenId: run.thorn.id, value: 18 }, { id: run.goblin.entryId, tokenId: run.goblin.id, value: 10 }] });
+    await ops.send({ t: "encounter.next" });
+    try {
+      await setUp({ width: 390, height: 844, scale: 1 });
+      await waitFor("Thorn's turn on Pat's page", () => (playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId && playerSocket.state.tokens[run.goblin.id]?.x === 9 ? true : null));
+      const from = await cellPoint({ x: 8, y: 6 });
+      const to = await cellPoint({ x: 8, y: 9 });
+      const touches = new Touches(playerCdp);
+      await touches.start([from]);
+      for (const p of along(from, to, 12)) await touches.move([p], 16);
+      try {
+        const label = await waitFor("Pat's leaves line", async () => (await boardTexts(player)).find((t) => t.includes("\nLeaves ")) ?? null, 5_000);
+        // Goblin 1 has no stat block, so Pat's device counts 5 ft and says so. The Lurker is no creature Pat's copy holds.
+        assert.match(label, /\nLeaves 5 ft of Goblin 1$/);
+        await shots.take(player, "oa-pp-drag-line");
+      } finally {
+        await touches.end([], 16);
+      }
+      await waitFor("Thorn three squares down", () => (playerSocket.state?.tokens[run.thorn.id]?.y === 9 ? true : null));
+      const folded = player.locator('[data-alert="turn"][data-turn-folded]');
+      await waitFor("the folded card's notice", async () => (/^Thorn's turn: left Goblin 1's reach/.test((await folded.first().innerText().catch(() => "")).trim()) ? true : null));
+      await shots.take(player, "oa-pp-folded-card");
+      await dm.locator("[data-toast]").filter({ hasText: /^Thorn left the reach of (Goblin 1 and Lurker|Lurker and Goblin 1)\.$/ }).first().waitFor();
+      await player.waitForTimeout(500);
+      const carried = [...playerSocket.received.slice(frames.received), ...playerSocket.sent.slice(frames.sent)].filter((f) => f.includes(lurker) || f.includes("Lurker"));
+      assert.deepEqual(carried, [], "a frame of Pat's carried the Lurker");
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: lurker }).catch(() => {});
+      await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 6 });
+      await ops.send({ t: "token.move", tokenId: run.goblin.id, x: 12, y: 9 });
     }
   });
 
