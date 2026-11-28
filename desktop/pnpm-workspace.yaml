@@ -7,3 +7,9 @@
 # which this app does not make (it ships NSIS), so its script stays off.
 allowBuilds:
   electron-winstaller: false
+# GHSA-g3hv-75wg-m249 is fixed only in minimatch 11.0.1 and later, and the
+# lockfile held 9.0.9 and 10.2.6. The 3.x and 5.x copies are outside the
+# affected range, and their callers use the old CommonJS function export that
+# 11 dropped, so they stay.
+overrides:
+  "minimatch@>=7.0.0 <11.0.1": 11.0.3
