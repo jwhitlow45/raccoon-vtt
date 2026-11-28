@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import fc from "fast-check";
 import type { PathStop, TokenPath } from "../model.ts";
-import { stopFootprint } from "./footprint.ts";
+import { footprintRect, occupiedHexes, stopFootprint, type PlacedToken } from "./footprint.ts";
+import { hexSubcells, type HexGrid } from "./hex.ts";
 import { COLUMNS, ROWS } from "./hexWalls.testkit.ts";
 import { SQUARES } from "./grid.ts";
 import { hexStandPlace } from "./movement.ts";
-import { hexRouteFeet, routeFeet } from "./route.ts";
+import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattice, spotRect, standingAt, type SizedSpot } from "./route.ts";
 import { MAX_PATH_STOPS } from "../protocol.ts";
-import { foldPrior, keepPrior, legGeometry, oneSize, pathCounters, priorDiag, priorSeenDiag, publicCounters, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
+import { foldPrior, keepPrior, legGeometry, legOnGround, legParts, legSpots, oneSize, pathCounters, priorDiag, priorSeenDiag, publicCounters, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
 
 /**
  * A path's stops each keep the size the creature had there
@@ -175,5 +177,89 @@ describe("what earlier floors took (docs/design/design-v1-floors.md phase 2, 5.3
     let full: TokenPath = path;
     for (let i = 1; i <= MAX_PATH_STOPS; i++) full = withStop(full, stop(i, 0, { moved: 5, cost: 5 }), undefined, { token, rules, grid: SQUARES });
     assert.equal(full.prior, prior);
+  });
+});
+
+describe("legOnGround reads the walk legSpots gives (docs/design/design-v1-opportunity-attacks.md 4)", () => {
+  // The walk as legOnGround read it before legSpots, kept here as the oracle.
+  function sizedAt(token: PlacedToken, stop: PathStop): PlacedToken {
+    if (!stop.footprint) return token;
+    const { w, h, squeeze } = stop.footprint;
+    return { size: "custom", w, h, x: stop.x, y: stop.y, ...(squeeze ? { squeeze } : {}) };
+  }
+  function before(g: typeof SQUARES | HexGrid, token: PlacedToken, from: PathStop, to: PathStop, ground: Parameters<typeof legOnGround>[4]): boolean {
+    if (g.shape === "hex") {
+      const open = (t: PlacedToken) => occupiedHexes(g, t).every((h) => hexSubcells(g, h).some(([sx, sy]) => ground.sub(sx, sy)));
+      if (!open(standingAt(token, from))) return false;
+      for (const [a, b] of legParts(from, to)) {
+        const sizes = oneSize(a, b) ? [standingAt(token, b)] : [standingAt(token, a), standingAt(token, b)];
+        for (const walker of sizes) for (const p of hexPieceSpots(hexPiece(g, walker, a, b))) if (!open({ ...walker, x: p.x, y: p.y })) return false;
+      }
+      return true;
+    }
+    const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
+    const covered = (p: SizedSpot) => {
+      const r = spotRect(g, token, p);
+      for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground.cell(x, y)) return false;
+      return true;
+    };
+    if (!covered(from)) return false;
+    for (const [a, b] of legParts(from, to)) {
+      const steps = legSteps(a, b, lattice);
+      for (let k = 1; k <= steps.n; k++) if (!covered({ ...b, ...steps.at(k) })) return false;
+    }
+    return true;
+  }
+
+  const half = fc.integer({ min: 0, max: 24 }).map((v) => v / 2);
+  const footprint = fc.option(fc.record({ w: fc.constantFrom(0.5, 1, 2, 3), h: fc.constantFrom(0.5, 1, 2, 3), squeeze: fc.option(fc.constant(true as const), { nil: undefined }) }), { nil: undefined });
+  const stop = fc.record({ x: half, y: half, elevation: fc.constantFrom(0, 5, 10), footprint }).map(({ footprint: f, ...rest }) => {
+    const out: PathStop = { ...rest };
+    if (f) out.footprint = f.squeeze ? { w: f.w, h: f.h, squeeze: true } : { w: f.w, h: f.h };
+    return out;
+  });
+  const via = fc.array(fc.tuple(half, half), { maxLength: 3 }).map((cs) => cs.flat());
+  const leg = fc.record({
+    grid: fc.constantFrom<typeof SQUARES | HexGrid>(SQUARES, ROWS, COLUMNS),
+    size: fc.constantFrom("tiny" as const, "medium" as const, "large" as const, "huge" as const),
+    from: stop,
+    to: stop,
+    via,
+    holes: fc.array(fc.tuple(fc.integer({ min: 0, max: 14 }), fc.integer({ min: 0, max: 14 })), { maxLength: 8 }),
+  });
+
+  test("legOnGround answers as it did before legSpots, on squares and hexes, sizes and resizes", () => {
+    fc.assert(
+      fc.property(leg, ({ grid, size, from, to, via: v, holes }) => {
+        const token: PlacedToken = { size, x: from.x, y: from.y };
+        const end: PathStop = v.length > 0 ? { ...to, via: v } : to;
+        const hidden = new Set(holes.map(([x, y]) => `${x},${y}`));
+        const ground = { cell: (x: number, y: number) => !hidden.has(`${x},${y}`), sub: (sx: number, sy: number) => !hidden.has(`${Math.floor(sx / 4)},${Math.floor(sy / 4)}`) };
+        assert.equal(legOnGround(grid, token, from, end, ground), before(grid, token, from, end, ground));
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  test("the walk starts at its first stop and ends at its last, each spot at its stop's size and height", () => {
+    const token: PlacedToken = { size: "medium", x: 0, y: 0 };
+    const spots = legSpots(SQUARES, token, { x: 0, y: 0, elevation: 0 }, { x: 3, y: 0, elevation: 10, footprint: { w: 2, h: 2 } });
+    assert.deepEqual(
+      spots.map((s) => [s.x, s.y, s.elevation, footprintRect(SQUARES, s).w]),
+      // A creature that can squeeze walks on half squares.
+      [
+        [0, 0, 0, 1],
+        [0.5, 0, 10, 2],
+        [1, 0, 10, 2],
+        [1.5, 0, 10, 2],
+        [2, 0, 10, 2],
+        [2.5, 0, 10, 2],
+        [3, 0, 10, 2],
+      ],
+    );
+    // A hex part joined across a resize walks at both sizes, the second walk starting again.
+    const hex = legSpots(ROWS, token, { x: 0, y: 0, elevation: 0, footprint: { w: 1, h: 1 } }, { x: 4, y: 0, elevation: 0, footprint: { w: 2, h: 2 } });
+    assert.equal(hex.filter((s) => s.jump).length, 1);
+    assert.equal(hex[0]!.jump, undefined);
   });
 });

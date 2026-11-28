@@ -1,10 +1,10 @@
 import type { Encounter, PathPrior, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import { footprintSize, isSqueezed, occupiedHexes, snapStep, type PlacedToken } from "./footprint.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedHexes, snapStep, type PlacedToken } from "./footprint.ts";
 import type { Grid } from "./grid.ts";
-import { hexSubcells, type HexGrid } from "./hex.ts";
-import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattice, spotRect, standingAt, straightCost, type LegCost, type SizedSpot } from "./route.ts";
+import { hexSubcells } from "./hex.ts";
+import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattice, standingAt, straightCost, type LegCost, type SizedSpot } from "./route.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -351,18 +351,15 @@ export type Ground = { cell(x: number, y: number): boolean; sub(sx: number, sy: 
  * `seenAtEvery`).
  */
 export function legOnGround(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, ground: Ground): boolean {
-  if (g.shape === "hex") return hexLegOnGround(g, token, from, to, ground);
-  const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
-  const covered = (p: SizedSpot) => {
-    const r = spotRect(g, token, p);
-    for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground.cell(x, y)) return false;
-    return true;
-  };
-  if (!covered(from)) return false;
-  for (const [a, b] of legParts(from, to)) {
-    const steps = legSteps(a, b, lattice);
-    for (let k = 1; k <= steps.n; k++) if (!covered({ ...b, ...steps.at(k) })) return false;
-  }
+  const covered =
+    g.shape === "hex"
+      ? (t: PlacedToken) => occupiedHexes(g, t).every((h) => hexSubcells(g, h).some(([sx, sy]) => ground.sub(sx, sy)))
+      : (t: PlacedToken) => {
+          const r = footprintRect(g, t);
+          for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground.cell(x, y)) return false;
+          return true;
+        };
+  for (const spot of legSpots(g, token, from, to)) if (!covered(spot)) return false;
   return true;
 }
 
@@ -379,32 +376,33 @@ export type LegSpot = PlacedToken & { elevation: number; jump?: true };
  * (docs/design/design-v1-opportunity-attacks.md 4, "Spots"): on squares each
  * straight part from `legParts` sampled by `legSteps` on the leg's lattice,
  * on hexes each hex `hexPiece` passes, each spot at the size its stop holds.
- * `legOnGround` reads the same walk.
+ * A hex part joined across a resize is walked at both its ends' sizes,
+ * since which size crossed which hex is not stored. Heights follow
+ * `legParts`: every spot of a part stands at its end's elevation, so a
+ * climb is counted once. `legOnGround` reads the same walk.
  */
 export function legSpots(g: Grid, token: PlacedToken, from: PathStop, to: PathStop): LegSpot[] {
-  void g;
-  void token;
-  void from;
-  void to;
-  throw new Error("not built");
-}
-
-/**
- * `legOnGround` on hexes. A part joined across a resize is walked at both
- * its ends' sizes, since which size crossed which hex is not stored, so
- * its corners reach an owner only where either size would have stood on
- * revealed ground.
- */
-function hexLegOnGround(g: HexGrid, token: PlacedToken, from: PathStop, to: PathStop, ground: Ground): boolean {
-  const open = (t: PlacedToken) => occupiedHexes(g, t).every((h) => hexSubcells(g, h).some(([sx, sy]) => ground.sub(sx, sy)));
-  if (!open(standingAt(token, from))) return false;
-  for (const [a, b] of legParts(from, to)) {
-    const sizes = oneSize(a, b) ? [standingAt(token, b)] : [standingAt(token, a), standingAt(token, b)];
-    for (const walker of sizes) {
-      for (const p of hexPieceSpots(hexPiece(g, walker, a, b))) if (!open({ ...walker, x: p.x, y: p.y })) return false;
+  const out: LegSpot[] = [{ ...standingAt(token, from), elevation: from.elevation }];
+  if (g.shape === "hex") {
+    for (const [a, b] of legParts(from, to)) {
+      const sizes = oneSize(a, b) ? [standingAt(token, b)] : [standingAt(token, a), standingAt(token, b)];
+      sizes.forEach((walker, w) => {
+        hexPieceSpots(hexPiece(g, walker, a, b)).forEach((p, k) => {
+          const spot: LegSpot = { ...walker, x: p.x, y: p.y, elevation: b.elevation };
+          // The second size walks the part again from its start, so its first spot is no step on from the first size's last.
+          if (w > 0 && k === 0) spot.jump = true;
+          out.push(spot);
+        });
+      });
     }
+    return out;
   }
-  return true;
+  const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
+  for (const [a, b] of legParts(from, to)) {
+    const steps = legSteps(a, b, lattice);
+    for (let k = 1; k <= steps.n; k++) out.push({ ...standingAt(token, { ...b, ...steps.at(k) }), elevation: b.elevation });
+  }
+  return out;
 }
 
 /** The creature as it stood at a stop, at the size the stop holds where that differs from its size now. */
