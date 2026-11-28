@@ -727,6 +727,8 @@ A model belongs to its picture. Changing the picture, cropping it, picking an ic
 
 On the map the model stands where its standee would, with the same ring, facing tick, selection and fog, and it grows and shrinks with the creature's size, so Enlarge needs no new file. Turning the view or pressing **Facing** shows the side the creature would show you. A tap on the empty corner beside a model reaches the creature behind it. A creature that is dying, dead or stable stands as its picture with its marks, so its state reads the same in both views. Top-down, Initiative and the panels keep the picture, and the Library lists the models' views under **3D models**, so you can delete one nothing uses.
 
+Models belong to Isometric view on the **Features** page. If you hide Isometric view on your device, the 3D model button and the Library's 3D models go with it, and **Show Isometric view** waits where the button was. The models already on your creatures still stand in your players' Isometric, since hiding a part changes only your own screen.
+
 ## Difficult ground
 
 Some ground is slow going: rubble, thick undergrowth, a slope of loose scree, the furniture of a crowded tavern. Every foot of movement through difficult terrain costs 1 extra foot, and the app counts it for you whenever a token is dragged or moved with the arrow keys, as the walking ruler does (see [Measuring and movement](#measuring-and-movement)).
