@@ -12,11 +12,21 @@ import { ISO_TEST_FLAG } from "../view/choice.ts";
  * so a change of copy mid-play stays inside the larger of the two.
  *
  * Each board's layout asks for the sheets of the creatures it stands, nearest
- * the canvas's middle first, after each commit. The first ones that fit the
- * budget, taken in turn from every board that asks, get sheets. To make room
- * a sheet no board asks for goes first, then the one asked for last, and the
- * rest stand as pictures until one frees. One board asking for the same
- * sheet for several creatures holds it once.
+ * the canvas's middle first, after each commit. A sheet held or loading
+ * keeps its place while any board asks for it, and the asks not held take
+ * what room is left in turn from every board, nearest first. So a pan that
+ * reorders more asks than fit never evicts a sheet a board may draw: the
+ * ones past the budget stand as pictures until a held one leaves every
+ * board's cull box (D-261127-704). To make room a sheet no board asks for
+ * goes first. One board asking for the same sheet for several creatures
+ * holds it once.
+ *
+ * What the boards draw changes only when their news is told, at most once
+ * a frame: a sheet that arrives or goes joins the next snapshot then, so a
+ * board never lays out mid-render. A sheet that arrives while others still
+ * load waits for them, up to ARRIVAL_HOLD_MS, so a burst of arrivals lays
+ * the board out and repaints it once rather than once a frame as each
+ * lands (D-261127-705).
  *
  * A sheet that goes is freed only once every board has committed a render
  * that no longer draws it, so Konva never draws a closed bitmap, and it
@@ -47,7 +57,12 @@ export type SheetIo = {
   release(image: SheetImage): void;
   /** Runs the listeners' news once, soon: a burst of arrivals lays out once. */
   schedule(run: () => void): void;
+  /** Runs `run` after `ms`, unless the returned function cancels it first. */
+  later(run: () => void, ms: number): () => void;
 };
+
+/** How long a sheet that arrived waits for the others still loading before the boards are told. */
+export const ARRIVAL_HOLD_MS = 300;
 
 /** A full copy weighs 3 and a phone copy 2 of 48: 16 full or 24 phone copies. */
 export const SHEET_BUDGET = 48;
@@ -69,6 +84,10 @@ export class SheetCache {
   readonly #listeners = new Set<() => void>();
   /** News is scheduled and not yet told. */
   #pending = false;
+  /** The held or gone sheets differ from the snapshot. */
+  #dirty = false;
+  /** Cancels the wait of sheets that arrived for the ones still loading. */
+  #hold: (() => void) | null = null;
   readonly #counts: SheetCounts = { loads: 0, evictions: 0, arrivals: 0, news: 0 };
 
   constructor(io: SheetIo = BROWSER_IO) {
@@ -119,6 +138,8 @@ export class SheetCache {
 
   /** Frees everything, for a test's end. */
   dispose(): void {
+    this.#hold?.();
+    this.#hold = null;
     for (const e of this.#entries.values()) {
       e.abort?.abort();
       if (e.image) this.#io.release(e.image);
@@ -130,9 +151,11 @@ export class SheetCache {
   }
 
   /**
-   * Every board's asks taken in turn, rank by rank, each sheet once, and
-   * the first that fit the budget admitted, in that order: a sheet's place
-   * there is also how late it goes when room is needed.
+   * Every board's asks taken in turn, rank by rank, each sheet once. Those
+   * held or loading are admitted first, as they fit in what the cache holds
+   * now, and the others take the room left in that order, a failed one
+   * weighing nothing. The admitted come back in the asks' order, which is
+   * also how late an asked sheet goes when room is needed.
    */
   #admission(): { admitted: Map<string, SheetCopy>; order: Map<string, number> } {
     const order = new Map<string, number>();
@@ -147,13 +170,25 @@ export class SheetCache {
         copies.set(url, l.copy);
       }
     }
-    const admitted = new Map<string, SheetCopy>();
+    const held = (url: string) => {
+      const state = this.#entries.get(url)?.state;
+      return state === "loading" || state === "ready";
+    };
+    const taken = new Set<string>();
     let weight = 0;
     for (const [url, copy] of copies) {
+      if (!held(url)) continue;
+      weight += SHEET_WEIGHT[copy];
+      taken.add(url);
+    }
+    for (const [url, copy] of copies) {
+      if (held(url)) continue;
       weight += this.#entries.get(url)?.state === "failed" ? 0 : SHEET_WEIGHT[copy];
       if (weight > SHEET_BUDGET) break;
-      admitted.set(url, copy);
+      taken.add(url);
     }
+    const admitted = new Map<string, SheetCopy>();
+    for (const [url, copy] of copies) if (taken.has(url)) admitted.set(url, copy);
     return { admitted, order };
   }
 
@@ -231,32 +266,62 @@ export class SheetCache {
         entry.image = image;
         entry.abort = null;
         this.#counts.arrivals++;
-        this.#publish();
+        this.#arrived();
       },
       () => {
         if (this.#entries.get(url) !== entry) return;
         entry.state = "failed";
         entry.abort = null;
+        if (this.#hold && !this.#loading()) this.#arrived();
       },
     );
   }
 
+  #loading(): boolean {
+    for (const e of this.#entries.values()) if (e.state === "loading") return true;
+    return false;
+  }
+
+  /** A sheet arrived: told with the others once none still loads, or once the first of them has waited ARRIVAL_HOLD_MS. */
+  #arrived(): void {
+    if (this.#loading()) {
+      this.#dirty = true;
+      this.#hold ??= this.#io.later(() => {
+        this.#hold = null;
+        this.#publish();
+      }, ARRIVAL_HOLD_MS);
+      return;
+    }
+    this.#hold?.();
+    this.#hold = null;
+    this.#publish();
+  }
+
+  /** The sheets held now join the snapshot with the next news, which tells every board once. */
   #publish(): void {
-    const held = new Map<string, SheetImage>();
-    for (const e of this.#entries.values()) if (e.state === "ready" && e.image) held.set(e.url, e.image);
-    this.#snapshot = { version: this.#snapshot.version + 1, get: (url) => held.get(url) ?? null };
+    this.#dirty = true;
     if (this.#pending) return;
     this.#pending = true;
     this.#io.schedule(() => {
       this.#pending = false;
+      if (!this.#dirty) return;
+      this.#dirty = false;
+      const held = new Map<string, SheetImage>();
+      for (const e of this.#entries.values()) if (e.state === "ready" && e.image) held.set(e.url, e.image);
+      this.#snapshot = { version: this.#snapshot.version + 1, get: (url) => held.get(url) ?? null };
+      this.#freeSettled();
       this.#counts.news++;
       for (const listener of [...this.#listeners]) listener();
     });
   }
 
-  /** Frees the sheets that left the snapshot at or before the oldest version every board has committed. */
+  /**
+   * Frees the sheets that left the snapshot at or before the oldest version
+   * every board has committed, once the snapshot has left them too, so a
+   * board shown again never reads a closed bitmap.
+   */
   #freeSettled(): void {
-    let oldest = Infinity;
+    let oldest = this.#snapshot.version;
     for (const l of this.#layouts.values()) oldest = Math.min(oldest, l.settled);
     const keep: { image: SheetImage; copy: SheetCopy; at: number }[] = [];
     for (const r of this.#retired) {
@@ -292,6 +357,10 @@ const BROWSER_IO: SheetIo = {
   schedule(run) {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => run());
     else setTimeout(run, 0);
+  },
+  later(run, ms) {
+    const timer = setTimeout(run, ms);
+    return () => clearTimeout(timer);
   },
 };
 

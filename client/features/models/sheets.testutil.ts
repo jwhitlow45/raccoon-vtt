@@ -9,10 +9,16 @@ export function harness() {
   const pending: Pending[] = [];
   const released: SheetImage[] = [];
   const news: (() => void)[] = [];
+  /** The waits running, by the order they began: what `wait` ends. */
+  const waits = new Set<() => void>();
   const io: SheetIo = {
     load: (url, signal) => new Promise((resolve, reject) => pending.push({ url, signal, resolve, reject })),
     release: (image) => void released.push(image),
     schedule: (run) => void news.push(run),
+    later: (run) => {
+      waits.add(run);
+      return () => void waits.delete(run);
+    },
   };
   const cache = new SheetCache(io);
   const images = new Map<string, SheetImage>();
@@ -39,5 +45,13 @@ export function harness() {
   };
   /** The images decoded and not yet freed: what the page's memory holds. */
   const live = () => [...handed].filter((image) => !released.includes(image));
-  return { cache, pending, released, news, finish, imageOf, decoded, live };
+  /** Tells the news scheduled, as the next frame does: the snapshot changes only then. */
+  const tell = () => news.splice(0).forEach((run) => run());
+  /** Ends every wait running, as their time passing does. */
+  const wait = () => {
+    const runs = [...waits];
+    waits.clear();
+    for (const run of runs) run();
+  };
+  return { cache, pending, released, news, waits, finish, tell, wait, imageOf, decoded, live };
 }
