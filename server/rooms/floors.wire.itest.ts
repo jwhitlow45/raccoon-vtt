@@ -73,6 +73,30 @@ function catchUp(s: Seat, markerId: string, x: number): Promise<void> {
   return foldUntil(s, (m) => m.changes.some((c) => c.key === `token:${markerId}` && "value" in c && (c.value as { x?: number } | null)?.x === x));
 }
 
+/**
+ * Waits until the seat holds a frame `has` matches, from its `from`th on. A frame another socket sent has no order
+ * against the marker move a sync sends: under the real number clock the room holds it behind a batch still
+ * committing, and the batch's `ev` goes out first. Waited for before the sync, it comes before the marker's `ev` at
+ * every seat it reaches, in both rooms of a pair, since the room sends a frame to all of them at once.
+ */
+function owed(s: Seat, what: string, has: (m: ServerMessage) => boolean, from = 0): Promise<void> {
+  const matches = (frame: string) => has(JSON.parse(frame) as ServerMessage);
+  if (s.frames.slice(from).some(matches)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const on = (data: { toString(): string }) => {
+      if (!matches(data.toString())) return;
+      clearTimeout(timer);
+      s.socket.ws.off("message", on);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      s.socket.ws.off("message", on);
+      reject(new Error(`${s.name} was never sent ${what} within ${OWED_MS} ms`));
+    }, OWED_MS);
+    s.socket.ws.on("message", on);
+  });
+}
+
 let pinged = 0;
 
 /** Waits until the seat holds every frame the server sent it so far: the pong of a ping comes behind each of them. */
@@ -644,7 +668,7 @@ describe("several floors over the wire (docs/design/design-v1-floors.md 8, the s
     await oracle(t, r.roomId, [second], "a DM on Upper");
     // A resync asked for Upper answers the same way: the scene, by its main floor.
     second.socket.send({ t: "scene", sceneId: upper });
-    await second.socket.next("resync");
+    await second.socket.next("resync", () => true, OWED_MS);
     const again = await second.socket.snapshot("dm-upper", undefined, upper);
     assert.equal(again.you.sceneId, r.ground);
     second.socket.close();
@@ -1327,6 +1351,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     const ruler: EphEvent = { k: "ruler", id: "attic-ruler", points: [{ x: 2.5, y: 2.5 }, { x: 6.5, y: 2.5 }] };
     for (const x of [a, b]) {
       send(x.seats.bree.socket, x.attic, ruler);
+      await owed(x.seats.ana, "Bree's ruler", (m) => m.t === "eph" && m.e.k === "ruler" && m.e.id === "attic-ruler");
       await x.sync("Bree measures on Attic");
       assert.deepEqual(ephs(x.seats.ana).at(-1)?.e, ruler, "Ana shows Bree's ruler");
     }
@@ -1365,6 +1390,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     const b = await riseRoom(30, false);
     for (const x of [a, b]) {
       send(x.seats.ana.socket, x.ground, { k: "dragMove", tokenId: x.thorn, x: 5, y: 5 });
+      await owed(x.seats.bree, "Ana's drag", (m) => m.t === "eph" && m.e.k === "dragMove");
       await x.sync("Ana drags Thorn");
       assert.deepEqual(ephs(x.seats.bree).at(-1)?.e, { k: "dragMove", tokenId: x.thorn, x: 5, y: 5 }, "Bree shows the drag");
     }
@@ -1411,7 +1437,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     }
     await alike(a, b, "Ana's carried ruler");
     // The DM sees every creature, so it gets the frame, without the ids it named.
-    const dmGot = await a.dmSocket.next("eph", (m) => m.e.k === "ruler" && m.e.id === "walk-up");
+    const dmGot = await a.dmSocket.next("eph", (m) => m.e.k === "ruler" && m.e.id === "walk-up", OWED_MS);
     assert.deepEqual(Object.keys((dmGot.e as { prior: object }).prior).sort(), ["diag", "ft", "walker"]);
     const co = new Map<Compared, Socket>();
     for (const x of [a, b]) co.set(x, await coDm(x));
@@ -1454,7 +1480,7 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
     await x.sync("the two carried rulers");
     leaks(x, "the two carried rulers");
     for (const s of [x.seats.bree, x.seats.tv]) assert.deepEqual(ephs(s), [], `${s.name} gets neither`);
-    const coGot = await co.next("eph", (m) => m.e.k === "ruler" && m.e.id === "dm-walk");
+    const coGot = await co.next("eph", (m) => m.e.k === "ruler" && m.e.id === "dm-walk", OWED_MS);
     assert.deepEqual(coGot.e, { ...dmCarry, prior: { ft: 15, diag: { h: 1, v: 0 }, walker: { size: "large" } } }, "a co-DM gets the DM's carried ruler without anchors and ends");
     // The DM shows the brute: the next frame reaches every player, and hiding it again ends it on their screens in that batch.
     await ok(x.dmSocket, { t: "token.update", tokenId: ogre, patch: { visibility: "all" } } as Op);
@@ -1573,7 +1599,9 @@ describe("floors phase 3 over the wire: the privacy twins (phase 3, 6)", () => {
 
     /** Sends the preview's frame and checks every watching screen shows it, as its device parses it, without the ids it named. */
     const shown = async (p: Preview, id: string, when: string) => {
+      const from = new Map(watching.map((x) => [x, x.frames.length]));
       send(p.from, p.sceneId, p.frame(id));
+      for (const x of watching) await owed(x, `${when}: the frame`, (msg) => msg.t === "eph", from.get(x));
       await m.sync(when);
       for (const x of watching) {
         const last = ephs(x).at(-1);
