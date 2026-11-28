@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import type { AssetSource } from "../../state/view.ts";
+import { ISO_TEST_FLAG } from "../view/choice.ts";
 
 /**
  * The decoded model sheets a device holds (docs/design/design-v1-token-models.md
@@ -52,6 +53,9 @@ export type SheetIo = {
 export const SHEET_BUDGET = 48;
 export const SHEET_WEIGHT: Readonly<Record<SheetCopy, number>> = { full: 3, mobile: 2 };
 
+/** What a cache has done since it was made: loads begun, sheets evicted, sheets arrived, and news told its boards. For the bench and the tests. */
+export type SheetCounts = { loads: number; evictions: number; arrivals: number; news: number };
+
 type Entry = { url: string; copy: SheetCopy; state: "loading" | "ready" | "failed"; image: SheetImage | null; abort: AbortController | null };
 type Layout = { copy: SheetCopy; urls: readonly string[]; settled: number };
 
@@ -65,6 +69,7 @@ export class SheetCache {
   readonly #listeners = new Set<() => void>();
   /** News is scheduled and not yet told. */
   #pending = false;
+  readonly #counts: SheetCounts = { loads: 0, evictions: 0, arrivals: 0, news: 0 };
 
   constructor(io: SheetIo = BROWSER_IO) {
     this.#io = io;
@@ -100,6 +105,11 @@ export class SheetCache {
   /** What weighs on the budget: the sheets loading or held, and those gone but not yet closed. For tests. */
   weight(): { held: number; closing: number } {
     return { held: this.#held(), closing: this.#closing() };
+  }
+
+  /** What the cache has done so far. */
+  counts(): SheetCounts {
+    return { ...this.#counts };
   }
 
   /** Every sheet loading or held, with its state. For tests. */
@@ -180,6 +190,7 @@ export class SheetCache {
       if (!out) break;
       this.#entries.delete(out.url);
       this.#retired.push({ image: out.image!, copy: out.copy, at: this.#snapshot.version + 1 });
+      this.#counts.evictions++;
       changed = true;
     }
     if (changed) this.#publish();
@@ -209,6 +220,7 @@ export class SheetCache {
     const abort = new AbortController();
     const entry: Entry = { url, copy, state: "loading", image: null, abort };
     this.#entries.set(url, entry);
+    this.#counts.loads++;
     this.#io.load(url, abort.signal).then(
       (image) => {
         if (this.#entries.get(url) !== entry) {
@@ -218,6 +230,7 @@ export class SheetCache {
         entry.state = "ready";
         entry.image = image;
         entry.abort = null;
+        this.#counts.arrivals++;
         this.#publish();
       },
       () => {
@@ -236,6 +249,7 @@ export class SheetCache {
     this.#pending = true;
     this.#io.schedule(() => {
       this.#pending = false;
+      this.#counts.news++;
       for (const listener of [...this.#listeners]) listener();
     });
   }
@@ -302,6 +316,8 @@ export function sheetsNearest(standing: readonly SheetWant[], cull: { x0: number
 
 /** The device's one cache: every board shares the budget, a player preview's included. */
 export const sheetCache = new SheetCache();
+// With the test flag only, which nothing a user does sets (canvas/relief/isoTest.ts), the bench reads the cache's counts.
+if ((globalThis as Record<string, unknown>)[ISO_TEST_FLAG] === true) (globalThis as Record<string, unknown>).__rvttSheets = sheetCache;
 
 /**
  * The sheets a board draws from at its copy, held while the board is
