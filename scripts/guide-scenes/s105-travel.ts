@@ -9,7 +9,7 @@ export default async (c: any) => {
   const end = panel.getByRole("button", { name: "End the fight" });
   if (await end.count()) {
     await end.click();
-    await panel.getByRole("button", { name: /Tap again/ }).first().click();
+    await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).first().click();
   }
   await dm.evaluate(() => window.scrollTo(0, 0));
   await c.harness.openSideTab(dm, "Scenes");
@@ -26,7 +26,7 @@ export default async (c: any) => {
   await dm.getByRole("button", { name: "Delete", exact: true }).first().click();
   await dm.waitForTimeout(300);
   const armed = (await dm.locator("body").innerText()).match(/Delete \d+ tokens\?/)?.[0] ?? "no armed text";
-  await dm.getByRole("button", { name: /Delete \d+ tokens\?|Tap again/ }).first().click();
+  await dm.getByRole("button", { name: /Delete \d+ tokens\?|(?:Tap|Click) again/ }).first().click();
   await dm.waitForTimeout(800);
   await dm.getByRole("button", { name: "Done", exact: true }).click().catch(() => {});
   await dm.keyboard.press("Escape");

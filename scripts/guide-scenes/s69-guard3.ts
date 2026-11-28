@@ -28,7 +28,7 @@ export default async (c: any) => {
   await c.harness.openSideTab(dm, "Initiative");
   const panel = dm.locator('[role="tabpanel"]').first();
   await panel.getByRole("button", { name: "End the fight" }).click();
-  await panel.getByRole("button", { name: /Tap again/ }).first().click();
+  await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).first().click();
   await dm.waitForTimeout(500);
   st = await roomState(c, c.state.forest);
   for (const t of Object.values(st.templates) as any[]) if (t.sceneId === c.state.forest) await ops.send({ t: "template.delete", templateId: t.id });

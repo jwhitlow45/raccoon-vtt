@@ -10,7 +10,7 @@ export default async (c: any) => {
   await dm.waitForTimeout(400);
   log.push("after set caster: " + (await hint()) + " popover=" + (await dm.getByRole("dialog", { name: /More Area options/ }).count()));
   // The first tap on the token can only close the pop-up that is still open, so tap until the app takes the caster.
-  for (let i = 0; i < 3 && !/Cast by Ivo|Tap where it goes|cast by Ivo/.test(await dm.locator("body").innerText()); i++) {
+  for (let i = 0; i < 3 && !/Cast by Ivo|(?:Tap|Click) where it goes|cast by Ivo/.test(await dm.locator("body").innerText()); i++) {
     await c.harness.tapCell(dm, b, { x: 3, y: 10 });
     await dm.waitForTimeout(600);
   }

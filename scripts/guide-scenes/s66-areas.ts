@@ -14,7 +14,7 @@ export default async (c: any) => {
   await del.click();
   await dm.waitForTimeout(300);
   const t2 = await panel.innerText();
-  const again = panel.getByRole("button", { name: /Tap again|Delete/ }).first();
+  const again = panel.getByRole("button", { name: /(?:Tap|Click) again|Delete/ }).first();
   if (await again.count()) await again.click();
   await dm.waitForTimeout(600);
   return list.slice(0, 600) + "\n---\n" + t2.slice(0, 300) + "\n---\n" + (await panel.innerText()).slice(0, 300);

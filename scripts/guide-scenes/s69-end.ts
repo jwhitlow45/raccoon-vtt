@@ -7,8 +7,8 @@ export default async (c: any) => {
   await end.scrollIntoViewIfNeeded();
   await end.click();
   await dm.waitForTimeout(300);
-  const armed = await panel.getByRole("button", { name: /Tap again/ }).allInnerTexts();
-  await panel.getByRole("button", { name: /Tap again/ }).first().click();
+  const armed = await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).allInnerTexts();
+  await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).first().click();
   await dm.waitForTimeout(800);
   await dm.evaluate(() => window.scrollTo(0, 0));
   return armed.join("|") + "\n" + (await panel.innerText()).slice(0, 200);

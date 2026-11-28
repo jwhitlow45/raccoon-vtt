@@ -46,7 +46,7 @@ export default async (c: any) => {
   const end = panel.getByRole("button", { name: "End the fight" });
   if (await end.count()) {
     await end.click();
-    await panel.getByRole("button", { name: /Tap again/ }).first().click();
+    await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).first().click();
     await dm.waitForTimeout(800);
   }
   const id = randomUUID();

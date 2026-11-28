@@ -11,7 +11,7 @@ export default async (c: any) => {
   if (await del.count()) {
     await del.click();
     await dm.waitForTimeout(300);
-    const again = panel.getByRole("button", { name: /Tap again|Delete/ }).first();
+    const again = panel.getByRole("button", { name: /(?:Tap|Click) again|Delete/ }).first();
     if (await again.count()) await again.click().catch(() => {});
     await dm.waitForTimeout(500);
   }

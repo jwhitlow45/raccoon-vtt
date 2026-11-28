@@ -10,7 +10,7 @@ export default async (c: any) => {
   if (await end.count()) {
     await end.click();
     await dm.waitForTimeout(300);
-    await dm.getByRole("button", { name: /^(End the fight|Tap again|Sure)/ }).first().click();
+    await dm.getByRole("button", { name: /^(End the fight|(?:Tap|Click) again|Sure)/ }).first().click();
     await dm.waitForTimeout(800);
   }
   await c.harness.openSideTab(dm, "Scenes");

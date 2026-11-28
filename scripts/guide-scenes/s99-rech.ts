@@ -11,7 +11,7 @@ export default async (c: any) => {
   const panel = dm.locator('[role="tabpanel"]').first();
   const end = panel.getByRole("button", { name: "End the fight" });
   await end.click();
-  await panel.getByRole("button", { name: /Tap again/ }).first().click();
+  await panel.getByRole("button", { name: /(?:Tap|Click) again/ }).first().click();
   await dm.waitForTimeout(600);
   await dm.evaluate(() => window.scrollTo(0, 0));
   return card;

@@ -8,7 +8,7 @@ export default async (c: any) => {
   await dm.getByLabel("Hidden from players").check();
   await dm.waitForTimeout(300);
   await c.shot(dm, "final-encounters");
-  await dm.getByRole("button", { name: "Place where I tap" }).click();
+  await dm.getByRole("button", { name: /^Place where I (tap|click)$/ }).click();
   await dm.waitForTimeout(800);
   await c.shot(dm, "look-place-strip");
   const strip = await dm.locator("body").innerText();
