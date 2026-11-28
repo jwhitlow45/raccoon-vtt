@@ -485,6 +485,8 @@ const settingsPatch = z.strictObject({
   soundNames: z.boolean().optional(),
   /** Only DM devices play (docs/design/design-v1-sound-dm-only.md 8). False removes the stored setting. */
   soundDmOnly: z.boolean().optional(),
+  /** Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md 4). True removes the stored setting. */
+  opportunityNotices: z.boolean().optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [

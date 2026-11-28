@@ -577,6 +577,14 @@ export type RoomSettings = {
    * keeps it until the DM turns it off, through every backup and import.
    */
   soundDmOnly?: true;
+  /**
+   * Opportunity Attack notices (docs/design/design-v1-opportunity-attacks.md
+   * 4): the DM and the mover are told when a creature's move in a fight
+   * leaves an enemy's reach. Absent reads as on, and only `false` is
+   * stored, so every room from before it has them. Read it through
+   * `opportunityNoticesOn` (shared/rules/opportunity.ts).
+   */
+  opportunityNotices?: boolean;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */

@@ -44,6 +44,9 @@ describe("DM", () => {
     assert.equal(code({ t: "member.update", memberId: "p1", name: "G" }, DM), "forbidden");
     assert.equal(code(undoCommand, DM), "ok");
     assert.equal(code({ t: "sys.restore", entries: [{ key: "token:gob", value: null, expectRev: 1 }], from: "undo" }, DM), "ok");
+    // Room settings' Opportunity Attack notices switch, both ways (docs/design/design-v1-opportunity-attacks.md 4).
+    assert.equal(code({ t: "room.update", settings: { opportunityNotices: false } }, DM), "ok");
+    assert.equal(code({ t: "room.update", settings: { opportunityNotices: true } }, DM), "ok");
   });
 
   // Deleting the players' scene sent them to the first scene in the list, which can be one the DM is preparing (LP9-PLAY-2).
@@ -129,6 +132,8 @@ describe("player role rules", () => {
   test("DM-only ops are forbidden", () => {
     const ops: Op[] = [
       { t: "room.update", name: "x" },
+      { t: "room.update", settings: { opportunityNotices: false } },
+      { t: "room.update", settings: { opportunityNotices: true } },
       { t: "room.setPlayerScene", sceneId: "s2" },
       { t: "view.blackout", blackout: true },
       { t: "scene.create", scene: { id: "n", name: "n", bounds: { w: 1, h: 1 } } },
