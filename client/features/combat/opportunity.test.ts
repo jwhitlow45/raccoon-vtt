@@ -336,6 +336,32 @@ describe("a leg's job", () => {
     );
   });
 
+  test("a part is confirmed once the server's copy holds its move, joined or not: a predicted join's parts are, its new leg and a repeat of A to B are not", () => {
+    const h = harness();
+    const sync = (view: RoomState, confirmed: RoomState) => h.jobs.sync({ key: "room|dm", view, confirmed, viewer: DM, on: true });
+    const unconfirmed = () => h.jobs.store.getState().movers.thorn!.legs.flatMap((l) => l.parts.filter((p) => !p.confirmed).map((p) => p.id));
+    let state = move(beside(), "thorn", 8, 5);
+    for (let i = 0; i < 48; i++) state = move(state, "thorn", 10 + (i % 2), 14);
+    assert.equal(state.tokens.thorn!.path!.stops.length, 50);
+    sync(state, state);
+    assert.deepEqual(unconfirmed(), []);
+    const predicted = move(state, "thorn", 12, 14);
+    sync(predicted, state);
+    const legs = h.jobs.store.getState().movers.thorn!.legs;
+    assert.equal(legs[0]!.parts.length, 2, "the predicted path joined the oldest pair, which the server holds apart");
+    assert.deepEqual(unconfirmed(), [legs.at(-1)!.id], "only the new leg waits for the server");
+    sync(predicted, predicted);
+    assert.deepEqual(unconfirmed(), []);
+    // Back, then along the leg to here again: the repeat waits though the server holds a leg with its very spots.
+    const back = move(predicted, "thorn", 11, 14);
+    sync(back, back);
+    const again = move(back, "thorn", 12, 14);
+    const repeated = again.tokens.thorn!.path!.stops.slice(-4).map((s) => s.x);
+    assert.deepEqual(repeated, [11, 12, 11, 12]);
+    sync(again, back);
+    assert.deepEqual(unconfirmed(), [h.jobs.store.getState().movers.thorn!.legs.at(-1)!.id]);
+  });
+
   test("off, the part hidden or no room: no job and nothing published", () => {
     const h = harness();
     h.sync(move(beside(), "thorn", 8, 5), DM, false);
@@ -420,7 +446,7 @@ describe("randomized event sequences (SNAPSHOT, NO-STARVE, ONE-TOAST, NO-FALSE-F
             if (leg.parts.length === 1) arrived.set(part.id, { state, end: k + 1 });
           }
         });
-        for (const text of toasts.step({ reach: h.jobs.store.getState(), view: state, confirmed: null, viewer: DM, previewing: false, shown: [], labels: new Map() })) {
+        for (const text of toasts.step({ reach: h.jobs.store.getState(), view: state, viewer: DM, previewing: false, shown: [], labels: new Map() })) {
           assert.ok(!toasted.has(text), `seed ${seed}: "${text}" toasted twice (ONE-TOAST)`);
           toasted.add(text);
         }

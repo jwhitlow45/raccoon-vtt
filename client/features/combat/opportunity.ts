@@ -43,11 +43,12 @@ export type ReachRow = { moverId: string; leg: number; left: Left };
 
 /**
  * One occurrence's job as it stands: its result once done, where its leg
- * ended, for the toast's check of a drop's own line, and whether it
- * provokes now: by its own mark, kept from while it was a leg of its own,
- * and by every join's that holds it.
+ * ended, for the toast's check of a drop's own line, whether it provokes
+ * now (by its own mark, kept from while it was a leg of its own, and by
+ * every join's that holds it), and whether the server's copy holds it yet
+ * (`confirmed`), so a move this device predicted is toasted once it lands.
  */
-export type PartOut = { id: number; to: Spot; provokes: boolean; done: boolean; over: boolean; leaves: readonly Left[] };
+export type PartOut = { id: number; to: Spot; provokes: boolean; confirmed: boolean; done: boolean; over: boolean; leaves: readonly Left[] };
 
 /** A leg as the jobs hold it: its occurrence, whether any of its parts provokes now, the provoking parts' result so far, and the occurrences behind it (itself, or a join's parts). */
 export type LegOut = { id: number; provokes: boolean; done: boolean; over: boolean; leaves: readonly Left[]; parts: readonly PartOut[] };
@@ -99,8 +100,21 @@ type Job = {
   cancelled: boolean;
 };
 
-/** `marks`: each record's provoking mark by its id, a leg's as its stop holds it now and a join's parts' as they last held it as legs (marksOf). */
-type Mover = { id: string; turn: number; sceneId: string; records: LegRecord[]; marks: ReadonlyMap<number, boolean> };
+/**
+ * `marks`: each record's provoking mark by its id, a leg's as its stop
+ * holds it now and a join's parts' as they last held it as legs (marksOf).
+ * `path`: the path the view holds, which `held` matches against the
+ * server's for the occurrences it holds (heldByServer).
+ */
+type Mover = {
+  id: string;
+  turn: number;
+  sceneId: string;
+  records: LegRecord[];
+  marks: ReadonlyMap<number, boolean>;
+  path: TokenPath | null;
+  held: { records: readonly LegRecord[]; path: TokenPath | null; ids: ReadonlySet<number> | null } | null;
+};
 
 /** Where the shown set lives in the tab's storage: one room's one turn, so a reload announces no old row. */
 export const SHOWN_KEY = "rvtt.opportunityShown";
@@ -229,9 +243,10 @@ export class LegJobs {
       const token = view.tokens[id]!;
       let mover = this.#movers.get(id);
       if (!mover) {
-        mover = { id, turn: path.turn, sceneId: token.sceneId, records: [], marks: new Map() };
+        mover = { id, turn: path.turn, sceneId: token.sceneId, records: [], marks: new Map(), path, held: null };
         this.#movers.set(id, mover);
       }
+      mover.path = path;
       const legs = legsOf(path);
       const got = reconcileLegs(mover.records, legs, () => this.#nextId++);
       mover.records = got.legs;
@@ -355,10 +370,11 @@ export class LegJobs {
     const shown = this.#readShown();
     const kept = this.#confirmed ?? view;
     for (const mover of this.#movers.values()) {
+      const held = this.#heldByServer(mover, viewer);
       const legs: LegOut[] = mover.records.map((record) => {
         const parts = provokingParts(record, mover.marks).map(({ part, provokes }): PartOut => {
           const result = this.#jobs.get(part.id)?.result ?? null;
-          return { id: part.id, to: part.to, provokes, done: result !== null, over: result === "over", leaves: result === null || result === "over" ? [] : result };
+          return { id: part.id, to: part.to, provokes, confirmed: held === null || held.has(part.id), done: result !== null, over: result === "over", leaves: result === null || result === "over" ? [] : result };
         });
         // A join's result is its provoking parts' together, each creature at its first leave (JOIN-UNION).
         const provoking = parts.filter((p) => p.provokes);
@@ -391,6 +407,28 @@ export class LegJobs {
     }
     this.store.setState({ key: this.#key, movers, fresh: fresh.length > 0 ? { seq: this.#freshSeq, rows: fresh } : this.store.getState().fresh }, true);
     this.leaves.setState({ on: true, chunks: this.#chunks, movers: leaves }, true);
+  }
+
+  /**
+   * The occurrences of a mover's legs the server's copy holds, or null for
+   * all of them where it holds the same path as the view. The server's legs
+   * are matched to the records as a path update is (reconcileLegs), so a
+   * predicted leg it has not taken is none of them however its spots repeat
+   * an earlier leg's, and a join's parts count whether the server holds them
+   * joined or not yet.
+   */
+  #heldByServer(mover: Mover, viewer: Viewer): ReadonlySet<number> | null {
+    const confirmed = this.#confirmed;
+    const token = confirmed?.tokens[mover.id];
+    const path = confirmed ? (token ? pathNow(confirmed.encounter, token, viewer.role) : null) : mover.path;
+    if (path === mover.path) return null;
+    const memo = mover.held;
+    if (memo && memo.records === mover.records && memo.path === path) return memo.ids;
+    const legs = path && path.turn === mover.turn ? legsOf(path) : [];
+    const gone = new Set(reconcileLegs(mover.records, legs, () => 0).removed.map((r) => r.id));
+    const ids = new Set(mover.records.flatMap(occurrences).filter((id) => !gone.has(id)));
+    mover.held = { records: mover.records, path, ids };
+    return ids;
   }
 
   /** The shown set for this room's view: the row ids shown this turn, by the turn's seq, empty where storage fails or holds another room's or turn's. */

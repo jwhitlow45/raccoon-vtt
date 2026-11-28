@@ -47,10 +47,11 @@ function dmDevice(opts: { loaded?: boolean } = {}) {
   const jobs = new LegJobs({ later: (r) => (timers.push(r), () => {}), load: { rolls: () => rolls.promise, monsters: () => monsters.promise }, storage: null });
   const toasts = new ReachToasts();
   const said: string[] = [];
+  /** `confirmed`: the server's copy under `state`, left out the same. */
   const see = (state: RoomState, more: { confirmed?: RoomState | null; previewing?: boolean; shown?: ShownLeaves[] } = {}) => {
-    jobs.sync({ key: "room|dm", view: state, viewer: DM, on: true });
+    jobs.sync({ key: "room|dm", view: state, confirmed: more.confirmed === undefined ? state : more.confirmed, viewer: DM, on: true });
     for (let i = 0; i < 10_000 && timers.length > 0; i++) timers.shift()!();
-    said.push(...toasts.step({ reach: jobs.store.getState(), view: state, confirmed: more.confirmed === undefined ? state : more.confirmed, viewer: DM, previewing: more.previewing ?? false, shown: more.shown ?? [], labels: new Map() }));
+    said.push(...toasts.step({ reach: jobs.store.getState(), view: state, viewer: DM, previewing: more.previewing ?? false, shown: more.shown ?? [], labels: new Map() }));
   };
   const load = async () => {
     rolls.resolve(await loadSrdRolls());
@@ -142,6 +143,53 @@ describe("the DM's Opportunity Attack toast", () => {
     dm.see(walked, { confirmed: walked });
     dm.see(walked, { confirmed: walked });
     assert.deepEqual(dm.said, ["Thorn left Goblin's reach."]);
+  });
+
+  test("a predicted walk that repeats an earlier leg's spots waits for the server to take that move, and one it refuses never toasts", () => {
+    const start = beside([token("wolf", { name: "Wolf", x: 20, y: 20 })]);
+    // A to B, back to A, and the wolf steps up beside A, all taken by the server.
+    const there = move(start, "thorn", 8, 5);
+    const back = move(there, "thorn", 5, 5);
+    const taken = move(back, "wolf", 4, 5);
+    // A to B again, predicted: it leaves the wolf's reach too.
+    const predicted = move(taken, "thorn", 8, 5);
+    const devices = [dmDevice(), dmDevice()];
+    for (const dm of devices) {
+      for (const state of [start, there, back, taken]) dm.see(state);
+      dm.see(predicted, { confirmed: taken });
+      assert.deepEqual(dm.said, ["Thorn left Goblin's reach."], "nothing before the server takes the second A to B");
+    }
+    const [takes, refuses] = devices as [ReturnType<typeof dmDevice>, ReturnType<typeof dmDevice>];
+    takes.see(predicted, { confirmed: predicted });
+    assert.deepEqual(takes.said, ["Thorn left Goblin's reach.", "Thorn left Wolf's reach."]);
+    refuses.see(taken, { confirmed: taken });
+    refuses.see(taken, { confirmed: taken });
+    assert.deepEqual(refuses.said, ["Thorn left Goblin's reach."], "the refused move never toasts");
+  });
+
+  test("legs joined past 50 stops before their jobs finish toast once the server holds them, a Teleport among them saying nothing", async () => {
+    const dm = dmDevice();
+    // An SRD creature far off makes every leg's job wait for the rolls table, so these legs are read only after their joins.
+    const air = token("air", { name: "Air Elemental", size: "large", x: 25, y: 25, actor: { inline: actor({ srdId: "air-elemental" }) } });
+    let state = beside([token("orc", { name: "Orc", x: 9, y: 6 }), token("wolf", { name: "Wolf", x: 15, y: 6 }), air]);
+    dm.see(state);
+    // A walk away from the goblin to beside the orc, a Teleport away from the orc to beside the wolf, and a walk away from the wolf.
+    state = move(state, "thorn", 8, 5);
+    dm.see(state);
+    state = apply(state, { t: "token.move", tokenId: "thorn", x: 14, y: 5, teleport: "wall" } as Op);
+    dm.see(state);
+    state = move(state, "thorn", 14, 9);
+    dm.see(state);
+    for (let i = 0; i < 48; i++) {
+      state = move(state, "thorn", 20 + (i % 2), 12);
+      dm.see(state);
+    }
+    const joined = state.tokens.thorn!.path!.stops[1]!;
+    assert.deepEqual([joined.x, joined.y, joined.via, joined.uncounted], [14, 9, [8, 5, 14, 5], undefined], "the three legs joined, a join that counts");
+    assert.deepEqual(dm.said, [], "nothing while the table loads");
+    await dm.load();
+    dm.see(state);
+    assert.deepEqual(dm.said, ["Thorn left Goblin's reach.", "Thorn left Wolf's reach."]);
   });
 
   test("on mount, a reload, a second DM device and Previous it seeds from the stored legs and repeats nothing", () => {

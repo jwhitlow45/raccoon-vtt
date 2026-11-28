@@ -1,15 +1,13 @@
 import { createElement, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
-import type { RoomState, TokenPath, Viewer } from "#shared/model.ts";
+import type { RoomState, Viewer } from "#shared/model.ts";
 import { reachWords } from "#shared/rules/opportunity.ts";
-import { sameSpot } from "#shared/rules/path.ts";
 import { displayName } from "../../lib/scene.ts";
 import type { Labels } from "../../lib/labels.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useLabels } from "../../state/labels.ts";
-import { useRoomStore, useRoomUi, useRoomView, useRoomYouIfAny } from "../../state/view.ts";
+import { useRoomUi, useRoomView, useRoomYouIfAny } from "../../state/view.ts";
 import { viewAsSlot } from "../dm/viewAs.tsx";
-import { pathNow, type TurnView } from "../measure/movement.ts";
 import { shownLeavesSlot, type ShownLeaves } from "../movement/store.ts";
 import { answersFor } from "./logic.ts";
 import { useTurnReach, type TurnReach } from "./opportunity.ts";
@@ -27,11 +25,10 @@ import { useTurnReach, type TurnReach } from "./opportunity.ts";
  * it says only its own creatures not yet said.
  */
 
-/** What one read of the toasts takes: the jobs' notices, the room as this device holds it and as the server confirmed it, and what this device's drops showed. */
+/** What one read of the toasts takes: the jobs' notices, with which legs the server's copy holds, the room as this device holds it, and what this device's drops showed. */
 export type ToastInput = {
   reach: TurnReach;
   view: Pick<RoomState, "tokens" | "characters" | "encounter">;
-  confirmed: { tokens: Readonly<Record<string, { id: string; path?: TokenPath }>>; encounter: TurnView | null } | null;
   viewer: Viewer;
   previewing: boolean;
   shown: readonly ShownLeaves[];
@@ -76,7 +73,8 @@ export class ReachToasts {
             }
             continue;
           }
-          if (!part.done || !confirmedLeg(input.confirmed, moverId, part.to)) continue;
+          // A leg this device predicted waits for the server to take that very move, a join's parts included.
+          if (!part.done || !part.confirmed) continue;
           this.#read.add(part.id);
           // A part that does not provoke says nothing, though a join holding it does: a Teleport joined with a walk is still a Teleport.
           if (part.over || !part.provokes) continue;
@@ -107,14 +105,6 @@ function turnCreature(view: Pick<RoomState, "encounter">): { tokenId: string } |
   return entry.tokenId !== undefined ? { tokenId: entry.tokenId } : entry.characterId !== undefined ? { characterId: entry.characterId } : null;
 }
 
-/** Whether the server has confirmed a stop at the leg's end on the mover's path, so a move this device predicted is toasted once it lands. */
-function confirmedLeg(confirmed: ToastInput["confirmed"], moverId: string, to: { x: number; y: number; elevation: number }): boolean {
-  if (!confirmed) return true;
-  const token = confirmed.tokens[moverId];
-  const path = token ? pathNow(confirmed.encounter, token, "dm") : null;
-  return path?.stops.slice(1).some((s) => sameSpot(s, to)) === true;
-}
-
 /**
  * The toasts as one of the board's controllers (features/layers.ts
  * CONTROLLERS), mounted once outside both drawing trees, so each says its
@@ -135,7 +125,6 @@ function Toasts(): null {
   const reach = useTurnReach();
   const view = useRoomView((s) => s.view);
   const you = useRoomView((s) => s.you);
-  const store = useRoomStore();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const labels = useLabels();
@@ -145,7 +134,7 @@ function Toasts(): null {
   const viewer = useMemo(() => (you ? { memberId: you.memberId, role: you.role } : null), [you]);
   useEffect(() => {
     if (!view || !viewer) return;
-    for (const text of toasts.step({ reach, view, confirmed: store.getState().confirmed ?? null, viewer, previewing, shown, labels })) ui.notify(text, "info");
-  }, [reach, view, viewer, previewing, shown, labels, toasts, store, ui]);
+    for (const text of toasts.step({ reach, view, viewer, previewing, shown, labels })) ui.notify(text, "info");
+  }, [reach, view, viewer, previewing, shown, labels, toasts, ui]);
   return null;
 }
