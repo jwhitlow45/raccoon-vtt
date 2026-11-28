@@ -367,6 +367,29 @@ export function legOnGround(g: Grid, token: PlacedToken, from: PathStop, to: Pat
 }
 
 /**
+ * One spot of a leg's walk: the creature as it stood there, at the size the
+ * stop holds, and its elevation. `jump` marks a spot that starts the walk
+ * again rather than stepping on from the spot before, as a hex part joined
+ * across a resize walks at both its ends' sizes.
+ */
+export type LegSpot = PlacedToken & { elevation: number; jump?: true };
+
+/**
+ * The spots a leg's walk passes, in order, its first the stop it starts at
+ * (docs/design/design-v1-opportunity-attacks.md 4, "Spots"): on squares each
+ * straight part from `legParts` sampled by `legSteps` on the leg's lattice,
+ * on hexes each hex `hexPiece` passes, each spot at the size its stop holds.
+ * `legOnGround` reads the same walk.
+ */
+export function legSpots(g: Grid, token: PlacedToken, from: PathStop, to: PathStop): LegSpot[] {
+  void g;
+  void token;
+  void from;
+  void to;
+  throw new Error("not built");
+}
+
+/**
  * `legOnGround` on hexes. A part joined across a resize is walked at both
  * its ends' sizes, since which size crossed which hex is not stored, so
  * its corners reach an owner only where either size would have stood on
