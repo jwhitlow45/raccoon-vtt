@@ -41,10 +41,15 @@ export type Left = ReachLeave & { known: boolean };
 /** A row of a mover's notice: a creature whose reach the turn's walk left, as the turn's first leave of it. */
 export type ReachRow = { moverId: string; leg: number; left: Left };
 
-/** One occurrence's job as it stands: its result once done, and where its leg ended, for the toast's check of a drop's own line. */
-export type PartOut = { id: number; to: Spot; done: boolean; over: boolean; leaves: readonly Left[] };
+/**
+ * One occurrence's job as it stands: its result once done, where its leg
+ * ended, for the toast's check of a drop's own line, and whether it
+ * provokes now: by its own mark, kept from while it was a leg of its own,
+ * and by every join's that holds it.
+ */
+export type PartOut = { id: number; to: Spot; provokes: boolean; done: boolean; over: boolean; leaves: readonly Left[] };
 
-/** A leg as the jobs hold it: its occurrence, whether it provokes now, its result so far, and the occurrences behind it (itself, or a join's parts). */
+/** A leg as the jobs hold it: its occurrence, whether any of its parts provokes now, the provoking parts' result so far, and the occurrences behind it (itself, or a join's parts). */
 export type LegOut = { id: number; provokes: boolean; done: boolean; over: boolean; leaves: readonly Left[]; parts: readonly PartOut[] };
 
 /** One mover's notice this turn, on this device. */
@@ -94,7 +99,8 @@ type Job = {
   cancelled: boolean;
 };
 
-type Mover = { id: string; turn: number; sceneId: string; records: LegRecord[]; provokes: boolean[] };
+/** `marks`: each record's provoking mark by its id, a leg's as its stop holds it now and a join's parts' as they last held it as legs (marksOf). */
+type Mover = { id: string; turn: number; sceneId: string; records: LegRecord[]; marks: ReadonlyMap<number, boolean> };
 
 /** Where the shown set lives in the tab's storage: one room's one turn, so a reload announces no old row. */
 export const SHOWN_KEY = "rvtt.opportunityShown";
@@ -146,6 +152,35 @@ function occurrences(record: LegRecord): number[] {
   return partsOf(record).map((r) => r.id);
 }
 
+/**
+ * Each record's provoking mark: a leg's from its stop now, and a part's
+ * inside a join kept as it was while that part was a leg of its own. The
+ * reducer's join counts unless both legs were uncounted, and is carried
+ * only when both were (path.ts withStop), so its own mark would make a
+ * Teleport, a "Doesn't count" or a carried part provoke once joined with a
+ * walked one. A join made inside one update was never a leg, so it has no
+ * mark and leaves its parts to theirs.
+ */
+function marksOf(records: readonly LegRecord[], legs: readonly { to: PathStop }[], was: ReadonlyMap<number, boolean>): Map<number, boolean> {
+  const out = new Map<number, boolean>();
+  const keep = (record: LegRecord): void => {
+    const mark = was.get(record.id);
+    if (mark !== undefined) out.set(record.id, mark);
+    record.parts?.forEach(keep);
+  };
+  records.forEach((record, i) => {
+    out.set(record.id, provokesAt(legs[i]!.to));
+    record.parts?.forEach(keep);
+  });
+  return out;
+}
+
+/** The parts a record stands for, each provoking only where its own mark and every join's above it say so. */
+function provokingParts(record: LegRecord, marks: ReadonlyMap<number, boolean>, above = true): { part: LegRecord; provokes: boolean }[] {
+  const here = above && (marks.get(record.id) ?? true);
+  return record.parts ? record.parts.flatMap((p) => provokingParts(p, marks, here)) : [{ part: record, provokes: here }];
+}
+
 export class LegJobs {
   readonly store: StoreApi<TurnReach> = createStore<TurnReach>(() => EMPTY);
   /** What a drag reads of the jobs (movement/store.ts turnLeavesSlot). */
@@ -194,13 +229,13 @@ export class LegJobs {
       const token = view.tokens[id]!;
       let mover = this.#movers.get(id);
       if (!mover) {
-        mover = { id, turn: path.turn, sceneId: token.sceneId, records: [], provokes: [] };
+        mover = { id, turn: path.turn, sceneId: token.sceneId, records: [], marks: new Map() };
         this.#movers.set(id, mover);
       }
       const legs = legsOf(path);
       const got = reconcileLegs(mover.records, legs, () => this.#nextId++);
       mover.records = got.legs;
-      mover.provokes = legs.map((l) => provokesAt(l.to));
+      mover.marks = marksOf(got.legs, legs, mover.marks);
       for (const record of got.added) {
         if (record.parts) continue;
         const end = got.legs.indexOf(record) + 1;
@@ -320,14 +355,15 @@ export class LegJobs {
     const shown = this.#readShown();
     const kept = this.#confirmed ?? view;
     for (const mover of this.#movers.values()) {
-      const legs: LegOut[] = mover.records.map((record, i) => {
-        const parts = partsOf(record).map((part): PartOut => {
+      const legs: LegOut[] = mover.records.map((record) => {
+        const parts = provokingParts(record, mover.marks).map(({ part, provokes }): PartOut => {
           const result = this.#jobs.get(part.id)?.result ?? null;
-          return { id: part.id, to: part.to, done: result !== null, over: result === "over", leaves: result === null || result === "over" ? [] : result };
+          return { id: part.id, to: part.to, provokes, done: result !== null, over: result === "over", leaves: result === null || result === "over" ? [] : result };
         });
-        // A join's result is its parts' together, each creature at its first leave (JOIN-UNION).
-        const union = parts.flatMap((p) => p.leaves).filter((l, k, all) => all.findIndex((m) => m.id === l.id) === k);
-        return { id: record.id, provokes: mover.provokes[i] ?? true, done: parts.every((p) => p.done), over: parts.some((p) => p.over), leaves: union, parts };
+        // A join's result is its provoking parts' together, each creature at its first leave (JOIN-UNION).
+        const provoking = parts.filter((p) => p.provokes);
+        const union = provoking.flatMap((p) => p.leaves).filter((l, k, all) => all.findIndex((m) => m.id === l.id) === k);
+        return { id: record.id, provokes: provoking.length > 0, done: parts.every((p) => p.done), over: provoking.some((p) => p.over), leaves: union, parts };
       });
       const seen = new Set<string>();
       const rows: ReachRow[] = [];
@@ -340,7 +376,7 @@ export class LegJobs {
         }
       }
       const checking = legs.some((l) => !l.done);
-      movers[mover.id] = { turn: mover.turn, legs, rows, checking, over: legs.some((l) => l.provokes && l.over) };
+      movers[mover.id] = { turn: mover.turn, legs, rows, checking, over: legs.some((l) => l.over) };
       leaves[mover.id] = { turn: mover.turn, skip: seen, settled: !checking };
       for (const row of rows) {
         const id = `${row.moverId}|${row.left.id}`;

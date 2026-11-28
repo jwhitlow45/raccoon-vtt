@@ -299,6 +299,43 @@ describe("a leg's job", () => {
     assert.equal(h.timers.length, 0);
   });
 
+  test("past 50 stops a Doesn't count leg and a Teleport joined with a walk keep their own marks: their rows never come back, and the walk's stand", () => {
+    const h = harness();
+    let state = beside([token("orc", { name: "Orc", x: 9, y: 6 }), token("wolf", { name: "Wolf", x: 20, y: 20 })]);
+    // Away from the goblin, marked Doesn't count, to beside the orc.
+    state = move(state, "thorn", 8, 5);
+    state = apply(state, { t: "token.countLeg", tokenId: "thorn", counts: false } as Op);
+    // A walk away from the orc to beside the wolf, then a Teleport away from the wolf.
+    state = move(state, "thorn", 19, 19);
+    state = apply(state, { t: "token.move", tokenId: "thorn", x: 19, y: 10, teleport: "wall" } as Op);
+    for (let i = 0; i < 46; i++) state = move(state, "thorn", 25 + (i % 2), 2);
+    h.sync(state);
+    h.drain();
+    assert.equal(h.jobs.store.getState().movers.thorn!.legs.length, 49);
+    assert.deepEqual(rowsOf(h.jobs.store.getState()), ["orc"]);
+    // The reducer joins the Doesn't count leg with the walk, a join that counts, then that join with the Teleport.
+    state = move(state, "thorn", 25, 3);
+    h.sync(state);
+    h.drain();
+    state = move(state, "thorn", 26, 3);
+    h.sync(state);
+    h.drain();
+    assert.equal(state.tokens.thorn!.path!.stops[1]!.uncounted, undefined, "the stored join counts, as the reducer joins it");
+    assert.deepEqual(rowsOf(h.jobs.store.getState()), ["orc"], "no goblin or wolf row from the parts that never provoked");
+    assert.deepEqual(h.jobs.leaves.getState().movers.thorn?.skip, new Set(["orc"]), "and the drag skips only the orc");
+    const first = h.jobs.store.getState().movers.thorn!.legs[0]!;
+    assert.deepEqual(
+      first.parts.map((p) => p.provokes),
+      [false, true, false],
+      "the joined leg's parts: the Doesn't count leg, the walk and the Teleport",
+    );
+    assert.equal(first.provokes, true, "the walk in it provokes");
+    assert.deepEqual(
+      first.leaves.map((l) => l.id),
+      ["orc"],
+    );
+  });
+
   test("off, the part hidden or no room: no job and nothing published", () => {
     const h = harness();
     h.sync(move(beside(), "thorn", 8, 5), DM, false);

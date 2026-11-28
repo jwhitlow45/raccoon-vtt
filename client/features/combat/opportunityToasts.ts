@@ -78,7 +78,8 @@ export class ReachToasts {
           }
           if (!part.done || !confirmedLeg(input.confirmed, moverId, part.to)) continue;
           this.#read.add(part.id);
-          if (part.over || !leg.provokes) continue;
+          // A part that does not provoke says nothing, though a join holding it does: a Teleport joined with a walk is still a Teleport.
+          if (part.over || !part.provokes) continue;
           const fresh = part.leaves.filter((l) => rows.has(l.id) && !this.#named.has(`${moverId}|${l.id}`));
           for (const left of fresh) this.#named.add(`${moverId}|${left.id}`);
           if (fresh.length === 0) continue;
